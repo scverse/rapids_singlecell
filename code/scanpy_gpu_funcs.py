@@ -251,7 +251,7 @@ def leiden(adata, resolution=1.0):
     
     # Format output
     clusters = leiden_parts.to_pandas().sort_values('vertex')[['partition']].to_numpy().ravel()
-    clusters = pd.Categorical(clusters)
+    clusters = pd.Categorical(clusters.astype(str))
     
     adata.obs['leiden'] = clusters
     
@@ -281,7 +281,7 @@ def louvain(adata, resolution=1.0):
     
     # Format output
     clusters = louvain_parts.to_pandas().sort_values('vertex')[['partition']].to_numpy().ravel()
-    clusters = pd.Categorical(clusters)
+    clusters = pd.Categorical(clusters.astype(str))
     
     adata.obs['louvain'] = clusters 
     
