@@ -35,7 +35,7 @@ Please have look at the notebooks to assess the functionality. I tried to write 
 
 ### scanpy_gpu_funcs
 `scanpy_gpu_funcs` are functions that are written to directly work with an `AnnData` object and replace the scanpy counterpart by running on the GPU. Scanpy already supports GPU versions of `pp.neighbors` and `tl.umap` using rapids.
-`scanpy_gpu_funcs` includes functions for:
+`scanpy_gpu_funcs` includes additional functions for:
 * PCA
 * Leiden Clustering
 * Louvain Clustering
