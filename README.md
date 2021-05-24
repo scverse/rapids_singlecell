@@ -4,7 +4,7 @@
 This repository offers some tools to make the analysis of single cells datasets faster by running them on the GPU. 
 The functions are analogous versions of functions that can be found within [scanpy](https://github.com/theislab/scanpy) from the Theis lab or functions from [rapids-single-cell-examples](https://github.com/clara-parabricks/rapids-single-cell-examples) created by the Nvidia Rapids team. Most functions are kept close to the original code to ensure compatibility. My aim with this repository was to use the speedup that GPU computing offers and combine it with the ease of use from scanpy.
 
-## Requierments
+## Requirements
 
 To run the code in this repository you need a conda environment with rapids and scanpy installed. To use the full functionality of this repo please use `rapids-0.20a`, because this version come with cupy 9. You also need an Nvidia GPU.
 ```
