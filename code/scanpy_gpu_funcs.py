@@ -362,13 +362,13 @@ def tsne(adata, n_pcs,perplexity = 30, early_exaggeration = 12,learning_rate =10
 
 def diffmap(adata, n_comps=15, neighbors_key = None, sort = 'decrease',density_normalize = True):
     """
+    Diffusion maps has been proposed for visualizing single-cell data.
+    
+    This is a reimplementation of scanpys function.
+    
     The width ("sigma") of the connectivity kernel is implicitly determined by
     the number of neighbors used to compute the single-cell graph in
-    :func:`~scanpy.pp.neighbors`. To reproduce the original implementation
-    using a Gaussian kernel, use `method=='gauss'` in
-    :func:`~scanpy.pp.neighbors`. To use an exponential kernel, use the default
-    `method=='umap'` or `'rapids'`. Differences between these options shouldn't usually be
-    dramatic.
+    :func:`~scanpy.pp.neighbors`. 
     
     Parameters
     ----------
