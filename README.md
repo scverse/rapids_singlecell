@@ -52,19 +52,21 @@ To show the capability of these functions, I created two example notebooks to sh
 
 Here are some benchmarks. I ran the notebook on the CPU with as many cores as were available where possible. 
 
-|Step                          |CPU (Ryzen 5950x, 32 Cores)|GPU (RTX 3090)|
-|------------------------------|---------------------------|--------------|
-|whole Notebook                | 494 s                     | 51 s         |
-|Preprocessing                 | 90 s                      | 23 s         |
-|Clustering and Visulatization | 379 s                     | 24 s         |
-|Normalize_total               | 273 ms                    | > 1ms        |
-|Regress_out                   | 81 s                      | 18 s         |
-|Scale                         | 701 ms                    | 154 ms       |
-|PCA                           | 19.9 s                    | 767 ms       |
-|Neighbors                     | 14.1 s                    | 6.9 s        |
-|UMAP                          | 31 s                      | 5 s          |
-|Louvain                       | 8.6 s                     | 152 ms       |
-|Leiden                        | 13.7 s                    | 171 ms       |
-|TSNE                          | 215 s                     | 1.9 s        |
-|Logistic_Regression           | 66 s                      | 3.7 s        |
+|Step                          |CPU (Ryzen 5950x, 32 Cores, 64GB RAM)|GPU (RTX 3090)|CPU (AMD Eypc Rome, 60 Cores, 1TB RAM)| GPU (Quadro RTX 6000) 
+|------------------------------|---------------------------|--------------|----------|--------------|
+|whole Notebook                | 494 s                     | 51 s         | 820 s    | 101 s        |
+|Preprocessing                 | 90 s                      | 23 s         | 120 s    | 49 s         |
+|Clustering and Visulatization | 379 s                     | 24 s         | 640 s    | 41 s         |
+|Normalize_total               | 273 ms                    | > 1ms        | 423 ms   | 197 ms       |
+|Regress_out                   | 81 s                      | 18 s         | 105 s    | 32.6 ms      |
+|Scale                         | 701 ms                    | 154 ms       | 1.1 s    | 1.3 ms       |
+|PCA                           | 19.9 s                    | 767 ms       | 22.8 s   | 1.5 s        |
+|Neighbors                     | 14.1 s                    | 6.9 s        | 31.6 s   | 12.8 s       |
+|UMAP                          | 31 s                      | 5 s          | 72 s     | 5.4 s        |
+|Louvain                       | 8.6 s                     | 152 ms       | 27.1 s   | 240 ms       |
+|Leiden                        | 13.7 s                    | 171 ms       | 35.9 s   | 305 ms       |
+|TSNE                          | 215 s                     | 1.9 s        | 336 s    | 2.43 s       |
+|Logistic_Regression           | 66 s                      | 3.7 s        | 94 s     | 10 s         |
+|Diffusion Map                 | 612 ms                    | 358 ms       | 1 s      | 5.26         |
 
+It seems like Turing based GPUs are a lot slower running the eigenvector calculations on sparse matrixes needed for Diffusion Maps than Ampere based ones.
