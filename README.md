@@ -47,3 +47,24 @@ Please have look at the notebooks to assess the functionality. I tried to write 
 
 ## Notebooks
 To show the capability of these functions, I created two example notebooks to show the same workflow running on the CPU and GPU. These notebooks should run in the environment, that is described in Requirements. First, run the `data_downloader` notebook to create the AnnData object for the analysis. If you run both `demo_gpu` and `demo_gpu` you should see a big speedup when running the analysis on the GPU.
+
+## Benchmarks
+
+Here are some benchmarks. I ran the notebook on the CPU with as many cores as were available where possible. 
+
+|Step                          |CPU (Ryzen 5950x, 32 Cores)|GPU (RTX 3090)|
+|------------------------------|---------------------------|--------------|
+|whole Notebook                | 494 s                     | 51 s         |
+|Preprocessing                 | 90 s                      | 23 s         |
+|Clustering and Visulatization | 379 s                     | 24 s         |
+|Normalize_total               | 273 ms                    | > 1ms        |
+|Regress_out                   | 81 s                      | 18 s         |
+|Scale                         | 701 ms                    | 154 ms       |
+|PCA                           | 19.9 s                    | 767 ms       |
+|Neighbors                     | 14.1 s                    | 6.9 s        |
+|UMAP                          | 31 s                      | 5 s          |
+|Louvain                       | 8.6 s                     | 152 ms       |
+|Leiden                        | 13.7 s                    | 171 ms       |
+|TSNE                          | 215 s                     | 1.9 s        |
+|Logistic_Regression           | 66 s                      | 3.7 s        |
+
