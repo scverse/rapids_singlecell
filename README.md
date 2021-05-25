@@ -57,7 +57,6 @@ Here are some benchmarks. I ran the notebook on the CPU with as many cores as we
 |whole Notebook                | 494 s                     | 51 s         |
 |Preprocessing                 | 90 s                      | 23 s         |
 |Clustering and Visulatization | 379 s                     | 24 s         |
-|------------------------------|--------------------------–|--------------|
 |Normalize_total               | 273 ms                    | > 1ms        |
 |Regress_out                   | 81 s                      | 18 s         |
 |Scale                         | 701 ms                    | 154 ms       |
