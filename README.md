@@ -1,7 +1,7 @@
 # rapids_singlecell
 
 ## Background
-This repository offers some tools to make the analysis of single cells datasets faster by running them on the GPU. 
+This repository offers some tools to make analyses of single cell datasets faster by running them on the GPU. 
 The functions are analogous versions of functions that can be found within [scanpy](https://github.com/theislab/scanpy) from the Theis lab or functions from [rapids-single-cell-examples](https://github.com/clara-parabricks/rapids-single-cell-examples) created by the Nvidia Rapids team. Most functions are kept close to the original code to ensure compatibility. My aim with this repository was to use the speedup that GPU computing offers and combine it with the ease of use from scanpy.
 
 ## Requirements
@@ -20,7 +20,7 @@ With this enviroment, you should be able to run the notebooks. So far I have onl
 ## Functions
 
 ### cunnData
-The preprocessing of the single-cell data is performed with the `cunnData`. It is a replacement for the [AnnData](https://github.com/theislab/anndata) object used by scanpy. The `cunnData` object is a cutdown version of an `AnnData` object. At its core lies a sparse matrix (`.X`) within the GPU memory. `.obs` and `.var` are pandas data frame and `.uns` is a dictionary. Most preprocessing functions of `scanpy` are methods of the `cunnData` class. I tried to keep the input as close to the original scanpy implementation as possible.
+The preprocessing of the single-cell data is performed with `cunnData`. It is a replacement for the [AnnData](https://github.com/theislab/anndata) object used by scanpy. The `cunnData` object is a cutdown version of an `AnnData` object. At its core lies a sparse matrix (`.X`) within the GPU memory. `.obs` and `.var` are pandas data frame and `.uns` is a dictionary. Most preprocessing functions of `scanpy` are methods of the `cunnData` class. I tried to keep the input as close to the original scanpy implementation as possible.
 Please have look at the notebooks to assess the functionality. I tried to write informative docstrings for each method. 
 `cunnData` includes methods for:
 * filter genes based on cells expressing that genes
@@ -46,7 +46,7 @@ Please have look at the notebooks to assess the functionality. I tried to write 
 * some plotting functions for cunnData objects
 
 ## Notebooks
-To show the capability of these functions, I created two example notebooks to show the same workflow running on the CPU and GPU. These notebooks should run in the environment, that is described in Requirements. First, run the `data_downloader` notebook to create the AnnData object for the analysis. If you run both `demo_gpu` and `demo_gpu` you should see a big speedup when running the analysis on the GPU.
+To show the capability of these functions, I created two example notebooks evaluating the same workflow running on the CPU and GPU. These notebooks should run in the environment, that is described in Requirements. First, run the `data_downloader` notebook to create the AnnData object for the analysis. If you run both `demo_gpu` and `demo_gpu` you should see a big speedup when running the analyses on the GPU.
 
 ## Benchmarks
 
