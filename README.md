@@ -8,11 +8,11 @@ The functions are analogous versions of functions that can be found within [scan
 
 To run the code in this repository you need a conda environment with rapids and scanpy installed. To use the full functionality of this repo please use `rapids-0.20a`, because this version comes with cupy 9. You also need an Nvidia GPU.
 ```
-conda create -n rapids-0.20_sc -c rapidsai-nightly -c nvidia -c conda-forge -c bioconda \
-    rapids-blazing=0.20 python=3.8 cudatoolkit=11.2 cudnn cutensor cusparselt scanpy \
+conda create -n rapids-0.21_sc -c rapidsai-nightly -c nvidia -c conda-forge -c bioconda \
+    rapids-blazing=21.06 python=3.8 cudatoolkit=11.2 cudnn cutensor cusparselt scanpy \
     leidenalg louvain multicore-tsne python-wget
-conda activate rapids-0.20_sc
-python -m ipykernel install --user --display-name "rapids-0.20_sc"
+conda activate rapids-21_sc
+python -m ipykernel install --user --display-name "rapids-21_sc"
 ```
 
 With this enviroment, you should be able to run the notebooks. So far I have only tested these Notebooks on a Quadro RTX 6000 and an RTX 3090.
