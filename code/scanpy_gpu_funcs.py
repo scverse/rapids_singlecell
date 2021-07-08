@@ -465,7 +465,7 @@ def plt_scatter(cudata, x, y, save = None, show =True, dpi =300):
     
     """
     fig,ax = plt.subplots()
-    sns.scatterplot(data=cudata.obs, x=x, y=y, color='k')
+    sns.scatterplot(data=cudata.obs, x=x, y=y,s=2, color='grey', edgecolor='grey')
     if save:
         os.makedirs("./figures/",exist_ok=True)
         fig_path = "./figures/"+save
