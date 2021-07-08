@@ -510,7 +510,7 @@ def plt_violin(cudata, key, group_by=None, size =1, save = None, show =True, dpi
     fig,ax = plt.subplots()
     ax = sns.violinplot(data=cudata.obs, y=key,scale='width',x= group_by, inner = None)
     if size:
-        ax = sns.stripplot(data=cudata.obs, y=key,x= group_by, color='k', size= 1, dodge = True, jitter = True)
+        ax = sns.stripplot(data=cudata.obs, y=key,x= group_by, color='k', size= size, dodge = True, jitter = True)
     if save:
         os.makedirs("./figures/",exist_ok=True)
         fig_path = "./figures/"+save
