@@ -605,15 +605,11 @@ class cunnData:
         ------
         updates cunndata object with a scaled cunndata.X
         """
-        X = cp.asarray(self.X)
-        mean = X.mean(axis=0)
-        X -= mean
-        del mean
-        stddev = cp.sqrt(X.var(axis=0))
-        X /= stddev
-        del stddev
-        self.X = X.clip(a_max=max_value)
-    
+        if type(self.X) is not cp._core.core.ndarray:
+            print("densifying _.X")
+            self.X = self.X.toarray()
+        self.X = StandardScaler().fit_transform(self.X).clip(a_max=max_value)
+        
 def _regress_out_chunk(X, y):
     """
     Performs a data_cunk.shape[1] number of local linear regressions,
