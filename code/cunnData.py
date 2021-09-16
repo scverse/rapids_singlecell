@@ -20,6 +20,7 @@ import warnings
 
 from scipy.sparse import issparse
 from cuml.linear_model import LinearRegression
+from cuml.preprocessing import StandardScaler
 
 
 class cunnData:
