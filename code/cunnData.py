@@ -613,8 +613,8 @@ class cunnData:
             print("densifying _.X")
             self.X = self.X.toarray()
         self.X = StandardScaler().fit_transform(self.X).clip(a_max=max_value)
-        
-            def scale_2(self, max_value=10):
+    
+    def scale_2(self, max_value=10):
         """
         Scales matrix to unit variance and clips values
         Parameters
