@@ -17,6 +17,10 @@ python -m ipykernel install --user --display-name "rapids-21_sc"
 
 With this enviroment, you should be able to run the notebooks. So far I have only tested these Notebooks on a Quadro RTX 6000 and an RTX 3090.
 
+## Citation
+
+If you use this code, please cite: [rapids-single-cell-examples](https://zenodo.org/badge/latestdoi/265649968) and  [scanpy](https://doi.org/10.1186/s13059-017-1382-0)
+
 ## Functions
 
 ### cunnData
