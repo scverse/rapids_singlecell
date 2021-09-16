@@ -614,6 +614,32 @@ class cunnData:
             self.X = self.X.toarray()
         self.X = StandardScaler().fit_transform(self.X).clip(a_max=max_value)
         
+            def scale_2(self, max_value=10):
+        """
+        Scales matrix to unit variance and clips values
+        Parameters
+        ----------
+        max_value : int
+                    After scaling matrix to unit variance,
+                    values will be clipped to this number
+                    of std deviations.
+        Return
+        ------
+        updates cunndata object with a scaled cunndata.X
+        """
+        if type(self.X) is not cp._core.core.ndarray:
+            print("densifying _.X")
+            X = self.X.toarray()
+        else:
+            X =self.X
+        mean = X.mean(axis=0)
+        X -= mean
+        del mean
+        stddev = cp.sqrt(X.var(axis=0))
+        X /= stddev
+        del stddev
+        self.X = X.clip(a_max=max_value)
+        
 def _regress_out_chunk(X, y):
     """
     Performs a data_cunk.shape[1] number of local linear regressions,
