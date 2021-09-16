@@ -580,6 +580,9 @@ class cunnData:
 
         outputs = cp.empty(self.X.shape, dtype=self.X.dtype, order="F")
 
+        if self.X.shape[0] < 100000:
+            self.X = self.X.todense()
+        
         for i in range(self.X.shape[1]):
             if verbose and i % 500 == 0:
                 print("Regressed %s out of %s" %(i, self.X.shape[1]))
@@ -631,11 +634,12 @@ def _regress_out_chunk(X, y):
     dense_mat : cupy.ndarray of shape (n_cells,)
         Adjusted column
     """
-    y_d = y.todense()
+    if cp.sparse.issparse(y):
+        y = y.todense()
 
     lr = LinearRegression(fit_intercept=False, output_type="cupy")
-    lr.fit(X, y_d, convert_dtype=True)
-    return y_d.reshape(y_d.shape[0],) - lr.predict(X).reshape(y_d.shape[0])
+    lr.fit(X, y, convert_dtype=True)
+    return y.reshape(y.shape[0],) - lr.predict(X).reshape(y.shape[0])
 
 def _highly_variable_genes_single_batch(my_mat,min_mean = 0.0125,max_mean =3,min_disp= 0.5,max_disp =np.inf, n_top_genes = None, flavor = 'seurat', n_bins = 20):
         """\
