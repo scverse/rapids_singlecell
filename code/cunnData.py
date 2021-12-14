@@ -580,7 +580,7 @@ class cunnData:
 
         outputs = cp.empty(self.X.shape, dtype=self.X.dtype, order="F")
 
-        if self.X.shape[0] < 100000:
+        if self.X.shape[0] < 100000 and cpx.scipy.sparse.issparse(self.X):
             self.X = self.X.todense()
         
         for i in range(self.X.shape[1]):
@@ -612,7 +612,8 @@ class cunnData:
         if type(self.X) is not cp._core.core.ndarray:
             print("densifying _.X")
             self.X = self.X.toarray()
-        self.X = StandardScaler().fit_transform(self.X).clip(a_max=max_value)
+        X = StandardScaler().fit_transform(self.X)
+        self.X = cp.clip(X,a_max=max_value)
     
     def scale_2(self, max_value=10):
         """
@@ -638,7 +639,7 @@ class cunnData:
         stddev = cp.sqrt(X.var(axis=0))
         X /= stddev
         del stddev
-        self.X = X.clip(a_max=max_value)
+        self.X = cp.clip(X,a_max=max_value)
         
 def _regress_out_chunk(X, y):
     """
