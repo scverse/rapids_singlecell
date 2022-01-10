@@ -474,7 +474,7 @@ def plt_scatter(cudata, x, y, save = None, show =True, dpi =300):
         plt.close()
 
         
-def plt_violin(cudata, key, group_by=None, size =1, save = None, show =True, dpi =300):
+def plt_violin(cudata, key, groupby=None, size =1, save = None, show =True, dpi =300):
     """
     Violin plot.
     Wraps :func:`seaborn.violinplot` for :class:`~cunnData.cunnData`. This plotting function so far is really basic and doesnt include all the features form sc.pl.violin.
@@ -487,7 +487,7 @@ def plt_violin(cudata, key, group_by=None, size =1, save = None, show =True, dpi
     key:
         Keys for accessing variables of fields of `.obs`.
     
-    group_by:
+    groupby:
         The key of the observation grouping to consider.(e.g batches)
     
     size:
@@ -508,9 +508,9 @@ def plt_violin(cudata, key, group_by=None, size =1, save = None, show =True, dpi
     
     """
     fig,ax = plt.subplots()
-    ax = sns.violinplot(data=cudata.obs, y=key,scale='width',x= group_by, inner = None)
+    ax = sns.violinplot(data=cudata.obs, y=key,scale='width',x= groupby, inner = None)
     if size:
-        ax = sns.stripplot(data=cudata.obs, y=key,x= group_by, color='k', size= size, dodge = True, jitter = True)
+        ax = sns.stripplot(data=cudata.obs, y=key,x= groupby, color='k', size= size, dodge = True, jitter = True)
     if save:
         os.makedirs("./figures/",exist_ok=True)
         fig_path = "./figures/"+save

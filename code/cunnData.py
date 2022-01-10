@@ -47,7 +47,6 @@ class cunnData:
                     self.X = cp.sparse.csr_matrix(adata.X, dtype=cp.float32)
                 self.shape = self.X.shape
                 self.nnz = self.X.nnz
-                self.genes = cudf.Series(adata.var_names)
                 self.obs = adata.obs.copy()
                 self.var = adata.var.copy()
                 self.uns = adata.uns.copy()
@@ -61,7 +60,6 @@ class cunnData:
                     self.X = cp.sparse.csr_matrix(X, dtype=cp.float32)
                 self.shape = self.X.shape
                 self.nnz = self.X.nnz
-                genes = cudf.Series(var.index)
                 self.obs = obs
                 self.var = var
                    
@@ -80,64 +78,115 @@ class cunnData:
         adata.var = self.var.copy()
         adata.uns = self.uns.copy()
         return adata
-
-    def filter_genes(self, min_cells = 3, batchsize = None, verbose =True):
+    
+    def calc_gene_qc(self, batchsize = None):
         """
         Filters out genes that expressed in less than a specified number of cells
 
         Parameters
         ----------
         
-            min_cells: int (default = 3)
-                Genes containing a number of cells below this value will be filtered
-        
             batchsize: int (default: None)
                 Number of rows to be processed together This can be adjusted for performance to trade-off memory use.
-        
-            verbose: bool
-                Print number of discarded genes
             
         Returns
         -------
+            updated `.var` with `n_cells` and `n_counts`
             filtered cunndata object inplace for genes less than the threshhold
         
         """
         if batchsize:
+            pass
             n_batches = math.ceil(self.X.shape[0] / batchsize)
-            filter_matrix = cp.zeros(shape=(n_batches,self.X.shape[1]))
+            n_counts = cp.zeros(shape=(n_batches,self.X.shape[1]))
+            n_cells= cp.zeros(shape=(n_batches,self.X.shape[1]))
             for batch in range(n_batches):
                 batch_size = batchsize
                 start_idx = batch * batch_size
                 stop_idx = min(batch * batch_size + batch_size, self.X.shape[0])
                 arr_batch = self.X[start_idx:stop_idx]
-                thr = cp.diff(arr_batch.tocsc().indptr)
-                thr = thr.ravel()
-                filter_matrix[batch,:]=thr
-            thr = cp.asarray(filter_matrix.sum(axis=0) >= min_cells).ravel()
-            thr = cp.where(thr)[0]
-            if verbose:
-                print(f"filtered out {self.X.shape[1]-len(thr)} genes that are detected in less than {min_cells} cells")
-            self.X =self.X.tocsc()
-            self.X = self.X[:, thr]
-            self.shape = self.X.shape
-            self.nnz = self.X.nnz
-            self.X = self.X.tocsr()
-            self.genes = self.genes[thr]
-            self.genes = self.genes.reset_index(drop=True)
-            self.var = self.var.iloc[cp.asnumpy(thr)]       
+                arr_batch = arr_batch.tocsc()
+                n_cells_batch = cp.diff(arr_batch.indptr).ravel()
+                n_cells[batch,:]=n_cells_batch
+                n_counts_batch = arr_batch.sum(axis = 0).ravel()
+                n_counts[batch,:]=n_counts_batch
+            self.var["n_cells"] = cp.asnumpy(n_cells.sum(axis= 0).ravel())
+            self.var["n_counts"] = cp.asnumpy(n_counts.sum(axis= 0).ravel())
         else:
-            self.X =self.X.tocsc()
-            thr = cp.diff(self.X.indptr).ravel()
-            thr = cp.where(thr >= min_cells)[0]
+            self.X = self.X.tocsc()
+            n_cells = cp.diff(self.X.indptr).ravel()
+            n_counts = self.X.sum(axis = 0).ravel()
+            self.X = self.X.tocsr()
+            self.var["n_cells"] = cp.asnumpy(n_cells)
+            self.var["n_counts"] = cp.asnumpy(n_counts)
+
+
+    def filter_genes(self, qc_var = "n_cells", min_count = None, max_count = None, batchsize = None, verbose =True):
+        """
+        Filter genes that have greater than a max number of genes or less than
+        a minimum number of a feature in a given `.var` columns. Can so far only be used for numerical columns.
+        You can run this function on 'n_cells' or 'n_counts' with a previous columns in `.var`.
+        
+        Parameters
+        ----------
+        qc_var: str (default: n_cells)
+            column in `.var` with numerical entries to filter against
+            
+        min_count : float
+            Lower bound on number of a given feature to keep gene
+
+        max_count : float
+            Upper bound on number of a given feature to keep gene
+        
+        batchsize: int (default: None)
+            only needed if you run `filter_genes` before `calculate_qc` or `calc_gene_qc` on 'n_genes' or 'n_counts'. Number of rows to be processed together. This can be adjusted for performance to trade-off memory use.
+            
+        verbose: bool (default: True)
+            Print number of discarded genes
+        
+        Returns
+        -------
+        a filtered cunnData object inplace
+        
+        """
+        
+        if qc_var in self.var.keys():
+            if min_count is not None and max_count is not None:
+                thr=np.where((self.var[qc_var] <= max_count) &  (min_count <= self.var[qc_var]))[0]
+            elif min_count is not None:
+                thr=np.where(self.var[qc_var] >= min_count)[0]
+            elif max_count is not None:
+                thr=np.where(self.var[qc_var] <= max_count)[0]
+
             if verbose:
-                print(f"filtered out {self.X.shape[1]-len(thr)} genes that are detected in less than {min_cells} cells")
+                print(f"filtered out {self.var.shape[0]-thr.shape[0]} genes based on {qc_var}")
+            self.X = self.X.tocsr()
             self.X = self.X[:, thr]
             self.shape = self.X.shape
             self.nnz = self.X.nnz
             self.X = self.X.tocsr()
-            self.genes = self.genes[thr]
-            self.genes = self.genes.reset_index(drop=True)
             self.var = self.var.iloc[cp.asnumpy(thr)]
+            
+        elif qc_var in ["n_cells","n_counts"]:
+            self.calc_gene_qc(batch_size = batch_size)    
+            if min_count is not None and max_count is not None:
+                thr=np.where((self.var[qc_var] <= max_count) &  (min_count <= self.var[qc_var]))[0]
+            elif min_count is not None:
+                thr=np.where(self.var[qc_var] >= min_count)[0]
+            elif max_count is not None:
+                thr=np.where(self.var[qc_var] <= max_count)[0]
+
+            if verbose:
+                print(f"filtered out {self.var.shape[0]-thr.shape[0]} genes based on {qc_var}")
+            self.X = self.X.tocsr()
+            self.X = self.X[:, thr]
+            self.shape = self.X.shape
+            self.nnz = self.X.nnz
+            self.X = self.X.tocsr()
+            self.var = self.var.iloc[cp.asnumpy(thr)]
+        else:
+            print(f"please check qc_var")
+
 
         
     def caluclate_qc(self, qc_vars = None, batchsize = None):
@@ -172,6 +221,8 @@ class cunnData:
             n_batches = math.ceil(self.X.shape[0] / batchsize)
             n_genes = []
             n_counts = []
+            if "n_cells" not in self.var.keys() or  "n_counts" not in self.var.keys():
+                self.calc_gene_qc(batchsize = batchsize)    
             if qc_vars:
                 if type(qc_vars) is str:
                     qc_var_total = []
@@ -211,6 +262,8 @@ class cunnData:
         else:
             self.obs["n_genes"] = cp.asnumpy(cp.diff(self.X.indptr)).ravel()
             self.obs["n_counts"] = cp.asnumpy(self.X.sum(axis=1)).ravel()
+            if "n_cells" not in self.var.keys() or  "n_counts" not in self.var.keys():
+                self.calc_gene_qc(batchsize = None)    
             if qc_vars:
                 if type(qc_vars) is str:
                     self.obs["total_"+qc_vars]=cp.asnumpy(self.X[:,self.var[qc_vars]].sum(axis=1))
@@ -243,9 +296,9 @@ class cunnData:
         
         """
         if gene_family_prefix:
-            self.var[gene_family_name] = cp.asnumpy(self.genes.str.startswith(gene_family_prefix)).ravel()
+            self.var[gene_family_name] = cp.asnumpy(self.var.index.str.startswith(gene_family_prefix)).ravel()
         if gene_list:
-            self.var[gene_family_name] = cp.asnumpy(self.genes.isin(gene_list)).ravel()
+            self.var[gene_family_name] = cp.asnumpy(self.var.index.isin(gene_list)).ravel()
     
     def filter_cells(self, qc_var, min_count=None, max_count=None, batchsize = None,verbose=True):
         """
@@ -431,7 +484,7 @@ class cunnData:
             self.obs[batch_key].astype("category")
             batches = self.obs[batch_key].cat.categories
             df = []
-            genes = self.genes.to_array()
+            genes = self.var.index.to_numpy()
             for batch in batches:
                 inter_matrix = self.X[np.where(self.obs[batch_key]==batch)[0],].tocsc()
                 thr_org = cp.diff(inter_matrix.indptr).ravel()
@@ -535,8 +588,6 @@ class cunnData:
             self.X = self.X[:, thr]
             self.shape = self.X.shape
             self.nnz = self.X.nnz
-            self.genes = self.genes[thr]
-            self.genes = self.genes.reset_index(drop=True)
             self.var = self.var.iloc[cp.asnumpy(thr)]      
         else:
             print(f"Please calculate highly variable genes first")
