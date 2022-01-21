@@ -101,9 +101,8 @@ class cunnData:
             n_counts = cp.zeros(shape=(n_batches,self.X.shape[1]))
             n_cells= cp.zeros(shape=(n_batches,self.X.shape[1]))
             for batch in range(n_batches):
-                batch_size = batchsize
-                start_idx = batch * batch_size
-                stop_idx = min(batch * batch_size + batch_size, self.X.shape[0])
+                start_idx = batch * batchsize
+                stop_idx = min(batch * batchsize + batchsize, self.X.shape[0])
                 arr_batch = self.X[start_idx:stop_idx]
                 arr_batch = arr_batch.tocsc()
                 n_cells_batch = cp.diff(arr_batch.indptr).ravel()
@@ -168,7 +167,7 @@ class cunnData:
             self.var = self.var.iloc[cp.asnumpy(thr)]
             
         elif qc_var in ["n_cells","n_counts"]:
-            self.calc_gene_qc(batch_size = batch_size)    
+            self.calc_gene_qc(batchsize = batchsize)    
             if min_count is not None and max_count is not None:
                 thr=np.where((self.var[qc_var] <= max_count) &  (min_count <= self.var[qc_var]))[0]
             elif min_count is not None:
@@ -234,9 +233,8 @@ class cunnData:
                         qc_var_total.append(my_list)
                         
             for batch in range(n_batches):
-                batch_size = batchsize
-                start_idx = batch * batch_size
-                stop_idx = min(batch * batch_size + batch_size, self.X.shape[0])
+                start_idx = batch * batchsize
+                stop_idx = min(batch * batchsize + batchsize, self.X.shape[0])
                 arr_batch = self.X[start_idx:stop_idx]
                 n_genes.append(cp.diff(arr_batch.indptr).ravel().get())
                 n_counts.append(arr_batch.sum(axis=1).ravel().get())
