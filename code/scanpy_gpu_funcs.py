@@ -24,8 +24,6 @@ from cuml.decomposition import PCA
 from cuml.linear_model import LinearRegression
 
 
-
-    
 def select_groups(labels, groups_order_subset='all'):
     groups_order = labels.cat.categories
     groups_masks = np.zeros(
@@ -53,8 +51,9 @@ def select_groups(labels, groups_order_subset='all'):
                     np.array(groups_order_subset),
                 )
             )[0]
-            
         groups_ids = [groups_id.item() for groups_id in groups_ids]
+        if len(groups_ids) >2:    
+            groups_ids = np.sort(groups_ids)
         groups_masks = groups_masks[groups_ids]
         groups_order_subset = labels.cat.categories[groups_ids].to_numpy()
     else:
@@ -145,7 +144,7 @@ def rank_genes_groups_logreg(
     for imask, mask in enumerate(groups_masks):
         ns[imask] = np.where(mask)[0].size
     if reference != 'rest':
-        ireference = np.where(groups_order == reference)[0][0]
+        reference = np.where(groups_order == reference)[0][0]
     reference_indices = cp.arange(X.shape[1], dtype=int)
 
     rankings_gene_scores = []
@@ -167,8 +166,14 @@ def rank_genes_groups_logreg(
     X = X[grouping_mask.values, :]
     # Indexing with a series causes issues, possibly segfault
         
+    grouping_logreg = grouping.cat.codes.to_numpy().astype('float32')
+    uniques = np.unique(grouping_logreg)
+    for idx, cat in enumerate(uniques):
+        grouping_logreg[np.where(grouping_logreg == cat)] = idx
+
+    
     clf = LogisticRegression(**kwds)
-    clf.fit(X, grouping.cat.codes.to_numpy().astype('float32'))
+    clf.fit(X, grouping_logreg)
     scores_all = cp.array(clf.coef_).T
     
     for igroup, group in enumerate(groups_order):
@@ -187,8 +192,9 @@ def rank_genes_groups_logreg(
 
     groups_order_save = [str(g) for g in groups_order]
     if (len(groups) == 2):
-        groups_order_save = [g for g in groups_order if g != reference]
-            
+        groups_order_save = [groups_order_save[0]]
+
+    
     scores = np.rec.fromarrays(
         [n for n in rankings_gene_scores],
         dtype=[(rn, 'float32') for rn in groups_order_save],
@@ -202,8 +208,6 @@ def rank_genes_groups_logreg(
     adata.uns["rank_genes_groups"]["params"] = dict(groupby=groupby,method="logreg", reference=refname, use_raw=use_raw)
     adata.uns["rank_genes_groups"]['scores'] = scores
     adata.uns["rank_genes_groups"]['names'] = names
-
-
 
 def leiden(adata, resolution=1.0):
     """
