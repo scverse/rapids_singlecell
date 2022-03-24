@@ -16,6 +16,7 @@ import math
 from scipy import sparse
 import seaborn as sns
 import matplotlib.pyplot as plt
+from natsort import natsorted
 
 
 from cuml.manifold import TSNE
@@ -234,10 +235,13 @@ def leiden(adata, resolution=1.0):
     leiden_parts, _ = cugraph.leiden(g,resolution = resolution)
     
     # Format output
-    clusters = leiden_parts.to_pandas().sort_values('vertex')[['partition']].to_numpy().ravel()
-    clusters = pd.Categorical(clusters.astype(str))
-    
-    adata.obs['leiden'] = clusters
+    groups = leiden_parts.to_pandas().sort_values('vertex')[['partition']].to_numpy().ravel()
+   
+    adata.obs['leiden'] = pd.Categorical(
+        values=groups.astype('U'),
+        categories=natsorted(map(str, np.unique(groups))),
+    )
+
     
 def louvain(adata, resolution=1.0):
     """
@@ -264,10 +268,12 @@ def louvain(adata, resolution=1.0):
     louvain_parts, _ = cugraph.louvain(g,resolution = resolution)
     
     # Format output
-    clusters = louvain_parts.to_pandas().sort_values('vertex')[['partition']].to_numpy().ravel()
-    clusters = pd.Categorical(clusters.astype(str))
-    
-    adata.obs['louvain'] = clusters 
+    groups = louvain_parts.to_pandas().sort_values('vertex')[['partition']].to_numpy().ravel()
+
+    adata.obs['louvain'] = pd.Categorical(
+        values=groups.astype('U'),
+        categories=natsorted(map(str, np.unique(groups))),
+    )
     
 def kmeans(adata, n_clusters =8, random_state= 42):
     """
