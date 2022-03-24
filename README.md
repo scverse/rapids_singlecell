@@ -6,13 +6,14 @@ The functions are analogous versions of functions that can be found within [scan
 
 ## Requirements
 
-To run the code in this repository you need a conda environment with rapids and scanpy installed. To use the full functionality of this repo please use `rapids-21.12`, because this version comes with cupy 9.6. You also need an Nvidia GPU.
+To run the code in this repository you need a conda environment with rapids and scanpy installed. To use the full functionality of this repo please use `rapids-22.02`. You also need an Nvidia GPU.
 ```
-conda create -n rapids-21_sc -c rapidsai -c nvidia -c conda-forge -c bioconda \
-    rapids=21.12 python=3.8 cudatoolkit=11.5 cudnn cutensor cusparselt scanpy \
-    leidenalg louvain gdown fa2
-conda activate rapids-21_sc
-python -m ipykernel install --user --display-name "rapids-21_sc"
+conda create -n rapids-22.02_sc -c rapidsai -c nvidia -c conda-forge -c bioconda \
+    rapids=22.02 python=3.9 cudatoolkit=11.5 cudnn cutensor cusparselt \
+    leidenalg louvain fa2
+conda activate rapids-22.02_sc
+pip install scanpy gdown
+ipython kernel install --user --name=rapids-22.02_sc
 ```
 
 With this enviroment, you should be able to run the notebooks. So far I have only tested these Notebooks on a Quadro RTX 6000 and an RTX 3090.
