@@ -520,7 +520,7 @@ def draw_graph(adata, init_pos = None, max_iter = 500):
             scaling_ratio=2.0,
             strong_gravity_mode=False,
             gravity=1.0,)
-    positions = cp.vstack((positions["x"].to_array(),positions["y"].to_array())).T
+    positions = cp.vstack((positions["x"].to_cupy(),positions["y"].to_cupy())).T
     layout = "fa"
     adata.uns['draw_graph'] = {}
     adata.uns['draw_graph']['params'] = dict(layout=layout, random_state=0)
