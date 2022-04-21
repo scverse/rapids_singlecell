@@ -527,8 +527,7 @@ def draw_graph(adata, init_pos = None, max_iter = 500):
     key_added = f'X_draw_graph_{layout}'
     adata.obsm[key_added] = positions.get()    # Format output
     
-    
-def plt_scatter(cudata, x, y, save = None, show =True, dpi =300):
+def plt_scatter(cudata, x, y, color = None, save = None, show =True, dpi =300):
     """
     Violin plot.
     Wraps :func:`seaborn.scaterplot` for :class:`~cunnData.cunnData`. This plotting function so far is really basic and doesnt include all the features form sc.pl.scatter.
@@ -560,7 +559,11 @@ def plt_scatter(cudata, x, y, save = None, show =True, dpi =300):
     
     """
     fig,ax = plt.subplots()
-    sns.scatterplot(data=cudata.obs, x=x, y=y,s=2, color='grey', edgecolor='grey')
+    if color == None:
+        sns.scatterplot(data=cudata.obs, x=x, y=y,s=2, color="grey", edgecolor="grey")
+    else:
+        sns.scatterplot(data=cudata.obs, x=x, y=y,s=2, hue=color)
+
     if save:
         os.makedirs("./figures/",exist_ok=True)
         fig_path = "./figures/"+save

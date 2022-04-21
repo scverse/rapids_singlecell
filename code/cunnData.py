@@ -14,11 +14,13 @@ import pandas as pd
 import scipy
 import math
 from scipy import sparse
-from typing import Any, Union, Optional
+from typing import Any, Union, Optional, Mapping
 
 import warnings
 
-from scipy.sparse import issparse
+from scipy.sparse import issparse as issparse_cpu
+from cupyx.scipy.sparse import issparse as issparse_gpu
+
 from cuml.linear_model import LinearRegression
 from cuml.preprocessing import StandardScaler
 
@@ -28,41 +30,53 @@ class cunnData:
     The cunnData objects can be used as an AnnData replacement for the inital preprocessing of single cell Datasets. It replaces some of the most common preprocessing steps within scanpy for annData objects.
     It can be initalized with a preexisting annData object or with a countmatrix and seperate Dataframes for var and obs. Index of var will be used as gene_names. Initalization with an AnnData object is advised.
     """
-    shape = tuple
-    nnz = int
-    genes = cudf.Series
     uns = {}
     def __init__(
         self,
         X: Optional[Union[np.ndarray,sparse.spmatrix, cp.array, cp.sparse.csr_matrix]] = None,
         obs: Optional[pd.DataFrame] = None,
         var: Optional[pd.DataFrame] = None,
+        uns: Optional[Mapping[str, Any]] = None,
         adata: Optional[anndata.AnnData] = None):
             if adata:
-                if not issparse(adata.X):
+                if not issparse_cpu(adata.X):
                     inter = scipy.sparse.csr_matrix(adata.X)
                     self.X = cp.sparse.csr_matrix(inter, dtype=cp.float32)
                     del inter
                 else:
                     self.X = cp.sparse.csr_matrix(adata.X, dtype=cp.float32)
-                self.shape = self.X.shape
-                self.nnz = self.X.nnz
                 self.obs = adata.obs.copy()
                 self.var = adata.var.copy()
                 self.uns = adata.uns.copy()
                 
             else:
-                if not issparse(X):
+                if issparse_gpu(X):
+                    self.X = X                
+                elif not issparse_cpu(X):
                     inter = scipy.sparse.csr_matrix(X)
                     self.X = cp.sparse.csr_matrix(inter, dtype=cp.float32)
                     del inter
                 else:
                     self.X = cp.sparse.csr_matrix(X, dtype=cp.float32)
-                self.shape = self.X.shape
-                self.nnz = self.X.nnz
+
                 self.obs = obs
                 self.var = var
-                   
+                self.uns = uns
+    
+    @property
+    def shape(self):
+        return self.X.shape
+    @property
+    def nnz(self):
+        return self.X.nnz
+    
+    def __getitem__(self, index):
+        """
+        Currently only works for `obs`
+        """
+        index = index.to_numpy()
+        return(cunnData(X = self.X[index,:],obs = self.obs.loc[index,:],var = self.var,uns=self.uns))
+        
 
     def to_AnnData(self):
         """
@@ -161,8 +175,6 @@ class cunnData:
                 print(f"filtered out {self.var.shape[0]-thr.shape[0]} genes based on {qc_var}")
             self.X = self.X.tocsr()
             self.X = self.X[:, thr]
-            self.shape = self.X.shape
-            self.nnz = self.X.nnz
             self.X = self.X.tocsr()
             self.var = self.var.iloc[cp.asnumpy(thr)]
             
@@ -179,8 +191,6 @@ class cunnData:
                 print(f"filtered out {self.var.shape[0]-thr.shape[0]} genes based on {qc_var}")
             self.X = self.X.tocsr()
             self.X = self.X[:, thr]
-            self.shape = self.X.shape
-            self.nnz = self.X.nnz
             self.X = self.X.tocsr()
             self.var = self.var.iloc[cp.asnumpy(thr)]
         else:
@@ -233,8 +243,9 @@ class cunnData:
                         qc_var_total.append(my_list)
                         
             for batch in range(n_batches):
-                start_idx = batch * batchsize
-                stop_idx = min(batch * batchsize + batchsize, self.X.shape[0])
+                batch_size = batchsize
+                start_idx = batch * batch_size
+                stop_idx = min(batch * batch_size + batch_size, self.X.shape[0])
                 arr_batch = self.X[start_idx:stop_idx]
                 n_genes.append(cp.diff(arr_batch.indptr).ravel().get())
                 n_counts.append(arr_batch.sum(axis=1).ravel().get())
@@ -339,8 +350,6 @@ class cunnData:
             if verbose:
                 print(f"filtered out {self.obs.shape[0]-inter.shape[0]} cells")
             self.X = self.X[inter,:]
-            self.shape = self.X.shape
-            self.nnz = self.X.nnz
             self.obs = self.obs.iloc[inter]
         elif qc_var in ['n_genes','n_counts']:
             print(f"Running calculate_qc for 'n_genes' or 'n_counts'")
@@ -357,8 +366,6 @@ class cunnData:
             if verbose:
                 print(f"filtered out {self.obs.shape[0]-inter.shape[0]} cells")
             self.X = self.X[inter,:]
-            self.shape = self.X.shape
-            self.nnz = self.X.nnz
             self.obs = self.obs.iloc[inter]
         else:
             print(f"Please check qc_var.")
@@ -479,7 +486,7 @@ class cunnData:
                 n_bins=n_bins,
                 flavor=flavor)
         else:
-            self.obs[batch_key].astype("category")
+            self.obs[batch_key] = self.obs[batch_key].astype("category")
             batches = self.obs[batch_key].cat.categories
             df = []
             genes = self.var.index.to_numpy()
@@ -584,8 +591,6 @@ class cunnData:
             thr = np.where(self.var["highly_variable"] == True)[0]
             self.X =self.X.tocsc()
             self.X = self.X[:, thr]
-            self.shape = self.X.shape
-            self.nnz = self.X.nnz
             self.var = self.var.iloc[cp.asnumpy(thr)]      
         else:
             print(f"Please calculate highly variable genes first")
