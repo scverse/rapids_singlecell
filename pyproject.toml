@@ -1,0 +1,22 @@
+[build-system]
+build-backend = "flit_core.buildapi"
+requires = [
+    "flit_core >=3.4,<4",
+    "setuptools_scm",
+    "importlib_metadata>=0.7; python_version < '3.10'",
+]
+
+[project]
+name = "rapids_singlecell"
+description = "running single cell analysis on Nvidia GPUs"
+requires-python = ">=3.8"
+license = {file = "LICENSE"}
+authors = [{name = "Severin Dicks"}]
+readme = {file = "README.md", content-type="text/markdown"}
+
+version = "0.1.0"
+
+
+[project.urls]
+Source = "https://github.com/Intron7/rapids_singlecell"
+

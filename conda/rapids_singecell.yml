@@ -1,0 +1,19 @@
+channels:
+ - rapidsai
+ - nvidia
+ - conda-forge
+ - bioconda
+dependencies:
+ - rapids=22.04
+ - python=3.9
+ - cudatoolkit=11.5
+ - cudnn
+ - cutensor
+ - cusparselt
+ - leidenalg
+ - louvain
+ - fa2
+ - pip
+ - pip:
+    - scanpy
+    - gdown

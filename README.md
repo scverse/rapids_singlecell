@@ -6,14 +6,14 @@ The functions are analogous versions of functions that can be found within [scan
 
 ## Requirements
 
-To run the code in this repository you need a conda environment with rapids and scanpy installed. To use the full functionality of this repo please use `rapids-22.02`. You also need an Nvidia GPU.
+To run the code in this repository you need a conda environment with rapids and scanpy installed. To use the full functionality of this repo please use `rapids-22.04`. You also need an Nvidia GPU.
 ```
-conda create -n rapids-22.02_sc -c rapidsai -c nvidia -c conda-forge -c bioconda \
-    rapids=22.02 python=3.9 cudatoolkit=11.5 cudnn cutensor cusparselt \
-    leidenalg louvain fa2
-conda activate rapids-22.02_sc
-pip install scanpy gdown
-ipython kernel install --user --name=rapids-22.02_sc
+conda create -n rapids_singelcell -f conda/rapids_singecell.yml
+ipython kernel install --user --name=rapids_singelcell
+```
+After you set up the enviroment you can install this package from this wheel into the enviroment. The wheel doesn't install any dependencies
+```
+pip install https://github.com/Intron7/rapids_singlecell/releases/download/v0.1.0/rapids_singlecell-0.1.0-py3-none-any.whl
 ```
 
 With this enviroment, you should be able to run the notebooks. So far I have only tested these Notebooks on a Quadro RTX 6000 and an RTX 3090.
@@ -47,6 +47,7 @@ Please have look at the notebooks to assess the functionality. I tried to write 
 * TSNE
 * Kmeans Clustering 
 * Diffusion Maps
+* Force Atlas 2 (draw_grah) 
 * rank_genes_groups with logistic regression
 * some plotting functions for cunnData objects
 
@@ -73,6 +74,7 @@ Here are some benchmarks. I ran the notebook on the CPU with as many cores as we
 |TSNE                          | 215 s                     | 1.9 s        | 336 s    | 2.3 s        |
 |Logistic_Regression           | 66 s                      | 3.7 s        | 94 s     | 8 s          |
 |Diffusion Map                 | 612 ms                    | 358 ms       | 1 s      | 1.9 s        |
+
 
 It seems like Turing based GPUs are a lot slower running the eigenvector calculations on sparse matrixes needed for Diffusion Maps than Ampere based ones.
 I also observed that the first GPU run in a new enviroment is slower than the runs after that (with a restarted kernel) (RTX 6000). 
