@@ -17,7 +17,7 @@ After you set up the enviroment you can install this package from this wheel int
 pip install https://github.com/Intron7/rapids_singlecell/releases/download/v0.2.0/rapids_singlecell-0.2.0-py3-none-any.whl
 ```
 
-With this enviroment, you should be able to run the notebooks. So far I have only tested these Notebooks on a Quadro RTX 6000 and an RTX 3090.
+With this enviroment, you should be able to run the notebooks. So far I have tested these Notebooks on an A100 80GB, a Quadro RTX 6000 and a RTX 3090.
 
 ## Citation
 
