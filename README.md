@@ -6,14 +6,15 @@ The functions are analogous versions of functions that can be found within [scan
 
 ## Requirements
 
-To run the code in this repository you need a conda environment with rapids and scanpy installed. To use the full functionality of this repo please use `rapids-22.04`. You also need an Nvidia GPU.
+To run the code in this repository you need a conda environment with rapids and scanpy installed. To use the full functionality of this repo please use `rapids-22.04` or `rapids-22.06`. You also need an Nvidia GPU.
 ```
 conda create -n rapids_singelcell -f conda/rapids_singecell.yml
+conda activate rapids_singelcell
 ipython kernel install --user --name=rapids_singelcell
 ```
 After you set up the enviroment you can install this package from this wheel into the enviroment. The wheel doesn't install any dependencies
 ```
-pip install https://github.com/Intron7/rapids_singlecell/releases/download/v0.1.0/rapids_singlecell-0.1.0-py3-none-any.whl
+pip install https://github.com/Intron7/rapids_singlecell/releases/download/v0.2.0/rapids_singlecell-0.2.0-py3-none-any.whl
 ```
 
 With this enviroment, you should be able to run the notebooks. So far I have only tested these Notebooks on a Quadro RTX 6000 and an RTX 3090.
@@ -25,7 +26,7 @@ If you use this code, please cite: [rapids-single-cell-examples](https://zenodo.
 ## Functions
 
 ### cunnData
-The preprocessing of the single-cell data is performed with `cunnData`. It is a replacement for the [AnnData](https://github.com/theislab/anndata) object used by scanpy. The `cunnData` object is a cutdown version of an `AnnData` object. At its core lies a sparse matrix (`.X`) within the GPU memory. `.obs` and `.var` are pandas data frame and `.uns` is a dictionary. Most preprocessing functions of `scanpy` are methods of the `cunnData` class. I tried to keep the input as close to the original scanpy implementation as possible.
+The preprocessing of the single-cell data is performed with `cunnData`. It is a replacement for the [AnnData](https://github.com/theislab/anndata) object used by scanpy. The `cunnData` object is a cutdown version of an `AnnData` object. At its core lies a sparse matrix (`.X`) within the GPU memory. `.obs` and `.var` are pandas data frame and `.uns` is a dictionary. It also includes layers. Most preprocessing functions of `scanpy` are methods of the `cunnData` class. I tried to keep the input as close to the original scanpy implementation as possible.
 Please have look at the notebooks to assess the functionality. I tried to write informative docstrings for each method. 
 `cunnData` includes methods for:
 * filter genes based on cells expressing that genes
@@ -46,6 +47,7 @@ Please have look at the notebooks to assess the functionality. I tried to write 
 * Louvain Clustering
 * TSNE
 * Kmeans Clustering 
+* Kernel Density
 * Diffusion Maps
 * Force Atlas 2 (draw_grah) 
 * rank_genes_groups with logistic regression
@@ -58,23 +60,23 @@ To show the capability of these functions, I created two example notebooks evalu
 
 Here are some benchmarks. I ran the notebook on the CPU with as many cores as were available where possible. 
 
-|Step                          |CPU (Ryzen 5950x, 32 Cores, 64GB RAM)|GPU (RTX 3090)|CPU (AMD Eypc Rome, 30 Cores, 500GB RAM)| GPU (Quadro RTX 6000)|GPU (A100 80GB)|
-|------------------------------|---------------------------|--------------|----------|--------------|----------------|
-|whole Notebook                | 728 s                     | 43 s         | 917 s    | 67 s         | 57 s           |
-|Preprocessing                 | 75 s                      | 21 s         | 40 s     | 34 s         | 30 s           |
-|Clustering and Visulatization | 423 s                     | 18 s         | 524 s    | 27 s         | 21 s           |
-|Normalize_total               | 252 ms                    | > 1ms        | 425 ms   | 1 ms         | 1 ms           |
-|Highly Variable Genes         | 3.2 s                     | 2.6 s        | 4.1 s    | 2.7 s        | 3.7 s          |
-|Regress_out                   | 63 s                      | 14 s         | 24 s     | 23 s         | 15 s           |
-|Scale                         | 1.3 s                     | 299 ms       | 2 s      | 2  s         | 359 ms         |
-|PCA                           | 26 s                      | 1.8 s        | 23 s     | 3.6 s        | 2.6 s          |
-|Neighbors                     | 10 s                      | 5 s          | 16.8 s   | 8.1  s       | 6 s            |
-|UMAP                          | 30 s                      | 659 ms       | 66 s     | 1 s          | 783 ms         |
-|Louvain                       | 16 s                      | 121 ms       | 20 s     | 214 ms       | 201 ms         |
-|Leiden                        | 11 s                      | 102 ms       | 20 s     | 175 ms       | 152 ms         |
-|TSNE                          | 240 s                     | 1.4 s        | 319 s    | 1.8 s        | 1.4 s          |
-|Logistic_Regression           | 74 s                      | 4 s          | 45 s     | 5 s          | 3.4 s          |
-|Diffusion Map                 | 715 ms                    | 259 ms       | 747 ms   | 431 ms       | 826 ms         |
-|Force Atlas 2                 | 207 s                     | 236 ms       | 300 s    | 298 ms       | 353 ms         |
+|Step                          |CPU (Ryzen 5950x, 32 Cores, 64GB RAM)|GPU (RTX 3090)|CPU (AMD Eypc Rome, 60 Cores, 1TB RAM)| GPU (Quadro RTX 6000) 
+|------------------------------|---------------------------|--------------|----------|--------------|
+|whole Notebook                | 494 s                     | 51 s         | 820 s    | 82 s         |
+|Preprocessing                 | 90 s                      | 23 s         | 120 s    | 35 s         |
+|Clustering and Visulatization | 379 s                     | 24 s         | 640 s    | 38 s         |
+|Normalize_total               | 273 ms                    | > 1ms        | 423 ms   | 1 ms         |
+|Regress_out                   | 81 s                      | 18 s         | 105 s    | 26.1 s       |
+|Scale                         | 701 ms                    | 154 ms       | 1.1 s    | 177 ms       |
+|PCA                           | 19.9 s                    | 767 ms       | 22.8 s   | 1.2 s        |
+|Neighbors                     | 14.1 s                    | 6.9 s        | 31.6 s   | 12.8 s       |
+|UMAP                          | 31 s                      | 5 s          | 72 s     | 5.4 s        |
+|Louvain                       | 8.6 s                     | 152 ms       | 27.1 s   | 240 ms       |
+|Leiden                        | 13.7 s                    | 171 ms       | 35.9 s   | 305 ms       |
+|TSNE                          | 215 s                     | 1.9 s        | 336 s    | 2.3 s        |
+|Logistic_Regression           | 66 s                      | 3.7 s        | 94 s     | 8 s          |
+|Diffusion Map                 | 612 ms                    | 358 ms       | 1 s      | 1.9 s        |
 
+
+It seems like Turing based GPUs are a lot slower running the eigenvector calculations on sparse matrixes needed for Diffusion Maps than Ampere based ones.
 I also observed that the first GPU run in a new enviroment is slower than the runs after that (with a restarted kernel) (RTX 6000). 
