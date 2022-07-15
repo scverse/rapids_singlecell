@@ -21,12 +21,14 @@ With this enviroment, you should be able to run the notebooks. So far I have onl
 
 ## Citation
 
-If you use this code, please cite: [rapids-single-cell-examples](https://zenodo.org/badge/latestdoi/265649968) and  [scanpy](https://doi.org/10.1186/s13059-017-1382-0)
+If you use this code, please cite: [![DOI](https://zenodo.org/badge/364573913.svg)](https://zenodo.org/badge/latestdoi/364573913)
+
+Please also consider citing:[rapids-single-cell-examples](https://zenodo.org/badge/latestdoi/265649968) and  [scanpy](https://doi.org/10.1186/s13059-017-1382-0)
 
 ## Functions
 
 ### cunnData
-The preprocessing of the single-cell data is performed with `cunnData`. It is a replacement for the [AnnData](https://github.com/theislab/anndata) object used by scanpy. The `cunnData` object is a cutdown version of an `AnnData` object. At its core lies a sparse matrix (`.X`) within the GPU memory. `.obs` and `.var` are pandas data frame and `.uns` is a dictionary. It also includes layers. Most preprocessing functions of `scanpy` are methods of the `cunnData` class. I tried to keep the input as close to the original scanpy implementation as possible.
+The preprocessing of the single-cell data is performed with `cunnData`. It is a replacement for the [AnnData](https://github.com/theislab/anndata) object used by scanpy. The `cunnData` object is a cutdown version of an `AnnData` object. At its core lies a sparse matrix (`.X`) within the GPU memory. `.obs` and `.var` are pandas data frame and `.uns` is a dictionary. It also supports layers. Most preprocessing functions of `scanpy` are methods of the `cunnData` class. I tried to keep the input as close to the original scanpy implementation as possible.
 Please have look at the notebooks to assess the functionality. I tried to write informative docstrings for each method. 
 `cunnData` includes methods for:
 * filter genes based on cells expressing that genes
