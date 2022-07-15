@@ -17,3 +17,5 @@ dependencies:
  - pip:
     - scanpy
     - gdown
+    - wget
+    - scikit-misc
