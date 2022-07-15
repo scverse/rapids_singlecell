@@ -14,6 +14,9 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from natsort import natsorted
 
+from scanpy._utils import sanitize_anndata
+from anndata import AnnData
+from typing import Union, Optional, Sequence
 
 from cuml.manifold import TSNE
 from cuml.cluster import KMeans
@@ -21,7 +24,7 @@ from cuml.decomposition import PCA
 
 
 
-def select_groups(labels, groups_order_subset='all'):
+def _select_groups(labels, groups_order_subset='all'):
     groups_order = labels.cat.categories
     groups_masks = np.zeros(
         (len(labels.cat.categories), len(labels.cat.codes)), dtype=bool
@@ -64,7 +67,8 @@ def rank_genes_groups_logreg(
     groups="all",
     reference='rest',
     n_genes = None,
-    use_raw = False,
+    use_raw = None,
+    layer= None,
     **kwds,
 ):
 
@@ -117,16 +121,23 @@ def rank_genes_groups_logreg(
             f'reference = {reference} needs to be one of groupby = {cats}.'
         )
 
-    groups_order, groups_masks = select_groups(labels, groups_order)
+    groups_order, groups_masks = _select_groups(labels, groups_order)
     
-    original_reference = reference
-    
-    if use_raw == False:
-        X = adata.X
+    if layer and use_raw== True:
+        raise ValueError("Cannot specify `layer` and have `use_raw=True`.")
+    elif layer:
+        X = adata.layers[layer]
         var_names = adata.var_names
-    else:
+    elif use_raw == None and adata.raw:
+        print("defaulting to using `.raw`")
         X = adata.raw.X
         var_names = adata.raw.var_names
+    elif use_raw == True:
+        X = adata.raw.X
+        var_names = adata.raw.var_names
+    else:
+        X = adata.X
+        var_names = adata.var_names
     
     # for clarity, rename variable
     n_genes_user = n_genes
@@ -293,7 +304,7 @@ Expectation Maximization.
     kmeans_out = KMeans(n_clusters=n_clusters, random_state=random_state).fit(adata.obsm['X_pca'])
     adata.obs['kmeans'] = kmeans_out.labels_.astype(str)
 
-def pca(adata, n_comps = 50):
+def pca(adata, layer = None, n_comps = 50):
     """
     Performs PCA using the cuML decomposition function
     
@@ -301,6 +312,9 @@ def pca(adata, n_comps = 50):
     ----------
     adata : annData object
     
+    layer
+        If provided, use `adata.layers[layer]` for expression values instead of `adata.X`.
+
     n_comps: int (default: 50)
         Number of principal components to compute. Defaults to 50
     
@@ -316,8 +330,9 @@ def pca(adata, n_comps = 50):
          Explained variance, equivalent to the eigenvalues of the
          covariance matrix.
     """
+    X = adata.layers[layer] if layer is not None else adata.X
     pca_func = PCA(n_components=n_comps, output_type="numpy")
-    adata.obsm["X_pca"] = pca_func.fit_transform(adata.X)
+    adata.obsm["X_pca"] = pca_func.fit_transform(X)
     adata.uns['pca'] ={'variance':pca_func.explained_variance_, 'variance_ratio':pca_func.explained_variance_ratio_}
     
     
@@ -328,7 +343,7 @@ def tsne(adata, n_pcs,perplexity = 30, early_exaggeration = 12,learning_rate =10
     Parameters
     ---------
     adata: adata object with `.obsm['X_pca']`
-    
+
     n_pcs: int
         use this many PCs
     
@@ -435,7 +450,6 @@ def draw_graph(adata, init_pos = None, max_iter = 500):
     Force-directed graph drawing with cugraph's implementation of Force Atlas 2.
     This is a reimplementation of scanpys function for GPU compute.
 
-    
     Parameters
     ----------
     adata : AnnData
@@ -523,6 +537,145 @@ def draw_graph(adata, init_pos = None, max_iter = 500):
     key_added = f'X_draw_graph_{layout}'
     adata.obsm[key_added] = positions.get()    # Format output
     
+def embedding_density(
+    adata: AnnData,
+    basis: str = 'umap',
+    groupby = None,
+    key_added = None,
+    components = None,
+) -> None:
+    """\
+    Calculate the density of cells in an embedding (per condition).
+    Gaussian kernel density estimation is used to calculate the density of
+    cells in an embedded space. This can be performed per category over a
+    categorical cell annotation. The cell density can be plotted using the
+    `pl.embedding_density` function.
+    Note that density values are scaled to be between 0 and 1. Thus, the
+    density value at each cell is only comparable to densities in
+    the same category.
+    This function was written by Sophie Tritschler and implemented into
+    Scanpy by Malte Luecken.
+    This function uses cuML's KernelDensity. It returns log Likelihood as does 
+    sklearn's implementation. scipy.stats implementation, used
+    in scanpy, returns PDF.
+
+    Parameters
+    ----------
+    adata
+        The annotated data matrix.
+    basis
+        The embedding over which the density will be calculated. This embedded
+        representation should be found in `adata.obsm['X_[basis]']``.
+    groupby
+        Key for categorical observation/cell annotation for which densities
+        are calculated per category.
+    key_added
+        Name of the `.obs` covariate that will be added with the density
+        estimates.
+    components
+        The embedding dimensions over which the density should be calculated.
+        This is limited to two components.
+    Returns
+    -------
+    Updates `adata.obs` with an additional field specified by the `key_added`
+    parameter. This parameter defaults to `[basis]_density_[groupby]`, where
+    `[basis]` is one of `umap`, `diffmap`, `pca`, `tsne`, or `draw_graph_fa`
+    and `[groupby]` denotes the parameter input.
+    Updates `adata.uns` with an additional field `[key_added]_params`.
+    """
+    # to ensure that newly created covariates are categorical
+    # to test for category numbers
+    sanitize_anndata(adata)
+    # Test user inputs
+    basis = basis.lower()
+
+    if basis == 'fa':
+        basis = 'draw_graph_fa'
+
+    if f'X_{basis}' not in adata.obsm_keys():
+        raise ValueError(
+            "Cannot find the embedded representation "
+            f"`adata.obsm['X_{basis}']`. Compute the embedding first."
+        )
+
+    if components is None:
+        components = '1,2'
+    if isinstance(components, str):
+        components = components.split(',')
+    components = np.array(components).astype(int) - 1
+
+    if len(components) != 2:
+        raise ValueError('Please specify exactly 2 components, or `None`.')
+
+    if basis == 'diffmap':
+        components += 1
+
+    if groupby is not None:
+        if groupby not in adata.obs:
+            raise ValueError(f'Could not find {groupby!r} `.obs` column.')
+
+        if adata.obs[groupby].dtype.name != 'category':
+            raise ValueError(f'{groupby!r} column does not contain categorical data')
+
+    # Define new covariate name
+    if key_added is not None:
+        density_covariate = key_added
+    elif groupby is not None:
+        density_covariate = f'{basis}_density_{groupby}'
+    else:
+        density_covariate = f'{basis}_density'
+
+    # Calculate the densities over each category in the groupby column
+    if groupby is not None:
+        categories = adata.obs[groupby].cat.categories
+
+        density_values = np.zeros(adata.n_obs)
+
+        for cat in categories:
+            cat_mask = adata.obs[groupby] == cat
+            embed_x = adata.obsm[f'X_{basis}'][cat_mask, components[0]]
+            embed_y = adata.obsm[f'X_{basis}'][cat_mask, components[1]]
+
+            dens_embed = _calc_density(cp.array(embed_x), cp.array(embed_y))
+            density_values[cat_mask] = dens_embed
+
+        adata.obs[density_covariate] = density_values
+    else:  # if groupby is None
+        # Calculate the density over the whole embedding without subsetting
+        embed_x = adata.obsm[f'X_{basis}'][:, components[0]]
+        embed_y = adata.obsm[f'X_{basis}'][:, components[1]]
+
+        adata.obs[density_covariate] = _calc_density(cp.array(embed_x), cp.array(embed_y))
+
+    # Reduce diffmap components for labeling
+    # Note: plot_scatter takes care of correcting diffmap components
+    #       for plotting automatically
+    if basis != 'diffmap':
+        components += 1
+
+    adata.uns[f'{density_covariate}_params'] = dict(
+        covariate=groupby, components=components.tolist()
+    )
+
+def _calc_density(x: cp.ndarray, y: cp.ndarray):
+    """\
+    Calculates the density of points in 2 dimensions.
+    """
+    from cuml.neighbors import KernelDensity
+    
+    # Calculate the point density
+    xy = cp.vstack([x, y]).T
+    bandwidth = cp.power(xy.shape[0],(-1./(xy.shape[1]+4)))
+    kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(xy)
+    z = kde.score_samples(xy)
+    min_z = cp.min(z)
+    max_z = cp.max(z)
+
+    # Scale between 0 and 1
+    scaled_z = (z - min_z) / (max_z - min_z)
+    
+    return scaled_z.get()
+
 def plt_scatter(cudata, x, y, color = None, save = None, show =True, dpi =300):
     """
     Violin plot.
