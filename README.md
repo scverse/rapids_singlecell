@@ -37,8 +37,14 @@ Please have look at the notebooks to assess the functionality. I tried to write 
 * filter cells based on a multitude of parameters (eg. number of expressed genes, mitchondrial content)
 * caluclate_qc (based on scanpy's `pp.calculate_qc_metrics`)
 * normalize_total
+* normalize based on `pearson_residuals`
 * log1p
 * highly_varible_genes
+  * surat
+  * cellranger
+  * seurat_v3
+  * pearson_residuals
+  * poisson_gene_selection (adepted from `scvi`)
 * regress_out 
 * scale
 * transform `cunnData` object to `AnnData` object
@@ -53,6 +59,7 @@ Please have look at the notebooks to assess the functionality. I tried to write 
 * Kmeans Clustering 
 * Kernel Density
 * Diffusion Maps
+* PyMDE (adepted from `scvi`)
 * Force Atlas 2 (draw_grah) 
 * rank_genes_groups with logistic regression
 * some plotting functions for cunnData objects
