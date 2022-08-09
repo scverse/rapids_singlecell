@@ -39,7 +39,7 @@ Please have look at the notebooks to assess the functionality. I tried to write 
 * normalize_total
 * normalize based on `pearson_residuals`
 * log1p
-* highly_varible_genes
+* highly_variable_genes
   * surat
   * cellranger
   * seurat_v3
