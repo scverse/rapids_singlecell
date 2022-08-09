@@ -44,7 +44,7 @@ Please have look at the notebooks to assess the functionality. I tried to write 
   * cellranger
   * seurat_v3
   * pearson_residuals
-  * poisson_gene_selection (adepted from `scvi`)
+  * poisson_gene_selection (adapted from `scvi`)
 * regress_out 
 * scale
 * transform `cunnData` object to `AnnData` object
@@ -59,7 +59,7 @@ Please have look at the notebooks to assess the functionality. I tried to write 
 * Kmeans Clustering 
 * Kernel Density
 * Diffusion Maps
-* PyMDE (adepted from `scvi`)
+* PyMDE (adapted from `scvi`)
 * Force Atlas 2 (draw_grah) 
 * rank_genes_groups with logistic regression
 * some plotting functions for cunnData objects
