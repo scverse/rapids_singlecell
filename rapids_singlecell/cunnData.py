@@ -545,7 +545,7 @@ class cunnData:
             return X
 
     
-    def highly_varible_genes(
+    def highly_variable_genes(
         self,
         layer = None,
         min_mean = 0.0125,
