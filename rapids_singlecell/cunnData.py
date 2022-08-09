@@ -560,13 +560,15 @@ class cunnData:
         theta:int = 100,
         clip = None,
         chunksize:int = 1000,
+        n_samples:int = 10000, 
         batch_key = None):
         """
         Annotate highly variable genes. 
-        Expects logarithmized data, except when `flavor='seurat_v3','pearson_residuals'`, in which count data is expected.
+        Expects logarithmized data, except when `flavor='seurat_v3','pearson_residuals','poisson_gene_selection'`, in which count data is expected.
         
         Reimplentation of scanpy's function. 
         Depending on flavor, this reproduces the R-implementations of Seurat, Cell Ranger, Seurat v3 and Pearson Residuals.
+        Flavor `poisson_gene_selection` is an implementation of scvi, which is based on M3Drop. It requiers gpu accelerated pytorch to be installed.
         
         For these dispersion-based methods, the normalized dispersion is obtained by scaling 
         with the mean and standard deviation of the dispersions for genes falling into a given 
@@ -577,6 +579,7 @@ class cunnData:
         are standardized (i.e., z-score normalization per feature) with a regularized
         standard deviation. Next, the normalized variance is computed as the variance
         of each gene after the transformation. Genes are ranked by the normalized variance.
+
 
         Parameters
         ----------
@@ -592,7 +595,7 @@ class cunnData:
             If n_top_genes unequals None, this and all other cutoffs for the means and the normalized dispersions are ignored.
         n_top_genes: int (defualt: None)
             Number of highly-variable genes to keep.
-        flavor : {`seurat`, `cell_ranger`, `seurat_v3`, `pearson_residuals`} (default: 'seurat')
+        flavor : {`seurat`, `cell_ranger`, `seurat_v3`, `pearson_residuals`, `poisson_gene_selection`} (default: 'seurat')
             Choose the flavor for identifying highly variable genes. For the dispersion based methods in their default workflows, Seurat passes the cutoffs whereas Cell Ranger passes n_top_genes.
         n_bins : int (default: 20)
             Number of bins for binning the mean gene expression. Normalization is done with respect to each bin. If just a single gene falls into a bin, the normalized dispersion is artificially set to 1.
@@ -605,15 +608,18 @@ class cunnData:
         theta: int (default: 1000)
             The negative binomial overdispersion parameter `theta` for Pearson residuals.
              Higher values correspond to less overdispersion (`var = mean + mean^2/theta`), and `theta=np.Inf` corresponds to a Poisson model.
-        clip : float (default: None)
+        clip: float (default: None)
             Only used if `flavor='pearson_residuals'`.
             Determines if and how residuals are clipped:
                 * If `None`, residuals are clipped to the interval `[-sqrt(n_obs), sqrt(n_obs)]`, where `n_obs` is the number of cells in the dataset (default behavior).
                 * If any scalar `c`, residuals are clipped to the interval `[-c, c]`. Set `clip=np.Inf` for no clipping.
-        chunksize : int (default: 1000)
-            If `flavor='pearson_residuals'`, this dertermines how many genes are processed at
+        chunksize: int (default: 1000)
+            If `flavor='pearson_residuals'` or `'poisson_gene_selection'`, this dertermines how many genes are processed at
             once while computing the residual variance. Choosing a smaller value will reduce
             the required memory.
+        n_samples: int (default: 10000)
+            The number of Binomial samples to use to estimate posterior probability
+            of enrichment of zeros for each gene (only for `flavor='poisson_gene_selection'`).
         batch_key:
             If specified, highly-variable genes are selected within each batch separately and merged.
             
@@ -664,6 +670,15 @@ class cunnData:
                 check_values = check_values,
                 layer=layer,
                 chunksize= chunksize)
+        elif flavor == 'poisson_gene_selection':
+            _poisson_gene_selection(
+                cudata =self,
+                n_top_genes=n_top_genes,
+                batch_key=batch_key,
+                check_values = check_values,
+                layer=layer,
+                n_samples = n_samples,
+                minibatch_size= chunksize)
         else:
             if batch_key is None:
                 X = self.layers[layer] if layer is not None else self.X
@@ -1213,6 +1228,194 @@ def _highly_variable_pearson_residuals(cudata: cunnData,
             'highly_variable_intersection'
         ].values
     cudata.var['highly_variable'] = df['highly_variable'].values
+
+def _poisson_gene_selection(
+    cudata:cunnData,
+    layer: Optional[str] = None,
+    n_top_genes: int = None,
+    n_samples: int = 10000,
+    batch_key: str = None,
+    minibatch_size: int = 1000,
+    check_values:bool = True,
+    **kwargs,
+) -> None:
+    """
+    Rank and select genes based on the enrichment of zero counts.
+    Enrichment is considered by comparing data to a Poisson count model.
+    This is based on M3Drop: https://github.com/tallulandrews/M3Drop
+    The method accounts for library size internally, a raw count matrix should be provided.
+    Instead of Z-test, enrichment of zeros is quantified by posterior
+    probabilites from a binomial model, computed through sampling.
+    Parameters
+    ----------
+    cudata
+        cunnData object (with sparse X matrix).
+    layer
+        If provided, use `adata.layers[layer]` for expression values instead of `adata.X`.
+    n_top_genes
+        How many variable genes to select.
+    n_samples
+        The number of Binomial samples to use to estimate posterior probability
+        of enrichment of zeros for each gene.
+    batch_key
+        key in adata.obs that contains batch info. If None, do not use batch info.
+        Defatult: ``None``.
+    minibatch_size
+        Size of temporary matrix for incremental calculation. Larger is faster but
+        requires more RAM or GPU memory. (The default should be fine unless
+        there are hundreds of millions cells or millions of genes.)
+    Returns
+    -------
+    Depending on `inplace` returns calculated metrics (:class:`~pd.DataFrame`) or
+    updates `.var` with the following fields
+    highly_variable : bool
+        boolean indicator of highly-variable genes
+    **observed_fraction_zeros**
+        fraction of observed zeros per gene
+    **expected_fraction_zeros**
+        expected fraction of observed zeros per gene
+    prob_zero_enrichment : float
+        Probability of zero enrichment, median across batches in the case of multiple batches
+    prob_zero_enrichment_rank : float
+        Rank of the gene according to probability of zero enrichment, median rank in the case of multiple batches
+    prob_zero_enriched_nbatches : int
+        If batch_key is given, this denotes in how many batches genes are detected as zero enriched
+    """
+    
+    try:
+        import torch
+    except ImportError:
+        raise ImportError(
+            'Please install pytorch package via `pip install pytorch'
+        )
+    if n_top_genes is None:
+        n_top_genes = 2000
+        warnings.warn(
+            "`flavor='seurat_v3'` expects `n_top_genes`  to be defined, defaulting to 2000 HVGs",
+            UserWarning,
+        )
+    
+    X = cudata.layers[layer] if layer is not None else cudata.X
+    if check_values and not _check_nonnegative_integers(X):
+        warnings.warn(
+            "`flavor='pearson_residuals'` expects raw count data, but non-integers were found.",
+            UserWarning,
+        )
+    if batch_key is None:
+        batch_info = pd.Categorical(np.zeros(cudata.shape[0], dtype=int))
+    else:
+        batch_info = cudata.obs[batch_key].values
+
+    prob_zero_enrichments = []
+    obs_frac_zeross = []
+    exp_frac_zeross = []
+    
+    with torch.no_grad():
+        for b in np.unique(batch_info):
+            X_batch = X[batch_info == b]
+            total_counts = torch.tensor(X_batch.sum(1).ravel(), device = "cuda")
+            X_batch = X_batch.tocsc()
+            # Calculate empirical statistics.
+            sum_0 = X_batch.sum(axis =0).ravel()
+            scaled_means = torch.tensor(sum_0 / sum_0.sum(), device = "cuda")
+
+            observed_fraction_zeros = torch.tensor(
+                cp.asarray(1.0 - cp.diff(X_batch.indptr).ravel() / X_batch.shape[0]).ravel(),
+                device = "cuda")
+            # Calculate probability of zero for a Poisson model.
+            # Perform in batches to save memory.
+            minibatch_size = min(total_counts.shape[0], minibatch_size)
+            n_batches = total_counts.shape[0] // minibatch_size
+
+            expected_fraction_zeros = torch.zeros(scaled_means.shape, device="cuda")
+
+            for i in range(n_batches):
+                total_counts_batch = total_counts[
+                    i * minibatch_size : (i + 1) * minibatch_size
+                ]
+                # Use einsum for outer product.
+                expected_fraction_zeros += torch.exp(
+                    -torch.einsum("i,j->ij", [scaled_means, total_counts_batch])
+                ).sum(1)
+
+            total_counts_batch = total_counts[(i + 1) * minibatch_size :]
+            expected_fraction_zeros += torch.exp(
+                -torch.einsum("i,j->ij", [scaled_means, total_counts_batch])
+            ).sum(1)
+            expected_fraction_zeros /= X_batch.shape[0]
+
+            # Compute probability of enriched zeros through sampling from Binomial distributions.
+            observed_zero = torch.distributions.Binomial(probs=observed_fraction_zeros)
+            expected_zero = torch.distributions.Binomial(probs=expected_fraction_zeros)
+
+            #extra_zeros = torch.zeros(expected_fraction_zeros.shape, device="cuda")
+            
+            
+            extra_zeros = observed_zero.sample((n_samples,))>expected_zero.sample((n_samples,))
+            #for i in range(n_samples):
+            #    extra_zeros += observed_zero.sample() > expected_zero.sample()
+            
+            extra_zeros = extra_zeros.sum(0)
+            prob_zero_enrichment = (extra_zeros / n_samples).cpu().numpy()
+
+            obs_frac_zeros = observed_fraction_zeros.cpu().numpy()
+            exp_frac_zeros = expected_fraction_zeros.cpu().numpy()
+
+            # Clean up memory (tensors seem to stay in GPU unless actively deleted).
+            del scaled_means
+            del total_counts
+            del expected_fraction_zeros
+            del observed_fraction_zeros
+            del extra_zeros
+            torch.cuda.empty_cache()
+
+            prob_zero_enrichments.append(prob_zero_enrichment.reshape(1, -1))
+            obs_frac_zeross.append(obs_frac_zeros.reshape(1, -1))
+            exp_frac_zeross.append(exp_frac_zeros.reshape(1, -1))
+
+    # Combine per batch results
+    prob_zero_enrichments = np.concatenate(prob_zero_enrichments, axis=0)
+    obs_frac_zeross = np.concatenate(obs_frac_zeross, axis=0)
+    exp_frac_zeross = np.concatenate(exp_frac_zeross, axis=0)
+
+    ranked_prob_zero_enrichments = prob_zero_enrichments.argsort(axis=1).argsort(axis=1)
+    median_prob_zero_enrichments = np.median(prob_zero_enrichments, axis=0)
+
+    median_obs_frac_zeross = np.median(obs_frac_zeross, axis=0)
+    median_exp_frac_zeross = np.median(exp_frac_zeross, axis=0)
+
+    median_ranked = np.median(ranked_prob_zero_enrichments, axis=0)
+
+    num_batches_zero_enriched = np.sum(
+        ranked_prob_zero_enrichments >= (cudata.shape[1] - n_top_genes), axis=0
+    )
+
+    df = pd.DataFrame(index=np.array(cudata.var_names))
+    df["observed_fraction_zeros"] = median_obs_frac_zeross
+    df["expected_fraction_zeros"] = median_exp_frac_zeross
+    df["prob_zero_enriched_nbatches"] = num_batches_zero_enriched
+    df["prob_zero_enrichment"] = median_prob_zero_enrichments
+    df["prob_zero_enrichment_rank"] = median_ranked
+
+    df["highly_variable"] = False
+    sort_columns = ["prob_zero_enriched_nbatches", "prob_zero_enrichment_rank"]
+    top_genes = df.nlargest(n_top_genes, sort_columns).index
+    df.loc[top_genes, "highly_variable"] = True
+
+    cudata.uns["hvg"] = {"flavor": "poisson_zeros"}
+    cudata.var["highly_variable"] = df["highly_variable"].values
+    cudata.var["observed_fraction_zeros"] = df["observed_fraction_zeros"].values
+    cudata.var["expected_fraction_zeros"] = df["expected_fraction_zeros"].values
+    cudata.var["prob_zero_enriched_nbatches"] = df[
+        "prob_zero_enriched_nbatches"
+    ].values
+    cudata.var["prob_zero_enrichment"] = df["prob_zero_enrichment"].values
+    cudata.var["prob_zero_enrichment_rank"] = df["prob_zero_enrichment_rank"].values
+
+    if batch_key is not None:
+        cudata.var["prob_zero_enriched_nbatches"] = df["prob_zero_enriched_nbatches"].values
+
+
 
 def _get_mean_var(X):
     mean = (X.sum(axis =0)/X.shape[0]).ravel()
