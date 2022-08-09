@@ -16,7 +16,7 @@ from natsort import natsorted
 
 from scanpy._utils import sanitize_anndata
 from anndata import AnnData
-from typing import Union, Optional, Sequence
+from typing import Union, Optional, Sequence, Literal
 
 from cuml.manifold import TSNE
 from cuml.cluster import KMeans
@@ -62,7 +62,7 @@ def _select_groups(labels, groups_order_subset='all'):
 
 
 def rank_genes_groups_logreg(
-    adata,
+    adata: AnnData,
     groupby,  
     groups="all",
     reference='rest',
@@ -217,7 +217,9 @@ def rank_genes_groups_logreg(
     adata.uns["rank_genes_groups"]['scores'] = scores
     adata.uns["rank_genes_groups"]['names'] = names
 
-def leiden(adata, resolution=1.0):
+def leiden(adata: AnnData, 
+           resolution=1.0,
+           key_added: str = 'leiden'):
     """
     Performs Leiden Clustering using cuGraph
     Parameters
@@ -227,6 +229,9 @@ def leiden(adata, resolution=1.0):
     resolution : float, optional (default: 1)
         A parameter value controlling the coarseness of the clustering.
         Higher values lead to more clusters.
+    
+    key_added
+        `adata.obs` key under which to add the cluster labels.
     """
     # Adjacency graph
     adjacency = adata.obsp["connectivities"]
@@ -244,13 +249,15 @@ def leiden(adata, resolution=1.0):
     # Format output
     groups = leiden_parts.to_pandas().sort_values('vertex')[['partition']].to_numpy().ravel()
    
-    adata.obs['leiden'] = pd.Categorical(
+    adata.obs[key_added] = pd.Categorical(
         values=groups.astype('U'),
         categories=natsorted(map(str, np.unique(groups))),
     )
 
     
-def louvain(adata, resolution=1.0):
+def louvain(adata: AnnData, 
+            resolution=1.0,
+            key_added: str = 'louvain'):
     """
     Performs Louvain Clustering using cuGraph
     Parameters
@@ -260,6 +267,9 @@ def louvain(adata, resolution=1.0):
     resolution : float, optional (default: 1)
         A parameter value controlling the coarseness of the clustering.
         Higher values lead to more clusters.
+    
+    key_added
+        `adata.obs` key under which to add the cluster labels.
     """
     # Adjacency graph
     adjacency = adata.obsp["connectivities"]
@@ -277,12 +287,14 @@ def louvain(adata, resolution=1.0):
     # Format output
     groups = louvain_parts.to_pandas().sort_values('vertex')[['partition']].to_numpy().ravel()
 
-    adata.obs['louvain'] = pd.Categorical(
+    adata.obs[key_added] = pd.Categorical(
         values=groups.astype('U'),
         categories=natsorted(map(str, np.unique(groups))),
     )
     
-def kmeans(adata, n_clusters =8, random_state= 42):
+def kmeans(adata: AnnData, 
+           n_clusters =8,
+           random_state= 42):
     """
     KMeans is a basic but powerful clustering method which is optimized via
 Expectation Maximization. 
@@ -304,7 +316,9 @@ Expectation Maximization.
     kmeans_out = KMeans(n_clusters=n_clusters, random_state=random_state).fit(adata.obsm['X_pca'])
     adata.obs['kmeans'] = kmeans_out.labels_.astype(str)
 
-def pca(adata, layer = None, n_comps = 50):
+def pca(adata: AnnData, 
+        layer = None, 
+        n_comps = 50):
     """
     Performs PCA using the cuML decomposition function
     
@@ -336,32 +350,114 @@ def pca(adata, layer = None, n_comps = 50):
     adata.uns['pca'] ={'variance':pca_func.explained_variance_, 'variance_ratio':pca_func.explained_variance_ratio_}
     
     
-def tsne(adata, n_pcs,perplexity = 30, early_exaggeration = 12,learning_rate =1000):
+def tsne(adata: AnnData, 
+         n_pcs:int = None,
+         use_rep:str= None,
+         perplexity:int = 30, 
+         early_exaggeration:int = 12,
+         learning_rate:int =1000):
     """
     Performs t-distributed stochastic neighborhood embedding (tSNE) using cuML libraray. Variable description adapted from scanpy and default are the same
     
     Parameters
     ---------
-    adata: adata object with `.obsm['X_pca']`
-
+    adata : AnnData
+        Annotated data matrix.
     n_pcs: int
         use this many PCs
-    
+    use_rep:str
+        use this obsm keys (defaults to `X_pca`)
     perplexity: float (default: 30)
         The perplexity is related to the number of nearest neighbors that is used in other manifold learning algorithms. Larger datasets usually require a larger perplexity. Consider selecting a value between 5 and 50. The choice is not extremely critical since t-SNE is quite insensitive to this parameter.
-    
     early_exaggeration : float (default:12)
         Controls how tight natural clusters in the original space are in the embedded space and how much space will be between them. For larger values, the space between natural clusters will be larger in the embedded space. Again, the choice of this parameter is not very critical. If the cost function increases during initial optimization, the early exaggeration factor or the learning rate might be too high.
-    
     learning_rate : float (default:1000)
         Note that the R-package “Rtsne” and cuML uses a default of 200. The learning rate can be a critical parameter. It should be between 100 and 1000. If the cost function increases during initial optimization, the early exaggeration factor or the learning rate might be too high. If the cost function gets stuck in a bad local minimum increasing the learning rate helps sometimes.
-
-
     """
+    if use_rep == None:
+        data = adata.obsm["X_pca"]
+    else:
+        data = adata.obsm[use_rep]
+    if n_pcs is not None:
+        data = data[:,:n_pcs]
+    adata.obsm['X_tsne'] = TSNE(perplexity=perplexity, early_exaggeration=early_exaggeration,learning_rate=learning_rate).fit_transform(data)
     
-    adata.obsm['X_tsne'] = TSNE(perplexity=perplexity, early_exaggeration=early_exaggeration,learning_rate=learning_rate).fit_transform(adata.obsm["X_pca"][:,:n_pcs])
+def mde(
+    adata: AnnData,
+    device: Optional[Literal["cpu", "cuda"]] = None,
+    n_neighbors: int = 15,
+    n_pcs = None,
+    use_rep = None,
+    **kwargs,
+) -> None:
+    """
+    Util to run :func:`pymde.preserve_neighbors` for visualization of single cell embeddings.
+    Parameters
+    ----------
+    adata : AnnData
+        Annotated data matrix.
+    device : str
+        Whether to run on cpu or gpu ("cuda"). If None, tries to run on gpu if available.
+    n_neighbors: int
+        use this many neighbors  
+    n_pcs: int
+        use this many PCs    
+    use_rep:str
+        use this obsm keys (defaults to `X_pca`)
+    kwargs
+        Keyword args to :func:`pymde.preserve_neighbors`
+    Returns
+    -------
+    The pymde embedding, defaults to two dimensions.
+    Notes
+    -----
+    This function adapted from scvi-tools.
+    The appropriateness of use of visualization of high-dimensional spaces in single-
+    cell omics remains an open research questions. See:
+    Chari, Tara, Joeyta Banerjee, and Lior Pachter. "The specious art of single-cell genomics." bioRxiv (2021).
+    If you use this function in your research please cite:
+    Agrawal, Akshay, Alnur Ali, and Stephen Boyd. "Minimum-distortion embedding." arXiv preprint arXiv:2103.02559 (2021).
+    """
+    import torch
+    try:
+        import pymde
+    except ImportError:
+        raise ImportError("Please install pymde package via `pip install pymde`")
+        
+    if use_rep == None:
+        data = adata.obsm["X_pca"]
+    else:
+        data = adata.obsm[use_rep]
+        
+    if isinstance(data, pd.DataFrame):
+        data = data.values
+    if n_pcs is not None:
+        data = data[:,:n_pcs]
+    
+    device = "cpu" if not torch.cuda.is_available() else "cuda"
+    _kwargs = dict(
+        embedding_dim=2,
+        constraint=pymde.Standardized(),
+        repulsive_fraction=0.7,
+        verbose=False,
+        device=device,
+        n_neighbors=n_neighbors,
+    )
+    _kwargs.update(kwargs)
 
-def diffmap(adata, n_comps=15, neighbors_key = None, sort = 'decrease',density_normalize = True):
+    emb = pymde.preserve_neighbors(data, **_kwargs).embed(verbose=_kwargs["verbose"])
+
+    if isinstance(emb, torch.Tensor):
+        emb = emb.cpu().numpy()
+        torch.cuda.empty_cache()
+
+    adata.obsm["X_mde"] = emb    
+
+def diffmap(adata: AnnData, 
+            n_comps=15, 
+            neighbors_key = None, 
+            sort = 'decrease',
+            density_normalize = True):
     """
     Diffusion maps has been proposed for visualizing single-cell data.
     
@@ -445,7 +541,9 @@ def diffmap(adata, n_comps=15, neighbors_key = None, sort = 'decrease',density_n
     adata.uns["diffmap_evals"] = evals.get()
     adata.obsm["X_diffmap"] = evecs.get()
 
-def draw_graph(adata, init_pos = None, max_iter = 500):
+def draw_graph(adata: AnnData,
+               init_pos = None,
+               max_iter = 500):
     """
     Force-directed graph drawing with cugraph's implementation of Force Atlas 2.
     This is a reimplementation of scanpys function for GPU compute.
@@ -764,3 +862,49 @@ def plt_violin(cudata, key, groupby=None, size =1, save = None, show =True, dpi 
         plt.savefig(fig_path, dpi=dpi ,bbox_inches = 'tight')
     if show is False:
         plt.close()
+
+
+def harmony_integrate(
+    adata: AnnData,
+    key: str,
+    basis: str = "X_pca",
+    adjusted_basis: str = "X_pca_harmony",
+    **kwargs,
+):
+    """\
+    Use harmonypy to integrate different experiments.
+    Harmony is an algorithm for integrating single-cell
+    data from multiple experiments. This function uses the python
+    gpu-computing based port of Harmony, to integrate single-cell data
+    stored in an AnnData object. As Harmony works by adjusting the
+    principal components, this function should be run after performing
+    PCA but before computing the neighbor graph, as illustrated in the
+    example below.
+    Parameters
+    ----------
+    adata
+        The annotated data matrix.
+    key
+        The name of the column in ``adata.obs`` that differentiates
+        among experiments/batches.
+    basis
+        The name of the field in ``adata.obsm`` where the PCA table is
+        stored. Defaults to ``'X_pca'``, which is the default for
+        ``sc.tl.pca()``.
+    adjusted_basis
+        The name of the field in ``adata.obsm`` where the adjusted PCA
+        table will be stored after running this function. Defaults to
+        ``X_pca_harmony``.
+    kwargs
+        Any additional arguments will be passed to
+        ``harmonypy.run_harmony()``.
+    Returns
+    -------
+    Updates adata with the field ``adata.obsm[obsm_out_field]``,
+    containing principal components adjusted by Harmony such that
+    different experiments are integrated.
+    """
+    from . import harmonpy_gpu
+    harmony_out = harmonpy_gpu.run_harmony(adata.obsm[basis], adata.obs, key, **kwargs)
+
+    adata.obsm[adjusted_basis] = harmony_out.Z_corr.T.get()
