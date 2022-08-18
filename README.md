@@ -58,6 +58,7 @@ Please have look at the notebooks to assess the functionality. I tried to write 
 * TSNE
 * Kmeans Clustering 
 * Kernel Density
+* Harmony Integration (gpu port of harmonypy)
 * Diffusion Maps
 * PyMDE (adapted from `scvi`)
 * Force Atlas 2 (draw_grah) 
