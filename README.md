@@ -19,7 +19,7 @@ pip install https://github.com/Intron7/rapids_singlecell/releases/download/v0.2.
 
 With this enviroment, you should be able to run the notebooks. So far I have tested these Notebooks on an A100 80GB, a Quadro RTX 6000 and a RTX 3090.
 
-To view a full guide how to set up a fully functioned single cell GPU accelerated visit [GPU_SingleCell_Setup](https://github.com/Intron7/GPU_SingleCell_Setup)
+To view a full guide how to set up a fully functioned single cell GPU accelerated conda environment visit [GPU_SingleCell_Setup](https://github.com/Intron7/GPU_SingleCell_Setup)
 
 ## Citation
 
