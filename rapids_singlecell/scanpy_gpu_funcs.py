@@ -22,6 +22,8 @@ from cuml.manifold import TSNE
 from cuml.cluster import KMeans
 from cuml.decomposition import PCA
 
+from scipy.sparse import issparse
+import warnings
 
 
 def _select_groups(labels, groups_order_subset='all'):
@@ -345,6 +347,11 @@ def pca(adata: AnnData,
          covariance matrix.
     """
     X = adata.layers[layer] if layer is not None else adata.X
+    if issparse(X):
+        warnings.warn(
+            "Your Countmatrix seems to be sparse, this can lead to a massive performance penalty.",
+            UserWarning,
+        )
     pca_func = PCA(n_components=n_comps, output_type="numpy")
     adata.obsm["X_pca"] = pca_func.fit_transform(X)
     adata.uns['pca'] ={'variance':pca_func.explained_variance_, 'variance_ratio':pca_func.explained_variance_ratio_}
