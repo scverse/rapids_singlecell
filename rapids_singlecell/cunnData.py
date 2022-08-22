@@ -536,6 +536,7 @@ class cunnData:
         X = X - mu
         X = X / cp.sqrt( mu + mu**2 / theta)
         X = cp.clip(X, a_min=-clip, a_max=clip)
+        X = cp.array(X, dtype= cp.float32)
         if inplace == True:
             if layer:
                 self.layers[layer]= X
