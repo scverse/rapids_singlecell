@@ -1,5 +1,6 @@
 from anndata import AnnData
 from typing import Optional, Literal
+import pandas as pd
 
 def mde(
     adata: AnnData,
