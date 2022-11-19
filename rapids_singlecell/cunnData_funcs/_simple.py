@@ -281,7 +281,7 @@ def filter_cells(cudata:cunnData, qc_var, min_count=None, max_count=None, batchs
                 cudata.obsm[key] = matrix[inter,:]
     elif qc_var in ['n_genes','n_counts']:
         print(f"Running calculate_qc for 'n_genes' or 'n_counts'")
-        cudata.caluclate_qc(batchsize=batchsize)
+        caluclate_qc(cudata,batchsize=batchsize)
         inter = np.array
         if min_count is not None and max_count is not None:
             inter=np.where((cudata.obs[qc_var] < max_count) &  (min_count< cudata.obs[qc_var]))[0]
