@@ -1,4 +1,6 @@
 from . import cunnData
-from . import scanpy_gpu_funcs
+from . import cunnData_funcs as pp
+from . import decoupler_gpu as dcg
+from . import scanpy_gpu as tl
 
-__version__ = '0.2.2'
+__version__ = '0.3.0'
