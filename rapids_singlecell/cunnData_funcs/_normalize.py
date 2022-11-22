@@ -71,7 +71,38 @@ def normalize_pearson_residuals(cudata: cunnData,
     check_values: bool = True,
     layer: Optional[str] = None,
     inplace = True):
+    """
+    Applies analytic Pearson residual normalization, based on Lause21.
+    The residuals are based on a negative binomial offset model with overdispersion
+    `theta` shared across genes. By default, residuals are clipped to `sqrt(n_obs)`
+    and overdispersion `theta=100` is used.
 
+    Parameters
+    ----------
+    cudata:
+        cunnData object
+    theta : float (default: 100)
+        The negative binomial overdispersion parameter theta for Pearson residuals. 
+        Higher values correspond to less overdispersion (var = mean + mean^2/theta), and theta=np.Inf corresponds to a Poisson model.
+    clip : Optional[float] (default: None)
+        Determines if and how residuals are clipped:
+        If None, residuals are clipped to the interval [-sqrt(n_obs), sqrt(n_obs)], where n_obs is the number of cells in the dataset (default behavior).
+        If any scalar c, residuals are clipped to the interval [-c, c]. Set clip=np.Inf for no clipping.
+    check_values : bool (default: True)
+        If True, checks if counts in selected layer are integers as expected by this function, 
+        and return a warning if non-integers are found. Otherwise, proceed without checking. Setting this to False can speed up code for large datasets.
+    layer : Optional[str] (default: None)
+        Layer to use as input instead of X. If None, X is used.
+    inplace : bool (default: True)
+        If True, update cunnData with results. Otherwise, return results. See below for details of what is returned.
+
+    Returns
+    ----------
+    If `inplace=True`, `cudata.X` or the selected layer in `cudata.layers` is updated with the normalized values.
+    If `inplace=False` the normalized matrix is returned.
+
+    """
+    
     X = cudata.layers[layer] if layer is not None else cudata.X
     X = X.copy()
     if check_values and not _check_nonnegative_integers(X):
