@@ -212,10 +212,12 @@ def highly_variable_genes(
                 df=df.sort_values(
                     ['highly_variable_nbatches', 'dispersions_norm'],
                     ascending=False,
-                    na_position='last',
+                    na_position='last'
                 )
-                df['highly_variable'] = False
-                df.iloc[:n_top_genes].highly_variable = True
+                
+                high_var = np.zeros(df.shape[0])
+                high_var[:n_top_genes] = True
+                df['highly_variable'] = high_var.astype(bool)
                 df = df.loc[genes]
             else:
                 df = df.loc[genes]
