@@ -2,11 +2,14 @@
 
 ## Background
 This repository offers some tools to make analyses of single cell datasets faster by running them on the GPU. 
-The functions are analogous versions of functions that can be found within [scanpy](https://github.com/theislab/scanpy) from the Theis lab or functions from [rapids-single-cell-examples](https://github.com/clara-parabricks/rapids-single-cell-examples) created by the Nvidia Rapids team. Most functions are kept close to the original code to ensure compatibility. My aim with this repository was to use the speedup that GPU computing offers and combine it with the ease of use from scanpy.
+The functions are analogous versions of functions that can be found within [scanpy](https://github.com/scverse/scanpy) from the Theis lab or functions from [rapids-single-cell-examples](https://github.com/clara-parabricks/rapids-single-cell-examples) created by the Nvidia Rapids team. Most functions are kept close to the original code to ensure compatibility. My aim with this repository was to use the speedup that GPU computing offers and combine it with the ease of use from scanpy.
 
 ## Requirements
 
 To run the code in this repository you need a conda environment with rapids and scanpy installed. To use the full functionality of this repo please use `rapids-22.08`. You also need an Nvidia GPU.
+
+At moment there are some bugs with louvain clustering in the newer rapids versions.
+
 ```
 conda create -n rapids_singelcell -f conda/rapids_singecell.yml
 conda activate rapids_singelcell
@@ -14,7 +17,7 @@ ipython kernel install --user --name=rapids_singelcell
 ```
 After you set up the enviroment you can install this package from this wheel into the enviroment. The wheel doesn't install any dependencies
 ```
-pip install https://github.com/Intron7/rapids_singlecell/releases/download/v0.2.2/rapids_singlecell-0.2.2-py3-none-any.whl
+pip install https://github.com/Intron7/rapids_singlecell/releases/download/v0.3.0/rapids_singlecell-0.3.0-py3-none-any.whl
 ```
 
 With this enviroment, you should be able to run the notebooks. So far I have tested these Notebooks on an A100 80GB, a Quadro RTX 6000 and a RTX 3090.
@@ -29,12 +32,23 @@ Please also consider citing: [rapids-single-cell-examples](https://zenodo.org/ba
 
 In addition to that please cite the methods' original research articles in the [scanpy documentation](https://scanpy.readthedocs.io/en/latest/references.html)
 
+If you use the accelerated decoupler functions please cite [decoupler](https://doi.org/10.1093/bioadv/vbac016)
+
 ## Functions
 
+As of version `0.3.0` `rapids_singlecell` has been updated to use functions of and not methods of the class. To see the new recommended usage please check the notebooks.
+
 ### cunnData
-The preprocessing of the single-cell data is performed with `cunnData`. It is a replacement for the [AnnData](https://github.com/theislab/anndata) object used by scanpy. The `cunnData` object is a cutdown version of an `AnnData` object. At its core lies a sparse matrix (`.X`) within the GPU memory. `.obs` and `.var` are pandas data frame and `.uns` is a dictionary. It also supports layers. Most preprocessing functions of `scanpy` are methods of the `cunnData` class. I tried to keep the input as close to the original scanpy implementation as possible.
-Please have look at the notebooks to assess the functionality. I tried to write informative docstrings for each method. 
+The preprocessing of the single-cell data is performed with `cunnData`. It is a replacement for the [AnnData](https://github.com/scverse/anndata) object used by scanpy. The `cunnData` object is a cutdown version of an `AnnData` object. At its core lies a sparse matrix (`.X`) within the GPU memory. `.obs` and `.var` are pandas data frame and `.uns` is a dictionary. It also supports `.layers` and `.obsm`. `.layers` are stored on the GPU, while `.obsm` is not.
+Since version `0.3.0` you can use cunnData for spatial transcriptomics datasets.\
 `cunnData` includes methods for:
+* `__getiem__` to filter the object based on `.obs`. 
+* transform cunnData object to AnnData object
+
+### cunnData_funcs or pp
+Most preprocessing functions of `scanpy` are reimplemented for the `cunnData` class. I tried to keep the input as close to the original scanpy implementation as possible.
+Please have look at the notebooks to assess the functionality. I tried to write informative docstrings for each function.\
+`cunnData` includes functions for:
 * filter genes based on cells expressing that genes
 * filter cells based on a multitude of parameters (eg. number of expressed genes, mitchondrial content)
 * caluclate_qc (based on scanpy's `pp.calculate_qc_metrics`)
@@ -49,11 +63,12 @@ Please have look at the notebooks to assess the functionality. I tried to write 
   * poisson_gene_selection (adapted from `scvi`)
 * regress_out 
 * scale
-* transform `cunnData` object to `AnnData` object
+* some plotting functions of qc parameters
 
-### scanpy_gpu_funcs
-`scanpy_gpu_funcs` are functions that are written to directly work with an `AnnData` object and replace the scanpy counterpart by running on the GPU. Scanpy already supports GPU versions of `pp.neighbors` and `tl.umap` using rapids.
-`scanpy_gpu_funcs` includes additional functions for:
+
+### scanpy_gpu
+`scanpy_gpu` are functions that are written to directly work with an `AnnData` object and replace the scanpy counterpart by running on the GPU. Scanpy already supports GPU versions of `pp.neighbors` and `tl.umap` using rapids.\
+`scanpy_gpu` includes additional functions for:
 * PCA
 * Leiden Clustering
 * Louvain Clustering
@@ -65,7 +80,12 @@ Please have look at the notebooks to assess the functionality. I tried to write 
 * PyMDE (adapted from `scvi`)
 * Force Atlas 2 (draw_grah) 
 * rank_genes_groups with logistic regression
-* some plotting functions for cunnData objects
+
+### decoupler_gpu
+[Decoupler](https://github.com/saezlab/decoupler-py/) is an amazing toolkit, that contains different statistical methods to extract biological activities from omics data within a unified framework. So far I have reimplemented `run_mlm` and `run_wsum` to run on the GPU. As always I tried to keep the syntax as close the original as possible. `decoupler_gpu` also works with the same `models` as decoupler. For a closer looks please check out the `demo_gpu.ipynb` in `notebooks`.
+`decoupler_gpu` includes additional functions for:
+* run_mlm
+* run_wsum
 
 ## Notebooks
 To show the capability of these functions, I created two example notebooks evaluating the same workflow running on the CPU and GPU. These notebooks should run in the environment, that is described in Requirements. First, run the `data_downloader` notebook to create the AnnData object for the analysis. If you run both `demo_gpu` and `demo_gpu` you should see a big speedup when running the analyses on the GPU.
