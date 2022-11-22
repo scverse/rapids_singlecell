@@ -14,7 +14,7 @@ def fit_mlm(X, y, inv, df):
     X = cp.ascontiguousarray(X)
     n_samples = y.shape[1]
     n_fsets = X.shape[1]
-    coef, sse, _, _ = cp.linalg.lstsq(X, y,rcond=None)
+    coef, sse, _, _ = cp.linalg.lstsq(X, y,rcond=-1)
     if len(sse) == 0:
         raise ValueError("""Couldn\'t fit a multivariate linear model. This can happen because there are more sources
         (covariates) than unique targets (samples), or because the network\'s matrix rank is smaller than the number of
