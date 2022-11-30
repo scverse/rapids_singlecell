@@ -12,7 +12,6 @@ def regress_out(cudata, keys, batchsize = None, regress_all = True, verbose=Fals
     and variation. 
     Parameters
     ----------
-
     adata
         The annotated data matrix.
     keys
@@ -31,12 +30,9 @@ def regress_out(cudata, keys, batchsize = None, regress_all = True, verbose=Fals
         
     verbose : bool
         Print debugging information
-
     Returns
     -------
     updates cunndata object with the corrected data matrix
-
-
     """
     
     if cpx.scipy.sparse.issparse(cudata.X) and not cpx.scipy.sparse.isspmatrix_csc(cudata.X):
@@ -55,10 +51,10 @@ def regress_out(cudata, keys, batchsize = None, regress_all = True, verbose=Fals
 
     outputs = cp.empty(cudata.X.shape, dtype=cudata.X.dtype, order="F")
 
-    if cudata.X.shape[0] < 100000 and cpx.scipy.sparse.issparse(cudata.X):
+    if cudata.X.shape[0] < 100000 and cpx.scipy.sparse.issparse(cudata.X) and not batchsize:
         cudata.X = cudata.X.todense()
     
-    ### Implemented new multi_target_regression based on code by @ahendriksen
+    # Implemented new multi_target_regression based on code by @ahendriksen
     cuml_supports_multi_target = LinearRegression._get_tags()['multioutput']
 
     if cuml_supports_multi_target and not cp.sparse.issparse(cudata.X) and regress_all:
@@ -66,7 +62,7 @@ def regress_out(cudata, keys, batchsize = None, regress_all = True, verbose=Fals
         lr = LinearRegression(fit_intercept=False, output_type="cupy", algorithm='svd')
         lr.fit(X, cudata.X, convert_dtype=True)
         outputs[:] = cudata.X - lr.predict(X)
-    elif cuml_supports_multi_target and cp.sparse.issparse(cudata.X) and batchsize:
+    elif cuml_supports_multi_target and batchsize:
         n_batches = math.ceil(cudata.X.shape[1] / batchsize)
         for batch in range(n_batches):
             start_idx = batch * batchsize
@@ -90,19 +86,14 @@ def _regress_out_chunk(X, y):
     """
     Performs a data_cunk.shape[1] number of local linear regressions,
     replacing the data in the original chunk w/ the regressed result.
-
     Parameters
     ----------
-
     X : cupy.ndarray of shape (n_cells, 3)
         Matrix of regressors
-
     y : cupy.sparse.spmatrix of shape (n_cells,)
         Sparse matrix containing a single column of the cellxgene matrix
-
     Returns
     -------
-
     dense_mat : cupy.ndarray of shape (n_cells,)
         Adjusted column
     """
