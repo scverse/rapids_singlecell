@@ -6,7 +6,7 @@ The functions are analogous versions of functions that can be found within [scan
 
 ## Requirements
 
-To run the code in this repository you need a conda environment with rapids and scanpy installed. To use the full functionality of this repo please use `rapids-22.08`. You also need an Nvidia GPU.
+To run the code in this repository you need a conda environment with rapids and scanpy installed. To use the full functionality of this repo please use `rapids-22.10`. You also need an Nvidia GPU.
 
 At moment there are some bugs with louvain clustering in the newer rapids versions.
 
