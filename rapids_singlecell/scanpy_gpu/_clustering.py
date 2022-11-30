@@ -13,6 +13,7 @@ import warnings
 
 def leiden(adata: AnnData, 
            resolution=1.0,
+           use_weights: bool =True,
            key_added: str = 'leiden'):
     """
     Performs Leiden Clustering using cuGraph
@@ -23,19 +24,29 @@ def leiden(adata: AnnData,
     resolution : float, optional (default: 1)
         A parameter value controlling the coarseness of the clustering.
         Higher values lead to more clusters.
+        
+    use_weights : bool (default: True) 
+        If `True`, edge weights from the graph are used in the computation
+        (placing more emphasis on stronger edges).
     
     key_added
         `adata.obs` key under which to add the cluster labels.
     """
     # Adjacency graph
     adjacency = adata.obsp["connectivities"]
-    offsets = cudf.Series(adjacency.indptr)
-    indices = cudf.Series(adjacency.indices)
-    g = cugraph.Graph()
-    if hasattr(g, 'add_adj_list'):
-        g.add_adj_list(offsets, indices, None)
+
+    if use_weights:
+        sources, targets = adjacency.nonzero()
+        weights = adjacency[sources, targets]
+        if isinstance(weights, np.matrix):
+            weights = weights.A1
+        df =cudf.DataFrame({"0":sources,"1":targets,"2":weights})
     else:
-        g.from_cudf_adjlist(offsets, indices, None)
+        sources, targets = adjacency.nonzero()
+        weights = np.ones(len(targets))
+        df =cudf.DataFrame({"0":sources,"1":targets,"2":weights})
+    
+    g = cugraph.from_cudf_edgelist(df, source='0', destination='1',edge_attr='2', renumber=False)
     
     # Cluster
     leiden_parts, _ = cugraph.leiden(g,resolution = resolution)
@@ -51,6 +62,7 @@ def leiden(adata: AnnData,
     
 def louvain(adata: AnnData, 
             resolution=1.0,
+            use_weights: bool =True,
             key_added: str = 'louvain'):
     """
     Performs Louvain Clustering using cuGraph
@@ -62,19 +74,28 @@ def louvain(adata: AnnData,
         A parameter value controlling the coarseness of the clustering.
         Higher values lead to more clusters.
     
+    use_weights : bool (default: True) 
+        If `True`, edge weights from the graph are used in the computation
+        (placing more emphasis on stronger edges).
+    
     key_added
         `adata.obs` key under which to add the cluster labels.
     """
     # Adjacency graph
     adjacency = adata.obsp["connectivities"]
-    offsets = cudf.Series(adjacency.indptr)
-    indices = cudf.Series(adjacency.indices)
-    g = cugraph.Graph()
-    if hasattr(g, 'add_adj_list'):
-        g.add_adj_list(offsets, indices, None)
-    else:
-        g.from_cudf_adjlist(offsets, indices, None)
     
+    if use_weights:
+        sources, targets = adjacency.nonzero()
+        weights = adjacency[sources, targets]
+        if isinstance(weights, np.matrix):
+            weights = weights.A1
+        df =cudf.DataFrame({"0":sources,"1":targets,"2":weights})
+    else:
+        sources, targets = adjacency.nonzero()
+        weights = np.ones(len(targets))
+        df =cudf.DataFrame({"0":sources,"1":targets,"2":weights})
+    
+    g = cugraph.from_cudf_edgelist(df, source='0', destination='1',edge_attr='2', renumber=False)
     # Cluster
     louvain_parts, _ = cugraph.louvain(g,resolution = resolution)
     
