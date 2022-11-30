@@ -14,6 +14,7 @@ import warnings
 def leiden(adata: AnnData, 
            resolution=1.0,
            use_weights: bool =True,
+           neighbors_key = None,
            key_added: str = 'leiden'):
     """
     Performs Leiden Clustering using cuGraph
@@ -29,12 +30,20 @@ def leiden(adata: AnnData,
         If `True`, edge weights from the graph are used in the computation
         (placing more emphasis on stronger edges).
     
+    neighbors_key : (default: None)
+        If not specified, `leiden` looks at .obsp['connectivities'] for neighbors connectivities
+        If specified, `leiden` looks at .obsp['neighbors_key_ connectivities'] for neighbors connectivities
+    
     key_added
         `adata.obs` key under which to add the cluster labels.
     """
     # Adjacency graph
-    adjacency = adata.obsp["connectivities"]
-
+    
+    if neighbors_key:
+        adjacency = adata.obsp[neighbors_key+"_connectivities"]
+    else:
+        adjacency = adata.obsp["connectivities"]
+        
     if use_weights:
         sources, targets = adjacency.nonzero()
         weights = adjacency[sources, targets]
@@ -63,6 +72,7 @@ def leiden(adata: AnnData,
 def louvain(adata: AnnData, 
             resolution=1.0,
             use_weights: bool =True,
+            neighbors_key = None,
             key_added: str = 'louvain'):
     """
     Performs Louvain Clustering using cuGraph
@@ -77,12 +87,20 @@ def louvain(adata: AnnData,
     use_weights : bool (default: True) 
         If `True`, edge weights from the graph are used in the computation
         (placing more emphasis on stronger edges).
+        
+    neighbors_key : (default: None)
+        If not specified, `louvain` looks at .obsp['connectivities'] for neighbors connectivities
+        If specified, `louvain` looks at .obsp['neighbors_key_ connectivities'] for neighbors connectivities
     
     key_added
         `adata.obs` key under which to add the cluster labels.
     """
     # Adjacency graph
-    adjacency = adata.obsp["connectivities"]
+    
+    if neighbors_key:
+        adjacency = adata.obsp[neighbors_key+"_connectivities"]
+    else:
+        adjacency = adata.obsp["connectivities"]
     
     if use_weights:
         sources, targets = adjacency.nonzero()
