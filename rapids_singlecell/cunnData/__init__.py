@@ -141,22 +141,44 @@ class cunnData:
     @property
     def var_names(self):
         return self.var.index
+    
+    @property
+    def n_obs(self):
+        return self.shape[0]
+
+    @property
+    def n_vars(self):
+        return self.shape[1]
 
     def __getitem__(self, index):
         """
         Currently only works for `obs`
         """
-        index = index.to_numpy()
-        self.X = self.X[index,:]
+        if type(index) == tuple:
+            obs_dx, var_dx = index
+        else:
+            obs_dx = index
+            var_dx = slice(None,None,None)
+        
+        if isinstance(obs_dx,pd.Series):
+            obs_dx = obs_dx.values
+        
+        if isinstance(var_dx,pd.Series):
+            var_dx = var_dx.values
+
+        self.X = self.X[obs_dx,var_dx]
         self.layers.update_shape(self.shape)
         self.obsm.update_shape(self.shape[0])
         if self.layers:
             for key, matrix in self.layers.items():
-                self.layers[key] = matrix[index, :]
+                self.layers[key] = matrix[obs_dx, var_dx]
         if self.obsm:
             for key, matrix in self.obsm.items():
-                self.obsm[key] = matrix[index, :]
-        return(cunnData(X = self.X,obs = self.obs.loc[index,:],var = self.var,uns=self.uns,layers= self.layers,obsm= self.obsm))
+                if isinstance(matrix, pd.DataFrame):
+                    self.obsm[key] = matrix.iloc[obs_dx, :]
+                else:
+                    self.obsm[key] = matrix[obs_dx, :]
+        return(cunnData(X = self.X,obs = self.obs.iloc[obs_dx,:],var = self.var.iloc[var_dx,:],uns=self.uns,layers= self.layers,obsm= self.obsm))
 
 
     def to_AnnData(self):
