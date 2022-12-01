@@ -6,9 +6,7 @@ The functions are analogous versions of functions that can be found within [scan
 
 ## Requirements
 
-To run the code in this repository you need a conda environment with rapids and scanpy installed. To use the full functionality of this repo please use `rapids-22.08`. You also need an Nvidia GPU.
-
-At moment there are some bugs with louvain clustering in the newer rapids versions.
+To run the code in this repository you need a conda environment with rapids and scanpy installed. To use the full functionality of this repo please use `rapids-22.10` or `rapids-22.12`. You also need an Nvidia GPU.
 
 ```
 conda create -n rapids_singelcell -f conda/rapids_singecell.yml
@@ -17,7 +15,7 @@ ipython kernel install --user --name=rapids_singelcell
 ```
 After you set up the enviroment you can install this package from this wheel into the enviroment. The wheel doesn't install any dependencies
 ```
-pip install https://github.com/Intron7/rapids_singlecell/releases/download/v0.3.0/rapids_singlecell-0.3.0-py3-none-any.whl
+pip install https://github.com/Intron7/rapids_singlecell/releases/download/v0.3.1/rapids_singlecell-0.3.1-py3-none-any.whl
 ```
 
 With this enviroment, you should be able to run the notebooks. So far I have tested these Notebooks on an A100 80GB, a Quadro RTX 6000 and a RTX 3090.
@@ -61,7 +59,7 @@ Please have look at the notebooks to assess the functionality. I tried to write 
   * seurat_v3
   * pearson_residuals
   * poisson_gene_selection (adapted from `scvi`)
-* regress_out 
+* regress_out
 * scale
 * some plotting functions of qc parameters
 
@@ -101,7 +99,7 @@ Here are some benchmarks. I ran the notebook on the CPU with as many cores as we
 |Clustering and Visulatization | 423 s                     | 18 s         | 524 s    | 27 s         | 21 s           |
 |Normalize_total               | 252 ms                    | > 1ms        | 425 ms   | 1 ms         | 1 ms           |
 |Highly Variable Genes         | 3.2 s                     | 2.6 s        | 4.1 s    | 2.7 s        | 3.7 s          |
-|Regress_out                   | 63 s                      | 14 s         | 24 s     | 23 s         | 15 s           |
+|Regress_out                   | 63 s                      | 2 s          | 24 s     | 2 s          | 2 s            |
 |Scale                         | 1.3 s                     | 299 ms       | 2 s      | 2  s         | 359 ms         |
 |PCA                           | 26 s                      | 1.8 s        | 23 s     | 3.6 s        | 2.6 s          |
 |Neighbors                     | 10 s                      | 5 s          | 16.8 s   | 8.1  s       | 6 s            |
