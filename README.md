@@ -40,7 +40,7 @@ As of version `0.3.0` `rapids_singlecell` has been updated to use functions of a
 The preprocessing of the single-cell data is performed with `cunnData`. It is a replacement for the [AnnData](https://github.com/scverse/anndata) object used by scanpy. The `cunnData` object is a cutdown version of an `AnnData` object. At its core lies a sparse matrix (`.X`) within the GPU memory. `.obs` and `.var` are pandas data frame and `.uns` is a dictionary. It also supports `.layers` and `.obsm`. `.layers` are stored on the GPU, while `.obsm` is not.
 Since version `0.3.0` you can use cunnData for spatial transcriptomics datasets.\
 `cunnData` includes methods for:
-* `__getiem__` to filter the object based on `.obs`. 
+* `__getiem__` to filter the object based on `.obs` and `.var`. 
 * transform cunnData object to AnnData object
 
 ### cunnData_funcs or pp
