@@ -13,8 +13,10 @@ import scipy
 import math
 from scipy import sparse
 from typing import Any, Union, Optional, Mapping
+from pandas.api.types import infer_dtype
 
 import warnings
+from natsort import natsorted
 
 from scipy.sparse import issparse as issparse_cpu
 from cupyx.scipy.sparse import issparse as issparse_gpu
@@ -41,7 +43,7 @@ class Layer_Mapping(dict):
 
 class obsm_Mapping(dict):
     """
-    Dictonary subclass for layers handeling in cunnData
+    Dictonary subclass for obsm handeling in cunnData
     """
     def __init__(self, shape):
         super().__init__({})
@@ -54,7 +56,24 @@ class obsm_Mapping(dict):
         if self.shape == item.shape[0]:
             super().__setitem__(key, item)
         else:
-            raise ValueError(f"Shape of {key} does not match `.X`")
+            raise ValueError(f"Shape of {key} does not match `.n_obs`")
+            
+class varm_Mapping(dict):
+    """
+    Dictonary subclass for obsm handeling in cunnData
+    """
+    def __init__(self, shape):
+        super().__init__({})
+        self.shape = shape
+    
+    def update_shape(self,shape):
+        self.shape = shape
+
+    def __setitem__(self, key, item):
+        if self.shape == item.shape[0]:
+            super().__setitem__(key, item)
+        else:
+            raise ValueError(f"Shape of {key} does not match `.n_vars`")
 
 class cunnData:
     """
@@ -64,13 +83,14 @@ class cunnData:
     uns = {}
     def __init__(
         self,
+        adata: Optional[anndata.AnnData] = None,
         X: Optional[Union[np.ndarray,sparse.spmatrix, cp.array, cp.sparse.csr_matrix]] = None,
         obs: Optional[pd.DataFrame] = None,
         var: Optional[pd.DataFrame] = None,
         uns: Optional[Mapping[str, Any]] = None,
         layers: Optional[Mapping[str, Any]] = None,
         obsm: Optional[Mapping[str, Any]] = None,
-        adata: Optional[anndata.AnnData] = None):
+        varm: Optional[Mapping[str, Any]] = None):
             if adata:
                 if not issparse_cpu(adata.X):
                     inter = scipy.sparse.csr_matrix(adata.X)
@@ -83,6 +103,7 @@ class cunnData:
                 self.uns = adata.uns.copy()
                 self.layers = Layer_Mapping(self.shape)
                 self.obsm = obsm_Mapping(self.shape[0])
+                self.varm = varm_Mapping(self.shape[1])
                 if adata.layers:
                     for key, matrix in adata.layers.items():
                         if not issparse_cpu(matrix):
@@ -96,6 +117,9 @@ class cunnData:
                 if adata.obsm:
                     for key, matrix in adata.obsm.items():
                         self.obsm[key] = matrix
+                if adata.varm:
+                    for key, matrix in adata.varm.items():
+                        self.varm[key] = matrix
                 
             else:
                 if issparse_gpu(X):
@@ -112,6 +136,8 @@ class cunnData:
                 self.uns = uns
                 self.layers = Layer_Mapping(self.shape)
                 self.obsm = obsm_Mapping(self.shape[0])
+                self.varm = varm_Mapping(self.shape[1])
+
                 if layers:
                     for key, matrix in layers.items():
                         if issparse_gpu(matrix):
@@ -126,6 +152,9 @@ class cunnData:
                 if obsm:
                     for key, matrix in obsm.items():
                         self.obsm[key] = matrix.copy()
+                if varm:
+                    for key, matrix in adata.varm.items():
+                        self.varm[key] = matrix
     
     @property
     def shape(self):
@@ -149,11 +178,29 @@ class cunnData:
     @property
     def n_vars(self):
         return self.shape[1]
+    
+    def _update_shape(self):
+        self.layers.update_shape(self.shape)
+        self.obsm.update_shape(self.shape[0])
+        self.varm.update_shape(self.shape[1])
+        
+    def _sanitize(self):
+        dfs = [self.obs, self.var]
+        for df in dfs:
+            string_cols = [
+                key for key in df.columns if infer_dtype(df[key]) == "string"
+            ]
+            for key in string_cols:
+                c = pd.Categorical(df[key])
+                if len(c.categories) >= len(c):
+                    continue
+                # Ideally this could be done inplace
+                sorted_categories = natsorted(c.categories)
+                if not np.array_equal(c.categories, sorted_categories):
+                    c = c.reorder_categories(sorted_categories)
+                df[key] = c
 
     def __getitem__(self, index):
-        """
-        Currently only works for `obs`
-        """
         if type(index) == tuple:
             obs_dx, var_dx = index
         else:
@@ -167,8 +214,7 @@ class cunnData:
             var_dx = var_dx.values
 
         self.X = self.X[obs_dx,var_dx]
-        self.layers.update_shape(self.shape)
-        self.obsm.update_shape(self.shape[0])
+        self._update_shape()
         if self.layers:
             for key, matrix in self.layers.items():
                 self.layers[key] = matrix[obs_dx, var_dx]
@@ -178,7 +224,37 @@ class cunnData:
                     self.obsm[key] = matrix.iloc[obs_dx, :]
                 else:
                     self.obsm[key] = matrix[obs_dx, :]
-        return(cunnData(X = self.X,obs = self.obs.iloc[obs_dx,:],var = self.var.iloc[var_dx,:],uns=self.uns,layers= self.layers,obsm= self.obsm))
+        if self.varm:
+            for key, matrix in self.varm.items():
+                if isinstance(matrix, pd.DataFrame):
+                    self.varm[key] = matrix.iloc[var_dx, :]
+                else:
+                    self.varm[key] = matrix[var_dx, :]
+        return(cunnData(X = self.X,
+                        obs = self.obs.iloc[obs_dx,:],
+                        var = self.var.iloc[var_dx,:],
+                        uns=self.uns,
+                        layers= self.layers,
+                        obsm= self.obsm,
+                        varm= self.varm))
+    
+    def _gen_repr(self, n_obs, n_vars) -> str:
+        descr = f"cunnData object with n_obs × n_vars = {n_obs} × {n_vars}"
+        for attr in [
+            "obs",
+            "var",
+            "uns",
+            "obsm",
+            "varm",
+            "layers",
+        ]:
+            keys = getattr(self, attr).keys()
+            if len(keys) > 0:
+                descr += f"\n    {attr}: {str(list(keys))[1:-1]}"
+        return descr
+
+    def __repr__(self) -> str:
+            return self._gen_repr(self.n_obs, self.n_vars)
 
 
     def to_AnnData(self):
@@ -200,4 +276,7 @@ class cunnData:
         if self.obsm:
             for key, matrix in self.obsm.items():
                 adata.obsm[key] = matrix.copy()
+        if self.varm:
+            for key, matrix in self.varm.items():
+                adata.varm[key] = matrix.copy()
         return adata
