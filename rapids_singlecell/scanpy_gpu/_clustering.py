@@ -43,22 +43,21 @@ def leiden(adata: AnnData,
         adjacency = adata.obsp[neighbors_key+"_connectivities"]
     else:
         adjacency = adata.obsp["connectivities"]
-        
+    G = cugraph.Graph()
     if use_weights:
-        sources, targets = adjacency.nonzero()
-        weights = adjacency[sources, targets]
-        if isinstance(weights, np.matrix):
-            weights = weights.A1
-        df =cudf.DataFrame({"0":sources,"1":targets,"2":weights})
+        offsets = cudf.Series(adjacency.indptr)
+        indices = cudf.Series(adjacency.indices)
+        weights = cudf.Series(adjacency.data)
+        
+        G.from_cudf_adjlist(offsets, indices, weights)
     else:
-        sources, targets = adjacency.nonzero()
-        weights = np.ones(len(targets))
-        df =cudf.DataFrame({"0":sources,"1":targets,"2":weights})
-    
-    g = cugraph.from_cudf_edgelist(df, source='0', destination='1',edge_attr='2', renumber=False)
+        offsets = cudf.Series(adjacency.indptr)
+        indices = cudf.Series(adjacency.indices)
+        G.from_cudf_adjlist(offsets, indices, None)
+        
     
     # Cluster
-    leiden_parts, _ = cugraph.leiden(g,resolution = resolution)
+    leiden_parts, _ = cugraph.leiden(G,resolution = resolution)
     
     # Format output
     groups = leiden_parts.to_pandas().sort_values('vertex')[['partition']].to_numpy().ravel()
@@ -102,20 +101,19 @@ def louvain(adata: AnnData,
     else:
         adjacency = adata.obsp["connectivities"]
     
+    G = cugraph.Graph()
     if use_weights:
-        sources, targets = adjacency.nonzero()
-        weights = adjacency[sources, targets]
-        if isinstance(weights, np.matrix):
-            weights = weights.A1
-        df =cudf.DataFrame({"0":sources,"1":targets,"2":weights})
+        offsets = cudf.Series(adjacency.indptr)
+        indices = cudf.Series(adjacency.indices)
+        weights = cudf.Series(adjacency.data)
+        
+        G.from_cudf_adjlist(offsets, indices, weights)
     else:
-        sources, targets = adjacency.nonzero()
-        weights = np.ones(len(targets))
-        df =cudf.DataFrame({"0":sources,"1":targets,"2":weights})
-    
-    g = cugraph.from_cudf_edgelist(df, source='0', destination='1',edge_attr='2', renumber=False)
+        offsets = cudf.Series(adjacency.indptr)
+        indices = cudf.Series(adjacency.indices)
+        G.from_cudf_adjlist(offsets, indices, None)
     # Cluster
-    louvain_parts, _ = cugraph.louvain(g,resolution = resolution)
+    louvain_parts, _ = cugraph.louvain(G,resolution = resolution)
     
     # Format output
     groups = louvain_parts.to_pandas().sort_values('vertex')[['partition']].to_numpy().ravel()
