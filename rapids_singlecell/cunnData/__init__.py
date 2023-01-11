@@ -75,6 +75,9 @@ class varm_Mapping(dict):
         else:
             raise ValueError(f"Shape of {key} does not match `.n_vars`")
 
+
+
+
 class cunnData:
     """
     The cunnData objects can be used as an AnnData replacement for the inital preprocessing of single cell Datasets. It replaces some of the most common preprocessing steps within scanpy for annData objects.
@@ -137,6 +140,7 @@ class cunnData:
                 self.layers = Layer_Mapping(self.shape)
                 self.obsm = obsm_Mapping(self.shape[0])
                 self.varm = varm_Mapping(self.shape[1])
+                self.raw = None
 
                 if layers:
                     for key, matrix in layers.items():
