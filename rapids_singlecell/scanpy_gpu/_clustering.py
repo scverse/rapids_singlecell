@@ -13,6 +13,7 @@ import warnings
 
 def leiden(adata: AnnData, 
            resolution=1.0,
+           n_iterations = -1,
            use_weights: bool =True,
            neighbors_key = None,
            key_added: str = 'leiden'):
@@ -25,7 +26,12 @@ def leiden(adata: AnnData,
     resolution : float, optional (default: 1)
         A parameter value controlling the coarseness of the clustering.
         Higher values lead to more clusters.
-        
+    
+    n_iterations
+        How many iterations of the Leiden clustering algorithm to perform.
+        Positive values above 2 define the total number of iterations to perform,
+        -1 has the algorithm run until it reaches its optimal clustering.
+
     use_weights : bool (default: True) 
         If `True`, edge weights from the graph are used in the computation
         (placing more emphasis on stronger edges).
@@ -43,21 +49,20 @@ def leiden(adata: AnnData,
         adjacency = adata.obsp[neighbors_key+"_connectivities"]
     else:
         adjacency = adata.obsp["connectivities"]
-    G = cugraph.Graph()
+    offsets = cudf.Series(adjacency.indptr)
+    indices = cudf.Series(adjacency.indices)
     if use_weights:
-        offsets = cudf.Series(adjacency.indptr)
-        indices = cudf.Series(adjacency.indices)
+
         weights = cudf.Series(adjacency.data)
-        
-        G.from_cudf_adjlist(offsets, indices, weights)
     else:
-        offsets = cudf.Series(adjacency.indptr)
-        indices = cudf.Series(adjacency.indices)
-        G.from_cudf_adjlist(offsets, indices, None)
-        
+        weights = None
     
+    g = cugraph.Graph()
+
+    g.from_cudf_adjlist(offsets, indices, weights)
+
     # Cluster
-    leiden_parts, _ = cugraph.leiden(G,resolution = resolution)
+    leiden_parts, _ = cugraph.leiden(g,resolution = resolution,max_iter=n_iterations)
     
     # Format output
     groups = leiden_parts.to_pandas().sort_values('vertex')[['partition']].to_numpy().ravel()
@@ -66,10 +71,17 @@ def leiden(adata: AnnData,
         values=groups.astype('U'),
         categories=natsorted(map(str, np.unique(groups))),
     )
+    # store information on the clustering parameters
+    adata.uns['leiden'] = {}
+    adata.uns['leiden']['params'] = dict(
+        resolution=resolution,
+        n_iterations=n_iterations,
+    )
 
     
 def louvain(adata: AnnData, 
             resolution=1.0,
+            n_iterations = 100,
             use_weights: bool =True,
             neighbors_key = None,
             key_added: str = 'louvain'):
@@ -83,6 +95,11 @@ def louvain(adata: AnnData,
         A parameter value controlling the coarseness of the clustering.
         Higher values lead to more clusters.
     
+    n_iterations
+       This controls the maximum number of levels/iterations of the Louvain algorithm. 
+       When specified the algorithm will terminate after no more than the specified number of iterations. 
+       No error occurs when the algorithm terminates early in this manner.
+
     use_weights : bool (default: True) 
         If `True`, edge weights from the graph are used in the computation
         (placing more emphasis on stronger edges).
@@ -101,19 +118,20 @@ def louvain(adata: AnnData,
     else:
         adjacency = adata.obsp["connectivities"]
     
-    G = cugraph.Graph()
+    offsets = cudf.Series(adjacency.indptr)
+    indices = cudf.Series(adjacency.indices)
     if use_weights:
-        offsets = cudf.Series(adjacency.indptr)
-        indices = cudf.Series(adjacency.indices)
+
         weights = cudf.Series(adjacency.data)
-        
-        G.from_cudf_adjlist(offsets, indices, weights)
     else:
-        offsets = cudf.Series(adjacency.indptr)
-        indices = cudf.Series(adjacency.indices)
-        G.from_cudf_adjlist(offsets, indices, None)
+        weights = None
+    
+    g = cugraph.Graph()
+
+    g.from_cudf_adjlist(offsets, indices, weights)
+
     # Cluster
-    louvain_parts, _ = cugraph.louvain(G,resolution = resolution)
+    louvain_parts, _ = cugraph.louvain(g,resolution = resolution,max_iter=n_iterations)
     
     # Format output
     groups = louvain_parts.to_pandas().sort_values('vertex')[['partition']].to_numpy().ravel()
@@ -121,6 +139,10 @@ def louvain(adata: AnnData,
     adata.obs[key_added] = pd.Categorical(
         values=groups.astype('U'),
         categories=natsorted(map(str, np.unique(groups))),
+    )
+    adata.uns['louvain'] = {}
+    adata.uns['louvain']['params'] = dict(
+        resolution=resolution
     )
     
 def kmeans(adata: AnnData, 
