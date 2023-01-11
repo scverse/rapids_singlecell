@@ -95,8 +95,6 @@ def pca(cudata: cunnData,
             chunk = chunk.toarray() if issparse(chunk) else chunk
             X_pca[start_idx:stop_idx] = pca_func.transform(chunk)
     else:
-        if issparse(X):
-            X = X.todense()
         if zero_center:
             pca_func = PCA(n_components=n_comps, output_type="numpy")
             X_pca= pca_func.fit_transform(X)
