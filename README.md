@@ -15,7 +15,7 @@ ipython kernel install --user --name=rapids_singelcell
 ```
 After you set up the enviroment you can install this package from this wheel into the enviroment. The wheel doesn't install any dependencies
 ```
-pip install https://github.com/Intron7/rapids_singlecell/releases/download/v0.3.1/rapids_singlecell-0.3.1-py3-none-any.whl
+pip install https://github.com/Intron7/rapids_singlecell/releases/download/v0.3.2/rapids_singlecell-0.3.2-py3-none-any.whl
 ```
 
 With this enviroment, you should be able to run the notebooks. So far I have tested these Notebooks on an A100 80GB, a Quadro RTX 6000 and a RTX 3090.
