@@ -87,10 +87,17 @@ def filter_genes(cudata:cunnData, qc_var = "n_cells", min_count = None, max_coun
         cudata.X = cudata.X[:, thr]
         cudata.X = cudata.X.tocsr()
         cudata.var = cudata.var.iloc[cp.asnumpy(thr)]
-        cudata.layers.update_shape(cudata.shape)
+        cudata._update_shape()
         if cudata.layers:
             for key, matrix in cudata.layers.items():
                 cudata.layers[key] = matrix[:, thr]
+        if cudata.varm:
+            for key, matrix in cudata.varm.items():
+                if isinstance(matrix, pd.DataFrame):
+                    cudata.varm[key] = matrix.iloc[thr, :]
+                else:
+                    cudata.varm[key] = matrix[thr, :]
+            
         
     elif qc_var in ["n_cells","n_counts"]:
         calc_gene_qc(cudata=cudata,batchsize = batchsize)    
@@ -104,10 +111,17 @@ def filter_genes(cudata:cunnData, qc_var = "n_cells", min_count = None, max_coun
         if verbose:
             print(f"filtered out {cudata.var.shape[0]-thr.shape[0]} genes based on {qc_var}")
         cudata.X = cudata.X[:, thr]
-        cudata.layers.update_shape(cudata.shape)
+        cudata._update_shape()
         if cudata.layers:
             for key, matrix in cudata.layers.items():
                 cudata.layers[key] = matrix[:, thr]
+        if cudata.varm:
+            for key, matrix in cudata.varm.items():
+                if isinstance(matrix, pd.DataFrame):
+                    cudata.varm[key] = matrix.iloc[thr, :]
+                else:
+                    cudata.varm[key] = matrix[thr, :]
+            
         cudata.var = cudata.var.iloc[cp.asnumpy(thr)]
     else:
         print(f"please check qc_var")
@@ -271,11 +285,10 @@ def filter_cells(cudata:cunnData, qc_var, min_count=None, max_count=None, batchs
             print(f"filtered out {cudata.obs.shape[0]-inter.shape[0]} cells")
         cudata.X = cudata.X[inter,:]
         cudata.obs = cudata.obs.iloc[inter]
-        cudata.layers.update_shape(cudata.shape)
+        cudata._update_shape()
         if cudata.layers:
             for key, matrix in cudata.layers.items():
                 cudata.layers[key] = matrix[inter,:]
-        cudata.obsm.update_shape(cudata.shape[0])
         if cudata.obsm:
             for key, matrix in cudata.obsm.items():
                 cudata.obsm[key] = matrix[inter,:]
@@ -295,11 +308,10 @@ def filter_cells(cudata:cunnData, qc_var, min_count=None, max_count=None, batchs
             print(f"filtered out {cudata.obs.shape[0]-inter.shape[0]} cells")
         cudata.X = cudata.X[inter,:]
         cudata.obs = cudata.obs.iloc[inter]
-        cudata.layers.update_shape(cudata.shape)
+        cudata._update_shape()
         if cudata.layers:
             for key, matrix in cudata.layers.items():
                 cudata.layers[key] = matrix[inter,:]
-        cudata.obsm.update_shape(cudata.shape[0])
         if cudata.obsm:
             for key, matrix in cudata.obsm.items():
                 cudata.obsm[key] = matrix[inter,:]
@@ -321,10 +333,16 @@ def filter_highly_variable(cudata:cunnData):
         thr = np.where(cudata.var["highly_variable"] == True)[0]
         cudata.X =cudata.X.tocsc()
         cudata.X = cudata.X[:, thr]
-        cudata.var = cudata.var.iloc[cp.asnumpy(thr)]
-        cudata.layers.update_shape(cudata.shape)
+        cudata.var = cudata.var.iloc[thr]
+        cudata._update_shape()
         if cudata.layers:
             for key, matrix in cudata.layers.items():
                 cudata.layers[key] = matrix[:,thr]
+        if cudata.varm:
+            for key, matrix in cudata.varm.items():
+                if isinstance(matrix, pd.DataFrame):
+                    cudata.varm[key] = matrix.iloc[thr, :]
+                else:
+                    cudata.varm[key] = matrix[thr, :]
     else:
         print(f"Please calculate highly variable genes first")

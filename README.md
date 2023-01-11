@@ -15,7 +15,7 @@ ipython kernel install --user --name=rapids_singelcell
 ```
 After you set up the enviroment you can install this package from this wheel into the enviroment. The wheel doesn't install any dependencies
 ```
-pip install https://github.com/Intron7/rapids_singlecell/releases/download/v0.3.1/rapids_singlecell-0.3.1-py3-none-any.whl
+pip install https://github.com/Intron7/rapids_singlecell/releases/download/v0.3.2/rapids_singlecell-0.3.2-py3-none-any.whl
 ```
 
 With this enviroment, you should be able to run the notebooks. So far I have tested these Notebooks on an A100 80GB, a Quadro RTX 6000 and a RTX 3090.
@@ -37,7 +37,7 @@ If you use the accelerated decoupler functions please cite [decoupler](https://d
 As of version `0.3.0` `rapids_singlecell` has been updated to use functions of and not methods of the class. To see the new recommended usage please check the notebooks.
 
 ### cunnData
-The preprocessing of the single-cell data is performed with `cunnData`. It is a replacement for the [AnnData](https://github.com/scverse/anndata) object used by scanpy. The `cunnData` object is a cutdown version of an `AnnData` object. At its core lies a sparse matrix (`.X`) within the GPU memory. `.obs` and `.var` are pandas data frame and `.uns` is a dictionary. It also supports `.layers` and `.obsm`. `.layers` are stored on the GPU, while `.obsm` is not.
+The preprocessing of the single-cell data is performed with `cunnData`. It is a replacement for the [AnnData](https://github.com/scverse/anndata) object used by scanpy. The `cunnData` object is a cutdown version of an `AnnData` object. At its core lies a sparse matrix (`.X`) within the GPU memory. `.obs` and `.var` are pandas data frame and `.uns` is a dictionary. It also supports `.layers`, `.varm` and `.obsm`. `.layers` are stored on the GPU, while `.obsm` and `.varm` are not.
 Since version `0.3.0` you can use cunnData for spatial transcriptomics datasets.\
 `cunnData` includes methods for:
 * `__getiem__` to filter the object based on `.obs` and `.var`. 
@@ -61,13 +61,14 @@ Please have look at the notebooks to assess the functionality. I tried to write 
   * poisson_gene_selection (adapted from `scvi`)
 * regress_out
 * scale
+* PCA (PCA/ incremental PCA/ truncated svd)
 * some plotting functions of qc parameters
 
 
-### scanpy_gpu
+### scanpy_gpu or tl
 `scanpy_gpu` are functions that are written to directly work with an `AnnData` object and replace the scanpy counterpart by running on the GPU. Scanpy already supports GPU versions of `pp.neighbors` and `tl.umap` using rapids.\
 `scanpy_gpu` includes additional functions for:
-* PCA
+* PCA (PCA/ incremental PCA/ truncated svd)
 * Leiden Clustering
 * Louvain Clustering
 * TSNE
