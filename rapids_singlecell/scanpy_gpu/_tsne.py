@@ -6,7 +6,7 @@ def tsne(adata: AnnData,
          use_rep:str= None,
          perplexity:int = 30, 
          early_exaggeration:int = 12,
-         learning_rate:int =1000):
+         learning_rate:int =200):
     """
     Performs t-distributed stochastic neighborhood embedding (tSNE) using cuML libraray. Variable description adapted from scanpy and default are the same
     
