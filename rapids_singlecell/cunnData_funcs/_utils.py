@@ -1,11 +1,10 @@
 import cupy as cp
 
-
 def _get_mean_var(X):
-    mean = (X.sum(axis =0)/X.shape[0]).ravel()
-    X.data **= 2
-    inter = (X.sum(axis =0)/X.shape[0]).ravel()
-    var = inter - mean ** 2
+    mean = X.sum(axis=0).flatten() / X.shape[0]
+    mean_sq = X.multiply(X).sum(axis=0).flatten() /  X.shape[0]
+    var = mean_sq - mean ** 2
+    var *= X.shape[1]/ ( X.shape[0] - 1)
     return mean, var
 
 def _check_nonnegative_integers(X):
