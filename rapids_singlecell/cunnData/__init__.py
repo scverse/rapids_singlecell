@@ -1,27 +1,18 @@
-#
-# created by Severin Dicks (IBSM, Freiburg)
-#
-#
-
 import cupy as cp
-import cupyx as cpx
 import anndata
+from anndata._core.index import _normalize_indices
 
 import numpy as np
 import pandas as pd
 import scipy
-import math
 from scipy import sparse
 from typing import Any, Union, Optional, Mapping
 from pandas.api.types import infer_dtype
 
-import warnings
 from natsort import natsorted
 
 from scipy.sparse import issparse as issparse_cpu
 from cupyx.scipy.sparse import issparse as issparse_gpu
-
-from cuml.linear_model import LinearRegression
 
 
 class Layer_Mapping(dict):
@@ -205,18 +196,7 @@ class cunnData:
                 df[key] = c
 
     def __getitem__(self, index):
-        if type(index) == tuple:
-            obs_dx, var_dx = index
-        else:
-            obs_dx = index
-            var_dx = slice(None,None,None)
-        
-        if isinstance(obs_dx,pd.Series):
-            obs_dx = obs_dx.values
-        
-        if isinstance(var_dx,pd.Series):
-            var_dx = var_dx.values
-
+        obs_dx,var_dx = _normalize_indices(index, self.obs_names, self.var_names)
         self.X = self.X[obs_dx,var_dx]
         self._update_shape()
         if self.layers:
