@@ -4,7 +4,7 @@ channels:
  - conda-forge
  - bioconda
 dependencies:
- - rapids=22.10
+ - rapids=22.12
  - python=3.9
  - cudatoolkit=11.5
  - cudnn
