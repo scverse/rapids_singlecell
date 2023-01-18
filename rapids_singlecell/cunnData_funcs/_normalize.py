@@ -1,6 +1,5 @@
 import cupy as cp
 import cupyx as cpx
-import numpy as np
 import math
 import warnings
 from typing import Optional
@@ -8,24 +7,38 @@ from typing import Optional
 from ..cunnData import cunnData
 from ._utils import _check_nonnegative_integers
 
-def normalize_total(cudata: cunnData, target_sum):
+def normalize_total(cudata: cunnData, 
+                    target_sum:int,
+                    layer: Optional[str] = None,
+                    inplace = True):
     """
     Normalizes rows in matrix so they sum to `target_sum`
 
     Parameters
     ----------
+    cudata: cunnData object
 
     target_sum : int
         Each row will be normalized to sum to this value
     
+    layer
+        Layer to normalize instead of `X`. If `None`, `X` is normalized.
+
+    inplace: bool
+        Whether to update `cudata` or return the normalized matrix.
+    
     
     Returns
     -------
-    
-    a normalized sparse Matrix to a specified target sum
+    Returns a normalized copy or  updates `cudata` with a normalized version of
+    the original `cudata.X` and `cudata.layers['layer']`, depending on `inplace`.
     
     """
-    csr_arr = cudata.X
+    csr_arr = cudata.layers[layer] if layer is not None else cudata.X
+
+    if not inplace:
+        csr_arr = csr_arr.copy()
+
     mul_kernel = cp.RawKernel(r'''
         extern "C" __global__
         void mul_kernel(const int *indptr, float *data, 
@@ -56,7 +69,13 @@ def normalize_total(cudata: cunnData, target_sum):
                     csr_arr.shape[0],
                     int(target_sum)))
 
-    cudata.X = csr_arr
+    if inplace:
+        if layer:
+            cudata.layers[layer] = csr_arr
+        else:
+            cudata.X = csr_arr
+    else:
+        return csr_arr
 
 def log1p(cudata: cunnData):
     """

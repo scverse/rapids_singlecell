@@ -146,7 +146,7 @@ def highly_variable_genes(
         if batch_key is None:
             X = cudata.layers[layer] if layer is not None else cudata.X
             df = _highly_variable_genes_single_batch(
-                X.tocsc(),
+                X.copy(),
                 min_disp=min_disp,
                 max_disp=max_disp,
                 min_mean=min_mean,
@@ -164,7 +164,7 @@ def highly_variable_genes(
                 thr_org = cp.diff(inter_matrix.indptr).ravel()
                 thr = cp.where(thr_org >= 1)[0]
                 thr_2 = cp.where(thr_org < 1)[0]
-                inter_matrix = inter_matrix[:, thr]
+                inter_matrix = inter_matrix[:, thr].tocsr()
                 thr = thr.get()
                 thr_2 = thr_2.get()
                 inter_genes = genes[thr]
@@ -374,7 +374,7 @@ def _highly_variable_genes_seurat_v3(
             UserWarning,
         )
 
-    mean, var = _get_mean_var(X.tocsc())
+    mean, var = _get_mean_var(X)
     df['means'], df['variances'] = mean.get(), var.get()
     if batch_key is None:
         batch_info = pd.Categorical(np.zeros(cudata.shape[0], dtype=int))
@@ -384,7 +384,7 @@ def _highly_variable_genes_seurat_v3(
     norm_gene_vars = []
     for b in np.unique(batch_info):
         X_batch = X[batch_info == b]
-        mean, var = _get_mean_var(X_batch.tocsc())
+        mean, var = _get_mean_var(X_batch)
         not_const = var > 0
         estimat_var = cp.zeros(X_batch.shape[1], dtype=np.float64)
 
@@ -527,7 +527,7 @@ def _highly_variable_pearson_residuals(cudata: cunnData,
     ranks_masked_array = np.ma.masked_invalid(ranks_residual_var)
     # Median rank across batches, ignoring batches in which gene was not selected
     medianrank_residual_var = np.ma.median(ranks_masked_array, axis=0).filled(np.nan)
-    means, variances = _get_mean_var(X.tocsc())
+    means, variances = _get_mean_var(X)
     means, variances = means.get(), variances.get()
     df = pd.DataFrame.from_dict(
         dict(

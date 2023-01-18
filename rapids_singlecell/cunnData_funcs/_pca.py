@@ -5,7 +5,6 @@ from anndata import AnnData
 from typing import Optional
 
 from cupy.sparse import issparse
-import warnings
 import math
 import numpy as np
 
