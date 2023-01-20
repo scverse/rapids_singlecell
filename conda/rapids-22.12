@@ -1,0 +1,27 @@
+name: rapids_singlecell-0.3.4
+channels:
+ - rapidsai
+ - nvidia
+ - conda-forge
+ - bioconda
+dependencies:
+ - rapids=22.12
+ - python=3.9
+ - cudatoolkit=11.5
+ - cudnn
+ - cutensor
+ - cusparselt
+ - leidenalg
+ - louvain
+ - fa2
+ - jupyterlab
+ - pip
+ - pip:
+    - scanpy
+    - decoupler
+    - omnipath
+    - gdown
+    - wget
+    - scikit-misc
+    - https://github.com/Intron7/rapids_singlecell/releases/download/v0.3.4/rapids_singlecell-0.3.4-py3-none-any.whl
+
