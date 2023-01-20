@@ -23,5 +23,6 @@ dependencies:
     - gdown
     - wget
     - scikit-misc
+    - harmonypy
     - https://github.com/Intron7/rapids_singlecell/releases/download/v0.3.4/rapids_singlecell-0.3.4-py3-none-any.whl
 
