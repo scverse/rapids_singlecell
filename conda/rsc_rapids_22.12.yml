@@ -1,4 +1,4 @@
-name: rapids_singlecell-0.3.4
+name: rapids_singlecell_0.3.4
 channels:
  - rapidsai
  - nvidia
