@@ -2,7 +2,6 @@ from anndata import AnnData
 import cupy as cp
 import numpy as np
 
-
 def embedding_density(
     adata: AnnData,
     basis: str = 'umap',
