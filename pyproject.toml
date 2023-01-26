@@ -32,5 +32,8 @@ dependencies = [
 [project.optional-dependencies]
 rapids = ["cudf-cu11", "cuml-cu11", "cugraph-cu11"] 
 
+[tool.flit.module]
+name = "rapids-singlecell"
+
 [project.urls]
 Source = "https://github.com/Intron7/rapids-singlecell"
