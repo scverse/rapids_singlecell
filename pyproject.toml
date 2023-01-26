@@ -7,7 +7,7 @@ requires = [
 ]
 
 [project]
-name = "rapids_singlecell"
+name = "rapids-singlecell"
 description = "running single cell analysis on Nvidia GPUs"
 requires-python = ">=3.8"
 license = {file = "LICENSE"}
@@ -33,4 +33,4 @@ dependencies = [
 rapids = ["cudf-cu11", "cuml-cu11", "cugraph-cu11"] 
 
 [project.urls]
-Source = "https://github.com/Intron7/rapids_singlecell"
+Source = "https://github.com/Intron7/rapids-singlecell"
