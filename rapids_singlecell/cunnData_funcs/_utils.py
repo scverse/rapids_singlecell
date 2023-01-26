@@ -3,7 +3,7 @@ import cupy as cp
 def _get_mean_var(X):
     mean = (X.sum(axis=0) / X.shape[0]).flatten()
     mean_sq = cp.sparse.csr_matrix((X.data ** 2,X.indices, X.indptr)).sum(axis=0).flatten() / X.shape[0]
-    var = (mean_sq - mean ** 2) * (X.shape[1] / (X.shape[0] - 1))
+    var = (mean_sq - mean ** 2) * (X.shape[0] / (X.shape[0] - 1))
     return mean, var
 
 def _check_nonnegative_integers(X):
