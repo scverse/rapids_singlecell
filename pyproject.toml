@@ -33,4 +33,4 @@ dependencies = [
 rapids = ["cudf-cu11", "cuml-cu11", "cugraph-cu11"] 
 
 [project.urls]
-Source = "https://github.com/Intron7/rapids-singlecell"
+Source = "https://github.com/Intron7/rapids_singlecell"
