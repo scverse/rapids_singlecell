@@ -1,8 +1,6 @@
 from anndata import AnnData
 import cupy as cp
 import numpy as np
-from scanpy._utils import sanitize_anndata
-
 
 def embedding_density(
     adata: AnnData,
@@ -52,7 +50,7 @@ def embedding_density(
     """
     # to ensure that newly created covariates are categorical
     # to test for category numbers
-    sanitize_anndata(adata)
+    adata._sanitize()
     # Test user inputs
     basis = basis.lower()
 

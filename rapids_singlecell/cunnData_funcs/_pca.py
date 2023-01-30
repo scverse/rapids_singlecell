@@ -111,4 +111,3 @@ def pca(cudata: cunnData,
     else:
         cudata.varm['PCs'] = pca_func.components_.T
         
-        
