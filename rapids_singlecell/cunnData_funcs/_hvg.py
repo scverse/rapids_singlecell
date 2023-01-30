@@ -751,7 +751,3 @@ def _poisson_gene_selection(
 
     if batch_key is not None:
         cudata.var["prob_zero_enriched_nbatches"] = df["prob_zero_enriched_nbatches"].values
-
-
-
-
