@@ -106,8 +106,8 @@ class cunnData:
                             
                         else:
                             inter = cp.sparse.csr_matrix(matrix, dtype=cp.float32)
-                    self.layers[key] = inter.copy()
-                    del inter
+                        self.layers[key] = inter.copy()
+                        del inter
                 if adata.obsm:
                     for key, matrix in adata.obsm.items():
                         self.obsm[key] = matrix
