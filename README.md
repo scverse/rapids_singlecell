@@ -8,9 +8,9 @@ The functions are analogous versions of functions that can be found within [scan
 ### Conda
 The easiest way to install *rapids-singlecell* is to use one of the *yaml* file provided in the [conda](https://github.com/Intron7/rapids_singlecell/tree/main/conda) folder. These *yaml* files install everything needed to run the example notbooks and get you started.
 ```
-conda create -f conda/rsc_rapids_22.12.yml
+conda env create -f conda/rsc_rapids_22.12.yml
 # or
-mamba create -f conda/rsc_rapids_23.02a.yml
+mamba env create -f conda/rsc_rapids_23.02a.yml
 ```
 ### PyPI
 As of version 0.4.0 *rapids-singlecell* is now on PyPI.
