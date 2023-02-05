@@ -3,38 +3,38 @@ import cudf
 import cugraph
 import numpy as np
 import cupy as cp
-
+from typing import Union
 
 def draw_graph(adata: AnnData,
-               init_pos = None,
-               max_iter = 500):
+               init_pos: Union[str, bool, None]= None,
+               max_iter:int = 500)-> None:
     """
     Force-directed graph drawing with cugraph's implementation of Force Atlas 2.
     This is a reimplementation of scanpys function for GPU compute.
 
     Parameters
     ----------
-    adata : AnnData
-        annData object with 'neighbors' field.
-       
-    init_pos
-        `'paga'`/`True`, `None`/`False`, or any valid 2d-`.obsm` key.
-        Use precomputed coordinates for initialization.
-        If `False`/`None` (the default), initialize randomly.
-    max_iter : integer
-        This controls the maximum number of levels/iterations of the
-        Force Atlas algorithm. When specified the algorithm will terminate
-        after no more than the specified number of iterations.
-        No error occurs when the algorithm terminates in this manner.
-        Good short-term quality can be achieved with 50-100 iterations.
-        Above 1000 iterations is discouraged.
+        adata 
+            annData object with 'neighbors' field.
+        
+        init_pos
+            `'paga'`/`True`, `None`/`False`, or any valid 2d-`.obsm` key.
+            Use precomputed coordinates for initialization.
+            If `False`/`None` (the default), initialize randomly.
+        max_iter 
+            This controls the maximum number of levels/iterations of the
+            Force Atlas algorithm. When specified the algorithm will terminate
+            after no more than the specified number of iterations.
+            No error occurs when the algorithm terminates in this manner.
+            Good short-term quality can be achieved with 50-100 iterations.
+            Above 1000 iterations is discouraged.
     
     Returns
     ----------
-    updates `adata` with the following fields.
-
-    X_draw_graph_layout_fa : `adata.obsm`
-         Coordinates of graph layout.
+        updates `adata` with the following fields.
+        
+            X_draw_graph_layout_fa : `adata.obsm`
+                Coordinates of graph layout.
     """
     
     from cugraph.layout import force_atlas2

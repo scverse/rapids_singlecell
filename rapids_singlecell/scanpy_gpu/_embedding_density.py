@@ -26,26 +26,27 @@ def embedding_density(
 
     Parameters
     ----------
-    adata
-        The annotated data matrix.
-    basis
-        The embedding over which the density will be calculated. This embedded
-        representation should be found in `adata.obsm['X_[basis]']``.
-    groupby
-        Key for categorical observation/cell annotation for which densities
-        are calculated per category.
-    key_added
-        Name of the `.obs` covariate that will be added with the density
-        estimates.
-    components
-        The embedding dimensions over which the density should be calculated.
-        This is limited to two components.
+        adata
+            The annotated data matrix.
+        basis
+            The embedding over which the density will be calculated. This embedded
+            representation should be found in `adata.obsm['X_[basis]']``.
+        groupby
+            Key for categorical observation/cell annotation for which densities
+            are calculated per category.
+        key_added
+            Name of the `.obs` covariate that will be added with the density
+            estimates.
+        components
+            The embedding dimensions over which the density should be calculated.
+            This is limited to two components.
     Returns
     -------
-    Updates `adata.obs` with an additional field specified by the `key_added`
-    parameter. This parameter defaults to `[basis]_density_[groupby]`, where
-    `[basis]` is one of `umap`, `diffmap`, `pca`, `tsne`, or `draw_graph_fa`
+    Updates `adata.obs` with an additional field specified by the `key_added` \
+    parameter. This parameter defaults to `[basis]_density_[groupby]`, where \
+    `[basis]` is one of `umap`, `diffmap`, `pca`, `tsne`, or `draw_graph_fa` \
     and `[groupby]` denotes the parameter input.
+    
     Updates `adata.uns` with an additional field `[key_added]_params`.
     """
     # to ensure that newly created covariates are categorical
