@@ -17,7 +17,7 @@ def pca(cudata: cunnData,
         chunk_size:int = None)->None:
 
     """
-    Performs PCA using the cuML decomposition function for the `cunnData` object.
+    Performs PCA using the cuML decomposition function for the :class:`~rapids_singlecell.cunnData.cunnData` object.
     
     Parameters
     ----------

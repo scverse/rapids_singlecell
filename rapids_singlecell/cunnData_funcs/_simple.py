@@ -55,9 +55,11 @@ def filter_genes(cudata:cunnData,
                 verbose:bool =True)-> None:
 
     """
+    Filter genes based on number of cells or counts.
+
     Filters genes, that have greater than a max number of genes or less than
-    a minimum number of a feature in a given `.var` columns. Can so far only be used for numerical columns.
-    You can run this function on 'n_cells' or 'n_counts' with a previous columns in `.var`.
+    a minimum number of a feature in a given :attr:`.var` columns. Can so far only be used for numerical columns.
+    You can run this function on 'n_cells' or 'n_counts' with a previous columns in :attr:`.var`.
     
     Parameters
     ----------
@@ -65,7 +67,7 @@ def filter_genes(cudata:cunnData,
             cunnData object
 
         qc_var
-            column in `.var` with numerical entries to filter against
+            column in :attr:`.var` with numerical entries to filter against
             
         min_count
             Lower bound on number of a given feature to keep gene
@@ -81,7 +83,7 @@ def filter_genes(cudata:cunnData,
     
     Returns
     -------
-        a filtered `cunnData` object inplace
+        a filtered :class:`~rapids_singlecell.cunnData.cunnData` object inplace
     
     """
     
@@ -161,14 +163,14 @@ def calculate_qc(cudata:cunnData,
     -------
         adds the following columns in :attr:`.obs` :
 
-            'n_counts'
+            `n_counts`
                 number of counts per cell
-            'n_genes'
+            `n_genes`
                 number of genes per cell
-            for 'qc_var' in 'qc_vars'
-                'total_qc_var'
+            for `qc_var` in `qc_vars`
+                `total_qc_var`
                     number of counts per qc_var (e.g total counts mitochondrial genes)
-                'percent_qc_vars'
+                `percent_qc_vars`
                     Proportion of counts of qc_var (percent of counts mitochondrial genes)
         
     """      
@@ -234,7 +236,7 @@ def calculate_qc(cudata:cunnData,
         cudata.X = cudata.X.tocsr()
 
 def flag_gene_family(cudata:cunnData,
-                    gene_family_name:str = str,
+                    gene_family_name:str,
                     gene_family_prefix:str = None,
                     gene_list:list= None)-> None:
 
@@ -254,11 +256,11 @@ def flag_gene_family(cudata:cunnData,
             prefix of the gene familiy (eg. mt- for all mitochondrial genes in mice)
             
         gene_list
-            list of genes to flag in .var
+            list of genes to flag in `.var`
     
     Returns
     -------
-        adds the boolean column in .var 
+        adds the boolean column in `.var` 
     
     """
     if gene_family_prefix:
@@ -274,8 +276,10 @@ def filter_cells(cudata:cunnData,
                 verbose:bool=True)->None:
 
     """\
-    Filter cells based on numerical columns in the `.obs` by selecting those with a feature count greater than a specified maximum or less than a specified minimum.
-    It is recommended to run `calculate_qc` before using this function. You can run this function on n_genes or n_counts before running `calculate_qc`.
+    Filter cell outliers based on counts and numbers of genes expressed.
+
+    Filter cells based on numerical columns in the :attr:`.obs` by selecting those with a feature count greater than a specified maximum or less than a specified minimum.
+    It is recommended to run :func:`calculate_qc` before using this function. You can run this function on n_genes or n_counts before running :func:`calculate_qc`.
     
     Parameters
     ----------
@@ -295,7 +299,7 @@ def filter_cells(cudata:cunnData,
     
     Returns
     -------
-       a filtered `cunnData` object inplace
+       a filtered :class:`~rapids_singlecell.cunnData.cunnData` object inplace
 
     """
     if qc_var in cudata.obs.keys(): 
@@ -321,7 +325,7 @@ def filter_cells(cudata:cunnData,
                 cudata.obsm[key] = matrix[inter,:]
     elif qc_var in ['n_genes','n_counts']:
         print(f"Running calculate_qc for 'n_genes' or 'n_counts'")
-        caluclate_qc(cudata,batchsize=batchsize)
+        calculate_qc(cudata,batchsize=batchsize)
         inter = np.array
         if min_count is not None and max_count is not None:
             inter=np.where((cudata.obs[qc_var] < max_count) &  (min_count< cudata.obs[qc_var]))[0]
@@ -348,11 +352,11 @@ def filter_cells(cudata:cunnData,
 def filter_highly_variable(cudata:cunnData)-> None:
 
     """
-    Filters the cunndata object for highly_variable genes. Run highly_varible_genes first.
+    Filters the :class:`~rapids_singlecell.cunnData.cunnData` object for highly_variable genes. Run highly_varible_genes first.
     
     Returns
     -------
-    updates cunndata object to only contain highly variable genes.
+        updates :class:`~rapids_singlecell.cunnData.cunnData` object to only contain highly variable genes.
     
     """
     if "highly_variable" in cudata.var.keys():

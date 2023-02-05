@@ -15,7 +15,7 @@ def scatter(cudata:cunnData,
                 dpi:int =300)-> None:
     """
     Violin plot.
-    Wraps :func:`seaborn.scaterplot` for :class:`~cunnData.cunnData`. This plotting function so far is really basic and doesnt include all the features form sc.pl.scatter.
+    Wraps :func:`seaborn.scatterplot` for :class:`~rapids_singlecell.cunnData.cunnData`. This plotting function so far is really basic and doesnt include all the features form :func:`scanpy.pl.scatter`.
     
     Parameters
     ---------
@@ -57,7 +57,7 @@ def violin(cudata:cunnData,
             dpi:int =300):
     """
     Violin plot.
-    Wraps :func:`seaborn.violinplot` for :class:`~cunnData.cunnData`. This plotting function so far is really basic and doesnt include all the features form sc.pl.violin.
+    Wraps :func:`seaborn.violinplot` for :class:`~rapids_singlecell.cunnData.cunnData`. This plotting function so far is really basic and doesnt include all the features form :func:`scanpy.pl.violin`.
     
     Parameters
     ---------

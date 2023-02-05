@@ -81,7 +81,7 @@ def normalize_total(cudata: cunnData,
 def log1p(cudata: cunnData)->None:
 
     """
-    Calculated the natural logarithm of one plus the sparse matrix, element-wise inplace in `cunnData.X`.
+    Calculated the natural logarithm of one plus the sparse matrix, element-wise inplace in :attr:`.X`.
     
     Parameters
     ----------
@@ -91,7 +91,7 @@ def log1p(cudata: cunnData)->None:
     
     Returns
     ----------
-        Updates `cudata.X`
+        Updates :attr:`.X`
 
     """
     cudata.X = cudata.X.log1p()
