@@ -10,22 +10,23 @@ from ._utils import _check_nonnegative_integers, _get_mean_var
 
 def highly_variable_genes(
     cudata:cunnData,
-    layer = None,
-    min_mean = 0.0125,
-    max_mean =3,
-    min_disp= 0.5,
-    max_disp =np.inf,
-    n_top_genes = None,
-    flavor = 'seurat',
-    n_bins = 20,
-    span = 0.3,
+    layer: str = None,
+    min_mean: float = 0.0125,
+    max_mean: float=3,
+    min_disp:float= 0.5,
+    max_disp: float  =np.inf,
+    n_top_genes: int = None,
+    flavor: str = 'seurat',
+    n_bins: int = 20,
+    span: float = 0.3,
     check_values: bool = True,
     theta:int = 100,
-    clip = None,
+    clip:bool = None,
     chunksize:int = 1000,
     n_samples:int = 10000, 
-    batch_key = None):
-    """
+    batch_key:str = None) -> None:
+
+    """\
     Annotate highly variable genes. 
     Expects logarithmized data, except when `flavor='seurat_v3','pearson_residuals','poisson_gene_selection'`, in which count data is expected.
     
@@ -43,76 +44,77 @@ def highly_variable_genes(
     standard deviation. Next, the normalized variance is computed as the variance
     of each gene after the transformation. Genes are ranked by the normalized variance.
 
-
     Parameters
     ----------
-    layer
-        If provided, use `cudata.layers[layer]` for expression values instead of `cudata.X`.
-    min_mean: float (default: 0.0125)
-        If n_top_genes unequals None, this and all other cutoffs for the means and the normalized dispersions are ignored.
-    max_mean: float (default: 3)
-        If n_top_genes unequals None, this and all other cutoffs for the means and the normalized dispersions are ignored.
-    min_disp: float (default: 0.5)
-        If n_top_genes unequals None, this and all other cutoffs for the means and the normalized dispersions are ignored.
-    max_disp: float (default: inf)
-        If n_top_genes unequals None, this and all other cutoffs for the means and the normalized dispersions are ignored.
-    n_top_genes: int (defualt: None)
-        Number of highly-variable genes to keep.
-    flavor : {`seurat`, `cell_ranger`, `seurat_v3`, `pearson_residuals`, `poisson_gene_selection`} (default: 'seurat')
-        Choose the flavor for identifying highly variable genes. For the dispersion based methods in their default workflows, Seurat passes the cutoffs whereas Cell Ranger passes n_top_genes.
-    n_bins : int (default: 20)
-        Number of bins for binning the mean gene expression. Normalization is done with respect to each bin. If just a single gene falls into a bin, the normalized dispersion is artificially set to 1.
-    span : float (default: 0.3)
-        The fraction of the data (cells) used when estimating the variance in the loess
-        model fit if `flavor='seurat_v3'`.
-    check_values: bool (default: True)
-        Check if counts in selected layer are integers. A Warning is returned if set to True.
-        Only used if `flavor='seurat_v3'` or `'pearson_residuals'`.
-    theta: int (default: 1000)
-        The negative binomial overdispersion parameter `theta` for Pearson residuals.
+        cudata
+            cunnData object
+        layer
+            If provided, use `cudata.layers[layer]` for expression values instead of `cudata.X`.
+        min_mean
+            If n_top_genes unequals None, this and all other cutoffs for the means and the normalized dispersions are ignored.
+        max_mean
+            If n_top_genes unequals None, this and all other cutoffs for the means and the normalized dispersions are ignored.
+        min_disp
+            If n_top_genes unequals None, this and all other cutoffs for the means and the normalized dispersions are ignored.
+        max_disp
+            If n_top_genes unequals None, this and all other cutoffs for the means and the normalized dispersions are ignored.
+        n_top_genes
+            Number of highly-variable genes to keep.
+        flavor :
+            Choose the flavor (`seurat`, `cell_ranger`, `seurat_v3`, `pearson_residuals`, `poisson_gene_selection`) for identifying highly variable genes. For the dispersion based methods 
+            in their default workflows, Seurat passes the cutoffs whereas Cell Ranger passes n_top_genes.
+        n_bins
+            Number of bins for binning the mean gene expression. Normalization is done with respect to each bin. If just a single gene falls into a bin, the normalized dispersion is artificially set to 1.
+        span
+            The fraction of the data (cells) used when estimating the variance in the loess
+            model fit if `flavor='seurat_v3'`.
+        check_values
+            Check if counts in selected layer are integers. A Warning is returned if set to True.
+            Only used if `flavor='seurat_v3'` or `'pearson_residuals'`.
+        theta
+            The negative binomial overdispersion parameter `theta` for Pearson residuals. 
             Higher values correspond to less overdispersion (`var = mean + mean^2/theta`), and `theta=np.Inf` corresponds to a Poisson model.
-    clip: float (default: None)
-        Only used if `flavor='pearson_residuals'`.
-        Determines if and how residuals are clipped:
-            * If `None`, residuals are clipped to the interval `[-sqrt(n_obs), sqrt(n_obs)]`, where `n_obs` is the number of cells in the dataset (default behavior).
-            * If any scalar `c`, residuals are clipped to the interval `[-c, c]`. Set `clip=np.Inf` for no clipping.
-    chunksize: int (default: 1000)
-        If `flavor='pearson_residuals'` or `'poisson_gene_selection'`, this dertermines how many genes are processed at
-        once while computing the residual variance. Choosing a smaller value will reduce
-        the required memory.
-    n_samples: int (default: 10000)
-        The number of Binomial samples to use to estimate posterior probability
-        of enrichment of zeros for each gene (only for `flavor='poisson_gene_selection'`).
-    batch_key:
-        If specified, highly-variable genes are selected within each batch separately and merged.
-        
+        clip
+            Only used if `flavor='pearson_residuals'`. Determines if and how residuals are clipped:
+                * If `None`, residuals are clipped to the interval `[-sqrt(n_obs), sqrt(n_obs)]`, where `n_obs` is the number of cells in the dataset (default behavior).
+                * If any scalar `c`, residuals are clipped to the interval `[-c, c]`. Set `clip=np.Inf` for no clipping.
+        chunksize
+            If `flavor='pearson_residuals'` or `'poisson_gene_selection'`, this dertermines how many genes are processed at
+            once while computing the residual variance. Choosing a smaller value will reduce
+            the required memory.
+        n_samples
+            The number of Binomial samples to use to estimate posterior probability
+            of enrichment of zeros for each gene (only for `flavor='poisson_gene_selection'`).
+        batch_key
+            If specified, highly-variable genes are selected within each batch separately and merged.
+            
     Returns
     -------
-    
-    upates .var with the following fields
-    highly_variable : bool
-        boolean indicator of highly-variable genes
-    means
-        means per gene
-    dispersions
-        For dispersion-based flavors, dispersions per gene
-    dispersions_norm
-        For dispersion-based flavors, normalized dispersions per gene
-    variances
-        For `flavor='seurat_v3','pearson_residuals'`, variance per gene
-    variances_norm
-        For `flavor='seurat_v3'`, normalized variance per gene, averaged in
-        the case of multiple batches
-    residual_variances : float
-        For `flavor='pearson_residuals'`, residual variance per gene. Averaged in the
-        case of multiple batches.
-    highly_variable_rank : float
-        For `flavor='seurat_v3','pearson_residuals'`, rank of the gene according to normalized
-        variance, median rank in the case of multiple batches
-    highly_variable_nbatches : int
-        If batch_key is given, this denotes in how many batches genes are detected as HVG
-    highly_variable_intersection : bool
-        If batch_key is given, this denotes the genes that are highly variable in all batches     
+        upates `cudata.var` with the following fields:
+
+            `highly_variable` : bool
+                boolean indicator of highly-variable genes
+            `means`: float
+                means per gene
+            `dispersions`: float
+                For dispersion-based flavors, dispersions per gene
+            `dispersions_norm`: float
+                For dispersion-based flavors, normalized dispersions per gene
+            `variances`: float
+                For `flavor='seurat_v3','pearson_residuals'`, variance per gene
+            `variances_norm`: float
+                For `flavor='seurat_v3'`, normalized variance per gene, averaged in
+                the case of multiple batches
+            `residual_variances` : float
+                For `flavor='pearson_residuals'`, residual variance per gene. Averaged in the
+                case of multiple batches.
+            `highly_variable_rank` : float
+                For `flavor='seurat_v3','pearson_residuals'`, rank of the gene according to normalized
+                variance, median rank in the case of multiple batches
+            `highly_variable_nbatches` : int
+                If batch_key is given, this denotes in how many batches genes are detected as HVG
+            `highly_variable_intersection` : bool
+                If batch_key is given, this denotes the genes that are highly variable in all batches
     """
     if flavor == 'seurat_v3':
         _highly_variable_genes_seurat_v3(

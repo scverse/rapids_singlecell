@@ -3,21 +3,24 @@ import numpy as np
 import pandas as pd
 import math
 from ..cunnData import cunnData
+from typing import Union
 
-def calc_gene_qc(cudata:cunnData, batchsize = None):
+def calc_gene_qc(cudata:cunnData, batchsize:int = None)->None:
+
     """
     Filters out genes that expressed in less than a specified number of cells
 
     Parameters
     ----------
-    
-        batchsize: int (default: None)
+        cudata
+            cunnData object
+        batchsize
             Number of rows to be processed together This can be adjusted for performance to trade-off memory use.
-        
+            
     Returns
     -------
         updated `.var` with `n_cells` and `n_counts`
-        filtered cunndata object inplace for genes less than the threshhold
+            filtered cunndata object inplace for genes less than the threshhold
     
     """
     if batchsize:
@@ -44,32 +47,41 @@ def calc_gene_qc(cudata:cunnData, batchsize = None):
         cudata.var["n_counts"] = cp.asnumpy(n_counts)
 
 
-def filter_genes(cudata:cunnData, qc_var = "n_cells", min_count = None, max_count = None, batchsize = None, verbose =True):
+def filter_genes(cudata:cunnData, 
+                qc_var:str = "n_cells", 
+                min_count:int = None,
+                max_count:int = None,
+                batchsize:int = None,
+                verbose:bool =True)-> None:
+
     """
-    Filter genes that have greater than a max number of genes or less than
+    Filters genes, that have greater than a max number of genes or less than
     a minimum number of a feature in a given `.var` columns. Can so far only be used for numerical columns.
     You can run this function on 'n_cells' or 'n_counts' with a previous columns in `.var`.
     
     Parameters
     ----------
-    qc_var: str (default: n_cells)
-        column in `.var` with numerical entries to filter against
-        
-    min_count : float
-        Lower bound on number of a given feature to keep gene
+        cudata: 
+            cunnData object
 
-    max_count : float
-        Upper bound on number of a given feature to keep gene
-    
-    batchsize: int (default: None)
-        only needed if you run `filter_genes` before `calculate_qc` or `calc_gene_qc` on 'n_genes' or 'n_counts'. Number of rows to be processed together. This can be adjusted for performance to trade-off memory use.
+        qc_var
+            column in `.var` with numerical entries to filter against
+            
+        min_count
+            Lower bound on number of a given feature to keep gene
+
+        max_count
+            Upper bound on number of a given feature to keep gene
         
-    verbose: bool (default: True)
-        Print number of discarded genes
+        batchsize
+            only needed if you run `filter_genes` before `calculate_qc` or `calc_gene_qc` on 'n_genes' or 'n_counts'. Number of rows to be processed together. This can be adjusted for performance to trade-off memory use.
+            
+        verbose
+            Print number of discarded genes
     
     Returns
     -------
-    a filtered cunnData object inplace
+        a filtered `cunnData` object inplace
     
     """
     
@@ -87,7 +99,6 @@ def filter_genes(cudata:cunnData, qc_var = "n_cells", min_count = None, max_coun
         cudata.X = cudata.X[:, thr]
         cudata.X = cudata.X.tocsr()
         cudata.var = cudata.var.iloc[cp.asnumpy(thr)]
-        cudata._update_shape()
         if cudata.layers:
             for key, matrix in cudata.layers.items():
                 cudata.layers[key] = matrix[:, thr]
@@ -111,7 +122,6 @@ def filter_genes(cudata:cunnData, qc_var = "n_cells", min_count = None, max_coun
         if verbose:
             print(f"filtered out {cudata.var.shape[0]-thr.shape[0]} genes based on {qc_var}")
         cudata.X = cudata.X[:, thr]
-        cudata._update_shape()
         if cudata.layers:
             for key, matrix in cudata.layers.items():
                 cudata.layers[key] = matrix[:, thr]
@@ -128,33 +138,39 @@ def filter_genes(cudata:cunnData, qc_var = "n_cells", min_count = None, max_coun
 
 
         
-def caluclate_qc(cudata:cunnData, qc_vars = None, batchsize = None):
-    """
+def calculate_qc(cudata:cunnData, 
+                qc_vars:Union[str, list] = None,
+                batchsize:int = None)->None:
+
+    """\
     Calculates basic qc Parameters. Calculates number of genes per cell (n_genes) and number of counts per cell (n_counts).
     Loosly based on calculate_qc_metrics from scanpy [Wolf et al. 2018]. Updates .obs with columns with qc data.
     
     Parameters
     ----------
-    qc_vars: str, list (default: None)
-        Keys for boolean columns of .var which identify variables you could want to control for (e.g. Mito). Run flag_gene_family first
-        
-    batchsize: int (default: None)
-        Number of rows to be processed together. This can be adjusted for performance to trade-off memory use.
-        
+        cudata: 
+            cunnData object
+        qc_vars
+            Keys for boolean columns of :attr:`.var` which identify variables you could want to control for (e.g. Mito).
+            Run flag_gene_family first
+        batchsize
+            Number of rows to be processed together. 
+            This can be adjusted for performance to trade-off memory use.
+            
     Returns
     -------
-    adds the following columns in .obs
-    n_counts
-        number of counts per cell
-    n_genes
-        number of genes per cell
-    for qc_var in qc_vars
-        total_qc_var
-            number of counts per qc_var (e.g total counts mitochondrial genes)
-        percent_qc_vars
-            
-            Proportion of counts of qc_var (percent of counts mitochondrial genes)
-    
+        adds the following columns in :attr:`.obs` :
+
+            'n_counts'
+                number of counts per cell
+            'n_genes'
+                number of genes per cell
+            for 'qc_var' in 'qc_vars'
+                'total_qc_var'
+                    number of counts per qc_var (e.g total counts mitochondrial genes)
+                'percent_qc_vars'
+                    Proportion of counts of qc_var (percent of counts mitochondrial genes)
+        
     """      
     if batchsize:
         n_batches = math.ceil(cudata.X.shape[0] / batchsize)
@@ -217,25 +233,32 @@ def caluclate_qc(cudata:cunnData, qc_vars = None, batchsize = None):
                     cudata.obs["percent_"+qc_var]=cudata.obs["total_"+qc_var]/cudata.obs["n_counts"]*100
         cudata.X = cudata.X.tocsr()
 
-def flag_gene_family(cudata:cunnData, gene_family_name = str, gene_family_prefix = None, gene_list= None):
+def flag_gene_family(cudata:cunnData,
+                    gene_family_name:str = str,
+                    gene_family_prefix:str = None,
+                    gene_list:list= None)-> None:
+
     """
     Flags a gene or gene_familiy in .var with boolean. (e.g all mitochondrial genes).
     Please only choose gene_family prefix or gene_list
     
     Parameters
     ----------
-    gene_family_name: str
-        name of colums in .var where you want to store informationa as a boolean
-        
-    gene_family_prefix: str
-        prefix of the gene familiy (eg. mt- for all mitochondrial genes in mice)
-        
-    gene_list: list
-        list of genes to flag in .var
+        cudata
+            cunnData object
+
+        gene_family_name
+            name of colums in .var where you want to store informationa as a boolean
+            
+        gene_family_prefix
+            prefix of the gene familiy (eg. mt- for all mitochondrial genes in mice)
+            
+        gene_list
+            list of genes to flag in .var
     
     Returns
     -------
-    adds the boolean column in .var 
+        adds the boolean column in .var 
     
     """
     if gene_family_prefix:
@@ -243,33 +266,37 @@ def flag_gene_family(cudata:cunnData, gene_family_name = str, gene_family_prefix
     if gene_list:
         cudata.var[gene_family_name] = cp.asnumpy(cudata.var.index.isin(gene_list)).ravel()
     
-def filter_cells(cudata:cunnData, qc_var, min_count=None, max_count=None, batchsize = None,verbose=True):
-    """
-    Filter cells that have greater than a max number of genes or less than
-    a minimum number of a feature in a given .obs columns. Can so far only be used for numerical columns.
-    It is recommended to run `calculated_qc` before using this function. You can run this function on n_genes or n_counts before running `calculated_qc`.
+def filter_cells(cudata:cunnData, 
+                qc_var:str,
+                min_count:float=None,
+                max_count:float=None,
+                batchsize:bool = None,
+                verbose:bool=True)->None:
+
+    """\
+    Filter cells based on numerical columns in the `.obs` by selecting those with a feature count greater than a specified maximum or less than a specified minimum.
+    It is recommended to run `calculate_qc` before using this function. You can run this function on n_genes or n_counts before running `calculate_qc`.
     
     Parameters
     ----------
-    qc_var: str
-        column in .obs with numerical entries to filter against
-        
-    min_count : float
-        Lower bound on number of a given feature to keep cell
-
-    max_count : float
-        Upper bound on number of a given feature to keep cell
-    
-    batchsize: int (default: None)
-        only needed if you run `filter_cells` before `calculate_qc` on 'n_genes' or 'n_counts'. Number of rows to be processed together. This can be adjusted for performance to trade-off memory use.
-        
-    verbose: bool (default: True)
-        Print number of discarded cells
+        cudata: 
+            cunnData object
+        qc_var
+            column in .obs with numerical entries to filter against
+        min_count
+            Lower bound on number of a given feature to keep cell
+        max_count
+            Upper bound on number of a given feature to keep cell
+        batchsize
+            only needed if you run `filter_cells` before `calculate_qc` on 'n_genes' or 'n_counts'. 
+            Number of rows to be processed together. This can be adjusted for performance to trade-off memory use.
+        verbose
+            Print number of discarded cells
     
     Returns
     -------
-    a filtered cunnData object inplace
-    
+       a filtered `cunnData` object inplace
+
     """
     if qc_var in cudata.obs.keys(): 
         inter = np.array
@@ -308,7 +335,6 @@ def filter_cells(cudata:cunnData, qc_var, min_count=None, max_count=None, batchs
             print(f"filtered out {cudata.obs.shape[0]-inter.shape[0]} cells")
         cudata.X = cudata.X[inter,:]
         cudata.obs = cudata.obs.iloc[inter]
-        cudata._update_shape()
         if cudata.layers:
             for key, matrix in cudata.layers.items():
                 cudata.layers[key] = matrix[inter,:]
@@ -319,22 +345,20 @@ def filter_cells(cudata:cunnData, qc_var, min_count=None, max_count=None, batchs
         print(f"Please check qc_var.")
 
 
-def filter_highly_variable(cudata:cunnData):
+def filter_highly_variable(cudata:cunnData)-> None:
+
     """
     Filters the cunndata object for highly_variable genes. Run highly_varible_genes first.
     
     Returns
     -------
-    
     updates cunndata object to only contain highly variable genes.
     
     """
     if "highly_variable" in cudata.var.keys():
         thr = np.where(cudata.var["highly_variable"] == True)[0]
-        cudata.X =cudata.X.tocsc()
         cudata.X = cudata.X[:, thr]
         cudata.var = cudata.var.iloc[thr]
-        cudata._update_shape()
         if cudata.layers:
             for key, matrix in cudata.layers.items():
                 cudata.layers[key] = matrix[:,thr]

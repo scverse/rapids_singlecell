@@ -6,35 +6,32 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import os
 
-def plt_scatter(cudata:cunnData, x, y, color = None, save = None, show =True, dpi =300):
+def scatter(cudata:cunnData, 
+                x:str, 
+                y:str,
+                color:str = None,
+                save:str = None,
+                show:bool =True,
+                dpi:int =300)-> None:
     """
     Violin plot.
     Wraps :func:`seaborn.scaterplot` for :class:`~cunnData.cunnData`. This plotting function so far is really basic and doesnt include all the features form sc.pl.scatter.
     
     Parameters
     ---------
-    cudata:
+    cudata
         cunnData object
-    
-    x:
+    x
         Keys for accessing variables of fields of `.obs`.
-    
-    y:
+    y
         Keys for accessing variables of fields of `.obs`.
-
-    
-    save: str default(None (no plot will be saved))
+    save
         file name to save plot as in ./figures
-        
-    show: boolean (default: True)
+    show
         if you want to display the plot
-    
-    dpi: int (default: 300)
+    dpi
         The resolution in dots per inch for save
-    
-    Returns
-    ------
-    nothing
+
     
     """
     fig,ax = plt.subplots()
@@ -51,33 +48,33 @@ def plt_scatter(cudata:cunnData, x, y, color = None, save = None, show =True, dp
         plt.close()
 
         
-def plt_violin(cudata:cunnData, key, groupby=None, size =1, save = None, show =True, dpi =300):
+def violin(cudata:cunnData,
+            key:str,
+            groupby:str=None,
+            size:float =1,
+            save:str = None,
+            show:bool =True,
+            dpi:int =300):
     """
     Violin plot.
     Wraps :func:`seaborn.violinplot` for :class:`~cunnData.cunnData`. This plotting function so far is really basic and doesnt include all the features form sc.pl.violin.
     
     Parameters
     ---------
-    cudata:
-        cunnData object
-    
-    key:
-        Keys for accessing variables of fields of `.obs`.
-    
-    groupby:
-        The key of the observation grouping to consider.(e.g batches)
-    
-    size:
-        pt_size for stripplot if 0 no strip plot will be shown.
-    
-    save: str default(None (no plot will be saved))
-        file name to save plot as in ./figures
-        
-    show: boolean (default: True)
-        if you want to display the plot
-    
-    dpi: int (default: 300)
-        The resolution in dots per inch for save
+        cudata
+            cunnData object
+        key
+            Keys for accessing variables of fields of `.obs`.
+        groupby
+            The key of the observation grouping to consider.(e.g batches)
+        size
+            pt_size for stripplot if 0 no strip plot will be shown.
+        save
+            file name to save plot as in ./figures
+        show
+            if you want to display the plot
+        dpi
+            The resolution in dots per inch for save
     
     Returns
     ------
