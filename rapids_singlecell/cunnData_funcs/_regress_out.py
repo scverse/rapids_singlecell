@@ -7,40 +7,42 @@ from ..cunnData import cunnData
 import math
 
 def regress_out(cudata:cunnData,
-                keys,
+                keys:Union[str,list],
                 layer: Optional[str] = None,
-                inplace = True,
+                inplace:bool = True,
                 batchsize: Union[int,Literal["all"],None] = 100,
-                verbose=False):
+                verbose:bool=False)-> Optional[cp.ndarray]:
 
     """
     Use linear regression to adjust for the effects of unwanted noise
     and variation. 
+    
     Parameters
     ----------
-    cudata: cunnData object
+        cudata
+            cunnData object
 
-    keys
-        Keys for numerical observation annotation on which to regress on.
-    
-    layer
-        Layer to regress instead of `X`. If `None`, `X` is regressed.
-
-    inplace: bool
-        Whether to update `cudata` or return the corrected matrix of
-        `cudata.X` and `cudata.layers`.
-
-    batchsize: Union[int,Literal["all"],None] (default: 100)
-        Number of genes that should be processed together. 
-        If `'all'` all genes will be processed together if `.n_obs` <100000. 
-        If `None` each gene will be analysed seperatly.
-        Will be ignored if cuML version < 22.12
+        keys
+            Keys for numerical observation annotation on which to regress on.
         
-    verbose : bool
-        Print debugging information
+        layer
+            Layer to regress instead of `X`. If `None`, `X` is regressed.
+
+        inplace
+            Whether to update `cudata` or return the corrected matrix of `cudata.X` and `cudata.layers`.
+
+        batchsize
+            Number of genes that should be processed together. \
+            If `'all'` all genes will be processed together if `.n_obs` <100000. \
+            If `None` each gene will be analysed seperatly. \
+            Will be ignored if cuML version < 22.12 
+            
+        verbose 
+            Print debugging information
+        
     Returns
     -------
-    Returns a corrected copy or  updates `cudata` with a corrected version of the 
+    Returns a corrected copy or  updates `cudata` with a corrected version of the \
     original `cudata.X` and `cudata.layers['layer']`, depending on `inplace`.
     """
     

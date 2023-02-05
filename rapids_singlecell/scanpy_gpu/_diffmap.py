@@ -7,10 +7,10 @@ import cupy as cp
 
 
 def diffmap(adata: AnnData, 
-            n_comps=15, 
-            neighbors_key = None, 
-            sort = 'decrease',
-            density_normalize = True):
+            n_comps: int=15, 
+            neighbors_key: str = None, 
+            sort: str = 'decrease',
+            density_normalize: bool = True)-> None:
     """
     Diffusion maps has been proposed for visualizing single-cell data.
     
@@ -22,28 +22,28 @@ def diffmap(adata: AnnData,
     
     Parameters
     ----------
-    adata : AnnData
-        Annotated data matrix.
-    n_comps : int, optional (default: 15)
-        The number of dimensions of the representation.
-    neighbors_key : typing.Union[str, NoneType], optional (default: None)
-        If not specified, diffmap looks at .obsp['connectivities'] for neighbors connectivities
-        If specified, diffmap looks at .obsp['neighbors_key_ connectivities'] for neighbors connectivities
-    sort: string (default:'decrease')
-        Leave as is for the same behavior as sc.tl.diffmap
-    density_normalize: boolean(default: True)
-        Leave as is for the same behavior as sc.tl.diffmap
+        adata
+            Annotated data matrix.
+        n_comps 
+            The number of dimensions of the representation.
+        neighbors_key
+            If not specified, diffmap looks at `.obsp['connectivities']` for neighbors connectivities
+            If specified, diffmap looks at `.obsp['neighbors_key_ connectivities']` for neighbors connectivities
+        sort
+            Leave as is for the same behavior as sc.tl.diffmap
+        density_normalize
+            Leave as is for the same behavior as sc.tl.diffmap
     
     Returns
     ----------
-    updates `adata` with the following fields.
-
-    `X_diffmap` : :class:`numpy.ndarray` (`adata.obsm`)
-        Diffusion map representation of data, which is the right eigen basis of
-        the transition matrix with eigenvectors as columns.
-    `diffmap_evals` : :class:`numpy.ndarray` (`adata.uns`)
-        Array of size (number of eigen vectors).
-        Eigenvalues of transition matrix.
+        updates `adata` with the following fields.
+        
+            `X_diffmap` : :class:`numpy.ndarray` (`adata.obsm`)
+                Diffusion map representation of data, which is the right eigen basis of
+                the transition matrix with eigenvectors as columns.
+            `diffmap_evals` : :class:`numpy.ndarray` (`adata.uns`)
+                Array of size (number of eigen vectors).
+                Eigenvalues of transition matrix.
     """
 
     if neighbors_key:

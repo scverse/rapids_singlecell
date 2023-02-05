@@ -10,27 +10,28 @@ from ._utils import _check_nonnegative_integers
 def normalize_total(cudata: cunnData, 
                     target_sum:int,
                     layer: Optional[str] = None,
-                    inplace = True):
+                    inplace:bool = True) -> Optional[cpx.scipy.sparse.csr_matrix]:
     """
     Normalizes rows in matrix so they sum to `target_sum`
 
     Parameters
     ----------
-    cudata: cunnData object
+        cudata: 
+            cunnData object
 
-    target_sum : int
-        Each row will be normalized to sum to this value
-    
-    layer
-        Layer to normalize instead of `X`. If `None`, `X` is normalized.
+        target_sum : 
+            Each row will be normalized to sum to this value
+        
+        layer
+            Layer to normalize instead of `X`. If `None`, `X` is normalized.
 
-    inplace: bool
-        Whether to update `cudata` or return the normalized matrix.
-    
+        inplace
+            Whether to update `cudata` or return the normalized matrix.
+        
     
     Returns
     -------
-    Returns a normalized copy or  updates `cudata` with a normalized version of
+    Returns a normalized copy or  updates `cudata` with a normalized version of \
     the original `cudata.X` and `cudata.layers['layer']`, depending on `inplace`.
     
     """
@@ -77,9 +78,21 @@ def normalize_total(cudata: cunnData,
     else:
         return csr_arr
 
-def log1p(cudata: cunnData):
+def log1p(cudata: cunnData)->None:
+
     """
-    Calculated the natural logarithm of one plus the sparse marttix, element-wise inlpace in cunnData object.
+    Calculated the natural logarithm of one plus the sparse matrix, element-wise inplace in :attr:`.X`.
+    
+    Parameters
+    ----------
+        cudata
+            cunnData object
+
+    
+    Returns
+    ----------
+        Updates :attr:`.X`
+
     """
     cudata.X = cudata.X.log1p()
     cudata.uns["log1p"] = {"base": None}
@@ -89,7 +102,7 @@ def normalize_pearson_residuals(cudata: cunnData,
     clip: Optional[float] = None,
     check_values: bool = True,
     layer: Optional[str] = None,
-    inplace = True):
+    inplace:bool = True) -> Optional[cp.ndarray]:
     """
     Applies analytic Pearson residual normalization, based on Lause21.
     The residuals are based on a negative binomial offset model with overdispersion
@@ -98,27 +111,27 @@ def normalize_pearson_residuals(cudata: cunnData,
 
     Parameters
     ----------
-    cudata:
-        cunnData object
-    theta : float (default: 100)
-        The negative binomial overdispersion parameter theta for Pearson residuals. 
-        Higher values correspond to less overdispersion (var = mean + mean^2/theta), and theta=np.Inf corresponds to a Poisson model.
-    clip : Optional[float] (default: None)
-        Determines if and how residuals are clipped:
-        If None, residuals are clipped to the interval [-sqrt(n_obs), sqrt(n_obs)], where n_obs is the number of cells in the dataset (default behavior).
-        If any scalar c, residuals are clipped to the interval [-c, c]. Set clip=np.Inf for no clipping.
-    check_values : bool (default: True)
-        If True, checks if counts in selected layer are integers as expected by this function, 
-        and return a warning if non-integers are found. Otherwise, proceed without checking. Setting this to False can speed up code for large datasets.
-    layer : Optional[str] (default: None)
-        Layer to use as input instead of X. If None, X is used.
-    inplace : bool (default: True)
-        If True, update cunnData with results. Otherwise, return results. See below for details of what is returned.
+        cudata
+            cunnData object
+        theta 
+            The negative binomial overdispersion parameter theta for Pearson residuals. 
+            Higher values correspond to less overdispersion (var = mean + mean^2/theta), and theta=np.Inf corresponds to a Poisson model.
+        clip 
+            Determines if and how residuals are clipped:
+            If None, residuals are clipped to the interval [-sqrt(n_obs), sqrt(n_obs)], where n_obs is the number of cells in the dataset (default behavior).
+            If any scalar c, residuals are clipped to the interval [-c, c]. Set clip=np.Inf for no clipping.
+        check_values 
+            If True, checks if counts in selected layer are integers as expected by this function, 
+            and return a warning if non-integers are found. Otherwise, proceed without checking. Setting this to False can speed up code for large datasets.
+        layer
+            Layer to use as input instead of X. If None, X is used.
+        inplace 
+            If True, update cunnData with results. Otherwise, return results. See below for details of what is returned.
 
     Returns
     ----------
-    If `inplace=True`, `cudata.X` or the selected layer in `cudata.layers` is updated with the normalized values.
-    If `inplace=False` the normalized matrix is returned.
+        If `inplace=True`, `cudata.X` or the selected layer in `cudata.layers` is updated with the normalized values. \
+        If `inplace=False` the normalized matrix is returned.
 
     """
     

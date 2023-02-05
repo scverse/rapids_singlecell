@@ -1,12 +1,15 @@
 import cupy as cp
-import anndata
+import cupyx as cpx
+from anndata import AnnData
 from anndata._core.index import _normalize_indices
+import anndata
 
 import numpy as np
 import pandas as pd
 import scipy
 from scipy import sparse
-from typing import Any, Union, Optional, Mapping
+from collections import OrderedDict
+from typing import Any, Union, Optional, Mapping, MutableMapping
 from pandas.api.types import infer_dtype
 
 from natsort import natsorted
@@ -30,7 +33,7 @@ class Layer_Mapping(dict):
         if self.shape == item.shape:
             super().__setitem__(key, item)
         else:
-            raise ValueError(f"Shape of {key} does not match `.X`")
+            raise ValueError(f"Shape of {key} does not match :attr:`.X`")
 
 class obsm_Mapping(dict):
     """
@@ -47,7 +50,7 @@ class obsm_Mapping(dict):
         if self.shape == item.shape[0]:
             super().__setitem__(key, item)
         else:
-            raise ValueError(f"Shape of {key} does not match `.n_obs`")
+            raise ValueError(f"Shape of {key} does not match :attr:`.n_obs`")
             
 class varm_Mapping(dict):
     """
@@ -64,21 +67,24 @@ class varm_Mapping(dict):
         if self.shape == item.shape[0]:
             super().__setitem__(key, item)
         else:
-            raise ValueError(f"Shape of {key} does not match `.n_vars`")
+            raise ValueError(f"Shape of {key} does not match :attr:`.n_vars`")
 
 
 
 
 class cunnData:
     """
-    The cunnData objects can be used as an AnnData replacement for the inital preprocessing of single cell Datasets. It replaces some of the most common preprocessing steps within scanpy for annData objects.
-    It can be initalized with a preexisting annData object or with a countmatrix and seperate Dataframes for var and obs. Index of var will be used as gene_names. Initalization with an AnnData object is advised.
+    The cunnData objects can be used as an AnnData replacement for the inital preprocessing 
+    of single cell Datasets. It replaces some of the most common preprocessing steps within 
+    scanpy for annData objects.
+    It can be initalized with a preexisting annData object or with a countmatrix and seperate 
+    Dataframes for var and obs. Index of var will be used as gene_names. Initalization with an 
+    AnnData object is advised.
     """
-    uns = {}
     def __init__(
         self,
-        adata: Optional[anndata.AnnData] = None,
-        X: Optional[Union[np.ndarray,sparse.spmatrix, cp.array, cp.sparse.csr_matrix]] = None,
+        adata: Optional[AnnData] = None,
+        X: Optional[Union[np.ndarray,sparse.spmatrix, cp.ndarray, cpx.scipy.sparse.csr_matrix]] = None,
         obs: Optional[pd.DataFrame] = None,
         var: Optional[pd.DataFrame] = None,
         uns: Optional[Mapping[str, Any]] = None,
@@ -91,13 +97,14 @@ class cunnData:
                     self.X = cp.sparse.csr_matrix(inter, dtype=cp.float32)
                     del inter
                 else:
-                    self.X = cp.sparse.csr_matrix(adata.X, dtype=cp.float32)
-                self.obs = adata.obs.copy()
-                self.var = adata.var.copy()
-                self.uns = adata.uns.copy()
-                self.layers = Layer_Mapping(self.shape)
-                self.obsm = obsm_Mapping(self.shape[0])
-                self.varm = varm_Mapping(self.shape[1])
+                    self._X = cp.sparse.csr_matrix(adata.X, dtype=cp.float32)
+                self._obs = adata.obs.copy()
+                self._var = adata.var.copy()
+                self._uns = adata.uns.copy()
+                self._layers = Layer_Mapping(self.shape)
+                self._obsm = obsm_Mapping(self.shape[0])
+                self._varm = varm_Mapping(self.shape[1])
+                self.raw = None
                 if adata.layers:
                     for key, matrix in adata.layers.items():
                         if not issparse_cpu(matrix):
@@ -106,37 +113,44 @@ class cunnData:
                             
                         else:
                             inter = cp.sparse.csr_matrix(matrix, dtype=cp.float32)
-                        self.layers[key] = inter.copy()
+                        self._layers[key] = inter.copy()
                         del inter
                 if adata.obsm:
                     for key, matrix in adata.obsm.items():
-                        self.obsm[key] = matrix
+                        self._obsm[key] = matrix.copy()
                 if adata.varm:
                     for key, matrix in adata.varm.items():
-                        self.varm[key] = matrix
+                        self._varm[key] = matrix.copy()
                 
             else:
                 if issparse_gpu(X):
-                    self.X = X                
+                    self._X = X      
+                elif isinstance(X,cp.ndarray):
+                    self._X  = X            
                 elif not issparse_cpu(X):
                     inter = scipy.sparse.csr_matrix(X)
-                    self.X = cp.sparse.csr_matrix(inter, dtype=cp.float32)
+                    self._X = cp.sparse.csr_matrix(inter, dtype=cp.float32)
                     del inter
                 else:
-                    self.X = cp.sparse.csr_matrix(X, dtype=cp.float32)
+                    self._X = cp.sparse.csr_matrix(X, dtype=cp.float32)
 
-                self.obs = obs
-                self.var = var
-                self.uns = uns
-                self.layers = Layer_Mapping(self.shape)
-                self.obsm = obsm_Mapping(self.shape[0])
-                self.varm = varm_Mapping(self.shape[1])
+                self._obs = obs
+                self._var = var
+                if uns:
+                    self._uns = uns
+                else:
+                    self._uns = OrderedDict()
+                self._layers = Layer_Mapping(self.shape)
+                self._obsm = obsm_Mapping(self.shape[0])
+                self._varm = varm_Mapping(self.shape[1])
                 self.raw = None
 
                 if layers:
                     for key, matrix in layers.items():
                         if issparse_gpu(matrix):
-                            inter = matrix.copy()               
+                            inter = matrix
+                        elif isinstance(matrix,cp.ndarray):
+                            inter = matrix               
                         elif not issparse_cpu(X):
                             inter = scipy.sparse.csr_matrix(matrix)
                             inter = cp.sparse.csr_matrix(inter, dtype=cp.float32)
@@ -151,28 +165,135 @@ class cunnData:
                     for key, matrix in adata.varm.items():
                         self.varm[key] = matrix
     
-    @property
-    def shape(self):
-        return self.X.shape
-    @property
-    def nnz(self):
-        return self.X.nnz
     
     @property
+    def X(self):
+        """Data matrix of shape :attr:`.n_obs` × :attr:`.n_vars`."""
+        return  self._X
+
+    @X.setter
+    def X(self, value: Optional[Union[cp.ndarray, cpx.scipy.sparse.spmatrix]]):
+        self._X = value
+        self._update_shape()
+
+
+    @property
+    def obs(self):
+        """One-dimensional annotation of observations (`pd.DataFrame`)."""     
+        return  self._obs
+
+    @obs.setter
+    def obs(self, value: pd.DataFrame):
+        if value.shape[0] == self.shape[0]:
+            self._obs = value.copy()
+        else:
+            raise ValueError("dimension mismatch")
+    @property
+    def var(self):
+        """One-dimensional annotation of variables/ features (`pd.DataFrame`)."""
+        return self._var
+
+    @var.setter
+    def var(self,value: pd.DataFrame):
+        if value.shape[0] == self.shape[1]:
+            self._var = value
+        else:
+            raise ValueError("dimension mismatch")
+
+    @property
+    def uns(self):
+        """Unstructured annotation (ordered dictionary)."""
+        return self._uns
+
+    @uns.setter
+    def uns(self, value: MutableMapping):
+        if not isinstance(value, MutableMapping):
+            raise ValueError(
+                "Only mutable mapping types (e.g. dict) are allowed for `.uns`."
+            )
+        if isinstance(value, (anndata.compact.OverloadedDict, anndata._core.views.DictView)):
+            value = value.copy()
+        self._uns = value
+
+    @uns.deleter
+    def uns(self):
+        self.uns = OrderedDict()
+
+    @property
+    def layers(self):
+        """\
+        Dictionary-like object with values of the same dimensions as :attr:`.X`.
+        Layers in cunnData are inspired by AnnData.
+
+        Return the layer named `"unspliced"`::
+            adata.layers["unspliced"]
+        Create or replace the `"spliced"` layer::
+            adata.layers["spliced"] = ...
+        Assign the 10th column of layer `"spliced"` to the variable a::
+            a = adata.layers["spliced"][:, 10]
+        Delete the `"spliced"` layer::
+            del adata.layers["spliced"]
+        Return layers’ names::
+            adata.layers.keys()
+        """  
+        return  self._layers
+
+    @property
+    def obsm(self):
+        """\
+        Multi-dimensional annotation of observations
+        (mutable structured :class:`~numpy.ndarray`).
+        Stores for each key a two or higher-dimensional :class:`~numpy.ndarray`
+        of length :attr:`n_obs`.
+        Is sliced with `data` and `obs` but behaves otherwise like a :term:`mapping`.
+        """      
+        return  self._obsm
+
+
+    @property
+    def varm(self):
+        """\
+        Multi-dimensional annotation of variables/features
+        (mutable structured :class:`~numpy.ndarray`).
+        Stores for each key a two or higher-dimensional :class:`~numpy.ndarray`
+        of length :attr:`n_vars`.
+        Is sliced with `data` and `var` but behaves otherwise like a :term:`mapping`.
+        """
+        return  self._varm
+    
+
+    @property
     def obs_names(self):
+        """Names of observations (alias for `.obs.index`)."""        
         return  self.obs.index
 
     @property
     def var_names(self):
+        """Names of variables (alias for `.var.index`)."""
         return self.var.index
     
     @property
-    def n_obs(self):
+    def n_obs(self)->int:
+        """Number of observations."""
         return self.shape[0]
 
     @property
-    def n_vars(self):
+    def n_vars(self)->int:
+        """Number of variables/features."""
         return self.shape[1]
+
+    @property
+    def shape(self):
+        """Shape of data matrix (:attr:`.n_obs`, :attr:`.n_vars`)."""
+        return self.X.shape
+
+    @property
+    def nnz(self):
+        """Get the count of explicitly-stored values (nonzeros) in :attr:`.X`"""
+        if issparse_gpu(self.X):
+            return self.X.nnz
+        else:
+            return None
     
     def _update_shape(self):
         self.layers.update_shape(self.shape)
@@ -198,7 +319,6 @@ class cunnData:
     def __getitem__(self, index):
         obs_dx,var_dx = _normalize_indices(index, self.obs_names, self.var_names)
         self.X = self.X[obs_dx,var_dx]
-        self._update_shape()
         if self.layers:
             for key, matrix in self.layers.items():
                 self.layers[key] = matrix[obs_dx, var_dx]
@@ -247,10 +367,11 @@ class cunnData:
         
         Returns
         -------
-            annData object
+        :class:`~anndata.AnnData`
+            Annotated data matrix.
         
         """
-        adata = anndata.AnnData(self.X.get())
+        adata = AnnData(self.X.get())
         adata.obs = self.obs.copy()
         adata.var = self.var.copy()
         adata.uns = self.uns.copy()

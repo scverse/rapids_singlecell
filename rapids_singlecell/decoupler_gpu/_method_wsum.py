@@ -7,6 +7,8 @@ from decoupler.pre import extract, match, rename_net, get_net_mat, filt_min_n
 from anndata import AnnData
 from tqdm import tqdm
 
+from typing import Union, Optional
+
 
 def run_perm(estimate, mat, net, idxs, times, seed):
     mat = cp.ascontiguousarray(mat)
@@ -72,48 +74,61 @@ def wsum(mat, net, times, batch_size, seed, verbose):
     return estimate, norm, corr, pvals
 
 
-def run_wsum(mat, net, source='source', target='target', weight='weight', times=1000, batch_size=10000, min_n=5, seed=42,
-             verbose=False, use_raw=True):
+def run_wsum(mat:Union[AnnData,pd.DataFrame,list], 
+            net:pd.DataFrame, 
+            source='source', 
+            target='target', 
+            weight='weight', 
+            times=1000, 
+            batch_size:int=10000, 
+            min_n:int=5, 
+            seed:int=42,
+            verbose:bool=False,
+            use_raw:bool=True)-> Optional[tuple]:
     """
     Weighted sum (WSUM).
     WSUM infers regulator activities by first multiplying each target feature by its associated weight which then are summed
     to an enrichment score (`wsum_estimate`). Furthermore, permutations of random target features can be performed to obtain a
     null distribution that can be used to compute a z-score (`wsum_norm`), or a corrected estimate (`wsum_corr`) by multiplying
     `wsum_estimate` by the minus log10 of the obtained empirical p-value.
+
     Parameters
     ----------
-    mat : list, DataFrame or AnnData
-        List of [features, matrix], dataframe (samples x features) or an AnnData instance.
-    net : DataFrame
-        Network in long format.
-    source : str
-        Column name in net with source nodes.
-    target : str
-        Column name in net with target nodes.
-    weight : str
-        Column name in net with weights.
-    times : int
-        How many random permutations to do.
-    batch_size : int
-        Size of the batches to use. Increasing this will consume more memmory but it will run faster.
-    min_n : int
-        Minimum of targets per source. If less, sources are removed.
-    seed : int
-        Random seed to use.
-    verbose : bool
-        Whether to show progress.
-    use_raw : bool
-        Use raw attribute of mat if present.
+        mat
+            List of [features, matrix], dataframe (samples x features) or an AnnData instance.
+        net
+            Network in long format.
+        source
+            Column name in net with source nodes.
+        target
+            Column name in net with target nodes.
+        weight
+            Column name in net with weights.
+        times
+            How many random permutations to do.
+        batch_size
+            Size of the batches to use. Increasing this will consume more memmory but it will run faster.
+        min_n
+            Minimum of targets per source. If less, sources are removed.
+        seed 
+            Random seed to use.
+        verbose
+            Whether to show progress.
+        use_raw
+            Use raw attribute of mat if present.
+        
     Returns
     -------
-    estimate : DataFrame
-        WSUM scores. Stored in `.obsm['wsum_estimate']` if `mat` is AnnData.
-    norm : DataFrame
-        Normalized WSUM scores. Stored in `.obsm['wsum_norm']` if `mat` is AnnData.
-    corr : DataFrame
-        Corrected WSUM scores. Stored in `.obsm['wsum_corr']` if `mat` is AnnData.
-    pvals : DataFrame
-        Obtained p-values. Stored in `.obsm['wsum_pvals']` if `mat` is AnnData.
+        Updates `adata` with the following fields.
+
+            **estimate** : DataFrame
+                WSUM scores. Stored in `.obsm['wsum_estimate']` if `mat` is AnnData.
+            **norm**: DataFrame
+                Normalized WSUM scores. Stored in `.obsm['wsum_norm']` if `mat` is AnnData.
+            **corr** : DataFrame
+                Corrected WSUM scores. Stored in `.obsm['wsum_corr']` if `mat` is AnnData.
+            **pvals** : DataFrame
+                Obtained p-values. Stored in `.obsm['wsum_pvals']` if `mat` is AnnData.
     """
 
     # Extract sparse matrix and array of genes

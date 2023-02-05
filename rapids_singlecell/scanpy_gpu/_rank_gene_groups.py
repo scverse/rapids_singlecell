@@ -3,6 +3,7 @@ from anndata import AnnData
 import numpy as np
 import pandas as pd
 import warnings
+from typing import Iterable, Union, Optional, Literal
 
 
 def _select_groups(labels, groups_order_subset='all'):
@@ -44,39 +45,56 @@ def _select_groups(labels, groups_order_subset='all'):
 
 def rank_genes_groups_logreg(
     adata: AnnData,
-    groupby,  
-    groups="all",
-    reference='rest',
-    n_genes = None,
-    use_raw = None,
-    layer= None,
+    groupby:str,  
+    groups:Union[Literal['all'], Iterable[str]]="all",
+    use_raw:bool = None,
+    reference:str='rest',
+    n_genes:int = None,
+    layer:str= None,
     **kwds,
-):
+)-> None:
 
     """
     Rank genes for characterizing groups.
 
     Parameters
     ----------
+        adata
+            Annotated data matrix.
+        groupby
+            The key of the observations grouping to consider.
+        groups
+            Subset of groups, e.g. [`'g1'`, `'g2'`, `'g3'`], to which comparison
+            shall be restricted, or `'all'` (default), for all groups.
+        use_raw
+            Use `raw` attribute of `adata` if present.
+        reference
+            If `'rest'`, compare each group to the union of the rest of the group.
+            If a group identifier, compare with respect to this group.
+        n_genes
+            The number of genes that appear in the returned tables.
+            Defaults to all genes.
+        layer
+            Key from `adata.layers` whose value will be used to perform tests on.
 
-    adata : adata object
+    Returns
+    --------
+        Updates `adata` with the following fields.
 
-    labels : cudf.Series of size (n_cells,)
-        Observations groupings to consider
+            **names** : structured `np.ndarray` (`.uns['rank_genes_groups']`)
+                Structured array to be indexed by group id storing the gene
+                names. Ordered according to scores.
 
-    var_names : cudf.Series of size (n_genes,)
-        Names of genes in X
+            **scores** : structured `np.ndarray` (`.uns['rank_genes_groups']`)
+                Structured array to be indexed by group id storing the z-score
+                underlying the computation of a p-value for each gene for each
+                group. Ordered according to scores.
+                
+            **pvals** : structured `np.ndarray` (`.uns['rank_genes_groups']`)
+                p-values.
 
-    groups : Iterable[str] (default: 'all')
-        Subset of groups, e.g. ['g1', 'g2', 'g3'], to which comparison
-        shall be restricted, or 'all' (default), for all groups.
-
-    reference : str (default: 'rest')
-        If 'rest', compare each group to the union of the rest of the group.
-        If a group identifier, compare with respect to this group.
-
-    n_genes : int (default: 100)
-        The number of genes that appear in the returned tables.
+            **pvals_adj** : structured `np.ndarray` (`.uns['rank_genes_groups']`)
+                Corrected p-values.
     """
 
     #### Wherever we see "adata.obs[groupby], we should just replace w/ the groups"

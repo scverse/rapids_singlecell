@@ -8,56 +8,57 @@ import math
 import numpy as np
 
 def pca(adata: AnnData, 
-        layer = None, 
-        n_comps = 50,
-        zero_center = True,
+        layer:str = None, 
+        n_comps:int = 50,
+        zero_center:bool = True,
         use_highly_variable: Optional[bool] = None,
-        chunked = False,
-        chunk_size = None):
+        chunked:bool = False,
+        chunk_size:int = None)-> None:
     """
-    Performs PCA using the cuML decomposition function for the `AnnData` object.
+    Performs PCA using the cuML decomposition function for the :class:`~anndata.AnnData` object.
     
     Parameters
     ----------
-    adata : annData object
-    
-    layer
-        If provided, use `adata.layers[layer]` for expression values instead of `adata.X`.
+        adata
+            annData object
+        
+        layer
+            If provided, use `adata.layers[layer]` for expression values instead of `adata.X`.
 
-    n_comps: int (default: 50)
-        Number of principal components to compute. Defaults to 50
-    
-    zero_center
-        If `True`, compute standard PCA from covariance matrix.
-        If `False`, omit zero-centering variables
-    
-    use_highly_variable
-        Whether to use highly variable genes only, stored in
-        `.var['highly_variable']`.
-        By default uses them if they have been determined beforehand.
+        n_comps
+            Number of principal components to compute. Defaults to 50
         
-    chunked
-        If `True`, perform an incremental PCA on segments of `chunk_size`.
-        The incremental PCA automatically zero centers and ignores settings of
-        `random_seed` and `svd_solver`. If `False`, perform a full PCA.
+        zero_center
+            If `True`, compute standard PCA from covariance matrix.
+            If `False`, omit zero-centering variables
         
-    chunk_size
-        Number of observations to include in each chunk.
-        Required if `chunked=True` was passed.
+        use_highly_variable
+            Whether to use highly variable genes only, stored in
+            `.var['highly_variable']`.
+            By default uses them if they have been determined beforehand.
+            
+        chunked
+            If `True`, perform an incremental PCA on segments of `chunk_size`.
+            The incremental PCA automatically zero centers and ignores settings of
+            `random_seed` and `svd_solver`. If `False`, perform a full PCA.
+            
+        chunk_size
+            Number of observations to include in each chunk.
+            Required if `chunked=True` was passed.
     
     Returns
-    
-    else adds fields to `adata`:
-
-    `.obsm['X_pca']`
-         PCA representation of data.  
-    `.varm['PCs']`
-         The principal components containing the loadings.
-    `.uns['pca']['variance_ratio']`
-         Ratio of explained variance.
-    `.uns['pca']['variance']`
-         Explained variance, equivalent to the eigenvalues of the
-         covariance matrix.
+    --------
+        adds fields to `adata`:
+        
+            `.obsm['X_pca']`
+                    PCA representation of data.  
+            `.varm['PCs']`
+                    The principal components containing the loadings.
+            `.uns['pca']['variance_ratio']`
+                    Ratio of explained variance.
+            `.uns['pca']['variance']`
+                    Explained variance, equivalent to the eigenvalues of the
+                    covariance matrix.
     """
 
     if use_highly_variable is True and 'highly_variable' not in adata.var.keys():

@@ -6,40 +6,46 @@ def mde(
     adata: AnnData,
     device: Optional[Literal["cpu", "cuda"]] = None,
     n_neighbors: int = 15,
-    n_pcs = None,
-    use_rep = None,
+    n_pcs:int = None,
+    use_rep:str = None,
     **kwargs,
 ) -> None:
     """
     Util to run :func:`pymde.preserve_neighbors` for visualization of single cell embeddings.
+
     Parameters
     ----------
-    adata : AnnData
-        Annotated data matrix.
-    device : str
-        Whether to run on cpu or gpu ("cuda"). If None, tries to run on gpu if available.
-    n_neighbors: int
-        use this many neighbors  
-    n_pcs: int
-        use this many PCs    
-    use_rep:str
-        use this obsm keys (defaults to `X_pca`)
-    kwargs
-        Keyword args to :func:`pymde.preserve_neighbors`
+        adata
+            Annotated data matrix.
+        device
+            Whether to run on cpu or gpu ("cuda"). If None, tries to run on gpu if available.
+        n_neighbors
+            use this many neighbors  
+        n_pcs
+            use this many PCs    
+        use_rep
+            use this obsm keys (defaults to `X_pca`)
+        kwargs
+            Keyword args to :func:`pymde.preserve_neighbors`
+
     Returns
     -------
-    The pymde embedding, defaults to two dimensions.
+        Updates `adata` with the following fields.
+        
+            **X_mde** : `np.ndarray` (`adata.obs`, dtype `float`)
+                X_mde coordinates of data.
+        
     Notes
     -----
-    This function adapted from scvi-tools.
-    The appropriateness of use of visualization of high-dimensional spaces in single-
-    cell omics remains an open research questions. See:
-    Chari, Tara, Joeyta Banerjee, and Lior Pachter. "The specious art of single-cell genomics." bioRxiv (2021).
-    If you use this function in your research please cite:
-    Agrawal, Akshay, Alnur Ali, and Stephen Boyd. "Minimum-distortion embedding." arXiv preprint arXiv:2103.02559 (2021).
+        This function adapted from scvi-tools.
+        The appropriateness of use of visualization of high-dimensional spaces in single-
+        cell omics remains an open research questions. See:
+        Chari, Tara, Joeyta Banerjee, and Lior Pachter. "The specious art of single-cell genomics." bioRxiv (2021).
+        If you use this function in your research please cite:
+        Agrawal, Akshay, Alnur Ali, and Stephen Boyd. "Minimum-distortion embedding." arXiv preprint arXiv:2103.02559 (2021).
     """
-    import torch
     try:
+        import torch
         import pymde
     except ImportError:
         raise ImportError("Please install pymde package via `pip install pymde`")
