@@ -43,6 +43,7 @@ extensions = [
     "sphinx.ext.githubpages",
     "sphinx_autodoc_typehints",
     "readthedocs_ext.readthedocs",
+    "sphinx.ext.imgconverter",
     "sphinx_copybutton",
     "nbsphinx",
     "scanpydoc",
