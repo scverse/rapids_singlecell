@@ -15,7 +15,7 @@ def pca(adata: AnnData,
         chunked:bool = False,
         chunk_size:int = None)-> None:
     """
-    Performs PCA using the cuML decomposition function for the `AnnData` object.
+    Performs PCA using the cuML decomposition function for the :class:`~anndata.AnnData` object.
     
     Parameters
     ----------

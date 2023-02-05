@@ -15,8 +15,7 @@ def harmony_integrate(
     gpu-computing based port of Harmony, to integrate single-cell data
     stored in an AnnData object. As Harmony works by adjusting the
     principal components, this function should be run after performing
-    PCA but before computing the neighbor graph, as illustrated in the
-    example below.
+    PCA but before computing the neighbor graph.
 
     Parameters
     ----------
