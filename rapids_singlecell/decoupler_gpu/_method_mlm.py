@@ -8,7 +8,7 @@ from anndata import AnnData
 from scipy import stats
 
 from tqdm import tqdm
-
+from typing import Union, Optional
 
 def fit_mlm(X, y, inv, df):
     X = cp.ascontiguousarray(X)
@@ -60,39 +60,50 @@ def mlm(mat, net, batch_size=10000, verbose=False):
     return es, pvals
 
 
-def run_mlm(mat, net, source='source', target='target', weight='weight', batch_size=10000,
-            min_n=5, verbose=False, use_raw=True):
+def run_mlm(mat:Union[AnnData,pd.DataFrame,list], 
+            net:pd.DataFrame, 
+            source:str='source',
+            target:str='target', 
+            weight:str='weight', 
+            batch_size:int=10000,
+            min_n:int=5, 
+            verbose:bool=False, 
+            use_raw:bool=True)-> Optional[tuple]:
     """
     Multivariate Linear Model (MLM).
     MLM fits a multivariate linear model for each sample, where the observed molecular readouts in `mat` are the response
     variable and the regulator weights in `net` are the covariates. Target features with no associated weight are set to
     zero. The obtained t-values from the fitted model are the activities (`mlm_estimate`) of the regulators in `net`.
+
     Parameters
     ----------
-    mat : list, DataFrame or AnnData
-        List of [features, matrix], dataframe (samples x features) or an AnnData instance.
-    net : DataFrame
-        Network in long format.
-    source : str
-        Column name in net with source nodes.
-    target : str
-        Column name in net with target nodes.
-    weight : str
-        Column name in net with weights.
-    batch_size : int
-        Size of the samples to use for each batch. Increasing this will consume more memmory but it will run faster.
-    min_n : int
-        Minimum of targets per source. If less, sources are removed.
-    verbose : bool
-        Whether to show progress.
-    use_raw : bool
-        Use raw attribute of mat if present.
+        mat
+            List of [features, matrix], dataframe (samples x features) or an AnnData instance.
+        net
+            Network in long format.
+        source
+            Column name in net with source nodes.
+        target
+            Column name in net with target nodes.
+        weight
+            Column name in net with weights.
+        batch_size
+            Size of the samples to use for each batch. Increasing this will consume more memmory but it will run faster.
+        min_n
+            Minimum of targets per source. If less, sources are removed.
+        verbose
+            Whether to show progress.
+        use_raw
+            Use raw attribute of mat if present.
+        
     Returns
     -------
-    estimate : DataFrame
-        MLM scores. Stored in `.obsm['mlm_estimate']` if `mat` is AnnData.
-    pvals : DataFrame
-        Obtained p-values. Stored in `.obsm['mlm_pvals']` if `mat` is AnnData.
+        Updates `adata` with the following fields.
+
+            **estimate** : DataFrame
+                MLM scores. Stored in `.obsm['mlm_estimate']` if `mat` is AnnData.
+            **pvals** : DataFrame
+                Obtained p-values. Stored in `.obsm['mlm_pvals']` if `mat` is AnnData.
     """
 
     # Extract sparse matrix and array of genes
