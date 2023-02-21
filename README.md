@@ -10,7 +10,7 @@ The easiest way to install *rapids-singlecell* is to use one of the *yaml* file 
 ```
 conda env create -f conda/rsc_rapids_22.12.yml
 # or
-mamba env create -f conda/rsc_rapids_23.02a.yml
+mamba env create -f conda/rsc_rapids_23.02.yml
 ```
 ### PyPI
 As of version 0.4.0 *rapids-singlecell* is now on PyPI.
