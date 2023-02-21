@@ -1,4 +1,4 @@
-name: rapids_singlecell_0.4.0
+name: rapids_singlecell_0.5.0
 channels:
  - rapidsai
  - nvidia
@@ -6,7 +6,7 @@ channels:
  - bioconda
 dependencies:
  - rapids=22.12
- - python=3.9
+ - python=3.10
  - cudatoolkit=11.5
  - cudnn
  - cutensor
