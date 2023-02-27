@@ -94,7 +94,7 @@ class cunnData:
             if adata:
                 if not issparse_cpu(adata.X):
                     inter = scipy.sparse.csr_matrix(adata.X)
-                    self.X = cp.sparse.csr_matrix(inter, dtype=cp.float32)
+                    self._X = cp.sparse.csr_matrix(inter, dtype=cp.float32)
                     del inter
                 else:
                     self._X = cp.sparse.csr_matrix(adata.X, dtype=cp.float32)
@@ -318,29 +318,27 @@ class cunnData:
 
     def __getitem__(self, index):
         obs_dx,var_dx = _normalize_indices(index, self.obs_names, self.var_names)
-        self.X = self.X[obs_dx,var_dx]
+        cudata = cunnData(X =self.X[obs_dx,var_dx].copy(),
+                        obs = self.obs.iloc[obs_dx,:].copy(),
+                        var = self.var.iloc[var_dx,:].copy(),
+                        uns=self.uns)
+
         if self.layers:
             for key, matrix in self.layers.items():
-                self.layers[key] = matrix[obs_dx, var_dx]
+                cudata.layers[key] = matrix[obs_dx, var_dx].copy()
         if self.obsm:
             for key, matrix in self.obsm.items():
                 if isinstance(matrix, pd.DataFrame):
-                    self.obsm[key] = matrix.iloc[obs_dx, :]
+                    cudata.obsm[key] = matrix.iloc[obs_dx, :].copy()
                 else:
-                    self.obsm[key] = matrix[obs_dx, :]
+                    cudata.obsm[key] = matrix[obs_dx, :].copy()
         if self.varm:
             for key, matrix in self.varm.items():
                 if isinstance(matrix, pd.DataFrame):
-                    self.varm[key] = matrix.iloc[var_dx, :]
+                    cudata.varm[key] = matrix.iloc[var_dx, :].copy()
                 else:
-                    self.varm[key] = matrix[var_dx, :]
-        return(cunnData(X = self.X,
-                        obs = self.obs.iloc[obs_dx,:],
-                        var = self.var.iloc[var_dx,:],
-                        uns=self.uns,
-                        layers= self.layers,
-                        obsm= self.obsm,
-                        varm= self.varm))
+                    cudata.varm[key] = matrix[var_dx, :].copy()
+        return(cudata)
     
     def _gen_repr(self, n_obs, n_vars) -> str:
         descr = f"cunnData object with n_obs × n_vars = {n_obs} × {n_vars}"
