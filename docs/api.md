@@ -38,7 +38,7 @@ import rapids_singlecell as rsc
 .. autosummary::
    :toctree: generated/
 
-   pp.calculate_qc
+   pp.calculate_qc_metrics
    pp.filter_cells
    pp.filter_genes
    pp.normalize_total
