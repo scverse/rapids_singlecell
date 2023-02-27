@@ -15,6 +15,8 @@ on_rtd = os.environ.get('READTHEDOCS') == 'True'
 
 info = metadata("rapids_singlecell")
 project_name = "rapids-singlecell"
+project = "rapids-singlecell"
+title = "accelerating single cell analysis"
 author = info["Author"]
 copyright = f"{datetime.now():%Y}, {author}."
 version = info["Version"]
