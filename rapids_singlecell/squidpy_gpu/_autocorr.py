@@ -6,6 +6,7 @@ from typing import (
     Literal,  # < 3.8
     Sequence,
     Union,
+    Optional,
 )
 from scipy import sparse
 import cupy as cp
@@ -20,15 +21,14 @@ def spatial_autocorr(
     genes: Union[str, Sequence[str],None] = None,
     mode: Literal["moran", "geary"] = "moran",
     transformation: bool = True,
-    n_perms: int | None = None,
+    n_perms: Union[int,None]= None,
     two_tailed: bool = False,
     corr_method: Union[str,None] = "fdr_bh",
     layer: Union[str,None] = None,
     use_raw: bool = False,
     use_sparse:bool = False,
     copy: bool = False,
-
-) -> pd.DataFrame | None:
+) -> Optional[pd.DataFrame]:
     """
     Calculate spatial autocorrelation for genes in an AnnData object.
 
