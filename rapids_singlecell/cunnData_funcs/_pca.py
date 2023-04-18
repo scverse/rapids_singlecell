@@ -1,7 +1,6 @@
 from ..cunnData import cunnData
 
 from cuml.decomposition import PCA, TruncatedSVD
-from anndata import AnnData
 from typing import Optional
 
 from cupy.sparse import issparse
