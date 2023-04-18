@@ -15,7 +15,7 @@ The default installer doesn't cover RAPIDS nor cupy. Information on how to insta
 
 If you want to use RAPIDS new PyPI packages, the whole library with all dependencies can be install with:
 ```
-pip install 'rapids-singlecell[rapids]' --extra-index-url=https://pypi.ngc.nvidia.com
+pip install 'rapids-singlecell[rapids]' --extra-index-url=https://pypi.nvidia.com
 ```
 Please note that the RAPIDS PyPI packages are still considered experimental. It is important to ensure that the CUDA environment is set up correctly so that RAPIDS and Cupy can locate the necessary libraries.
 

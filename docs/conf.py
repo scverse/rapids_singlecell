@@ -100,6 +100,7 @@ intersphinx_mapping = {
     "cugraph":('https://docs.rapids.ai/api/cugraph/stable/', None),
     "pymde":('https://pymde.org',None),
     "scanpy":("https://scanpy.readthedocs.io/en/stable/",None),
+    "squidpy":("https://squidpy.readthedocs.io/en/stable/",None),
     "seaborn":("https://seaborn.pydata.org/",None),
     "decoupler":("https://decoupler-py.readthedocs.io/en/latest/",None),
     "rmm":("https://docs.rapids.ai/api/rmm/stable/",None)

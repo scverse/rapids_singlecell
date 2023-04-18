@@ -10,4 +10,5 @@ Sample notebooks
    notebooks/demo_gpu-seuratv3
    notebooks/demo_gpu-PR
    notebooks/demo_gpu-seuratv3-brain
+   notebooks/autocorr_benchmark
 
