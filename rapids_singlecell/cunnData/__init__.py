@@ -6,7 +6,6 @@ import anndata
 
 import numpy as np
 import pandas as pd
-import scipy
 from scipy import sparse
 from collections import OrderedDict
 from typing import Any, Union, Optional, Mapping, MutableMapping
@@ -93,7 +92,7 @@ class cunnData:
         varm: Optional[Mapping[str, Any]] = None):
             if adata:
                 if not issparse_cpu(adata.X):
-                    inter = scipy.sparse.csr_matrix(adata.X)
+                    inter = sparse.csr_matrix(adata.X)
                     self._X = cp.sparse.csr_matrix(inter, dtype=cp.float32)
                     del inter
                 else:
@@ -108,7 +107,7 @@ class cunnData:
                 if adata.layers:
                     for key, matrix in adata.layers.items():
                         if not issparse_cpu(matrix):
-                            inter = scipy.sparse.csr_matrix(matrix)
+                            inter = sparse.csr_matrix(matrix)
                             inter = cp.sparse.csr_matrix(inter, dtype=cp.float32)
                             
                         else:
@@ -128,7 +127,7 @@ class cunnData:
                 elif isinstance(X,cp.ndarray):
                     self._X  = X            
                 elif not issparse_cpu(X):
-                    inter = scipy.sparse.csr_matrix(X)
+                    inter = sparse.csr_matrix(X)
                     self._X = cp.sparse.csr_matrix(inter, dtype=cp.float32)
                     del inter
                 else:
@@ -152,7 +151,7 @@ class cunnData:
                         elif isinstance(matrix,cp.ndarray):
                             inter = matrix               
                         elif not issparse_cpu(X):
-                            inter = scipy.sparse.csr_matrix(matrix)
+                            inter = sparse.csr_matrix(matrix)
                             inter = cp.sparse.csr_matrix(inter, dtype=cp.float32)
                         else:
                             inter = cp.sparse.csr_matrix(matrix, dtype=cp.float32)
