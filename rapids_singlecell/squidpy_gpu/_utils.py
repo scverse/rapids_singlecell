@@ -14,7 +14,7 @@ def _p_value_calc(
     sims: Union[np.ndarray, None],
     weights: Union[spmatrix, np.ndarray],
     params: Dict[str, Any],
-) -> Dict[str, Any]:
+):
     """
     Handle p-value calculation for spatial autocorrelation function.
     Parameters
@@ -65,7 +65,7 @@ def _p_value_calc(
     return results
 
 
-def _analytic_pval(score: np.ndarray, g: Union[spmatrix, np.ndarray], params: Dict[str, Any]) -> tuple[np.ndarray, float]:
+def _analytic_pval(score: np.ndarray, g: Union[spmatrix, np.ndarray], params: Dict[str, Any]):
     """
     Analytic p-value computation.
     See `Moran's I <https://pysal.org/esda/_modules/esda/moran.html#Moran>`_ and
@@ -92,7 +92,7 @@ def _analytic_pval(score: np.ndarray, g: Union[spmatrix, np.ndarray], params: Di
     return p_norm, Vscore_norm
 
 
-def _g_moments(w: Union[spmatrix, np.ndarray]) -> tuple[float, float, float]:
+def _g_moments(w: Union[spmatrix, np.ndarray]):
     """
     Compute moments of adjacency matrix for analytic p-value calculation.
     See `pysal <https://pysal.org/libpysal/_modules/libpysal/weights/weights.html#W>`_ implementation.
