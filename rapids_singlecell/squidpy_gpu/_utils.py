@@ -3,6 +3,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Dict,
+    Union,
 )
 from scipy import stats
 from scipy.sparse import spmatrix
@@ -10,7 +11,7 @@ from scipy.sparse import spmatrix
 ### Taken from squidpy: https://github.com/scverse/squidpy/blob/main/squidpy/gr/_ppatterns.py
 def _p_value_calc(
     score: np.ndarray,
-    sims: np.ndarray | None,
+    sims: Union[np.ndarray, None],
     weights: spmatrix | np.ndarray,
     params: Dict[str, Any],
 ) -> Dict[str, Any]:
