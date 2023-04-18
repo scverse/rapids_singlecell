@@ -120,10 +120,23 @@ Basic plotting function for {class}`~rapids_singlecell.cunnData.cunnData` to ass
     tl.harmony_integrate
 ```
 
+## squidpy-GPU: `gr`
 
-## Decoupler-GPU: `dcg`
+{mod}`squidpy.gr` is a tool for the analysis of spatial molecular data. {mod}`rapids_singlecell.gr` acclerates some of these anlysis.
 
-{mod}`decoupler` is a package, that contains different statistical methods to extract biological activities. {mod}`rapids_singlecell.dcg` acclerates some of these methods.
+```{eval-rst}
+.. module:: rapids_singlecell.gr
+.. currentmodule:: rapids_singlecell
+
+.. autosummary::
+    :toctree: generated
+
+    gr.spatial_autocorr
+```
+
+## decoupler-GPU: `dcg`
+
+{mod}`decoupler` contains different statistical methods to extract biological activities. {mod}`rapids_singlecell.dcg` acclerates some of these methods.
 
 ```{eval-rst}
 .. module:: rapids_singlecell.dcg
