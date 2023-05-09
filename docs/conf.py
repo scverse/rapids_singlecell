@@ -103,7 +103,9 @@ intersphinx_mapping = {
     "squidpy":("https://squidpy.readthedocs.io/en/stable/",None),
     "seaborn":("https://seaborn.pydata.org/",None),
     "decoupler":("https://decoupler-py.readthedocs.io/en/latest/",None),
-    "rmm":("https://docs.rapids.ai/api/rmm/stable/",None)
+    "rmm":("https://docs.rapids.ai/api/rmm/stable/",None),
+    "statsmodels":("https://www.statsmodels.org/stable/",None),
+    "omnipath":("https://omnipath.readthedocs.io/en/latest/",None),
 }
 
 # List of patterns, relative to source directory, that match files and
