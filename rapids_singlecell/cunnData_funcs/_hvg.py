@@ -2,30 +2,32 @@ import cupy as cp
 import cupyx as cpx
 import numpy as np
 import pandas as pd
+import math
 import warnings
 from typing import Optional
 
 from ..cunnData import cunnData
 from ._utils import _check_nonnegative_integers, _get_mean_var
 
+
 def highly_variable_genes(
-    cudata:cunnData,
+    cudata: cunnData,
     layer: str = None,
     min_mean: float = 0.0125,
-    max_mean: float=3,
-    min_disp:float= 0.5,
-    max_disp: float  =np.inf,
+    max_mean: float = 3,
+    min_disp: float = 0.5,
+    max_disp: float = np.inf,
     n_top_genes: int = None,
-    flavor: str = 'seurat',
+    flavor: str = "seurat",
     n_bins: int = 20,
     span: float = 0.3,
     check_values: bool = True,
-    theta:int = 100,
-    clip:bool = None,
-    chunksize:int = 1000,
-    n_samples:int = 10000, 
-    batch_key:str = None) -> None:
-
+    theta: int = 100,
+    clip: bool = None,
+    chunksize: int = 1000,
+    n_samples: int = 10000,
+    batch_key: str = None,
+) -> None:
     """\
     Annotate highly variable genes. 
     Expects logarithmized data, except when `flavor='seurat_v3','pearson_residuals','poisson_gene_selection'`, in which count data is expected.
@@ -116,34 +118,36 @@ def highly_variable_genes(
             `highly_variable_intersection` : bool
                 If batch_key is given, this denotes the genes that are highly variable in all batches
     """
-    if flavor == 'seurat_v3':
+    if flavor == "seurat_v3":
         _highly_variable_genes_seurat_v3(
-            cudata = cudata,
+            cudata=cudata,
             layer=layer,
             n_top_genes=n_top_genes,
             batch_key=batch_key,
             span=span,
-            check_values = check_values,
+            check_values=check_values,
         )
-    elif flavor == 'pearson_residuals':
+    elif flavor == "pearson_residuals":
         _highly_variable_pearson_residuals(
-            cudata = cudata,
-            theta= theta,
-            clip = clip,
+            cudata=cudata,
+            theta=theta,
+            clip=clip,
             n_top_genes=n_top_genes,
             batch_key=batch_key,
-            check_values = check_values,
+            check_values=check_values,
             layer=layer,
-            chunksize= chunksize)
-    elif flavor == 'poisson_gene_selection':
+            chunksize=chunksize,
+        )
+    elif flavor == "poisson_gene_selection":
         _poisson_gene_selection(
-            cudata =cudata,
+            cudata=cudata,
             n_top_genes=n_top_genes,
             batch_key=batch_key,
-            check_values = check_values,
+            check_values=check_values,
             layer=layer,
-            n_samples = n_samples,
-            minibatch_size= chunksize)
+            n_samples=n_samples,
+            minibatch_size=chunksize,
+        )
     else:
         if batch_key is None:
             X = cudata.layers[layer] if layer is not None else cudata.X
@@ -155,14 +159,17 @@ def highly_variable_genes(
                 max_mean=max_mean,
                 n_top_genes=n_top_genes,
                 n_bins=n_bins,
-                flavor=flavor)
+                flavor=flavor,
+            )
         else:
             cudata.obs[batch_key] = cudata.obs[batch_key].astype("category")
             batches = cudata.obs[batch_key].cat.categories
             df = []
             genes = cudata.var.index.to_numpy()
             for batch in batches:
-                inter_matrix = cudata.X[np.where(cudata.obs[batch_key]==batch)[0],].tocsc()
+                inter_matrix = cudata.X[
+                    np.where(cudata.obs[batch_key] == batch)[0],
+                ].tocsc()
                 thr_org = cp.diff(inter_matrix.indptr).ravel()
                 thr = cp.where(thr_org >= 1)[0]
                 thr_2 = cp.where(thr_org < 1)[0]
@@ -171,30 +178,34 @@ def highly_variable_genes(
                 thr_2 = thr_2.get()
                 inter_genes = genes[thr]
                 other_gens_inter = genes[thr_2]
-                hvg_inter = _highly_variable_genes_single_batch(inter_matrix,
-                                                                min_disp=min_disp,
-                                                                max_disp=max_disp,
-                                                                min_mean=min_mean,
-                                                                max_mean=max_mean,
-                                                                n_top_genes=n_top_genes,
-                                                                n_bins=n_bins,
-                                                                flavor=flavor)
+                hvg_inter = _highly_variable_genes_single_batch(
+                    inter_matrix,
+                    min_disp=min_disp,
+                    max_disp=max_disp,
+                    min_mean=min_mean,
+                    max_mean=max_mean,
+                    n_top_genes=n_top_genes,
+                    n_bins=n_bins,
+                    flavor=flavor,
+                )
                 hvg_inter["gene"] = inter_genes
                 missing_hvg = pd.DataFrame(
                     np.zeros((len(other_gens_inter), len(hvg_inter.columns))),
                     columns=hvg_inter.columns,
                 )
-                missing_hvg['highly_variable'] = missing_hvg['highly_variable'].astype(bool)
-                missing_hvg['gene'] = other_gens_inter
-                #hvg = hvg_inter.append(missing_hvg, ignore_index=True)
-                hvg = pd.concat([hvg_inter,missing_hvg], ignore_index=True)
+                missing_hvg["highly_variable"] = missing_hvg["highly_variable"].astype(
+                    bool
+                )
+                missing_hvg["gene"] = other_gens_inter
+                # hvg = hvg_inter.append(missing_hvg, ignore_index=True)
+                hvg = pd.concat([hvg_inter, missing_hvg], ignore_index=True)
                 idxs = np.concatenate((thr, thr_2))
                 hvg = hvg.loc[np.argsort(idxs)]
                 df.append(hvg)
-            
+
             df = pd.concat(df, axis=0)
-            df['highly_variable'] = df['highly_variable'].astype(int)
-            df = df.groupby('gene').agg(
+            df["highly_variable"] = df["highly_variable"].astype(int)
+            df = df.groupby("gene").agg(
                 dict(
                     means=np.nanmean,
                     dispersions=np.nanmean,
@@ -203,23 +214,23 @@ def highly_variable_genes(
                 )
             )
             df.rename(
-                columns=dict(highly_variable='highly_variable_nbatches'), inplace=True
+                columns=dict(highly_variable="highly_variable_nbatches"), inplace=True
             )
-            df['highly_variable_intersection'] = df['highly_variable_nbatches'] == len(
+            df["highly_variable_intersection"] = df["highly_variable_nbatches"] == len(
                 batches
             )
             if n_top_genes is not None:
                 # sort genes by how often they selected as hvg within each batch and
                 # break ties with normalized dispersion across batches
-                df=df.sort_values(
-                    ['highly_variable_nbatches', 'dispersions_norm'],
+                df = df.sort_values(
+                    ["highly_variable_nbatches", "dispersions_norm"],
                     ascending=False,
-                    na_position='last'
+                    na_position="last",
                 )
-                
+
                 high_var = np.zeros(df.shape[0])
                 high_var[:n_top_genes] = True
-                df['highly_variable'] = high_var.astype(bool)
+                df["highly_variable"] = high_var.astype(bool)
                 df = df.loc[genes]
             else:
                 df = df.loc[genes]
@@ -233,101 +244,115 @@ def highly_variable_genes(
                         df.dispersions_norm < max_disp,
                     )
                 )
-                df['highly_variable'] = gene_subset
-        
-        cudata.var["highly_variable"] =df['highly_variable'].values
-        cudata.var["means"] = df['means'].values
-        cudata.var["dispersions"]=df['dispersions'].values
-        cudata.var["dispersions_norm"]=df['dispersions_norm'].values
-        cudata.uns['hvg'] = {'flavor': flavor}
+                df["highly_variable"] = gene_subset
+
+        cudata.var["highly_variable"] = df["highly_variable"].values
+        cudata.var["means"] = df["means"].values
+        cudata.var["dispersions"] = df["dispersions"].values
+        cudata.var["dispersions_norm"] = df["dispersions_norm"].values
+        cudata.uns["hvg"] = {"flavor": flavor}
         if batch_key is not None:
-            cudata.var['highly_variable_nbatches'] = df[
-                'highly_variable_nbatches'
+            cudata.var["highly_variable_nbatches"] = df[
+                "highly_variable_nbatches"
             ].values
-            cudata.var['highly_variable_intersection'] = df[
-                'highly_variable_intersection'
+            cudata.var["highly_variable_intersection"] = df[
+                "highly_variable_intersection"
             ].values
 
-def _highly_variable_genes_single_batch(X,min_mean = 0.0125,max_mean =3,min_disp= 0.5,max_disp =np.inf, n_top_genes = None, flavor = 'seurat', n_bins = 20):
-        """\
+
+def _highly_variable_genes_single_batch(
+    X,
+    min_mean=0.0125,
+    max_mean=3,
+    min_disp=0.5,
+    max_disp=np.inf,
+    n_top_genes=None,
+    flavor="seurat",
+    n_bins=20,
+):
+    """\
         See `highly_variable_genes`.
         Returns
         -------
         A DataFrame that contains the columns
         `highly_variable`, `means`, `dispersions`, and `dispersions_norm`.
         """
-        if flavor == 'seurat':
-            X = X.expm1()
-        mean, var = _get_mean_var(X)
-        mean[mean == 0] = 1e-12
-        disp = var/mean
-        if flavor == 'seurat':  # logarithmized mean as in Seurat
-            disp[disp == 0] = np.nan
-            disp = cp.log(disp)
-            mean = cp.log1p(mean)
-        df = pd.DataFrame()
-        mean = mean.get()
-        disp = disp.get()
-        df['means'] = mean
-        df['dispersions'] = disp
-        if flavor == 'seurat':
-            df['mean_bin'] = pd.cut(df['means'], bins=n_bins)
-            disp_grouped = df.groupby('mean_bin')['dispersions']
-            disp_mean_bin = disp_grouped.mean()
-            disp_std_bin = disp_grouped.std(ddof=1)
-            # retrieve those genes that have nan std, these are the ones where
-            # only a single gene fell in the bin and implicitly set them to have
-            # a normalized disperion of 1
-            one_gene_per_bin = disp_std_bin.isnull()
-            gen_indices = np.where(one_gene_per_bin[df['mean_bin'].values])[0].tolist()
+    if flavor == "seurat":
+        X = X.expm1()
+    mean, var = _get_mean_var(X)
+    mean[mean == 0] = 1e-12
+    disp = var / mean
+    if flavor == "seurat":  # logarithmized mean as in Seurat
+        disp[disp == 0] = np.nan
+        disp = cp.log(disp)
+        mean = cp.log1p(mean)
+    df = pd.DataFrame()
+    mean = mean.get()
+    disp = disp.get()
+    df["means"] = mean
+    df["dispersions"] = disp
+    if flavor == "seurat":
+        df["mean_bin"] = pd.cut(df["means"], bins=n_bins)
+        disp_grouped = df.groupby("mean_bin")["dispersions"]
+        disp_mean_bin = disp_grouped.mean()
+        disp_std_bin = disp_grouped.std(ddof=1)
+        # retrieve those genes that have nan std, these are the ones where
+        # only a single gene fell in the bin and implicitly set them to have
+        # a normalized disperion of 1
+        one_gene_per_bin = disp_std_bin.isnull()
+        gen_indices = np.where(one_gene_per_bin[df["mean_bin"].values])[0].tolist()
 
-            # Circumvent pandas 0.23 bug. Both sides of the assignment have dtype==float32,
-            # but there’s still a dtype error without “.value”.
-            disp_std_bin[one_gene_per_bin.values] = disp_mean_bin[
-                one_gene_per_bin.values
-            ].values
-            disp_mean_bin[one_gene_per_bin.values] = 0
-            # actually do the normalization
-            df['dispersions_norm'] = (
-                df['dispersions'].values  # use values here as index differs
-                - disp_mean_bin[df['mean_bin'].values].values
-            ) / disp_std_bin[df['mean_bin'].values].values
+        # Circumvent pandas 0.23 bug. Both sides of the assignment have dtype==float32,
+        # but there’s still a dtype error without “.value”.
+        disp_std_bin[one_gene_per_bin.values] = disp_mean_bin[
+            one_gene_per_bin.values
+        ].values
+        disp_mean_bin[one_gene_per_bin.values] = 0
+        # actually do the normalization
+        df["dispersions_norm"] = (
+            df["dispersions"].values  # use values here as index differs
+            - disp_mean_bin[df["mean_bin"].values].values
+        ) / disp_std_bin[df["mean_bin"].values].values
 
-        elif flavor == 'cell_ranger':
-            from statsmodels import robust
-            df['mean_bin'] = pd.cut(
-                    df['means'],
-                    np.r_[-np.inf, np.percentile(df['means'], np.arange(10, 105, 5)), np.inf],
-                )
-            disp_grouped = df.groupby('mean_bin')['dispersions']
-            disp_median_bin = disp_grouped.median()
-            with warnings.catch_warnings():
-                    warnings.simplefilter('ignore')
-                    disp_mad_bin = disp_grouped.apply(robust.mad)
-                    df['dispersions_norm'] = (
-                        df['dispersions'].values - disp_median_bin[df['mean_bin'].values].values
-                    ) / disp_mad_bin[df['mean_bin'].values].values
+    elif flavor == "cell_ranger":
+        from statsmodels import robust
 
-        dispersion_norm = df['dispersions_norm'].values
-        if n_top_genes is not None:
-            dispersion_norm = dispersion_norm[~np.isnan(dispersion_norm)]
-            dispersion_norm[::-1].sort()# interestingly, np.argpartition is slightly slower
-            if n_top_genes > X.shape[1]:
-                n_top_genes = X.shape[1]
-            disp_cut_off = dispersion_norm[n_top_genes - 1]
-            gene_subset = np.nan_to_num(df['dispersions_norm'].values) >= disp_cut_off
-        else:
-            dispersion_norm[np.isnan(dispersion_norm)] = 0  # similar to Seurat
-            gene_subset = np.logical_and.reduce(
-                (
-                    mean > min_mean,
-                    mean < max_mean,
-                    dispersion_norm > min_disp,
-                    dispersion_norm < max_disp,
-                )
+        df["mean_bin"] = pd.cut(
+            df["means"],
+            np.r_[-np.inf, np.percentile(df["means"], np.arange(10, 105, 5)), np.inf],
+        )
+        disp_grouped = df.groupby("mean_bin")["dispersions"]
+        disp_median_bin = disp_grouped.median()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            disp_mad_bin = disp_grouped.apply(robust.mad)
+            df["dispersions_norm"] = (
+                df["dispersions"].values - disp_median_bin[df["mean_bin"].values].values
+            ) / disp_mad_bin[df["mean_bin"].values].values
+
+    dispersion_norm = df["dispersions_norm"].values
+    if n_top_genes is not None:
+        dispersion_norm = dispersion_norm[~np.isnan(dispersion_norm)]
+        dispersion_norm[
+            ::-1
+        ].sort()  # interestingly, np.argpartition is slightly slower
+        if n_top_genes > X.shape[1]:
+            n_top_genes = X.shape[1]
+        disp_cut_off = dispersion_norm[n_top_genes - 1]
+        gene_subset = np.nan_to_num(df["dispersions_norm"].values) >= disp_cut_off
+    else:
+        dispersion_norm[np.isnan(dispersion_norm)] = 0  # similar to Seurat
+        gene_subset = np.logical_and.reduce(
+            (
+                mean > min_mean,
+                mean < max_mean,
+                dispersion_norm > min_disp,
+                dispersion_norm < max_disp,
             )
-        df['highly_variable'] = gene_subset
-        return df
+        )
+    df["highly_variable"] = gene_subset
+    return df
+
 
 def _highly_variable_genes_seurat_v3(
     cudata: cunnData,
@@ -335,7 +360,8 @@ def _highly_variable_genes_seurat_v3(
     n_top_genes: int = None,
     batch_key: Optional[str] = None,
     span: float = 0.3,
-    check_values = True):
+    check_values=True,
+):
     """\
     See `highly_variable_genes`.
     For further implementation details see https://www.overleaf.com/read/ckptrbgzzzpg
@@ -365,7 +391,7 @@ def _highly_variable_genes_seurat_v3(
         from skmisc.loess import loess
     except ImportError:
         raise ImportError(
-            'Please install skmisc package via `pip install --user scikit-misc'
+            "Please install skmisc package via `pip install --user scikit-misc"
         )
 
     df = pd.DataFrame(index=cudata.var.index)
@@ -377,7 +403,7 @@ def _highly_variable_genes_seurat_v3(
         )
 
     mean, var = _get_mean_var(X)
-    df['means'], df['variances'] = mean.get(), var.get()
+    df["means"], df["variances"] = mean.get(), var.get()
     if batch_key is None:
         batch_info = pd.Categorical(np.zeros(cudata.shape[0], dtype=int))
     else:
@@ -423,40 +449,41 @@ def _highly_variable_genes_seurat_v3(
     ranked_norm_gene_vars = ranked_norm_gene_vars.get()
     ma_ranked = np.ma.masked_invalid(ranked_norm_gene_vars)
     median_ranked = np.ma.median(ma_ranked, axis=0).filled(np.nan)
-    df['highly_variable_nbatches'] = num_batches_high_var.get()
-    df['highly_variable_rank'] = median_ranked
-    df['variances_norm'] = cp.mean(norm_gene_vars, axis=0).get()
+    df["highly_variable_nbatches"] = num_batches_high_var.get()
+    df["highly_variable_rank"] = median_ranked
+    df["variances_norm"] = cp.mean(norm_gene_vars, axis=0).get()
     sorted_index = (
-        df[['highly_variable_rank', 'highly_variable_nbatches']]
+        df[["highly_variable_rank", "highly_variable_nbatches"]]
         .sort_values(
-            ['highly_variable_rank', 'highly_variable_nbatches'],
+            ["highly_variable_rank", "highly_variable_nbatches"],
             ascending=[True, False],
-            na_position='last',
+            na_position="last",
         )
         .index
     )
-    df['highly_variable'] = False
-    df.loc[sorted_index[: int(n_top_genes)], 'highly_variable'] = True
-    cudata.var['highly_variable'] = df['highly_variable'].values
-    cudata.var['highly_variable_rank'] = df['highly_variable_rank'].values
-    cudata.var['means'] = df['means'].values
-    cudata.var['variances'] = df['variances'].values
-    cudata.var['variances_norm'] = df['variances_norm'].values.astype(
-            'float64', copy=False
-        )
-    cudata.var['highly_variable_nbatches'] = df[
-                'highly_variable_nbatches'
-            ].values
-    cudata.uns['hvg'] = {'flavor': 'seurat_v3'}
+    df["highly_variable"] = False
+    df.loc[sorted_index[: int(n_top_genes)], "highly_variable"] = True
+    cudata.var["highly_variable"] = df["highly_variable"].values
+    cudata.var["highly_variable_rank"] = df["highly_variable_rank"].values
+    cudata.var["means"] = df["means"].values
+    cudata.var["variances"] = df["variances"].values
+    cudata.var["variances_norm"] = df["variances_norm"].values.astype(
+        "float64", copy=False
+    )
+    cudata.var["highly_variable_nbatches"] = df["highly_variable_nbatches"].values
+    cudata.uns["hvg"] = {"flavor": "seurat_v3"}
 
-def _highly_variable_pearson_residuals(cudata: cunnData,
+
+def _highly_variable_pearson_residuals(
+    cudata: cunnData,
     theta: float = 100,
     clip: Optional[float] = None,
     n_top_genes: int = 2000,
     batch_key: Optional[str] = None,
     check_values: bool = True,
     layer: Optional[str] = None,
-    chunksize= 1000):
+    chunksize=1000,
+):
     """
     Select highly variable genes using analytic Pearson residuals.
     Pearson residuals of a negative binomial offset model are computed
@@ -478,14 +505,89 @@ def _highly_variable_pearson_residuals(cudata: cunnData,
             UserWarning,
         )
     if theta <= 0:
-        raise ValueError('Pearson residuals require theta > 0')
+        raise ValueError("Pearson residuals require theta > 0")
     if batch_key is None:
         batch_info = pd.Categorical(np.zeros(cudata.shape[0], dtype=int))
     else:
         batch_info = cudata.obs[batch_key].values
-        
+
     n_batches = len(np.unique(batch_info))
     residual_gene_vars = []
+    sparse_kernel = cp.RawKernel(
+        r"""
+    extern "C" __global__
+    void calculate_sum_cg(const int *indptr,const int *index,const float *data, 
+                                        float* sums_genes, float* sums_cells,
+                                        int n_genes) {
+        int gene = blockDim.x * blockIdx.x + threadIdx.x;
+        if(gene >= n_genes){
+            return;
+        }
+        int start_idx = indptr[gene];
+        int stop_idx = indptr[gene+1];
+
+        for(int cell = start_idx; cell < stop_idx; cell++){
+            float value = data[cell];
+            int cell_number = index[cell];
+            atomicAdd(&sums_genes[gene], value);
+            atomicAdd(&sums_cells[cell_number], value);
+
+        }
+    }
+    """,
+        "calculate_sum_cg",
+    )
+    sparse_kernel_res = cp.RawKernel(
+        r"""
+    extern "C" __global__
+    void calculate_res(const int *indptr,const int *index,const float *data, 
+                            const float* sums_genes,const float* sums_cells,
+                            float* residuals ,float* sum_total,float* clip,float* theta,int n_genes, int n_cells) {
+        int gene = blockDim.x * blockIdx.x + threadIdx.x;
+        if(gene >= n_genes){
+            return;
+        }
+        int start_idx = indptr[gene];
+        int stop_idx = indptr[gene + 1];
+
+        int sparse_idx = start_idx;
+        float var_sum = 0.0;
+        float sum_clipped_res = 0.0;
+        for(int cell = 0; cell < n_cells; cell++){
+            float mu = sums_genes[gene]*sums_cells[cell]/sum_total[0];
+            float value = 0.0;
+            if (sparse_idx < stop_idx && index[sparse_idx] == cell){
+                value = data[sparse_idx];
+                sparse_idx++;
+            }
+            float mu_sum = value - mu;
+            float pre_res =  mu_sum / sqrt(mu + mu * mu / theta[0]);
+            float clipped_res = fminf(fmaxf(pre_res, -clip[0]), clip[0]);
+            sum_clipped_res += clipped_res;
+        }
+
+        float mean_clipped_res = sum_clipped_res / n_cells;
+        sparse_idx = start_idx;
+        for(int cell = 0; cell < n_cells; cell++){
+            float mu = sums_genes[gene]*sums_cells[cell]/sum_total[0];
+            float value = 0.0;
+            if (sparse_idx < stop_idx && index[sparse_idx] == cell){
+                value = data[sparse_idx];
+                sparse_idx++;
+            }
+            float mu_sum = value - mu;
+            float pre_res =  mu_sum / sqrt(mu + mu * mu / theta[0]);
+            float clipped_res = fminf(fmaxf(pre_res, -clip[0]), clip[0]);
+            float diff = clipped_res - mean_clipped_res;
+            var_sum += diff * diff;
+        }
+        residuals[gene] = var_sum / n_cells;
+    }
+
+    """,
+        "calculate_res",
+    )
+
     for b in np.unique(batch_info):
         X_batch = X[batch_info == b].tocsc()
         thr_org = cp.diff(X_batch.indptr).ravel()
@@ -493,28 +595,51 @@ def _highly_variable_pearson_residuals(cudata: cunnData,
         X_batch = X_batch[:, nonzero_genes]
         if clip is None:
             n = X_batch.shape[0]
-            clip = cp.sqrt(n)
+            clip = cp.sqrt(n, dtype=cp.float32)
         if clip < 0:
             raise ValueError("Pearson residuals require `clip>=0` or `clip=None`.")
-        sums_cells = X_batch.sum(axis=1)
-        X_batch =X_batch.tocsr()
-        sums_genes = X_batch.sum(axis=0)
-        sum_total = sums_genes.sum().squeeze()
-        # Compute pearson residuals in chunks
-        residual_gene_var = cp.empty((X_batch.shape[1]))
-        X_batch = X_batch.tocsc()
-        for start in np.arange(0, X_batch.shape[1], chunksize):
-            stop = start + chunksize
-            mu = cp.array(sums_cells @ sums_genes[:, start:stop] / sum_total)
-            X_dense = X_batch[:, start:stop].toarray()
-            residuals = (X_dense - mu) / cp.sqrt(mu + mu**2 / theta)
-            residuals = cp.clip(residuals, a_min=-clip, a_max=clip)
-            residual_gene_var[start:stop] = cp.var(residuals, axis=0)
 
+        theta = cp.array([theta], dtype=cp.float32)
+        sums_genes = cp.zeros(X_batch.shape[1], dtype=cp.float32)
+        sums_cells = cp.zeros(X_batch.shape[0], dtype=cp.float32)
+        block = (32,)
+        grid = (int(math.ceil(X_batch.shape[1] / block[0])),)
+        sparse_kernel(
+            grid,
+            block,
+            (
+                X_batch.indptr,
+                X_batch.indices,
+                X_batch.data,
+                sums_genes,
+                sums_cells,
+                X_batch.shape[1],
+            ),
+        )
+        sum_total = sums_genes.sum().squeeze()
+        residual_gene_var = cp.zeros(X_batch.shape[1], dtype=cp.float32, order="C")
+
+        sparse_kernel_res(
+            grid,
+            block,
+            (
+                X_batch.indptr,
+                X_batch.indices,
+                X_batch.data,
+                sums_genes,
+                sums_cells,
+                residual_gene_var,
+                sum_total,
+                clip,
+                theta,
+                X_batch.shape[1],
+                X_batch.shape[0],
+            ),
+        )
         unmasked_residual_gene_var = cp.zeros(len(nonzero_genes))
         unmasked_residual_gene_var[nonzero_genes] = residual_gene_var
         residual_gene_vars.append(unmasked_residual_gene_var.reshape(1, -1))
-        
+
     residual_gene_vars = cp.concatenate(residual_gene_vars, axis=0)
     # Get rank per gene within each batch
     # argsort twice gives ranks, small rank means most variable
@@ -525,7 +650,7 @@ def _highly_variable_pearson_residuals(cudata: cunnData,
         (ranks_residual_var < n_top_genes).astype(int), axis=0
     ).get()
     ranks_residual_var[ranks_residual_var >= n_top_genes] = np.nan
-    ranks_residual_var= ranks_residual_var.get()
+    ranks_residual_var = ranks_residual_var.get()
     ranks_masked_array = np.ma.masked_invalid(ranks_residual_var)
     # Median rank across batches, ignoring batches in which gene was not selected
     medianrank_residual_var = np.ma.median(ranks_masked_array, axis=0).filled(np.nan)
@@ -543,39 +668,38 @@ def _highly_variable_pearson_residuals(cudata: cunnData,
     )
     df = df.set_index(cudata.var_names)
     df.sort_values(
-        ['highly_variable_nbatches', 'highly_variable_rank'],
+        ["highly_variable_nbatches", "highly_variable_rank"],
         ascending=[False, True],
-        na_position='last',
+        na_position="last",
         inplace=True,
     )
     high_var = np.zeros(df.shape[0], dtype=bool)
     high_var[:n_top_genes] = True
-    df['highly_variable'] = high_var
+    df["highly_variable"] = high_var
     df = df.loc[cudata.var_names, :]
-    
-    computed_on = layer if layer else 'adata.X'
-    cudata.uns['hvg'] = {'flavor': 'pearson_residuals', 'computed_on': computed_on}
-    cudata.var['means'] = df['means'].values
-    cudata.var['variances'] = df['variances'].values
-    cudata.var['residual_variances'] = df['residual_variances']
-    cudata.var['highly_variable_rank'] = df['highly_variable_rank'].values
+
+    computed_on = layer if layer else "adata.X"
+    cudata.uns["hvg"] = {"flavor": "pearson_residuals", "computed_on": computed_on}
+    cudata.var["means"] = df["means"].values
+    cudata.var["variances"] = df["variances"].values
+    cudata.var["residual_variances"] = df["residual_variances"]
+    cudata.var["highly_variable_rank"] = df["highly_variable_rank"].values
     if batch_key is not None:
-        cudata.var['highly_variable_nbatches'] = df[
-            'highly_variable_nbatches'
+        cudata.var["highly_variable_nbatches"] = df["highly_variable_nbatches"].values
+        cudata.var["highly_variable_intersection"] = df[
+            "highly_variable_intersection"
         ].values
-        cudata.var['highly_variable_intersection'] = df[
-            'highly_variable_intersection'
-        ].values
-    cudata.var['highly_variable'] = df['highly_variable'].values
+    cudata.var["highly_variable"] = df["highly_variable"].values
+
 
 def _poisson_gene_selection(
-    cudata:cunnData,
+    cudata: cunnData,
     layer: Optional[str] = None,
     n_top_genes: int = None,
     n_samples: int = 10000,
     batch_key: str = None,
     minibatch_size: int = 1000,
-    check_values:bool = True,
+    check_values: bool = True,
     **kwargs,
 ) -> None:
     """
@@ -620,20 +744,18 @@ def _poisson_gene_selection(
     prob_zero_enriched_nbatches : int
         If batch_key is given, this denotes in how many batches genes are detected as zero enriched
     """
-    
+
     try:
         import torch
     except ImportError:
-        raise ImportError(
-            'Please install pytorch package via `pip install pytorch'
-        )
+        raise ImportError("Please install pytorch package via `pip install pytorch")
     if n_top_genes is None:
         n_top_genes = 2000
         warnings.warn(
             "`flavor='seurat_v3'` expects `n_top_genes`  to be defined, defaulting to 2000 HVGs",
             UserWarning,
         )
-    
+
     X = cudata.layers[layer] if layer is not None else cudata.X
     if check_values and not _check_nonnegative_integers(X):
         warnings.warn(
@@ -648,19 +770,22 @@ def _poisson_gene_selection(
     prob_zero_enrichments = []
     obs_frac_zeross = []
     exp_frac_zeross = []
-    
+
     with torch.no_grad():
         for b in np.unique(batch_info):
             X_batch = X[batch_info == b]
-            total_counts = torch.tensor(X_batch.sum(1).ravel(), device = "cuda")
+            total_counts = torch.tensor(X_batch.sum(1).ravel(), device="cuda")
             X_batch = X_batch.tocsc()
             # Calculate empirical statistics.
-            sum_0 = X_batch.sum(axis =0).ravel()
-            scaled_means = torch.tensor(sum_0 / sum_0.sum(), device = "cuda")
+            sum_0 = X_batch.sum(axis=0).ravel()
+            scaled_means = torch.tensor(sum_0 / sum_0.sum(), device="cuda")
 
             observed_fraction_zeros = torch.tensor(
-                cp.asarray(1.0 - cp.diff(X_batch.indptr).ravel() / X_batch.shape[0]).ravel(),
-                device = "cuda")
+                cp.asarray(
+                    1.0 - cp.diff(X_batch.indptr).ravel() / X_batch.shape[0]
+                ).ravel(),
+                device="cuda",
+            )
             # Calculate probability of zero for a Poisson model.
             # Perform in batches to save memory.
             minibatch_size = min(total_counts.shape[0], minibatch_size)
@@ -687,13 +812,14 @@ def _poisson_gene_selection(
             observed_zero = torch.distributions.Binomial(probs=observed_fraction_zeros)
             expected_zero = torch.distributions.Binomial(probs=expected_fraction_zeros)
 
-            #extra_zeros = torch.zeros(expected_fraction_zeros.shape, device="cuda")
-            
-            
-            extra_zeros = observed_zero.sample((n_samples,))>expected_zero.sample((n_samples,))
-            #for i in range(n_samples):
+            # extra_zeros = torch.zeros(expected_fraction_zeros.shape, device="cuda")
+
+            extra_zeros = observed_zero.sample((n_samples,)) > expected_zero.sample(
+                (n_samples,)
+            )
+            # for i in range(n_samples):
             #    extra_zeros += observed_zero.sample() > expected_zero.sample()
-            
+
             extra_zeros = extra_zeros.sum(0)
             prob_zero_enrichment = (extra_zeros / n_samples).cpu().numpy()
 
@@ -745,11 +871,11 @@ def _poisson_gene_selection(
     cudata.var["highly_variable"] = df["highly_variable"].values
     cudata.var["observed_fraction_zeros"] = df["observed_fraction_zeros"].values
     cudata.var["expected_fraction_zeros"] = df["expected_fraction_zeros"].values
-    cudata.var["prob_zero_enriched_nbatches"] = df[
-        "prob_zero_enriched_nbatches"
-    ].values
+    cudata.var["prob_zero_enriched_nbatches"] = df["prob_zero_enriched_nbatches"].values
     cudata.var["prob_zero_enrichment"] = df["prob_zero_enrichment"].values
     cudata.var["prob_zero_enrichment_rank"] = df["prob_zero_enrichment_rank"].values
 
     if batch_key is not None:
-        cudata.var["prob_zero_enriched_nbatches"] = df["prob_zero_enriched_nbatches"].values
+        cudata.var["prob_zero_enriched_nbatches"] = df[
+            "prob_zero_enriched_nbatches"
+        ].values
