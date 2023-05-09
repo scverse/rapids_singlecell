@@ -7,7 +7,7 @@ def harmony_integrate(
     basis: str = "X_pca",
     adjusted_basis: str = "X_pca_harmony",
     **kwargs,
-)-> None:
+) -> None:
     """
     Use harmonypy to integrate different experiments.
     Harmony is an algorithm for integrating single-cell
@@ -43,6 +43,7 @@ def harmony_integrate(
     
     """
     from . import _harmonpy_gpu
+
     harmony_out = _harmonpy_gpu.run_harmony(adata.obsm[basis], adata.obs, key, **kwargs)
 
     adata.obsm[adjusted_basis] = harmony_out.Z_corr.T.get()

@@ -25,23 +25,23 @@ def run_perm(estimate, mat, net, idxs, times, seed):
 
     # Compute empirical p-value
     pvals = cp.where(pvals == 0.0, 1.0, pvals).astype(np.float32)
-    pvals = cp.where(pvals == times, times-1, pvals).astype(np.float32)
+    pvals = cp.where(pvals == times, times - 1, pvals).astype(np.float32)
     pvals = pvals / times
-    pvals = cp.where(pvals >= 0.5, 1-(pvals), pvals)
+    pvals = cp.where(pvals >= 0.5, 1 - (pvals), pvals)
     pvals = pvals * 2
-    
+
     # Compute z-score
-    norm = (estimate-null_dst.mean(axis=2))/null_dst.std(ddof=1,axis=2)
+    norm = (estimate - null_dst.mean(axis=2)) / null_dst.std(ddof=1, axis=2)
 
     # Compute corr score
     corr = (estimate * -cp.log10(pvals)).astype(np.float32)
-    
+
     estimate_return = estimate.get()
     norm_return = norm.get()
     corr_return = corr.get()
-    pvals_return =pvals.get()
-    del estimate,norm,corr,pvals,mat,null_dst
-    return estimate_return,norm_return ,corr_return , pvals_return
+    pvals_return = pvals.get()
+    del estimate, norm, corr, pvals, mat, null_dst
+    return estimate_return, norm_return, corr_return, pvals_return
 
 
 def wsum(mat, net, times, batch_size, seed, verbose):
@@ -51,7 +51,7 @@ def wsum(mat, net, times, batch_size, seed, verbose):
     n_batches = int(np.ceil(n_samples / batch_size))
 
     if verbose:
-        print('Infering activities on {0} batches.'.format(n_batches))
+        print("Infering activities on {0} batches.".format(n_batches))
 
     # Init empty acts
     estimate = np.zeros((n_samples, n_fsets), dtype=np.float32)
@@ -64,27 +64,36 @@ def wsum(mat, net, times, batch_size, seed, verbose):
 
     for i in tqdm(range(n_batches), disable=not verbose):
         # Subset batch
-        srt, end = i*batch_size, i*batch_size+batch_size
+        srt, end = i * batch_size, i * batch_size + batch_size
         tmp = mat[srt:end].A
         # Run WSUM
         estimate[srt:end] = tmp.dot(net)
         if times > 1:
             idxs = np.arange(n_features, dtype=np.int32)
-            estimate[srt:end],norm[srt:end], corr[srt:end], pvals[srt:end] = run_perm(cp.array(estimate[srt:end]), cp.array(tmp), cp.array(net), cp.array(idxs), times, seed)
+            estimate[srt:end], norm[srt:end], corr[srt:end], pvals[srt:end] = run_perm(
+                cp.array(estimate[srt:end]),
+                cp.array(tmp),
+                cp.array(net),
+                cp.array(idxs),
+                times,
+                seed,
+            )
     return estimate, norm, corr, pvals
 
 
-def run_wsum(mat:Union[AnnData,pd.DataFrame,list], 
-            net:pd.DataFrame, 
-            source='source', 
-            target='target', 
-            weight='weight', 
-            times=1000, 
-            batch_size:int=10000, 
-            min_n:int=5, 
-            seed:int=42,
-            verbose:bool=False,
-            use_raw:bool=True)-> Optional[tuple]:
+def run_wsum(
+    mat: Union[AnnData, pd.DataFrame, list],
+    net: pd.DataFrame,
+    source="source",
+    target="target",
+    weight="weight",
+    times=1000,
+    batch_size: int = 10000,
+    min_n: int = 5,
+    seed: int = 42,
+    verbose: bool = False,
+    use_raw: bool = True,
+) -> Optional[tuple]:
     """
     Weighted sum (WSUM).
     WSUM infers regulator activities by first multiplying each target feature by its associated weight which then are summed
@@ -110,13 +119,13 @@ def run_wsum(mat:Union[AnnData,pd.DataFrame,list],
             Size of the batches to use. Increasing this will consume more memmory but it will run faster.
         min_n
             Minimum of targets per source. If less, sources are removed.
-        seed 
+        seed
             Random seed to use.
         verbose
             Whether to show progress.
         use_raw
             Use raw attribute of mat if present.
-        
+
     Returns
     -------
         Updates `adata` with the following fields.
@@ -142,21 +151,25 @@ def run_wsum(mat:Union[AnnData,pd.DataFrame,list],
     net = match(c, targets, net)
 
     if verbose:
-        print('Running wsum on mat with {0} samples and {1} targets for {2} sources.'.format(m.shape[0], len(c), net.shape[1]))
+        print(
+            "Running wsum on mat with {0} samples and {1} targets for {2} sources.".format(
+                m.shape[0], len(c), net.shape[1]
+            )
+        )
 
     # Run WSUM
     estimate, norm, corr, pvals = wsum(m, net, times, batch_size, seed, verbose)
 
     # Transform to df
     estimate = pd.DataFrame(estimate, index=r, columns=sources)
-    estimate.name = 'wsum_estimate'
+    estimate.name = "wsum_estimate"
     if pvals is not None:
         norm = pd.DataFrame(norm, index=r, columns=sources)
-        norm.name = 'wsum_norm'
+        norm.name = "wsum_norm"
         corr = pd.DataFrame(corr, index=r, columns=sources)
-        corr.name = 'wsum_corr'
+        corr.name = "wsum_corr"
         pvals = pd.DataFrame(pvals, index=r, columns=sources)
-        pvals.name = 'wsum_pvals'
+        pvals.name = "wsum_pvals"
 
     # AnnData support
     if isinstance(mat, AnnData):
@@ -168,7 +181,6 @@ def run_wsum(mat:Union[AnnData,pd.DataFrame,list],
             mat.obsm[pvals.name] = pvals
     else:
         if pvals is not None:
-             return estimate, norm, corr, pvals
+            return estimate, norm, corr, pvals
         else:
-             return estimate
-            
+            return estimate

@@ -1,4 +1,4 @@
-from ._clustering import leiden,louvain,kmeans
+from ._clustering import leiden, louvain, kmeans
 from ._diffmap import diffmap
 from ._draw_graph import draw_graph
 from ._embedding_density import embedding_density

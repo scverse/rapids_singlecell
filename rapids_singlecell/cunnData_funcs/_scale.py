@@ -3,11 +3,12 @@ from ..cunnData import cunnData
 from typing import Optional
 
 
-def scale(cudata:cunnData, 
-        max_value: int=10,
-        layer: Optional[str] = None,
-        inplace:bool = True)->Optional[cp.ndarray]:
-
+def scale(
+    cudata: cunnData,
+    max_value: int = 10,
+    layer: Optional[str] = None,
+    inplace: bool = True,
+) -> Optional[cp.ndarray]:
     """
     Scales matrix to unit variance and clips values
     
@@ -37,14 +38,14 @@ def scale(cudata:cunnData,
         print("densifying _.X")
         X = X.toarray()
     else:
-        X =X.copy()
+        X = X.copy()
     mean = X.sum(axis=0).flatten() / X.shape[0]
     X -= mean
     del mean
     stddev = cp.sqrt(X.var(axis=0))
     X /= stddev
     del stddev
-    X= cp.clip(X,a_max=max_value)
+    X = cp.clip(X, a_max=max_value)
     if inplace:
         if layer:
             cudata.layers[layer] = X

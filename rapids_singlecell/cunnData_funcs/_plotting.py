@@ -6,17 +6,20 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import os
 
-def scatter(cudata:cunnData, 
-                x:str, 
-                y:str,
-                color:str = None,
-                save:str = None,
-                show:bool =True,
-                dpi:int =300)-> None:
+
+def scatter(
+    cudata: cunnData,
+    x: str,
+    y: str,
+    color: str = None,
+    save: str = None,
+    show: bool = True,
+    dpi: int = 300,
+) -> None:
     """
     Violin plot.
     Wraps :func:`seaborn.scatterplot` for :class:`~rapids_singlecell.cunnData.cunnData`. This plotting function so far is really basic and doesnt include all the features form :func:`scanpy.pl.scatter`.
-    
+
     Parameters
     ---------
     cudata
@@ -32,33 +35,35 @@ def scatter(cudata:cunnData,
     dpi
         The resolution in dots per inch for save
 
-    
+
     """
-    fig,ax = plt.subplots()
+    fig, ax = plt.subplots()
     if color == None:
-        sns.scatterplot(data=cudata.obs, x=x, y=y,s=2, color="grey", edgecolor="grey")
+        sns.scatterplot(data=cudata.obs, x=x, y=y, s=2, color="grey", edgecolor="grey")
     else:
-        sns.scatterplot(data=cudata.obs, x=x, y=y,s=2, hue=color)
+        sns.scatterplot(data=cudata.obs, x=x, y=y, s=2, hue=color)
 
     if save:
-        os.makedirs("./figures/",exist_ok=True)
-        fig_path = "./figures/"+save
-        plt.savefig(fig_path, dpi=dpi ,bbox_inches = 'tight')
+        os.makedirs("./figures/", exist_ok=True)
+        fig_path = "./figures/" + save
+        plt.savefig(fig_path, dpi=dpi, bbox_inches="tight")
     if show is False:
         plt.close()
 
-        
-def violin(cudata:cunnData,
-            key:str,
-            groupby:str=None,
-            size:float =1,
-            save:str = None,
-            show:bool =True,
-            dpi:int =300):
+
+def violin(
+    cudata: cunnData,
+    key: str,
+    groupby: str = None,
+    size: float = 1,
+    save: str = None,
+    show: bool = True,
+    dpi: int = 300,
+):
     """
     Violin plot.
     Wraps :func:`seaborn.violinplot` for :class:`~rapids_singlecell.cunnData.cunnData`. This plotting function so far is really basic and doesnt include all the features form :func:`scanpy.pl.violin`.
-    
+
     Parameters
     ---------
         cudata
@@ -75,19 +80,27 @@ def violin(cudata:cunnData,
             if you want to display the plot
         dpi
             The resolution in dots per inch for save
-    
+
     Returns
     ------
     nothing
-    
+
     """
-    fig,ax = plt.subplots()
-    ax = sns.violinplot(data=cudata.obs, y=key,scale='width',x= groupby, inner = None)
+    fig, ax = plt.subplots()
+    ax = sns.violinplot(data=cudata.obs, y=key, scale="width", x=groupby, inner=None)
     if size:
-        ax = sns.stripplot(data=cudata.obs, y=key,x= groupby, color='k', size= size, dodge = True, jitter = True)
+        ax = sns.stripplot(
+            data=cudata.obs,
+            y=key,
+            x=groupby,
+            color="k",
+            size=size,
+            dodge=True,
+            jitter=True,
+        )
     if save:
-        os.makedirs("./figures/",exist_ok=True)
-        fig_path = "./figures/"+save
-        plt.savefig(fig_path, dpi=dpi ,bbox_inches = 'tight')
+        os.makedirs("./figures/", exist_ok=True)
+        fig_path = "./figures/" + save
+        plt.savefig(fig_path, dpi=dpi, bbox_inches="tight")
     if show is False:
         plt.close()

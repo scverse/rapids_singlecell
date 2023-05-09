@@ -10,33 +10,35 @@ from scipy import stats
 from tqdm import tqdm
 from typing import Union, Optional
 
+
 def fit_mlm(X, y, inv, df):
     X = cp.ascontiguousarray(X)
     n_samples = y.shape[1]
     n_fsets = X.shape[1]
-    coef, sse, _, _ = cp.linalg.lstsq(X, y,rcond=-1)
+    coef, sse, _, _ = cp.linalg.lstsq(X, y, rcond=-1)
     if len(sse) == 0:
-        raise ValueError("""Couldn\'t fit a multivariate linear model. This can happen because there are more sources
+        raise ValueError(
+            """Couldn\'t fit a multivariate linear model. This can happen because there are more sources
         (covariates) than unique targets (samples), or because the network\'s matrix rank is smaller than the number of
-        sources.""")
+        sources."""
+        )
     sse = sse / df
     inv = cp.diag(inv)
-    sse = cp.reshape(sse, (sse.shape[0],1))
-    inv = cp.reshape(inv, (1,inv.shape[0]))
-    se= cp.sqrt(sse * inv)
-    t = coef.T/se
+    sse = cp.reshape(sse, (sse.shape[0], 1))
+    inv = cp.reshape(inv, (1, inv.shape[0]))
+    se = cp.sqrt(sse * inv)
+    t = coef.T / se
     return t.astype(np.float32)
 
 
 def mlm(mat, net, batch_size=10000, verbose=False):
-
     # Get number of batches
     n_samples = mat.shape[0]
     n_features, n_fsets = net.shape
     n_batches = int(np.ceil(n_samples / batch_size))
 
     # Add intercept to network
-    net = cp.column_stack((cp.ones((n_features, ), dtype=np.float32), cp.array(net)))
+    net = cp.column_stack((cp.ones((n_features,), dtype=np.float32), cp.array(net)))
 
     # Compute inv and df for lm
     inv = cp.linalg.inv(cp.dot(net.T, net))
@@ -45,9 +47,8 @@ def mlm(mat, net, batch_size=10000, verbose=False):
     # Init empty acts
     es = cp.zeros((n_samples, n_fsets), dtype=np.float32)
     for i in tqdm(range(n_batches), disable=not verbose):
-
         # Subset batch
-        srt, end = i*batch_size, i*batch_size+batch_size
+        srt, end = i * batch_size, i * batch_size + batch_size
         y = mat[srt:end].A.T
 
         # Compute MLM for batch
@@ -60,15 +61,17 @@ def mlm(mat, net, batch_size=10000, verbose=False):
     return es, pvals
 
 
-def run_mlm(mat:Union[AnnData,pd.DataFrame,list], 
-            net:pd.DataFrame, 
-            source:str='source',
-            target:str='target', 
-            weight:str='weight', 
-            batch_size:int=10000,
-            min_n:int=5, 
-            verbose:bool=False, 
-            use_raw:bool=True)-> Optional[tuple]:
+def run_mlm(
+    mat: Union[AnnData, pd.DataFrame, list],
+    net: pd.DataFrame,
+    source: str = "source",
+    target: str = "target",
+    weight: str = "weight",
+    batch_size: int = 10000,
+    min_n: int = 5,
+    verbose: bool = False,
+    use_raw: bool = True,
+) -> Optional[tuple]:
     """
     Multivariate Linear Model (MLM).
     MLM fits a multivariate linear model for each sample, where the observed molecular readouts in `mat` are the response
@@ -95,7 +98,7 @@ def run_mlm(mat:Union[AnnData,pd.DataFrame,list],
             Whether to show progress.
         use_raw
             Use raw attribute of mat if present.
-        
+
     Returns
     -------
         Updates `adata` with the following fields.
@@ -118,16 +121,20 @@ def run_mlm(mat:Union[AnnData,pd.DataFrame,list],
     net = match(c, targets, net)
 
     if verbose:
-        print('Running mlm on mat with {0} samples and {1} targets for {2} sources.'.format(m.shape[0], len(c), net.shape[1]))
+        print(
+            "Running mlm on mat with {0} samples and {1} targets for {2} sources.".format(
+                m.shape[0], len(c), net.shape[1]
+            )
+        )
 
     # Run MLM
     estimate, pvals = mlm(m, net, batch_size=batch_size, verbose=verbose)
 
     # Transform to df
     estimate = pd.DataFrame(estimate, index=r, columns=sources)
-    estimate.name = 'mlm_estimate'
+    estimate.name = "mlm_estimate"
     pvals = pd.DataFrame(pvals, index=r, columns=sources)
-    pvals.name = 'mlm_pvals'
+    pvals.name = "mlm_pvals"
 
     # AnnData support
     if isinstance(mat, AnnData):
