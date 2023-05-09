@@ -48,7 +48,6 @@ import rapids_singlecell as rsc
    pp.scale
    pp.pca
    pp.normalize_pearson_residuals
-   pp.calc_gene_qc
    pp.flag_gene_family
    pp.filter_highly_variable
 ```
@@ -122,7 +121,7 @@ Basic plotting function for {class}`~rapids_singlecell.cunnData.cunnData` to ass
 
 ## squidpy-GPU: `gr`
 
-{mod}`squidpy.gr` is a tool for the analysis of spatial molecular data. {mod}`rapids_singlecell.gr` acclerates some of these anlysis.
+{mod}`squidpy.gr` is a tool for the analysis of spatial molecular data. {mod}`rapids_singlecell.gr` acclerates some of these functions.
 
 ```{eval-rst}
 .. module:: rapids_singlecell.gr
@@ -132,6 +131,7 @@ Basic plotting function for {class}`~rapids_singlecell.cunnData.cunnData` to ass
     :toctree: generated
 
     gr.spatial_autocorr
+    gr.ligrec
 ```
 
 ## decoupler-GPU: `dcg`

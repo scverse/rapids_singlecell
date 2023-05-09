@@ -33,7 +33,9 @@ After preprocessing is done just transform the {class}`~rapids_singlecell.cunnDa
 
 ### Tools
 
-The functions in {mod}`~.tl` are created to manipulate the {class}`~anndata.AnnData` object. They are near dropin replacements for *scanpy's* functions just a lot faster. For this reason you can use *scanpy's* plotting API. All {mod}`~.tl` functions work on {class}`~anndata.AnnData`, for the reason {func}`~.harmony_integrate` has switched from `.pp` to `.tl`. This is also why there are two functions to calculate the princpal components one for {class}`~rapids_singlecell.cunnData.cunnData`[`.pp`] and one for {class}`~anndata.AnnData`[`.tl`]. 
+The functions provided in {mod}`~.tl` are designed to manipulate the {class}`~anndata.AnnData` object. They serve as near drop-in replacements for the functions in *scanpy*, but offer significantly improved performance. Consequently, you can continue to use scanpy's plotting API with ease.
+
+All {mod}`~.tl` functions operate on {class}`~anndata.AnnData`, which is why {func}`~.harmony_integrate` has transitioned from the `.pp` module to `.tl`. This also explains the existence of two distinct functions for calculating principal components: one for {class}`~rapids_singlecell.cunnData.cunnData` (within the `.pp` module) and another for {class}`~anndata.AnnData` (within the `.tl` module).
 
 Example:
 ```
