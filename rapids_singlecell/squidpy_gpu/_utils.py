@@ -6,7 +6,9 @@ from typing import (
     Union,
 )
 from scipy import stats
-from scipy.sparse import spmatrix
+from scipy.sparse import spmatrix, issparse
+import pandas as pd
+
 
 ### Taken from squidpy: https://github.com/scverse/squidpy/blob/main/squidpy/gr/_ppatterns.py
 def _p_value_calc(
@@ -43,7 +45,9 @@ def _p_value_calc(
     n_perms = sims.shape[0]
     large_perm = (sims >= score).sum(axis=0)
     # subtract total perm for negative values
-    large_perm[(n_perms - large_perm) < large_perm] = n_perms - large_perm[(n_perms - large_perm) < large_perm]
+    large_perm[(n_perms - large_perm) < large_perm] = (
+        n_perms - large_perm[(n_perms - large_perm) < large_perm]
+    )
     # get p-value based on permutation
     p_sim: np.ndarray = (large_perm + 1) / (n_perms + 1)
 
@@ -65,7 +69,9 @@ def _p_value_calc(
     return results
 
 
-def _analytic_pval(score: np.ndarray, g: Union[spmatrix, np.ndarray], params: Dict[str, Any]):
+def _analytic_pval(
+    score: np.ndarray, g: Union[spmatrix, np.ndarray], params: Dict[str, Any]
+):
     """
     Analytic p-value computation.
     See `Moran's I <https://pysal.org/esda/_modules/esda/moran.html#Moran>`_ and
@@ -110,3 +116,89 @@ def _g_moments(w: Union[spmatrix, np.ndarray]):
     s2 = s2array.sum()
 
     return s0, s1, s2
+
+
+def _create_sparse_df(
+    data,
+    index=None,
+    columns=None,
+    fill_value=0,
+):
+    """
+    Create a new DataFrame from a scipy sparse matrix or numpy array.
+
+    This is the original :mod:`pandas` implementation with 2 differences:
+
+        - allow creation also from :class:`numpy.ndarray`
+        - expose ``fill_values``
+
+    Parameters
+    ----------
+    data
+        Must be convertible to CSC format.
+    index
+        Row labels to use.
+    columns
+        Column labels to use.
+
+    Returns
+    -------
+    Each column of the DataFrame is stored as a :class:`arrays.SparseArray`.
+    """
+    from pandas._libs.sparse import IntIndex
+    from pandas.core.arrays.sparse.accessor import (
+        SparseArray,
+        SparseDtype,
+        SparseFrameAccessor,
+    )
+
+    if not issparse(data):
+        pred = (
+            (lambda col: ~np.isnan(col))
+            if fill_value is np.nan
+            else (lambda col: ~np.isclose(col, fill_value))
+        )
+        dtype = SparseDtype(data.dtype, fill_value=fill_value)
+        n_rows, n_cols = data.shape
+        arrays = []
+
+        for i in range(n_cols):
+            mask = pred(data[:, i])
+            idx = IntIndex(n_rows, np.where(mask)[0], check_integrity=False)
+            arr = SparseArray._simple_new(data[mask, i], idx, dtype)
+            arrays.append(arr)
+
+        return pd.DataFrame._from_arrays(
+            arrays, columns=columns, index=index, verify_integrity=False
+        )
+
+    if TYPE_CHECKING:
+        assert isinstance(data, spmatrix)
+    data = data.tocsc()
+    sort_indices = True
+
+    data = data.tocsc()
+    index, columns = SparseFrameAccessor._prep_index(data, index, columns)
+    n_rows, n_columns = data.shape
+    # We need to make sure indices are sorted, as we create
+    # IntIndex with no input validation (i.e. check_integrity=False ).
+    # Indices may already be sorted in scipy in which case this adds
+    # a small overhead.
+    if sort_indices:
+        data.sort_indices()
+
+    indices = data.indices
+    indptr = data.indptr
+    array_data = data.data
+    dtype = SparseDtype(array_data.dtype, fill_value=fill_value)
+    arrays = []
+
+    for i in range(n_columns):
+        sl = slice(indptr[i], indptr[i + 1])
+        idx = IntIndex(n_rows, indices[sl], check_integrity=False)
+        arr = SparseArray._simple_new(array_data[sl], idx, dtype)
+        arrays.append(arr)
+
+    return pd.DataFrame._from_arrays(
+        arrays, columns=columns, index=index, verify_integrity=False
+    )
