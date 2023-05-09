@@ -21,11 +21,12 @@ class Layer_Mapping(dict):
     """
     Dictonary subclass for layers handeling in cunnData
     """
+
     def __init__(self, shape):
         super().__init__({})
         self.shape = shape
-    
-    def update_shape(self,shape):
+
+    def update_shape(self, shape):
         self.shape = shape
 
     def __setitem__(self, key, item):
@@ -34,32 +35,40 @@ class Layer_Mapping(dict):
         else:
             raise ValueError(f"Shape of {key} does not match :attr:`.X`")
 
+
 class obsm_Mapping(dict):
     """
     Dictonary subclass for obsm handeling in cunnData
     """
+
     def __init__(self, shape):
         super().__init__({})
         self.shape = shape
-    
-    def update_shape(self,shape):
+
+    def update_shape(self, shape):
         self.shape = shape
 
     def __setitem__(self, key, item):
         if self.shape == item.shape[0]:
+            if issparse_gpu(item):
+                if self._X.nnz > 2**31-1:
+                    raise ValueError("Cupy only supports Sparse Matrices with `.nnz` \
+                                with less than 2**31-1 for the int32 indptr")
             super().__setitem__(key, item)
         else:
             raise ValueError(f"Shape of {key} does not match :attr:`.n_obs`")
-            
+
+
 class varm_Mapping(dict):
     """
     Dictonary subclass for obsm handeling in cunnData
     """
+
     def __init__(self, shape):
         super().__init__({})
         self.shape = shape
-    
-    def update_shape(self,shape):
+
+    def update_shape(self, shape):
         self.shape = shape
 
     def __setitem__(self, key, item):
@@ -69,117 +78,118 @@ class varm_Mapping(dict):
             raise ValueError(f"Shape of {key} does not match :attr:`.n_vars`")
 
 
-
-
 class cunnData:
     """
-    The cunnData objects can be used as an AnnData replacement for the inital preprocessing 
-    of single cell Datasets. It replaces some of the most common preprocessing steps within 
+    The cunnData objects can be used as an AnnData replacement for the inital preprocessing
+    of single cell Datasets. It replaces some of the most common preprocessing steps within
     scanpy for annData objects.
-    It can be initalized with a preexisting annData object or with a countmatrix and seperate 
-    Dataframes for var and obs. Index of var will be used as gene_names. Initalization with an 
+    It can be initalized with a preexisting annData object or with a countmatrix and seperate
+    Dataframes for var and obs. Index of var will be used as gene_names. Initalization with an
     AnnData object is advised.
     """
+
     def __init__(
         self,
         adata: Optional[AnnData] = None,
-        X: Optional[Union[np.ndarray,sparse.spmatrix, cp.ndarray, cpx.scipy.sparse.csr_matrix]] = None,
+        X: Optional[
+            Union[np.ndarray, sparse.spmatrix, cp.ndarray, cpx.scipy.sparse.csr_matrix]
+        ] = None,
         obs: Optional[pd.DataFrame] = None,
         var: Optional[pd.DataFrame] = None,
         uns: Optional[Mapping[str, Any]] = None,
         layers: Optional[Mapping[str, Any]] = None,
         obsm: Optional[Mapping[str, Any]] = None,
-        varm: Optional[Mapping[str, Any]] = None):
-            if adata:
-                if not issparse_cpu(adata.X):
-                    inter = sparse.csr_matrix(adata.X)
-                    self._X = cp.sparse.csr_matrix(inter, dtype=cp.float32)
-                    del inter
-                else:
-                    self._X = cp.sparse.csr_matrix(adata.X, dtype=cp.float32)
-                self._obs = adata.obs.copy()
-                self._var = adata.var.copy()
-                self._uns = adata.uns.copy()
-                self._layers = Layer_Mapping(self.shape)
-                self._obsm = obsm_Mapping(self.shape[0])
-                self._varm = varm_Mapping(self.shape[1])
-                self.raw = None
-                if adata.layers:
-                    for key, matrix in adata.layers.items():
-                        if not issparse_cpu(matrix):
-                            inter = sparse.csr_matrix(matrix)
-                            inter = cp.sparse.csr_matrix(inter, dtype=cp.float32)
-                            
-                        else:
-                            inter = cp.sparse.csr_matrix(matrix, dtype=cp.float32)
-                        self._layers[key] = inter.copy()
-                        del inter
-                if adata.obsm:
-                    for key, matrix in adata.obsm.items():
-                        self._obsm[key] = matrix.copy()
-                if adata.varm:
-                    for key, matrix in adata.varm.items():
-                        self._varm[key] = matrix.copy()
-                
+        varm: Optional[Mapping[str, Any]] = None,
+    ):
+        if adata:
+            if not issparse_cpu(adata.X):
+                inter = sparse.csr_matrix(adata.X)
+                self._X = cp.sparse.csr_matrix(inter, dtype=cp.float32)
+                del inter
             else:
-                if issparse_gpu(X):
-                    self._X = X      
-                elif isinstance(X,cp.ndarray):
-                    self._X  = X            
-                elif not issparse_cpu(X):
-                    inter = sparse.csr_matrix(X)
-                    self._X = cp.sparse.csr_matrix(inter, dtype=cp.float32)
-                    del inter
-                else:
-                    self._X = cp.sparse.csr_matrix(X, dtype=cp.float32)
+                self._X = cp.sparse.csr_matrix(adata.X, dtype=cp.float32)
+            self._obs = adata.obs.copy()
+            self._var = adata.var.copy()
+            self._uns = adata.uns.copy()
+            self._layers = Layer_Mapping(self.shape)
+            self._obsm = obsm_Mapping(self.shape[0])
+            self._varm = varm_Mapping(self.shape[1])
+            self.raw = None
+            if adata.layers:
+                for key, matrix in adata.layers.items():
+                    if not issparse_cpu(matrix):
+                        inter = sparse.csr_matrix(matrix)
+                        inter = cp.sparse.csr_matrix(inter, dtype=cp.float32)
+                    else:
+                        inter = cp.sparse.csr_matrix(matrix, dtype=cp.float32)
+                    self._layers[key] = inter
+            if adata.obsm:
+                for key, matrix in adata.obsm.items():
+                    self._obsm[key] = matrix.copy()
+            if adata.varm:
+                for key, matrix in adata.varm.items():
+                    self._varm[key] = matrix.copy()
 
-                self._obs = obs
-                self._var = var
-                if uns:
-                    self._uns = uns
-                else:
-                    self._uns = OrderedDict()
-                self._layers = Layer_Mapping(self.shape)
-                self._obsm = obsm_Mapping(self.shape[0])
-                self._varm = varm_Mapping(self.shape[1])
-                self.raw = None
+        else:
+            if issparse_gpu(X):
+                self._X = X
+            elif isinstance(X, cp.ndarray):
+                self._X = X
+            elif not issparse_cpu(X):
+                inter = sparse.csr_matrix(X)
+                self._X = cp.sparse.csr_matrix(inter, dtype=cp.float32)
+                del inter
+            else:
+                self._X = cp.sparse.csr_matrix(X, dtype=cp.float32)
 
-                if layers:
-                    for key, matrix in layers.items():
-                        if issparse_gpu(matrix):
-                            inter = matrix
-                        elif isinstance(matrix,cp.ndarray):
-                            inter = matrix               
-                        elif not issparse_cpu(X):
-                            inter = sparse.csr_matrix(matrix)
-                            inter = cp.sparse.csr_matrix(inter, dtype=cp.float32)
-                        else:
-                            inter = cp.sparse.csr_matrix(matrix, dtype=cp.float32)
-                        self.layers[key] = inter.copy()
-                        del inter
-                if obsm:
-                    for key, matrix in obsm.items():
-                        self.obsm[key] = matrix.copy()
-                if varm:
-                    for key, matrix in adata.varm.items():
-                        self.varm[key] = matrix
-    
-    
+            self._obs = obs
+            self._var = var
+            if uns:
+                self._uns = uns
+            else:
+                self._uns = OrderedDict()
+            self._layers = Layer_Mapping(self.shape)
+            self._obsm = obsm_Mapping(self.shape[0])
+            self._varm = varm_Mapping(self.shape[1])
+            self.raw = None
+
+            if layers:
+                for key, matrix in layers.items():
+                    if issparse_gpu(matrix):
+                        inter = matrix
+                    elif isinstance(matrix, cp.ndarray):
+                        inter = matrix
+                    elif not issparse_cpu(X):
+                        inter = sparse.csr_matrix(matrix)
+                        inter = cp.sparse.csr_matrix(inter, dtype=cp.float32)
+                    else:
+                        inter = cp.sparse.csr_matrix(matrix, dtype=cp.float32)
+                    self.layers[key] = inter
+            if obsm:
+                for key, matrix in obsm.items():
+                    self.obsm[key] = matrix.copy()
+            if varm:
+                for key, matrix in adata.varm.items():
+                    self.varm[key] = matrix
+        if issparse_gpu(self._X):
+            if self._X.nnz > 2**31-1:
+                raise ValueError("Cupy only supports Sparse Matrices with `.nnz` \
+                                 with less than 2**31-1 for the int32 indptr")
+
     @property
     def X(self):
         """Data matrix of shape :attr:`.n_obs` × :attr:`.n_vars`."""
-        return  self._X
+        return self._X
 
     @X.setter
     def X(self, value: Optional[Union[cp.ndarray, cpx.scipy.sparse.spmatrix]]):
         self._X = value
         self._update_shape()
 
-
     @property
     def obs(self):
-        """One-dimensional annotation of observations (`pd.DataFrame`)."""     
-        return  self._obs
+        """One-dimensional annotation of observations (`pd.DataFrame`)."""
+        return self._obs
 
     @obs.setter
     def obs(self, value: pd.DataFrame):
@@ -187,13 +197,14 @@ class cunnData:
             self._obs = value.copy()
         else:
             raise ValueError("dimension mismatch")
+
     @property
     def var(self):
         """One-dimensional annotation of variables/ features (`pd.DataFrame`)."""
         return self._var
 
     @var.setter
-    def var(self,value: pd.DataFrame):
+    def var(self, value: pd.DataFrame):
         if value.shape[0] == self.shape[1]:
             self._var = value
         else:
@@ -210,7 +221,9 @@ class cunnData:
             raise ValueError(
                 "Only mutable mapping types (e.g. dict) are allowed for `.uns`."
             )
-        if isinstance(value, (anndata.compact.OverloadedDict, anndata._core.views.DictView)):
+        if isinstance(
+            value, (anndata.compact.OverloadedDict, anndata._core.views.DictView)
+        ):
             value = value.copy()
         self._uns = value
 
@@ -234,8 +247,8 @@ class cunnData:
             del adata.layers["spliced"]
         Return layers’ names::
             adata.layers.keys()
-        """  
-        return  self._layers
+        """
+        return self._layers
 
     @property
     def obsm(self):
@@ -245,9 +258,8 @@ class cunnData:
         Stores for each key a two or higher-dimensional :class:`~numpy.ndarray`
         of length :attr:`n_obs`.
         Is sliced with `data` and `obs` but behaves otherwise like a :term:`mapping`.
-        """      
-        return  self._obsm
-
+        """
+        return self._obsm
 
     @property
     def varm(self):
@@ -258,26 +270,25 @@ class cunnData:
         of length :attr:`n_vars`.
         Is sliced with `data` and `var` but behaves otherwise like a :term:`mapping`.
         """
-        return  self._varm
-    
+        return self._varm
 
     @property
     def obs_names(self):
-        """Names of observations (alias for `.obs.index`)."""        
-        return  self.obs.index
+        """Names of observations (alias for `.obs.index`)."""
+        return self.obs.index
 
     @property
     def var_names(self):
         """Names of variables (alias for `.var.index`)."""
         return self.var.index
-    
+
     @property
-    def n_obs(self)->int:
+    def n_obs(self) -> int:
         """Number of observations."""
         return self.shape[0]
 
     @property
-    def n_vars(self)->int:
+    def n_vars(self) -> int:
         """Number of variables/features."""
         return self.shape[1]
 
@@ -293,12 +304,12 @@ class cunnData:
             return self.X.nnz
         else:
             return None
-    
+
     def _update_shape(self):
         self.layers.update_shape(self.shape)
         self.obsm.update_shape(self.shape[0])
         self.varm.update_shape(self.shape[1])
-        
+
     def _sanitize(self):
         dfs = [self.obs, self.var]
         for df in dfs:
@@ -316,11 +327,13 @@ class cunnData:
                 df[key] = c
 
     def __getitem__(self, index):
-        obs_dx,var_dx = _normalize_indices(index, self.obs_names, self.var_names)
-        cudata = cunnData(X =self.X[obs_dx,var_dx].copy(),
-                        obs = self.obs.iloc[obs_dx,:].copy(),
-                        var = self.var.iloc[var_dx,:].copy(),
-                        uns=self.uns)
+        obs_dx, var_dx = _normalize_indices(index, self.obs_names, self.var_names)
+        cudata = cunnData(
+            X=self.X[obs_dx, var_dx].copy(),
+            obs=self.obs.iloc[obs_dx, :].copy(),
+            var=self.var.iloc[var_dx, :].copy(),
+            uns=self.uns,
+        )
 
         if self.layers:
             for key, matrix in self.layers.items():
@@ -337,8 +350,8 @@ class cunnData:
                     cudata.varm[key] = matrix.iloc[var_dx, :].copy()
                 else:
                     cudata.varm[key] = matrix[var_dx, :].copy()
-        return(cudata)
-    
+        return cudata
+
     def _gen_repr(self, n_obs, n_vars) -> str:
         descr = f"cunnData object with n_obs × n_vars = {n_obs} × {n_vars}"
         for attr in [
@@ -355,18 +368,17 @@ class cunnData:
         return descr
 
     def __repr__(self) -> str:
-            return self._gen_repr(self.n_obs, self.n_vars)
-
+        return self._gen_repr(self.n_obs, self.n_vars)
 
     def to_AnnData(self):
         """
         Takes the cunnData object and creates an AnnData object
-        
+
         Returns
         -------
         :class:`~anndata.AnnData`
             Annotated data matrix.
-        
+
         """
         adata = AnnData(self.X.get())
         adata.obs = self.obs.copy()
