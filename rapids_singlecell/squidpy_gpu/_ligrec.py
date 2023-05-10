@@ -30,7 +30,7 @@ def _get_interactions(
         from omnipath.interactions import import_intercell_network
     except ImportError:
         raise ImportError("Please install omnipath package via `pip install omnipath")
-    
+
     interactions = import_intercell_network(
         interactions_params=interactions_params,
         transmitter_params=transmitter_params,
@@ -226,15 +226,15 @@ def ligrec(
     Returns
     -------
     If `copy = True`, returns a dict with following keys:
-        * `means` - 
+        * `means` -
             :class:`pandas.DataFrame` containing the mean expression.
-        * `pvalues` - 
+        * `pvalues` -
             :class:`pandas.DataFrame` containing the possibly corrected p-values.
-        * `metadata` - 
+        * `metadata` -
             :class:`pandas.DataFrame` containing interaction metadata.
     Otherwise, modifies the adata object with the following key:
-        * :attr:`anndata.AnnData.uns` `['{key_added}']` - 
-            the above mentioned dict. 
+        * :attr:`anndata.AnnData.uns` `['{key_added}']` -
+            the above mentioned dict.
     NaN p-values mark combinations for which the mean expression of one of the \
     interacting components was 0 or it didnt pass the threshold percentage of \
     cells being expressed within a given cluster.
@@ -313,7 +313,7 @@ def ligrec(
             new_genes = adata.raw.var[gene_symbols]
         else:
             new_genes = adata.var[gene_symbols]
-        data.colums = new_genes
+        data = data.rename(columns=new_genes)
 
     interactions[SOURCE] = interactions[SOURCE].str.upper()
     interactions[TARGET] = interactions[TARGET].str.upper()
@@ -459,11 +459,11 @@ def ligrec(
                                         const int num_rows, const int num_cols, const int n_cls) {
             int i = blockIdx.x * blockDim.x + threadIdx.x;
             int j = blockIdx.y * blockDim.y + threadIdx.y;
-            
+
             if (i >= num_rows || j >= num_cols) {
                 return;
             }
-            
+
             int cluster = clusters[i];
             float value = data[i * num_cols + j];
 
@@ -502,7 +502,7 @@ def ligrec(
         sparse_kernel = cp.RawKernel(
             r"""
         extern "C" __global__
-        void calculate_sum_and_count_sparse(const int *indptr,const int *index,const float *data, 
+        void calculate_sum_and_count_sparse(const int *indptr,const int *index,const float *data,
                                             const int* clusters,float* sum_gt0, int* count_gt0,
                                             int nrows, int n_cls) {
             int cell = blockDim.x * blockIdx.x + threadIdx.x;
@@ -515,7 +515,7 @@ def ligrec(
             for(int gene = start_idx; gene < stop_idx; gene++){
                 float value = data[gene];
                 int gene_number = index[gene];
-                
+
                 if (value>0.0){
                     atomicAdd(&sum_gt0[gene_number * n_cls + cluster], value);
                     atomicAdd(&count_gt0[gene_number * n_cls + cluster], 1);
@@ -562,15 +562,15 @@ def ligrec(
                                     const int num_rows, const int num_cols, const int n_cls) {
         int i = blockIdx.x * blockDim.x + threadIdx.x;
         int j = blockIdx.y * blockDim.y + threadIdx.y;
-        
+
         if (i >= num_rows || j >= num_cols) {
             return;
         }
-        
+
         //int cluster = clusters[i];
         //float value = data[i * num_cols + j];
 
-        atomicAdd(&g_cluster[j * n_cls + clusters[i]], data[i * num_cols + j]);    
+        atomicAdd(&g_cluster[j * n_cls + clusters[i]], data[i * num_cols + j]);
     }
     """,
         "mean_kernel",
@@ -579,7 +579,7 @@ def ligrec(
     mean_kernel_sparse = cp.RawKernel(
         r"""
         extern "C" __global__
-        void mean_kernel_sparse(const int *indptr,const int *index,const float *data, 
+        void mean_kernel_sparse(const int *indptr,const int *index,const float *data,
                                             const int* clusters,float* sum_gt0,
                                             int nrows, int n_cls) {
             int cell = blockDim.x * blockIdx.x + threadIdx.x;
@@ -592,7 +592,7 @@ def ligrec(
             for(int gene = start_idx; gene < stop_idx; gene++){
                 float value = data[gene];
                 int gene_number = index[gene];
-                
+
                 if (value>0.0){
                     atomicAdd(&sum_gt0[gene_number * n_cls + cluster], value);
 
@@ -607,11 +607,11 @@ def ligrec(
         r"""
     extern "C" __global__
     void elementwise_diff( float* g_cluster,
-                        const float* total_counts, 
+                        const float* total_counts,
                         const int num_genes, const int num_clusters) {
         int i = blockIdx.x * blockDim.x + threadIdx.x;
         int j = blockIdx.y * blockDim.y + threadIdx.y;
-        
+
         if (i >= num_genes || j >= num_clusters) {
             return;
         }
@@ -633,19 +633,19 @@ def ligrec(
                             const int n_iter, const int n_inter_clust, const int n_cls) {
         int i = blockIdx.x * blockDim.x + threadIdx.x;
         int j = blockIdx.y * blockDim.y + threadIdx.y;
-        
+
         if (i >= n_iter || j >= n_inter_clust) {
             return;
         }
         int rec = interactions[i*2];
         int lig = interactions[i*2+1];
-        
+
         int c1 = interaction_clusters[j*2];
         int c2 = interaction_clusters[j*2+1];
-        
+
         float m1 = mean[rec* n_cls+ c1];
         float m2 = mean[lig* n_cls+ c2];
-        
+
         if (!isnan(res[i*n_inter_clust  + j])) {
             if (m1 > 0 && m2 > 0) {
                 if (mask[rec*n_cls + c1 ] && mask[lig*n_cls + c2]) {
@@ -762,19 +762,19 @@ def ligrec(
                             const int n_inter, const int n_inter_clust, const int n_cls) {
         int i = blockIdx.x * blockDim.x + threadIdx.x;
         int j = blockIdx.y * blockDim.y + threadIdx.y;
-        
+
         if (i >= n_inter || j >= n_inter_clust) {
             return;
         }
         int rec = interactions[i*2];
         int lig = interactions[i*2+1];
-        
+
         int c1 = interaction_clusters[j*2];
         int c2 = interaction_clusters[j*2+1];
-        
+
         float m1 = mean[rec* n_cls+ c1];
         float m2 = mean[lig* n_cls+ c2];
-        
+
 
         if (m1 > 0 && m2 > 0) {
             res_mean[i*n_inter_clust  + j] = (m1 + m2) / 2.0;
