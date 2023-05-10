@@ -373,7 +373,6 @@ def filter_genes(
     qc_var: str = "n_cells_by_counts",
     min_count: int = None,
     max_count: int = None,
-    batchsize: int = None,
     verbose: bool = True,
 ) -> None:
     """
@@ -390,17 +389,13 @@ def filter_genes(
 
         qc_var
             column in :attr:`.var` with numerical entries to filter against
-            
+
         min_count
             Lower bound on number of a given feature to keep gene
 
         max_count
             Upper bound on number of a given feature to keep gene
-        
-        batchsize
-            only needed if you run `filter_genes` before `calculate_qc_metrics` or `calc_gene_qc` on 'n_cells_by_counts', 'total_counts', 'mean_counts' or 'pct_dropout_by_counts'. \
-            Number of rows to be processed together. This can be adjusted for performance to trade-off memory use.
-            
+
         verbose
             Print number of discarded genes
     
@@ -482,7 +477,6 @@ def filter_cells(
     qc_var: str,
     min_count: float = None,
     max_count: float = None,
-    batchsize: bool = None,
     verbose: bool = True,
 ) -> None:
     """\
@@ -501,9 +495,6 @@ def filter_cells(
             Lower bound on number of a given feature to keep cell
         max_count
             Upper bound on number of a given feature to keep cell
-        batchsize
-            only needed if you run `filter_cells` before `calculate_qc_metrics` on 'n_genes' or 'n_counts'. 
-            Number of rows to be processed together. This can be adjusted for performance to trade-off memory use.
         verbose
             Print number of discarded cells
     
@@ -539,7 +530,7 @@ def filter_cells(
         print(
             f"Running `calculate_qc_metrics` for 'n_cells_by_counts' or 'total_counts'"
         )
-        calculate_qc_metrics(cudata, log1p=False, batchsize=batchsize)
+        calculate_qc_metrics(cudata, log1p=False)
         inter = np.array
         if min_count is not None and max_count is not None:
             inter = np.where(
