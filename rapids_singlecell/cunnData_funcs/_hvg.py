@@ -81,9 +81,8 @@ def highly_variable_genes(
                 * If `None`, residuals are clipped to the interval `[-sqrt(n_obs), sqrt(n_obs)]`, where `n_obs` is the number of cells in the dataset (default behavior).
                 * If any scalar `c`, residuals are clipped to the interval `[-c, c]`. Set `clip=np.Inf` for no clipping.
         chunksize
-            If `flavor='pearson_residuals'` or `'poisson_gene_selection'`, this dertermines how many genes are processed at
-            once while computing the residual variance. Choosing a smaller value will reduce
-            the required memory.
+            If `'poisson_gene_selection'`, this dertermines how many genes are processed at
+            once. Choosing a smaller value will reduce the required memory.
         n_samples
             The number of Binomial samples to use to estimate posterior probability
             of enrichment of zeros for each gene (only for `flavor='poisson_gene_selection'`).
@@ -136,7 +135,6 @@ def highly_variable_genes(
             batch_key=batch_key,
             check_values=check_values,
             layer=layer,
-            chunksize=chunksize,
         )
     elif flavor == "poisson_gene_selection":
         _poisson_gene_selection(
@@ -482,7 +480,6 @@ def _highly_variable_pearson_residuals(
     batch_key: Optional[str] = None,
     check_values: bool = True,
     layer: Optional[str] = None,
-    chunksize=1000,
 ):
     """
     Select highly variable genes using analytic Pearson residuals.
