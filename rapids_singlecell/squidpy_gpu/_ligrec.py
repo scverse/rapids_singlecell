@@ -26,8 +26,11 @@ def _get_interactions(
     transmitter_params={"categories": "ligand"},
     receiver_params={"categories": "receptor"},
 ):
-    from omnipath.interactions import import_intercell_network
-
+    try:
+        from omnipath.interactions import import_intercell_network
+    except ImportError:
+        raise ImportError("Please install omnipath package via `pip install omnipath")
+    
     interactions = import_intercell_network(
         interactions_params=interactions_params,
         transmitter_params=transmitter_params,
