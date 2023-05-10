@@ -6,6 +6,7 @@ scanpydoc[typehints]>=0.7.4
 sphinx-copybutton
 matplotlib
 sphinx==4.5.0
+urllib3<2.0
 readthedocs-sphinx-ext
 Jinja2==2.11.3
 nbsphinx==0.8.12
