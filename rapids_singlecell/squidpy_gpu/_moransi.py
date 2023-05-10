@@ -1,7 +1,7 @@
 import cupy as cp
 import math
 
-kernel_morans_I_num_dense = '''
+kernel_morans_I_num_dense = r"""
 extern "C" __global__
 void morans_I_num_dense(const float* data_centered, const int* adj_matrix_row_ptr, const int* adj_matrix_col_ind, 
 const float* adj_matrix_data, float* num, int n_samples, int n_features) {
@@ -22,7 +22,8 @@ const float* adj_matrix_data, float* num, int n_samples, int n_features) {
         atomicAdd(&num[f], edge_weight * product);
     }
 }
-'''
+"""
+
 
 def _morans_I_cupy_dense(data, adj_matrix_cupy, n_permutations=100):
     n_samples, n_features = data.shape
@@ -35,88 +36,125 @@ def _morans_I_cupy_dense(data, adj_matrix_cupy, n_permutations=100):
     sg = int(math.ceil(n_samples / block_size))
     grid_size = (fg, sg, 1)
 
-    num_kernel = cp.RawKernel(kernel_morans_I_num_dense, 'morans_I_num_dense')
-    num_kernel(grid_size, 
-               (block_size, block_size, 1), 
-               (data_centered_cupy, adj_matrix_cupy.indptr, adj_matrix_cupy.indices, 
-                adj_matrix_cupy.data, num, n_samples, n_features))
-    den = cp.sum(data_centered_cupy ** 2, axis=0)
+    num_kernel = cp.RawKernel(kernel_morans_I_num_dense, "morans_I_num_dense")
+    num_kernel(
+        grid_size,
+        (block_size, block_size, 1),
+        (
+            data_centered_cupy,
+            adj_matrix_cupy.indptr,
+            adj_matrix_cupy.indices,
+            adj_matrix_cupy.data,
+            num,
+            n_samples,
+            n_features,
+        ),
+    )
+    den = cp.sum(data_centered_cupy**2, axis=0)
     morans_I = num / den
     # Calculate p-values using permutation tests
     if n_permutations:
         morans_I_permutations = cp.zeros((n_permutations, n_features), dtype=cp.float32)
         for p in range(n_permutations):
             idx_shuffle = cp.random.permutation(adj_matrix_cupy.shape[0])
-            adj_matrix_permuted = adj_matrix_cupy[idx_shuffle,:]
+            adj_matrix_permuted = adj_matrix_cupy[idx_shuffle, :]
             num_permuted = cp.zeros(n_features, dtype=cp.float32)
-            num_kernel(grid_size, 
-                       (block_size, block_size, 1), 
-                       (data_centered_cupy, adj_matrix_permuted.indptr, adj_matrix_permuted.indices, 
-                       adj_matrix_permuted.data, num_permuted, n_samples, n_features))
-            morans_I_permutations[p,:] = num_permuted / den
+            num_kernel(
+                grid_size,
+                (block_size, block_size, 1),
+                (
+                    data_centered_cupy,
+                    adj_matrix_permuted.indptr,
+                    adj_matrix_permuted.indices,
+                    adj_matrix_permuted.data,
+                    num_permuted,
+                    n_samples,
+                    n_features,
+                ),
+            )
+            morans_I_permutations[p, :] = num_permuted / den
             cp.cuda.Stream.null.synchronize()
     else:
-        morans_I_permutations=None
+        morans_I_permutations = None
     return morans_I, morans_I_permutations
+
 
 def _morans_I_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
     n_samples, n_features = data.shape
     data_mean = data.mean(axis=0).ravel()
 
     # Calculate den
-    den = cp.sum((data- data_mean) ** 2, axis=0)
-    
+    den = cp.sum((data - data_mean) ** 2, axis=0)
+
     # Calculate the numerator and denominator for Moran's I
     data = data.tocsc()
     num = cp.zeros(n_features, dtype=data.dtype)
     block_size = 8
-    
+
     sg = int(math.ceil(n_samples / block_size))
-    
-    num_kernel = cp.RawKernel(kernel_morans_I_num_dense, 'morans_I_num_dense')
+
+    num_kernel = cp.RawKernel(kernel_morans_I_num_dense, "morans_I_num_dense")
     batchsize = 1000
     n_batches = math.ceil(n_features / batchsize)
     for batch in range(n_batches):
         start_idx = batch * batchsize
         stop_idx = min(batch * batchsize + batchsize, n_features)
-        data_centered_cupy = data[:,start_idx:stop_idx].toarray()
-        data_centered_cupy = data_centered_cupy-data_mean[start_idx:stop_idx]
+        data_centered_cupy = data[:, start_idx:stop_idx].toarray()
+        data_centered_cupy = data_centered_cupy - data_mean[start_idx:stop_idx]
         num_block = cp.zeros(data_centered_cupy.shape[1], dtype=data.dtype)
         fg = int(math.ceil(data_centered_cupy.shape[1] / block_size))
         grid_size = (fg, sg, 1)
 
-        num_kernel(grid_size, 
-                   (block_size, block_size, 1), 
-                   (data_centered_cupy, adj_matrix_cupy.indptr, adj_matrix_cupy.indices, 
-                    adj_matrix_cupy.data, num_block, n_samples, data_centered_cupy.shape[1]))
+        num_kernel(
+            grid_size,
+            (block_size, block_size, 1),
+            (
+                data_centered_cupy,
+                adj_matrix_cupy.indptr,
+                adj_matrix_cupy.indices,
+                adj_matrix_cupy.data,
+                num_block,
+                n_samples,
+                data_centered_cupy.shape[1],
+            ),
+        )
         num[start_idx:stop_idx] = num_block
         cp.cuda.Stream.null.synchronize()
-    
+
     morans_I = num / den
     # Calculate p-values using permutation tests
     if n_permutations:
         morans_I_permutations = cp.zeros((n_permutations, n_features), dtype=cp.float32)
         for p in range(n_permutations):
             idx_shuffle = cp.random.permutation(adj_matrix_cupy.shape[0])
-            adj_matrix_permuted = adj_matrix_cupy[idx_shuffle,:]
+            adj_matrix_permuted = adj_matrix_cupy[idx_shuffle, :]
             num_permuted = cp.zeros(n_features, dtype=data.dtype)
             for batch in range(n_batches):
                 start_idx = batch * batchsize
                 stop_idx = min(batch * batchsize + batchsize, n_features)
-                data_centered_cupy = data[:,start_idx:stop_idx].toarray()
-                data_centered_cupy = data_centered_cupy-data_mean[start_idx:stop_idx]
+                data_centered_cupy = data[:, start_idx:stop_idx].toarray()
+                data_centered_cupy = data_centered_cupy - data_mean[start_idx:stop_idx]
                 num_block = cp.zeros(data_centered_cupy.shape[1], dtype=data.dtype)
                 fg = int(math.ceil(data_centered_cupy.shape[1] / block_size))
                 grid_size = (fg, sg, 1)
-                num_kernel(grid_size, 
-                           (block_size, block_size, 1), 
-                           (data_centered_cupy, adj_matrix_permuted.indptr, adj_matrix_permuted.indices, 
-                            adj_matrix_permuted.data, num_block, n_samples, data_centered_cupy.shape[1]))
+                num_kernel(
+                    grid_size,
+                    (block_size, block_size, 1),
+                    (
+                        data_centered_cupy,
+                        adj_matrix_permuted.indptr,
+                        adj_matrix_permuted.indices,
+                        adj_matrix_permuted.data,
+                        num_block,
+                        n_samples,
+                        data_centered_cupy.shape[1],
+                    ),
+                )
                 num_permuted[start_idx:stop_idx] = num_block
                 cp.cuda.Stream.null.synchronize()
-            morans_I_permutations[p,:] = num_permuted / den
+            morans_I_permutations[p, :] = num_permuted / den
     else:
-        morans_I_permutations=None
+        morans_I_permutations = None
     return morans_I, morans_I_permutations
 
 

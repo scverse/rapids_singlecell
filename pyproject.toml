@@ -31,8 +31,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-rapids = ["cudf-cu11", "cuml-cu11", "cugraph-cu11"] 
+rapids = ["cudf-cu11", "cuml-cu11", "cugraph-cu11"]
 
 [project.urls]
 Documentation = "https://rapids-singlecell.readthedocs.io"
 Source = "https://github.com/Intron7/rapids_singlecell"
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '^rapids_singlecell/.*\.py$'

@@ -2,17 +2,19 @@ import cupy as cp
 import cupyx as cpx
 from cuml.linear_model import LinearRegression
 from rapids_singlecell.cunnData import cunnData
-from typing import Literal, Union,Optional
+from typing import Literal, Union, Optional
 from ..cunnData import cunnData
 import math
 
-def regress_out(cudata:cunnData,
-                keys:Union[str,list],
-                layer: Optional[str] = None,
-                inplace:bool = True,
-                batchsize: Union[int,Literal["all"],None] = 100,
-                verbose:bool=False)-> Optional[cp.ndarray]:
 
+def regress_out(
+    cudata: cunnData,
+    keys: Union[str, list],
+    layer: Optional[str] = None,
+    inplace: bool = True,
+    batchsize: Union[int, Literal["all"], None] = 100,
+    verbose: bool = False,
+) -> Optional[cp.ndarray]:
     """
     Use linear regression to adjust for the effects of unwanted noise
     and variation. 
@@ -45,35 +47,39 @@ def regress_out(cudata:cunnData,
     Returns a corrected copy or  updates `cudata` with a corrected version of the \
     original `cudata.X` and `cudata.layers['layer']`, depending on `inplace`.
     """
-    
+
     if batchsize != "all" and type(batchsize) not in [int, type(None)]:
         raise ValueError("batchsize must be `int`, `None` or `'all'`")
-    
-    X= cudata.layers[layer] if layer is not None else cudata.X
+
+    X = cudata.layers[layer] if layer is not None else cudata.X
 
     if cpx.scipy.sparse.issparse(X) and not cpx.scipy.sparse.isspmatrix_csc(X):
         X = X.tocsc()
 
-    dim_regressor= 2
-    if type(keys)is list:
-        dim_regressor = len(keys)+1
+    dim_regressor = 2
+    if type(keys) is list:
+        dim_regressor = len(keys) + 1
 
-    regressors = cp.ones((X.shape[0]*dim_regressor)).reshape((X.shape[0], dim_regressor), order="F")
-    if dim_regressor==2:
+    regressors = cp.ones((X.shape[0] * dim_regressor)).reshape(
+        (X.shape[0], dim_regressor), order="F"
+    )
+    if dim_regressor == 2:
         regressors[:, 1] = cp.array(cudata.obs[keys]).ravel()
     else:
-        for i in range(dim_regressor-1):
-            regressors[:, i+1] = cp.array(cudata.obs[keys[i]]).ravel()
+        for i in range(dim_regressor - 1):
+            regressors[:, i + 1] = cp.array(cudata.obs[keys[i]]).ravel()
 
     outputs = cp.empty(X.shape, dtype=X.dtype, order="F")
 
-    cuml_supports_multi_target = LinearRegression._get_tags()['multioutput']
+    cuml_supports_multi_target = LinearRegression._get_tags()["multioutput"]
 
     if cuml_supports_multi_target and batchsize:
         if batchsize == "all" and X.shape[0] < 100000:
-            if cpx.scipy.sparse.issparse(X): 
+            if cpx.scipy.sparse.issparse(X):
                 X = X.todense()
-            lr = LinearRegression(fit_intercept=False, output_type="cupy", algorithm='svd')
+            lr = LinearRegression(
+                fit_intercept=False, output_type="cupy", algorithm="svd"
+            )
             lr.fit(regressors, X, convert_dtype=True)
             outputs[:] = X - lr.predict(regressors)
         else:
@@ -84,22 +90,24 @@ def regress_out(cudata:cunnData,
                 start_idx = batch * batchsize
                 stop_idx = min(batch * batchsize + batchsize, X.shape[1])
                 if cpx.scipy.sparse.issparse(X):
-                    arr_batch = X[:,start_idx:stop_idx].todense()
+                    arr_batch = X[:, start_idx:stop_idx].todense()
                 else:
-                    arr_batch = X[:,start_idx:stop_idx].copy()
-                lr = LinearRegression(fit_intercept=False, output_type="cupy", algorithm='svd')
+                    arr_batch = X[:, start_idx:stop_idx].copy()
+                lr = LinearRegression(
+                    fit_intercept=False, output_type="cupy", algorithm="svd"
+                )
                 lr.fit(regressors, arr_batch, convert_dtype=True)
-                outputs[:,start_idx:stop_idx] =arr_batch - lr.predict(regressors)
+                outputs[:, start_idx:stop_idx] = arr_batch - lr.predict(regressors)
     else:
         if X.shape[0] < 100000 and cpx.scipy.sparse.issparse(X):
             X = X.todense()
         for i in range(X.shape[1]):
             if verbose and i % 500 == 0:
-                print("Regressed %s out of %s" %(i, X.shape[1]))
-            
-            y = X[:,i]
+                print("Regressed %s out of %s" % (i, X.shape[1]))
+
+            y = X[:, i]
             outputs[:, i] = _regress_out_chunk(regressors, y)
-    
+
     if inplace:
         if layer:
             cudata.layers[layer] = outputs
@@ -129,4 +137,8 @@ def _regress_out_chunk(X, y):
 
     lr = LinearRegression(fit_intercept=False, output_type="cupy")
     lr.fit(X, y, convert_dtype=True)
-    return y.reshape(y.shape[0],) - lr.predict(X).reshape(y.shape[0])
+    return y.reshape(
+        y.shape[0],
+    ) - lr.predict(
+        X
+    ).reshape(y.shape[0])
