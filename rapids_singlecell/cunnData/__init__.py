@@ -31,6 +31,12 @@ class Layer_Mapping(dict):
 
     def __setitem__(self, key, item):
         if self.shape == item.shape:
+            if issparse_gpu(item):
+                if item.nnz > 2**31 - 1:
+                    raise ValueError(
+                        "Cupy only supports Sparse Matrices with `.nnz`"
+                        "with less than 2**31-1 for the int32 indptr"
+                    )
             super().__setitem__(key, item)
         else:
             raise ValueError(f"Shape of {key} does not match :attr:`.X`")
@@ -50,10 +56,6 @@ class obsm_Mapping(dict):
 
     def __setitem__(self, key, item):
         if self.shape == item.shape[0]:
-            if issparse_gpu(item):
-                if self._X.nnz > 2**31-1:
-                    raise ValueError("Cupy only supports Sparse Matrices with `.nnz` \
-                                with less than 2**31-1 for the int32 indptr")
             super().__setitem__(key, item)
         else:
             raise ValueError(f"Shape of {key} does not match :attr:`.n_obs`")
@@ -172,9 +174,11 @@ class cunnData:
                 for key, matrix in adata.varm.items():
                     self.varm[key] = matrix
         if issparse_gpu(self._X):
-            if self._X.nnz > 2**31-1:
-                raise ValueError("Cupy only supports Sparse Matrices with `.nnz` \
-                                 with less than 2**31-1 for the int32 indptr")
+            if self._X.nnz > 2**31 - 1:
+                raise ValueError(
+                    "Cupy only supports Sparse Matrices with `.nnz` "
+                    "less than 2**31-1 due to the int32 limit on `indptr`."
+                )
 
     @property
     def X(self):
