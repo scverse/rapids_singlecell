@@ -19,6 +19,7 @@ lib64/
 parts/
 sdist/
 var/
+docs/generated
 wheels/
 share/python-wheels/
 *.egg-info/
@@ -157,5 +158,5 @@ cython_debug/
 ._.*
 ._*
 
-#R 
+#R
 .Rhistory
