@@ -29,18 +29,18 @@ def highly_variable_genes(
     batch_key: str = None,
 ) -> None:
     """\
-    Annotate highly variable genes. 
+    Annotate highly variable genes.
     Expects logarithmized data, except when `flavor='seurat_v3','pearson_residuals','poisson_gene_selection'`, in which count data is expected.
-    
-    Reimplentation of scanpy's function. 
+
+    Reimplentation of scanpy's function.
     Depending on flavor, this reproduces the R-implementations of Seurat, Cell Ranger, Seurat v3 and Pearson Residuals.
     Flavor `poisson_gene_selection` is an implementation of scvi, which is based on M3Drop. It requiers gpu accelerated pytorch to be installed.
-    
-    For these dispersion-based methods, the normalized dispersion is obtained by scaling 
-    with the mean and standard deviation of the dispersions for genes falling into a given 
-    bin for mean expression of genes. This means that for each bin of mean expression, 
+
+    For these dispersion-based methods, the normalized dispersion is obtained by scaling
+    with the mean and standard deviation of the dispersions for genes falling into a given
+    bin for mean expression of genes. This means that for each bin of mean expression,
     highly variable genes are selected.
-    
+
     For Seurat v3, a normalized variance for each gene is computed. First, the data
     are standardized (i.e., z-score normalization per feature) with a regularized
     standard deviation. Next, the normalized variance is computed as the variance
@@ -63,7 +63,7 @@ def highly_variable_genes(
         n_top_genes
             Number of highly-variable genes to keep.
         flavor :
-            Choose the flavor (`seurat`, `cell_ranger`, `seurat_v3`, `pearson_residuals`, `poisson_gene_selection`) for identifying highly variable genes. For the dispersion based methods 
+            Choose the flavor (`seurat`, `cell_ranger`, `seurat_v3`, `pearson_residuals`, `poisson_gene_selection`) for identifying highly variable genes. For the dispersion based methods
             in their default workflows, Seurat passes the cutoffs whereas Cell Ranger passes n_top_genes.
         n_bins
             Number of bins for binning the mean gene expression. Normalization is done with respect to each bin. If just a single gene falls into a bin, the normalized dispersion is artificially set to 1.
@@ -74,7 +74,7 @@ def highly_variable_genes(
             Check if counts in selected layer are integers. A Warning is returned if set to True.
             Only used if `flavor='seurat_v3'` or `'pearson_residuals'`.
         theta
-            The negative binomial overdispersion parameter `theta` for Pearson residuals. 
+            The negative binomial overdispersion parameter `theta` for Pearson residuals.
             Higher values correspond to less overdispersion (`var = mean + mean^2/theta`), and `theta=np.Inf` corresponds to a Poisson model.
         clip
             Only used if `flavor='pearson_residuals'`. Determines if and how residuals are clipped:
@@ -88,7 +88,7 @@ def highly_variable_genes(
             of enrichment of zeros for each gene (only for `flavor='poisson_gene_selection'`).
         batch_key
             If specified, highly-variable genes are selected within each batch separately and merged.
-            
+
     Returns
     -------
         upates `cudata.var` with the following fields:
@@ -277,7 +277,7 @@ def _highly_variable_genes_single_batch(
         """
     if flavor == "seurat":
         X = X.expm1()
-    mean, var = _get_mean_var(X)
+    mean, var = _get_mean_var(X, axis=1)
     mean[mean == 0] = 1e-12
     disp = var / mean
     if flavor == "seurat":  # logarithmized mean as in Seurat
@@ -400,7 +400,7 @@ def _highly_variable_genes_seurat_v3(
             UserWarning,
         )
 
-    mean, var = _get_mean_var(X)
+    mean, var = _get_mean_var(X, axis=1)
     df["means"], df["variances"] = mean.get(), var.get()
     if batch_key is None:
         batch_info = pd.Categorical(np.zeros(cudata.shape[0], dtype=int))
@@ -410,7 +410,7 @@ def _highly_variable_genes_seurat_v3(
     norm_gene_vars = []
     for b in np.unique(batch_info):
         X_batch = X[batch_info == b]
-        mean, var = _get_mean_var(X_batch)
+        mean, var = _get_mean_var(X_batch, axis=1)
         not_const = var > 0
         estimat_var = cp.zeros(X_batch.shape[1], dtype=np.float64)
 
@@ -420,6 +420,7 @@ def _highly_variable_genes_seurat_v3(
         model.fit()
         estimat_var[not_const] = model.outputs.fitted_values
         reg_std = cp.sqrt(10**estimat_var)
+        X_batch = X_batch.astype(cp.float64)
         batch_counts = X_batch
         N = X_batch.shape[0]
         vmax = cp.sqrt(N)
@@ -513,7 +514,7 @@ def _highly_variable_pearson_residuals(
     sparse_kernel = cp.RawKernel(
         r"""
     extern "C" __global__
-    void calculate_sum_cg(const int *indptr,const int *index,const float *data, 
+    void calculate_sum_cg(const int *indptr,const int *index,const float *data,
                                         float* sums_genes, float* sums_cells,
                                         int n_genes) {
         int gene = blockDim.x * blockIdx.x + threadIdx.x;
@@ -537,7 +538,7 @@ def _highly_variable_pearson_residuals(
     sparse_kernel_res = cp.RawKernel(
         r"""
     extern "C" __global__
-    void calculate_res(const int *indptr,const int *index,const float *data, 
+    void calculate_res(const int *indptr,const int *index,const float *data,
                             const float* sums_genes,const float* sums_cells,
                             float* residuals ,float* sum_total,float* clip,float* theta,int n_genes, int n_cells) {
         int gene = blockDim.x * blockIdx.x + threadIdx.x;
@@ -651,7 +652,7 @@ def _highly_variable_pearson_residuals(
     ranks_masked_array = np.ma.masked_invalid(ranks_residual_var)
     # Median rank across batches, ignoring batches in which gene was not selected
     medianrank_residual_var = np.ma.median(ranks_masked_array, axis=0).filled(np.nan)
-    means, variances = _get_mean_var(X)
+    means, variances = _get_mean_var(X, axis=1)
     means, variances = means.get(), variances.get()
     df = pd.DataFrame.from_dict(
         dict(
