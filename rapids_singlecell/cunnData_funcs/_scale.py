@@ -11,7 +11,7 @@ def scale(
 ) -> Optional[cp.ndarray]:
     """
     Scales matrix to unit variance and clips values
-    
+
     Parameters
     ----------
         cudata
@@ -20,12 +20,12 @@ def scale(
         max_value
             After scaling matrix to unit variance, values will be clipped to this number of std deviations.
 
-        layer 
+        layer
             Layer to use as input instead of X. If None, X is used.
 
         inplace
             If True, update cunnData with results. Otherwise, return results. See below for details of what is returned.
-        
+
     Returns
     -------
     Returns a sacled copy or updates `cudata` with a scaled version of the original `cudata.X` and `cudata.layers['layer']`, \

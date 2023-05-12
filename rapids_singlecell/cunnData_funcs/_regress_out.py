@@ -17,8 +17,8 @@ def regress_out(
 ) -> Optional[cp.ndarray]:
     """
     Use linear regression to adjust for the effects of unwanted noise
-    and variation. 
-    
+    and variation.
+
     Parameters
     ----------
         cudata
@@ -26,7 +26,7 @@ def regress_out(
 
         keys
             Keys for numerical observation annotation on which to regress on.
-        
+
         layer
             Layer to regress instead of `X`. If `None`, `X` is regressed.
 
@@ -37,11 +37,11 @@ def regress_out(
             Number of genes that should be processed together. \
             If `'all'` all genes will be processed together if `.n_obs` <100000. \
             If `None` each gene will be analysed seperatly. \
-            Will be ignored if cuML version < 22.12 
-            
-        verbose 
+            Will be ignored if cuML version < 22.12
+
+        verbose
             Print debugging information
-        
+
     Returns
     -------
     Returns a corrected copy or  updates `cudata` with a corrected version of the \

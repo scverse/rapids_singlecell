@@ -16,24 +16,24 @@ def normalize_total(
 
     Parameters
     ----------
-        cudata: 
+        cudata:
             cunnData object
 
-        target_sum : 
+        target_sum :
             Each row will be normalized to sum to this value
-        
+
         layer
             Layer to normalize instead of `X`. If `None`, `X` is normalized.
 
         inplace
             Whether to update `cudata` or return the normalized matrix.
-        
-    
+
+
     Returns
     -------
     Returns a normalized copy or  updates `cudata` with a normalized version of \
     the original `cudata.X` and `cudata.layers['layer']`, depending on `inplace`.
-    
+
     """
     csr_arr = cudata.layers[layer] if layer is not None else cudata.X
 
@@ -43,7 +43,7 @@ def normalize_total(
     mul_kernel = cp.RawKernel(
         r"""
         extern "C" __global__
-        void mul_kernel(const int *indptr, float *data, 
+        void mul_kernel(const int *indptr, float *data,
                         int nrows, int tsum) {
             int row = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -121,7 +121,7 @@ def log1p(
 _sparse_kernel_sum_csc = cp.RawKernel(
     r"""
     extern "C" __global__
-    void calculate_sum_cg_csc(const int *indptr,const int *index,const float *data, 
+    void calculate_sum_cg_csc(const int *indptr,const int *index,const float *data,
                                         float* sums_genes, float* sums_cells,
                                         int n_genes) {
         int gene = blockDim.x * blockIdx.x + threadIdx.x;
@@ -146,7 +146,7 @@ _sparse_kernel_sum_csc = cp.RawKernel(
 _sparse_kernel_norm_res_csc = cp.RawKernel(
     r"""
     extern "C" __global__
-    void calculate_res_csc(const int *indptr,const int *index,const float *data, 
+    void calculate_res_csc(const int *indptr,const int *index,const float *data,
                             const float* sums_cells,const float* sums_genes,
                             float* residuals ,const float* sum_total, const float* clip,
                             const float* theta,const int n_cells,const int n_genes) {
@@ -178,7 +178,7 @@ _sparse_kernel_norm_res_csc = cp.RawKernel(
 _sparse_kernel_sum_csr = cp.RawKernel(
     r"""
     extern "C" __global__
-    void calculate_sum_cg_csr(const int *indptr,const int *index,const float *data, 
+    void calculate_sum_cg_csr(const int *indptr,const int *index,const float *data,
                                         float* sums_genes, float* sums_cells,
                                         int n_cells) {
         int cell = blockDim.x * blockIdx.x + threadIdx.x;
@@ -294,19 +294,19 @@ def normalize_pearson_residuals(
     ----------
         cudata
             cunnData object
-        theta 
-            The negative binomial overdispersion parameter theta for Pearson residuals. 
+        theta
+            The negative binomial overdispersion parameter theta for Pearson residuals.
             Higher values correspond to less overdispersion (var = mean + mean^2/theta), and theta=np.Inf corresponds to a Poisson model.
-        clip 
+        clip
             Determines if and how residuals are clipped:
             If None, residuals are clipped to the interval [-sqrt(n_obs), sqrt(n_obs)], where n_obs is the number of cells in the dataset (default behavior).
             If any scalar c, residuals are clipped to the interval [-c, c]. Set clip=np.Inf for no clipping.
-        check_values 
-            If True, checks if counts in selected layer are integers as expected by this function, 
+        check_values
+            If True, checks if counts in selected layer are integers as expected by this function,
             and return a warning if non-integers are found. Otherwise, proceed without checking. Setting this to False can speed up code for large datasets.
         layer
             Layer to use as input instead of X. If None, X is used.
-        inplace 
+        inplace
             If True, update cunnData with results. Otherwise, return results. See below for details of what is returned.
 
     Returns

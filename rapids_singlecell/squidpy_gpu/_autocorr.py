@@ -33,13 +33,13 @@ def spatial_autocorr(
     """
     Calculate spatial autocorrelation for genes in an AnnData object.
 
-    This function computes spatial autocorrelation scores (Moran's I or Geary's C) for each gene in an AnnData object. 
+    This function computes spatial autocorrelation scores (Moran's I or Geary's C) for each gene in an AnnData object.
     The function also calculates p-values and corrected p-values for multiple testing.
 
     Note:
-        This implementation uses single-precision (float32) for calculations, which may result in decreased accuracy for weak 
-        correlations when compared to double-precision (float64) calculations. For strongly correlated data, the difference in p-values 
-        should be minimal. However, for weakly correlated data with I or C values close to their expected values, the lack of precision 
+        This implementation uses single-precision (float32) for calculations, which may result in decreased accuracy for weak
+        correlations when compared to double-precision (float64) calculations. For strongly correlated data, the difference in p-values
+        should be minimal. However, for weakly correlated data with I or C values close to their expected values, the lack of precision
         may lead to larger discrepancies in p-values.
 
 

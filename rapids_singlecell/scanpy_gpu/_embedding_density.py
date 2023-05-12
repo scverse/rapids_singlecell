@@ -21,7 +21,7 @@ def embedding_density(
     the same category.
     This function was written by Sophie Tritschler and implemented into
     Scanpy by Malte Luecken.
-    This function uses cuML's KernelDensity. It returns log Likelihood as does 
+    This function uses cuML's KernelDensity. It returns log Likelihood as does
     sklearn's implementation. scipy.stats implementation, used
     in scanpy, returns PDF.
 
@@ -47,7 +47,7 @@ def embedding_density(
     parameter. This parameter defaults to `[basis]_density_[groupby]`, where \
     `[basis]` is one of `umap`, `diffmap`, `pca`, `tsne`, or `draw_graph_fa` \
     and `[groupby]` denotes the parameter input.
-    
+
     Updates `adata.uns` with an additional field `[key_added]_params`.
     """
     # to ensure that newly created covariates are categorical
