@@ -420,7 +420,7 @@ def _highly_variable_genes_seurat_v3(
         model.fit()
         estimat_var[not_const] = model.outputs.fitted_values
         reg_std = cp.sqrt(10**estimat_var)
-        X_batch = X_batch.astype(cp.float64)
+        X_batch.data = X_batch.data.astype(cp.float64)
         batch_counts = X_batch
         N = X_batch.shape[0]
         vmax = cp.sqrt(N)
