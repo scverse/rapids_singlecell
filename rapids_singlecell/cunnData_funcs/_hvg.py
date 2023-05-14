@@ -469,7 +469,8 @@ def _highly_variable_genes_seurat_v3(
     cudata.var["variances_norm"] = df["variances_norm"].values.astype(
         "float64", copy=False
     )
-    cudata.var["highly_variable_nbatches"] = df["highly_variable_nbatches"].values
+    if batch_key:
+        cudata.var["highly_variable_nbatches"] = df["highly_variable_nbatches"].values
     cudata.uns["hvg"] = {"flavor": "seurat_v3"}
 
 
