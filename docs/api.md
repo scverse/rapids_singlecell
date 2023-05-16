@@ -29,7 +29,7 @@ import rapids_singlecell as rsc
 
 ## cunnData_funcs: `pp`
 
-`cunnData_funcs` offers functions for preprocessing of {class}`~rapids_singlecell.cunnData.cunnData`. 
+`cunnData_funcs` offers functions for preprocessing of {class}`~rapids_singlecell.cunnData.cunnData`.
 
 ### Preprocessing
 ```{eval-rst}
@@ -78,7 +78,7 @@ Basic plotting function for {class}`~rapids_singlecell.cunnData.cunnData` to ass
 .. currentmodule:: rapids_singlecell
 ```
 
-### Embedding 
+### Embedding
 ```{eval-rst}
 .. autosummary::
    :toctree: generated/

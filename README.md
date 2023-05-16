@@ -6,7 +6,7 @@
 # rapids-singlecell
 
 ## Background
-This repository offers some tools to make analyses of single cell datasets faster by running them on the GPU. 
+This repository offers some tools to make analyses of single cell datasets faster by running them on the GPU.
 The functions are analogous versions of functions that can be found within [scanpy](https://github.com/scverse/scanpy) from the Theis lab or functions from [rapids-single-cell-examples](https://github.com/clara-parabricks/rapids-single-cell-examples) created by the Nvidia RAPIDS team. Most functions are kept close to the original code to ensure compatibility. My aim with this repository was to use the speedup that GPU computing offers and combine it with the ease of use from scanpy.
 
 ## Installation
@@ -52,7 +52,7 @@ To show the capability of these functions, I created two example notebooks evalu
 
 ## Benchmarks
 
-Here are some benchmarks. I ran the notebook on the CPU with as many cores as were available where possible. 
+Here are some benchmarks. I ran the notebook on the CPU with as many cores as were available where possible.
 
 |Step                          |CPU (Ryzen 5950x, 32 Cores, 64GB RAM)|GPU (RTX 3090)|CPU (AMD Eypc Rome, 30 Cores, 500GB RAM)| GPU (Quadro RTX 6000)|GPU (A100 80GB)|
 |------------------------------|---------------------------|--------------|----------|--------------|----------------|

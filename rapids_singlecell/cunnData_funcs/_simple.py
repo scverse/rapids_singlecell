@@ -10,7 +10,7 @@ from typing import Union
 _sparse_qc_kernel_csc = cp.RawKernel(
     r"""
     extern "C" __global__
-    void caluclate_qc_csc(const int *indptr,const int *index,const float *data, 
+    void caluclate_qc_csc(const int *indptr,const int *index,const float *data,
                                         float* sums_cells, float* sums_genes,
                                         int* cell_ex, int* gene_ex,
                                         int n_genes) {
@@ -38,7 +38,7 @@ _sparse_qc_kernel_csc = cp.RawKernel(
 _sparse_qc_kernel_csr = cp.RawKernel(
     r"""
     extern "C" __global__
-    void caluclate_qc_csr(const int *indptr,const int *index,const float *data, 
+    void caluclate_qc_csr(const int *indptr,const int *index,const float *data,
                         float* sums_cells, float* sums_genes,
                         int* cell_ex, int* gene_ex,
                         int n_cells) {
@@ -66,7 +66,7 @@ _sparse_qc_kernel_csr = cp.RawKernel(
 _sparse_qc_kernel_dense = cp.RawKernel(
     r"""
     extern "C" __global__
-    void caluclate_qc_dense(const float *data, 
+    void caluclate_qc_dense(const float *data,
                         float* sums_cells, float* sums_genes,
                         int* cell_ex, int* gene_ex,
                         int n_cells,int n_genes) {
@@ -75,11 +75,11 @@ _sparse_qc_kernel_dense = cp.RawKernel(
         if(cell >= n_cells || gene >=n_genes){
             return;
         }
-    
+
 
         long long int index = static_cast<long long int>(cell) * n_genes + gene;
         float value = data[index];
-        if (value>0.0){ 
+        if (value>0.0){
             atomicAdd(&sums_genes[gene], value);
             atomicAdd(&sums_cells[cell], value);
             atomicAdd(&gene_ex[gene], 1);
@@ -93,7 +93,7 @@ _sparse_qc_kernel_dense = cp.RawKernel(
 _sparse_qc_kernel_csc_sub = cp.RawKernel(
     r"""
     extern "C" __global__
-    void caluclate_qc_csc_sub(const int *indptr,const int *index,const float *data, 
+    void caluclate_qc_csc_sub(const int *indptr,const int *index,const float *data,
                                         float* sums_cells, bool* mask,
                                         int n_genes) {
         int gene = blockDim.x * blockIdx.x + threadIdx.x;
@@ -118,7 +118,7 @@ _sparse_qc_kernel_csc_sub = cp.RawKernel(
 _sparse_qc_kernel_csr_sub = cp.RawKernel(
     r"""
     extern "C" __global__
-    void caluclate_qc_csr_sub(const int *indptr,const int *index,const float *data, 
+    void caluclate_qc_csr_sub(const int *indptr,const int *index,const float *data,
                         float* sums_cells, bool* mask,
                         int n_cells) {
         int cell = blockDim.x * blockIdx.x + threadIdx.x;
@@ -143,7 +143,7 @@ _sparse_qc_kernel_csr_sub = cp.RawKernel(
 _sparse_qc_kernel_dense_sub = cp.RawKernel(
     r"""
     extern "C" __global__
-    void caluclate_qc_dense_sub(const float *data, 
+    void caluclate_qc_dense_sub(const float *data,
                         float* sums_cells, bool *mask,
                         int n_cells, int n_genes) {
         int cell = blockDim.x * blockIdx.x + threadIdx.x;
@@ -154,7 +154,7 @@ _sparse_qc_kernel_dense_sub = cp.RawKernel(
         if(mask[gene] == false){
             return;
         }
-        
+
         long long int index = static_cast<long long int>(cell) * n_genes + gene;
         atomicAdd(&sums_cells[cell], data[index]);
 
@@ -174,10 +174,10 @@ def calculate_qc_metrics(
     """\
     Calculates basic qc Parameters. Calculates number of genes per cell (n_genes) and number of counts per cell (n_counts).
     Loosly based on calculate_qc_metrics from scanpy [Wolf et al. 2018]. Updates :attr:`.obs` and :attr:`.var`  with columns with qc data.
-    
+
     Parameters
     ----------
-        cudata 
+        cudata
             cunnData object
         expr_type
             Name of kind of values in X.
@@ -188,7 +188,7 @@ def calculate_qc_metrics(
             Run flag_gene_family first
         log1p
             Set to `False` to skip computing `log1p` transformed annotations.
-            
+
     Returns
     -------
         adds the following columns in :attr:`.obs` :
@@ -201,7 +201,7 @@ def calculate_qc_metrics(
                     number of counts per qc_var (e.g total counts mitochondrial genes)
                 `pct_{expr_type}_{qc_var}`
                     Proportion of counts of qc_var (percent of counts mitochondrial genes)
-        
+
         adds the following columns in :attr:`.var` :
             `total_{expr_type}`
                 E.g. 'total_counts'. Sum of counts for a gene.
@@ -211,7 +211,7 @@ def calculate_qc_metrics(
                 E.g. "mean_counts". Mean expression over all cells.
             `pct_dropout_by_{expr_type}`
                 E.g. 'pct_dropout_by_counts'. Percentage of cells this feature does not appear in.
-        
+
     """
 
     X = cudata.X
@@ -381,10 +381,10 @@ def filter_genes(
     Filters genes, that have greater than a max number of genes or less than
     a minimum number of a feature in a given :attr:`.var` columns. Can so far only be used for numerical columns.
     You can run this function on 'n_cells' or 'n_counts' with a previous columns in :attr:`.var`.
-    
+
     Parameters
     ----------
-        cudata: 
+        cudata:
             cunnData object
 
         qc_var
@@ -398,11 +398,11 @@ def filter_genes(
 
         verbose
             Print number of discarded genes
-    
+
     Returns
     -------
         a filtered :class:`~rapids_singlecell.cunnData.cunnData` object inplace
-    
+
     """
 
     if qc_var in cudata.var.keys():
@@ -484,10 +484,10 @@ def filter_cells(
 
     Filter cells based on numerical columns in the :attr:`.obs` by selecting those with a feature count greater than a specified maximum or less than a specified minimum.
     It is recommended to run :func:`calculate_qc_metrics` before using this function. You can run this function on n_genes or n_counts before running :func:`calculate_qc_metrics`.
-    
+
     Parameters
     ----------
-        cudata: 
+        cudata:
             cunnData object
         qc_var
             column in .obs with numerical entries to filter against
@@ -497,7 +497,7 @@ def filter_cells(
             Upper bound on number of a given feature to keep cell
         verbose
             Print number of discarded cells
-    
+
     Returns
     -------
        a filtered :class:`~rapids_singlecell.cunnData.cunnData` object inplace

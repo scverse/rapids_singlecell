@@ -20,7 +20,7 @@ The workflow of *rapids-singlecell* is basically the same as *scanpy's*. The mai
 
 ### Preprocessing
 
-The preprocessing is handled by {class}`~rapids_singlecell.cunnData.cunnData` and `cunnData_funcs`. The latter is import as {mod}`~.pp` and {mod}`~.pl` to mimic the behavior of scanpy. 
+The preprocessing is handled by {class}`~rapids_singlecell.cunnData.cunnData` and `cunnData_funcs`. The latter is import as {mod}`~.pp` and {mod}`~.pl` to mimic the behavior of scanpy.
 
 Example:
 ```

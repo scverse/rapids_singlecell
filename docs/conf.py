@@ -8,7 +8,7 @@ from pathlib import Path
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE / "rapids_singlecell"))
 
-on_rtd = os.environ.get('READTHEDOCS') == 'True'
+on_rtd = os.environ.get("READTHEDOCS") == "True"
 
 
 # -- Project information -----------------------------------------------------
@@ -66,7 +66,7 @@ napoleon_numpy_docstring = True
 napoleon_include_init_with_doc = False
 napoleon_use_rtype = False  # having a separate entry generally helps readability
 napoleon_use_param = True
-api_dir = HERE / 'api' 
+api_dir = HERE / "api"
 myst_heading_anchors = 3  # create anchors for h1-h3
 myst_enable_extensions = [
     "amsmath",
@@ -91,21 +91,21 @@ source_suffix = {
 intersphinx_mapping = {
     "anndata": ("https://anndata.readthedocs.io/en/stable/", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
-    "scipy":('https://docs.scipy.org/doc/scipy/',None),
-    "cupy": ("https://docs.cupy.dev/en/stable/",None),
-    "python":('https://docs.python.org/3', None),
-    "cuml":('https://docs.rapids.ai/api/cuml/stable/', None),
-    "pandas":('https://pandas.pydata.org/docs/', None),
-    "cudf":('https://docs.rapids.ai/api/cudf/stable/', None),
-    "cugraph":('https://docs.rapids.ai/api/cugraph/stable/', None),
-    "pymde":('https://pymde.org',None),
-    "scanpy":("https://scanpy.readthedocs.io/en/stable/",None),
-    "squidpy":("https://squidpy.readthedocs.io/en/stable/",None),
-    "seaborn":("https://seaborn.pydata.org/",None),
-    "decoupler":("https://decoupler-py.readthedocs.io/en/latest/",None),
-    "rmm":("https://docs.rapids.ai/api/rmm/stable/",None),
-    "statsmodels":("https://www.statsmodels.org/stable/",None),
-    "omnipath":("https://omnipath.readthedocs.io/en/latest/",None),
+    "scipy": ("https://docs.scipy.org/doc/scipy/", None),
+    "cupy": ("https://docs.cupy.dev/en/stable/", None),
+    "python": ("https://docs.python.org/3", None),
+    "cuml": ("https://docs.rapids.ai/api/cuml/stable/", None),
+    "pandas": ("https://pandas.pydata.org/docs/", None),
+    "cudf": ("https://docs.rapids.ai/api/cudf/stable/", None),
+    "cugraph": ("https://docs.rapids.ai/api/cugraph/stable/", None),
+    "pymde": ("https://pymde.org", None),
+    "scanpy": ("https://scanpy.readthedocs.io/en/stable/", None),
+    "squidpy": ("https://squidpy.readthedocs.io/en/stable/", None),
+    "seaborn": ("https://seaborn.pydata.org/", None),
+    "decoupler": ("https://decoupler-py.readthedocs.io/en/latest/", None),
+    "rmm": ("https://docs.rapids.ai/api/rmm/stable/", None),
+    "statsmodels": ("https://www.statsmodels.org/stable/", None),
+    "omnipath": ("https://omnipath.readthedocs.io/en/latest/", None),
 }
 
 # List of patterns, relative to source directory, that match files and
@@ -121,11 +121,11 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "._*", "*.ipynb_checkpoi
 #
 
 html_context = dict(
-    display_github= True,  # Integrate GitHub
-    github_user= "Intron7",  # Username
-    github_repo= "rapids_singlecell",  # Repo name
-    github_version= "main",  # Version
-    conf_py_path= "/docs/",  # Path in the checkout to the docs root
+    display_github=True,  # Integrate GitHub
+    github_user="Intron7",  # Username
+    github_repo="rapids_singlecell",  # Repo name
+    github_version="main",  # Version
+    conf_py_path="/docs/",  # Path in the checkout to the docs root
 )
 
 html_theme = "scanpydoc"
@@ -143,7 +143,7 @@ html_theme_options = {
 html_show_sphinx = False
 html_logo = "_static/logo3.svg"
 html_static_path = ["_static"]
-#html_extra_path = ["_extra"]
+# html_extra_path = ["_extra"]
 
 nitpick_ignore = [
     # If building the documentation fails because of a missing link that is outside your control,
@@ -151,8 +151,9 @@ nitpick_ignore = [
     #     ("py:class", "igraph.Graph"),
 ]
 
-#def setup(app):
+# def setup(app):
 #    app.warningiserror = on_rtd
+
 
 def setup(app):
     """App setup hook."""

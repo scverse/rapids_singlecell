@@ -25,4 +25,3 @@ dependencies:
     - scikit-misc
     - harmonypy
     - rapids-singlecell
-

@@ -34,13 +34,13 @@ def harmony_integrate(
         kwargs
             Any additional arguments will be passed to
             ``harmonpy_gpu.run_harmony()``.
-            
+
     Returns
     -------
         Updates adata with the field ``adata.obsm[adjusted_basis]``, \
         containing principal components adjusted by Harmony such that \
         different experiments are integrated.
-    
+
     """
     from . import _harmonpy_gpu
 
