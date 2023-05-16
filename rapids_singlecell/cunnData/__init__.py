@@ -143,9 +143,14 @@ class cunnData:
                 del inter
             else:
                 self._X = cp.sparse.csr_matrix(X, dtype=cp.float32)
-
-            self._obs = obs
-            self._var = var
+            if obs:
+                self._obs = obs
+            else:
+                self._obs = pd.DataFrame(index=range(self.shape[0]))
+            if var:
+                self._var = var
+            else:
+                self._var = pd.DataFrame(index=range(self.shape[1]))
             if uns:
                 self._uns = uns
             else:
