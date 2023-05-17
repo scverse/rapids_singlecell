@@ -5,7 +5,7 @@ from typing import Optional
 
 def scale(
     cudata: cunnData,
-    max_value: int = 10,
+    max_value: Optional[int] = None,
     layer: Optional[str] = None,
     inplace: bool = True,
 ) -> Optional[cp.ndarray]:
@@ -45,7 +45,8 @@ def scale(
     stddev = cp.sqrt(X.var(axis=0))
     X /= stddev
     del stddev
-    X = cp.clip(X, a_max=max_value)
+    if max_value:
+        X = cp.clip(X, a_max=max_value)
     if inplace:
         if layer:
             cudata.layers[layer] = X
