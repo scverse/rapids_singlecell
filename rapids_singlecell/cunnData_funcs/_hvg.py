@@ -164,10 +164,9 @@ def highly_variable_genes(
             batches = cudata.obs[batch_key].cat.categories
             df = []
             genes = cudata.var.index.to_numpy()
+            X = cudata.layers[layer] if layer is not None else cudata.X
             for batch in batches:
-                inter_matrix = cudata.X[
-                    np.where(cudata.obs[batch_key] == batch)[0],
-                ].tocsc()
+                inter_matrix = X[np.where(cudata.obs[batch_key] == batch)[0],].tocsc()
                 thr_org = cp.diff(inter_matrix.indptr).ravel()
                 thr = cp.where(thr_org >= 1)[0]
                 thr_2 = cp.where(thr_org < 1)[0]
@@ -336,6 +335,12 @@ def _highly_variable_genes_single_batch(
         ].sort()  # interestingly, np.argpartition is slightly slower
         if n_top_genes > X.shape[1]:
             n_top_genes = X.shape[1]
+        if n_top_genes > dispersion_norm.size:
+            warnings.warn(
+                "`n_top_genes` > number of normalized dispersions, returning all genes with normalized dispersions.",
+                UserWarning,
+            )
+            n_top_genes = dispersion_norm.size
         disp_cut_off = dispersion_norm[n_top_genes - 1]
         gene_subset = np.nan_to_num(df["dispersions_norm"].values) >= disp_cut_off
     else:
@@ -448,6 +453,7 @@ def _highly_variable_genes_seurat_v3(
     ranked_norm_gene_vars = ranked_norm_gene_vars.get()
     ma_ranked = np.ma.masked_invalid(ranked_norm_gene_vars)
     median_ranked = np.ma.median(ma_ranked, axis=0).filled(np.nan)
+
     df["highly_variable_nbatches"] = num_batches_high_var.get()
     df["highly_variable_rank"] = median_ranked
     df["variances_norm"] = cp.mean(norm_gene_vars, axis=0).get()
@@ -598,6 +604,7 @@ def _highly_variable_pearson_residuals(
         if clip < 0:
             raise ValueError("Pearson residuals require `clip>=0` or `clip=None`.")
 
+        clip = cp.array([clip], dtype=cp.float32)
         theta = cp.array([theta], dtype=cp.float32)
         sums_genes = cp.zeros(X_batch.shape[1], dtype=cp.float32)
         sums_cells = cp.zeros(X_batch.shape[0], dtype=cp.float32)
