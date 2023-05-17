@@ -32,6 +32,15 @@ class Layer_Mapping(dict):
     def __setitem__(self, key, item):
         if self.shape == item.shape:
             if issparse_gpu(item):
+                item = item
+            elif isinstance(item, cp.ndarray):
+                item = item
+            elif not issparse_cpu(item):
+                inter = sparse.csr_matrix(item)
+                item = cp.sparse.csr_matrix(inter, dtype=cp.float32)
+            else:
+                item = cp.sparse.csr_matrix(item, dtype=cp.float32)
+            if issparse_gpu(item):
                 if item.nnz > 2**31 - 1:
                     raise ValueError(
                         "Cupy only supports Sparse Matrices with `.nnz`"
@@ -103,6 +112,7 @@ class cunnData:
         obsm: Optional[Mapping[str, Any]] = None,
         varm: Optional[Mapping[str, Any]] = None,
     ):
+        # Initialize from adata
         if adata:
             if not issparse_cpu(adata.X):
                 inter = sparse.csr_matrix(adata.X)
@@ -119,12 +129,7 @@ class cunnData:
             self.raw = None
             if adata.layers:
                 for key, matrix in adata.layers.items():
-                    if not issparse_cpu(matrix):
-                        inter = sparse.csr_matrix(matrix)
-                        inter = cp.sparse.csr_matrix(inter, dtype=cp.float32)
-                    else:
-                        inter = cp.sparse.csr_matrix(matrix, dtype=cp.float32)
-                    self._layers[key] = inter
+                    self._layers[key] = matrix
             if adata.obsm:
                 for key, matrix in adata.obsm.items():
                     self._obsm[key] = matrix.copy()
@@ -132,6 +137,7 @@ class cunnData:
                 for key, matrix in adata.varm.items():
                     self._varm[key] = matrix.copy()
 
+        # Initialize from items
         else:
             if issparse_gpu(X):
                 self._X = X
@@ -143,11 +149,11 @@ class cunnData:
                 del inter
             else:
                 self._X = cp.sparse.csr_matrix(X, dtype=cp.float32)
-            if obs:
+            if obs is not None:
                 self._obs = obs
             else:
                 self._obs = pd.DataFrame(index=range(self.shape[0]))
-            if var:
+            if var is not None:
                 self._var = var
             else:
                 self._var = pd.DataFrame(index=range(self.shape[1]))
@@ -162,16 +168,7 @@ class cunnData:
 
             if layers:
                 for key, matrix in layers.items():
-                    if issparse_gpu(matrix):
-                        inter = matrix
-                    elif isinstance(matrix, cp.ndarray):
-                        inter = matrix
-                    elif not issparse_cpu(X):
-                        inter = sparse.csr_matrix(matrix)
-                        inter = cp.sparse.csr_matrix(inter, dtype=cp.float32)
-                    else:
-                        inter = cp.sparse.csr_matrix(matrix, dtype=cp.float32)
-                    self.layers[key] = inter
+                    self.layers[key] = matrix
             if obsm:
                 for key, matrix in obsm.items():
                     self.obsm[key] = matrix.copy()
