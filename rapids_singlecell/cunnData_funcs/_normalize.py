@@ -323,6 +323,8 @@ def normalize_pearson_residuals(
             "`flavor='pearson_residuals'` expects raw count data, but non-integers were found.",
             UserWarning,
         )
+    computed_on = layer if layer else "cudata.X"
+    settings_dict = dict(theta=theta, clip=clip, computed_on=computed_on)
     if theta <= 0:
         raise ValueError("Pearson residuals require theta > 0")
     if clip is None:
@@ -331,6 +333,7 @@ def normalize_pearson_residuals(
     if clip < 0:
         raise ValueError("Pearson residuals require `clip>=0` or `clip=None`.")
     theta = cp.array([1 / theta], dtype=cp.float32)
+    clip = cp.array([clip], dtype=cp.float32)
     sums_cells = cp.zeros(X.shape[0], dtype=cp.float32)
     sums_genes = cp.zeros(X.shape[1], dtype=cp.float32)
 
@@ -420,7 +423,9 @@ def normalize_pearson_residuals(
                 residuals.shape[1],
             ),
         )
+
     if inplace == True:
+        cudata.uns["pearson_residuals_normalization"] = settings_dict
         if layer:
             cudata.layers[layer] = residuals
         else:
