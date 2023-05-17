@@ -14,7 +14,7 @@ from typing import (
     Mapping,
     Iterable,
 )
-from ._utils import _create_sparse_df
+from ._utils import _create_sparse_df, _assert_categorical_obs
 
 
 SOURCE = "source"
@@ -245,8 +245,6 @@ def ligrec(
         interactions = _get_interactions(
             interactions_params, transmitter_params, receiver_params
         )
-    else:
-        interactions = interactions.copy()
 
     if isinstance(interactions, Mapping):
         interactions = pd.DataFrame(interactions)
@@ -276,6 +274,13 @@ def ligrec(
         )
 
     assert isinstance(interactions, pd.DataFrame)
+
+    if corr_axis:
+        if corr_axis not in {"clusters", "interactions"}:
+            raise ValueError(f"Invalid option `{corr_axis}` for `CorrAxis`.")
+
+    if n_perms <= 0:
+        raise ValueError(f"Expected `n_perms` to be positive, found `{n_perms}`.")
 
     if interactions.empty:
         raise ValueError("The interactions are empty")
@@ -355,18 +360,23 @@ def ligrec(
             interactions, tgt, how="left", left_index=True, right_index=True
         )
     else:
-        raise NotImplementedError(
-            f"Complex policy {complex_policy!r} is not implemented."
-        )
+        raise ValueError(f"Invalid option `{complex_policy!r}` for `ComplexPolicy`.")
 
     interactions = interactions[
         interactions[SOURCE].isin(data.columns)
         & interactions[TARGET].isin(data.columns)
     ]
 
+    _assert_categorical_obs(adata, key=cluster_key)
+    if interactions.empty:
+        raise ValueError("After filtering by genes, no interactions remain.")
     filtered_data = data.loc[
         :, list(set(interactions[SOURCE]) | set(interactions[TARGET]))
     ]
+    if len(adata.obs[cluster_key].cat.categories) <= 1:
+        raise ValueError(
+            f"Expected at least `2` clusters, found `{len(adata.obs[cluster_key].cat.categories)}`."
+        )
     filtered_data["clusters"] = (
         adata.obs.copy()[cluster_key].astype("string").astype("category").values
     )

@@ -110,11 +110,11 @@ def spatial_autocorr(
     # check sparse:
     if use_sparse:
         vals = sparse.csr_matrix(vals)
-        data = cp.sparse.csr_matrix(vals)
+        data = cp.sparse.csr_matrix(vals, dtype=cp.float32)
     else:
         if sparse.issparse(vals):
             vals = vals.toarray()
-        data = cp.array(vals)
+        data = cp.array(vals, dtype=cp.float32)
     # Run Spartial Autocorr
     if mode == "moran":
         score, score_perms = _morans_I_cupy(
@@ -136,7 +136,8 @@ def spatial_autocorr(
         raise NotImplementedError(f"Mode `{mode}` is not yet implemented.")
     g = sparse.csr_matrix(adj_matrix_cupy.get())
     score = score.get()
-    score_perms = score_perms.get()
+    if n_perms is not None:
+        score_perms = score_perms.get()
     with np.errstate(divide="ignore"):
         pval_results = _p_value_calc(score, score_perms, g, params)
 

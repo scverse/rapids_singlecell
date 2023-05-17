@@ -1,7 +1,8 @@
 from ..cunnData import cunnData
+from anndata import AnnData
 
 from cuml.decomposition import PCA, TruncatedSVD
-from typing import Optional
+from typing import Optional, Union
 
 from cupy.sparse import issparse
 import math
@@ -9,10 +10,11 @@ import numpy as np
 
 
 def pca(
-    cudata: cunnData,
+    cudata: Union[cunnData, AnnData],
     layer: str = None,
-    n_comps: int = 50,
+    n_comps: Optional[int] = None,
     zero_center: bool = True,
+    random_state: Union[int, None] = 0,
     use_highly_variable: Optional[bool] = None,
     chunked: bool = False,
     chunk_size: int = None,
@@ -23,17 +25,21 @@ def pca(
     Parameters
     ----------
         cudata :
-            cunnData object
+            cunnData, AnnData object
 
         layer
             If provided, use `cudata.layers[layer]` for expression values instead of `cudata.X`.
 
         n_comps
-            Number of principal components to compute. Defaults to 50
+            Number of principal components to compute. Defaults to 50, or 1 - minimum
+            dimension size of selected representation
 
         zero_center
             If `True`, compute standard PCA from covariance matrix.
             If `False`, omit zero-centering variables
+
+        random_state
+            Change to use different initial states for the optimization.
 
         use_highly_variable
             Whether to use highly variable genes only, stored in
@@ -78,6 +84,13 @@ def pca(
     if use_highly_variable:
         X = X[:, cudata.var["highly_variable"]]
 
+    if n_comps is None:
+        min_dim = min(X.shape[0], X.shape[1])
+        if 50 >= min_dim:
+            n_comps = min_dim - 1
+        else:
+            n_comps = 50
+
     if chunked:
         from cuml.decomposition import IncrementalPCA
 
@@ -97,11 +110,15 @@ def pca(
             X_pca[start_idx:stop_idx] = pca_func.transform(chunk)
     else:
         if zero_center:
-            pca_func = PCA(n_components=n_comps, output_type="numpy")
+            pca_func = PCA(
+                n_components=n_comps, random_state=random_state, output_type="numpy"
+            )
             X_pca = pca_func.fit_transform(X)
 
         elif not zero_center:
-            pca_func = TruncatedSVD(n_components=n_comps, output_type="numpy")
+            pca_func = TruncatedSVD(
+                n_components=n_comps, random_state=random_state, output_type="numpy"
+            )
             X_pca = pca_func.fit_transform(X)
 
     cudata.obsm["X_pca"] = X_pca

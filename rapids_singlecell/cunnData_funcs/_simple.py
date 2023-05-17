@@ -291,7 +291,7 @@ def calculate_qc_metrics(
             qc_vars = [qc_vars]
         for qc_var in qc_vars:
             sums_cells_sub = cp.zeros(X.shape[0], dtype=cp.float32)
-            mask = cp.array(cudata.var["MT"], dtype=cp.bool_)
+            mask = cp.array(cudata.var[qc_var], dtype=cp.bool_)
             if cp.sparse.issparse(X):
                 if cpx.scipy.sparse.isspmatrix_csr(X):
                     block = (32,)

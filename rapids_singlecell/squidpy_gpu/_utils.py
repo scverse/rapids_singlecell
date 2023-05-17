@@ -8,6 +8,7 @@ from typing import (
 from scipy import stats
 from scipy.sparse import spmatrix, issparse
 import pandas as pd
+from pandas.api.types import infer_dtype, is_categorical_dtype
 
 
 ### Taken from squidpy: https://github.com/scverse/squidpy/blob/main/squidpy/gr/_ppatterns.py
@@ -202,3 +203,13 @@ def _create_sparse_df(
     return pd.DataFrame._from_arrays(
         arrays, columns=columns, index=index, verify_integrity=False
     )
+
+
+def _assert_categorical_obs(adata, key):
+    if key not in adata.obs:
+        raise KeyError(f"Cluster key `{key}` not found in `adata.obs`.")
+
+    if not is_categorical_dtype(adata.obs[key]):
+        raise TypeError(
+            f"Expected `adata.obs[{key!r}]` to be `categorical`, found `{infer_dtype(adata.obs[key])}`."
+        )
