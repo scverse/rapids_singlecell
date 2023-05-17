@@ -98,7 +98,7 @@ def _check_nonnegative_integers(X):
     if issparse(X):
         data = X.data
     else:
-        data = data
+        data = X
     """Checks values of data to ensure it is count data"""
     # Check no negatives
     if cp.signbit(data).any():
