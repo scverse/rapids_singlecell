@@ -53,7 +53,7 @@ def diffmap(
     else:
         connectivities = adata.obsp["connectivities"]
     if issparse(connectivities):
-        W = cp.sparse.csr_matrix(connectivities, dtype=cp.float32)
+        W = cpx.scipy.sparse.csr_matrix(connectivities, dtype=cp.float32)
     else:
         W = cp.asarray(connectivities)
     if density_normalize:

@@ -1,5 +1,6 @@
 import cupy as cp
-from cupy.sparse import issparse
+import cupyx as cpx
+from cupyx.scipy.sparse import issparse
 import math
 
 _get_mean_var_major = cp.RawKernel(
@@ -74,20 +75,20 @@ def _mean_var_minor(X, major, minor):
 
 def _get_mean_var(X, axis=0):
     if axis == 0:
-        if cp.sparse.isspmatrix_csr(X):
+        if cpx.scipy.sparse.isspmatrix_csr(X):
             major = X.shape[0]
             minor = X.shape[1]
             mean, var = _mean_var_major(X, major, minor)
-        elif cp.sparse.isspmatrix_csc(X):
+        elif cpx.scipy.sparse.isspmatrix_csc(X):
             major = X.shape[1]
             minor = X.shape[0]
             mean, var = _mean_var_minor(X, major, minor)
     elif axis == 1:
-        if cp.sparse.isspmatrix_csr(X):
+        if cpx.scipy.sparse.isspmatrix_csr(X):
             major = X.shape[0]
             minor = X.shape[1]
             mean, var = _mean_var_minor(X, major, minor)
-        elif cp.sparse.isspmatrix_csc(X):
+        elif cpx.scipy.sparse.isspmatrix_csc(X):
             major = X.shape[1]
             minor = X.shape[0]
             mean, var = _mean_var_major(X, major, minor)

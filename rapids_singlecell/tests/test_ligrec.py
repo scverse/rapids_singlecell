@@ -1,6 +1,5 @@
 import sys
 from itertools import product
-from time import time
 from typing import TYPE_CHECKING, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
@@ -9,12 +8,11 @@ import pytest
 import scanpy as sc
 from anndata import AnnData, read_h5ad
 from pandas.testing import assert_frame_equal
-from scanpy import settings as s
-from scanpy.datasets import blobs
 from itertools import product
 
 from rapids_singlecell.gr import ligrec
 from pathlib import Path
+import pickle
 
 _CK = "leiden"
 Interactions_t = Tuple[Sequence[str], Sequence[str]]
@@ -32,6 +30,23 @@ def adata() -> AnnData:
 @pytest.fixture()
 def interactions(adata: AnnData) -> Tuple[Sequence[str], Sequence[str]]:
     return tuple(product(adata.raw.var_names[:5], adata.raw.var_names[:5]))
+
+
+@pytest.fixture()
+def paul15() -> AnnData:
+    # session because we don't modify this dataset
+    adata = sc.datasets.paul15()
+    sc.pp.normalize_per_cell(adata)
+    adata.raw = adata.copy()
+
+    return adata
+
+
+@pytest.fixture()
+def paul15_means() -> pd.DataFrame:
+    file = Path(__file__).parent / Path("_data/paul15_means.pickle")
+    with open(file, "rb") as fin:
+        return pickle.load(fin)
 
 
 class TestInvalidBehavior:
@@ -146,3 +161,192 @@ class TestInvalidBehavior:
             ligrec(
                 adata, _CK, interactions=interactions, clusters=["foo", ("bar", "baz")]
             )
+
+
+class TestValidBehavior:
+    def test_fdr_axis_works(self, adata: AnnData, interactions: Interactions_t):
+        rc = ligrec(
+            adata,
+            _CK,
+            interactions=interactions,
+            n_perms=5,
+            corr_axis="clusters",
+            copy=True,
+        )
+        ri = ligrec(
+            adata,
+            _CK,
+            interactions=interactions,
+            n_perms=5,
+            corr_axis="interactions",
+            copy=True,
+        )
+
+        np.testing.assert_array_equal(
+            np.where(np.isnan(rc["pvalues"])), np.where(np.isnan(ri["pvalues"]))
+        )
+        mask = np.isnan(rc["pvalues"])
+
+        assert not np.allclose(rc["pvalues"].values[mask], ri["pvalues"].values[mask])
+
+    """
+    def test_inplace_default_key(self, adata: AnnData, interactions: Interactions_t):
+        res = ligrec(adata, _CK, interactions=interactions, n_perms=5, copy=False)
+
+        assert res is None
+        assert isinstance(adata.uns[key], dict)
+        r = adata.uns[key]
+        assert len(r) == 3
+        assert isinstance(r["means"], pd.DataFrame)
+        assert isinstance(r["pvalues"], pd.DataFrame)
+        assert isinstance(r["metadata"], pd.DataFrame)
+    """
+
+    def test_inplace_key_added(self, adata: AnnData, interactions: Interactions_t):
+        assert "foobar" not in adata.uns
+        res = ligrec(
+            adata,
+            _CK,
+            interactions=interactions,
+            n_perms=5,
+            copy=False,
+            key_added="foobar",
+        )
+
+        assert res is None
+        assert isinstance(adata.uns["foobar"], dict)
+        r = adata.uns["foobar"]
+        assert len(r) == 3
+        assert isinstance(r["means"], pd.DataFrame)
+        assert isinstance(r["pvalues"], pd.DataFrame)
+        assert isinstance(r["metadata"], pd.DataFrame)
+
+    def test_return_no_write(self, adata: AnnData, interactions: Interactions_t):
+        assert "foobar" not in adata.uns
+        r = ligrec(
+            adata,
+            _CK,
+            interactions=interactions,
+            n_perms=5,
+            copy=True,
+            key_added="foobar",
+        )
+
+        assert "foobar" not in adata.uns
+        assert len(r) == 3
+        assert isinstance(r["means"], pd.DataFrame)
+        assert isinstance(r["pvalues"], pd.DataFrame)
+        assert isinstance(r["metadata"], pd.DataFrame)
+
+    @pytest.mark.parametrize("fdr_method", [None, "fdr_bh"])
+    def test_pvals_in_correct_range(
+        self, adata: AnnData, interactions: Interactions_t, fdr_method: Optional[str]
+    ):
+        r = ligrec(
+            adata,
+            _CK,
+            interactions=interactions,
+            n_perms=5,
+            copy=True,
+            corr_method=fdr_method,
+            threshold=0,
+        )
+
+        if np.sum(np.isnan(r["pvalues"].values)) == np.prod(r["pvalues"].shape):
+            assert fdr_method == "fdr_bh"
+        else:
+            assert np.nanmax(r["pvalues"].values) <= 1.0, np.nanmax(r["pvalues"].values)
+            assert np.nanmin(r["pvalues"].values) >= 0, np.nanmin(r["pvalues"].values)
+
+    def test_result_correct_index(self, adata: AnnData, interactions: Interactions_t):
+        r = ligrec(adata, _CK, interactions=interactions, n_perms=5, copy=True)
+
+        np.testing.assert_array_equal(r["means"].index, r["pvalues"].index)
+        np.testing.assert_array_equal(r["pvalues"].index, r["metadata"].index)
+
+        np.testing.assert_array_equal(r["means"].columns, r["pvalues"].columns)
+        assert not np.array_equal(r["means"].columns, r["metadata"].columns)
+        assert not np.array_equal(r["pvalues"].columns, r["metadata"].columns)
+
+    def test_result_is_sparse(self, adata: AnnData, interactions: Interactions_t):
+        interactions = pd.DataFrame(interactions, columns=["source", "target"])
+        if TYPE_CHECKING:
+            assert isinstance(interactions, pd.DataFrame)
+        interactions["metadata"] = "foo"
+        r = ligrec(adata, _CK, interactions=interactions, n_perms=5, copy=True)
+
+        assert r["means"].sparse.density <= 0.15
+        assert r["pvalues"].sparse.density <= 0.95
+
+        with pytest.raises(
+            AttributeError,
+            match=r"Can only use the '.sparse' accessor with Sparse data.",
+        ):
+            _ = r["metadata"].sparse
+
+        np.testing.assert_array_equal(r["metadata"].columns, ["metadata"])
+        np.testing.assert_array_equal(
+            r["metadata"]["metadata"], interactions["metadata"]
+        )
+
+    def test_paul15_correct_means(self, paul15: AnnData, paul15_means: pd.DataFrame):
+        res = ligrec(
+            paul15,
+            "paul15_clusters",
+            interactions=list(paul15_means.index.to_list()),
+            corr_method=None,
+            copy=True,
+            threshold=0.01,
+            n_perms=1,
+        )
+
+        np.testing.assert_array_equal(res["means"].index, paul15_means.index)
+        np.testing.assert_array_equal(res["means"].columns, paul15_means.columns)
+        np.testing.assert_allclose(
+            res["means"].values, paul15_means.values, rtol=1e-5, atol=1e-6
+        )
+
+    def test_non_uniqueness(self, adata: AnnData, interactions: Interactions_t):
+        # add complexes
+        expected = {(r.upper(), l.upper()) for r, l in interactions}
+        interactions += (  # type: ignore
+            (
+                f"{interactions[-1][0]}_{interactions[-1][1]}",
+                f"{interactions[-2][0]}_{interactions[-2][1]}",
+            ),
+        ) * 2
+        interactions += interactions[:3]  # type: ignore
+        res = ligrec(
+            adata,
+            _CK,
+            interactions=interactions,
+            n_perms=1,
+            copy=True,
+        )
+
+        assert len(res["pvalues"]) == len(expected)
+        assert set(res["pvalues"].index.to_list()) == expected
+
+    @pytest.mark.parametrize("use_raw", [False, True])
+    def test_gene_symbols(self, adata: AnnData, use_raw: bool):
+        gene_ids = adata.var["gene_ids"]
+        interactions = tuple(product(gene_ids[:5], gene_ids[:5]))
+        res = ligrec(
+            adata,
+            _CK,
+            interactions=interactions,
+            n_perms=5,
+            use_raw=use_raw,
+            copy=True,
+            gene_symbols="gene_ids",
+        )
+
+        np.testing.assert_array_equal(
+            res["means"].index, pd.MultiIndex.from_tuples(interactions)
+        )
+        np.testing.assert_array_equal(
+            res["pvalues"].index, pd.MultiIndex.from_tuples(interactions)
+        )
+        np.testing.assert_array_equal(
+            res["metadata"].index, pd.MultiIndex.from_tuples(interactions)
+        )

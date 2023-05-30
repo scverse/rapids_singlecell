@@ -7,12 +7,14 @@ from rapids_singlecell.cunnData import cunnData
 import pandas as pd
 import pytest
 
+from pathlib import Path
+
+FILE = Path(__file__).parent / Path("_scripts/seurat_hvg.csv")
+FILE_V3 = Path(__file__).parent / Path("_scripts/seurat_hvg_v3.csv.gz")
+FILE_V3_BATCH = Path(__file__).parent / Path("_scripts/seurat_hvg_v3_batch.csv")
+
 
 def test_highly_variable_genes_basic():
-    cudata = cunnData(sc.datasets.blobs())
-
-    rsc.pp.highly_variable_genes(cudata)
-
     cudata = cunnData(sc.datasets.blobs())
     np.random.seed(0)
     cudata.obs["batch"] = np.random.binomial(3, 0.5, size=(cudata.n_obs))
@@ -67,13 +69,6 @@ def test_highly_variable_genes_basic():
     ]
 
     assert np.all(np.isin(colnames, cudata.var.columns))
-
-
-from pathlib import Path
-
-FILE = Path(__file__).parent / Path("_scripts/seurat_hvg.csv")
-FILE_V3 = Path(__file__).parent / Path("_scripts/seurat_hvg_v3.csv.gz")
-FILE_V3_BATCH = Path(__file__).parent / Path("_scripts/seurat_hvg_v3_batch.csv")
 
 
 def test_higly_variable_genes_compare_to_seurat():
@@ -272,7 +267,7 @@ def test_highly_variable_genes_pearson_residuals_general(clip, theta, n_top_gene
 @pytest.mark.parametrize("n_top_genes", [100, 200])
 def test_highly_variable_genes_pearson_residuals_batch(n_top_genes):
     adata = sc.datasets.pbmc3k().copy()
-    adata = adata[:1000, :500]
+    adata = adata[:1000, :500].copy()
     np.random.seed(42)
     adata.obs["batch"] = np.random.randint(0, 3, size=adata.shape[0])
     sc.pp.filter_genes(adata, min_cells=1)
