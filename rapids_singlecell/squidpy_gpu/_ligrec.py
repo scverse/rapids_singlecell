@@ -2,7 +2,8 @@ import cupy as cp
 import numpy as np
 import pandas as pd
 from scipy.sparse import csc_matrix, issparse
-from cupy.sparse import issparse as cpissparse
+from cupyx.scipy.sparse import issparse as cpissparse
+import cupyx as cpx
 import math
 from anndata import AnnData
 from itertools import product
@@ -443,7 +444,7 @@ def ligrec(
     interactions_ = np.vectorize(lambda g: gene_mapper[g])(interactions.values)
 
     if issparse(mat):
-        data_cp = cp.sparse.csr_matrix(mat.tocsr())
+        data_cp = cpx.scipy.sparse.csr_matrix(mat.tocsr())
     else:
         data_cp = cp.array(mat)
 

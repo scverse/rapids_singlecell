@@ -10,6 +10,7 @@ from typing import (
 )
 from scipy import sparse
 import cupy as cp
+import cupyx as cpx
 from ._moransi import _morans_I_cupy
 from ._gearysc import _gearys_C_cupy
 from ._utils import _p_value_calc
@@ -97,20 +98,22 @@ def spatial_autocorr(
             vals = adata[:, genes].X
     # create Adj-Matrix
     adj_matrix = adata.obsp[connectivity_key]
-    adj_matrix_cupy = cp.sparse.csr_matrix(adj_matrix, dtype=cp.float32)
+    adj_matrix_cupy = cpx.scipy.sparse.csr_matrix(adj_matrix, dtype=cp.float32)
 
     if transformation:  # row-normalize
         row_sums = adj_matrix_cupy.sum(axis=1).reshape(-1, 1)
         non_zero_rows = row_sums != 0
         row_sums[non_zero_rows] = 1.0 / row_sums[non_zero_rows]
-        adj_matrix_cupy = adj_matrix_cupy.multiply(cp.sparse.csr_matrix(row_sums))
+        adj_matrix_cupy = adj_matrix_cupy.multiply(
+            cpx.scipy.sparse.csr_matrix(row_sums)
+        )
 
     params = {"two_tailed": two_tailed}
 
     # check sparse:
     if use_sparse:
         vals = sparse.csr_matrix(vals)
-        data = cp.sparse.csr_matrix(vals, dtype=cp.float32)
+        data = cpx.scipy.sparse.csr_matrix(vals, dtype=cp.float32)
     else:
         if sparse.issparse(vals):
             vals = vals.toarray()

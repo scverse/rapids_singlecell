@@ -337,7 +337,7 @@ def normalize_pearson_residuals(
     sums_cells = cp.zeros(X.shape[0], dtype=cp.float32)
     sums_genes = cp.zeros(X.shape[1], dtype=cp.float32)
 
-    if cp.sparse.issparse(X):
+    if cpx.scipy.sparse.issparse(X):
         residuals = cp.zeros(X.shape, dtype=cp.float32)
         if cpx.scipy.sparse.isspmatrix_csc(X):
             block = (8,)

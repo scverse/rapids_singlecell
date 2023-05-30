@@ -219,7 +219,7 @@ def calculate_qc_metrics(
     sums_genes = cp.zeros(X.shape[1], dtype=cp.float32)
     cell_ex = cp.zeros(X.shape[0], dtype=cp.int32)
     gene_ex = cp.zeros(X.shape[1], dtype=cp.int32)
-    if cp.sparse.issparse(X):
+    if cpx.scipy.sparse.issparse(X):
         if cpx.scipy.sparse.isspmatrix_csr(X):
             block = (32,)
             grid = (int(math.ceil(X.shape[0] / block[0])),)
@@ -292,7 +292,7 @@ def calculate_qc_metrics(
         for qc_var in qc_vars:
             sums_cells_sub = cp.zeros(X.shape[0], dtype=cp.float32)
             mask = cp.array(cudata.var[qc_var], dtype=cp.bool_)
-            if cp.sparse.issparse(X):
+            if cpx.scipy.sparse.issparse(X):
                 if cpx.scipy.sparse.isspmatrix_csr(X):
                     block = (32,)
                     grid = (int(math.ceil(X.shape[0] / block[0])),)
@@ -419,19 +419,8 @@ def filter_genes(
             print(
                 f"filtered out {cudata.var.shape[0]-thr.shape[0]} genes based on {qc_var}"
             )
-        cudata.X = cudata.X.tocsr()
-        cudata.X = cudata.X[:, thr]
-        cudata.X = cudata.X.tocsr()
-        cudata.var = cudata.var.iloc[cp.asnumpy(thr)]
-        if cudata.layers:
-            for key, matrix in cudata.layers.items():
-                cudata.layers[key] = matrix[:, thr]
-        if cudata.varm:
-            for key, matrix in cudata.varm.items():
-                if isinstance(matrix, pd.DataFrame):
-                    cudata.varm[key] = matrix.iloc[thr, :]
-                else:
-                    cudata.varm[key] = matrix[thr, :]
+
+        cudata._inplace_subset_var(thr)
 
     elif qc_var in [
         "n_cells_by_counts",
@@ -456,18 +445,8 @@ def filter_genes(
             print(
                 f"filtered out {cudata.var.shape[0]-thr.shape[0]} genes based on {qc_var}"
             )
-        cudata.X = cudata.X[:, thr]
-        if cudata.layers:
-            for key, matrix in cudata.layers.items():
-                cudata.layers[key] = matrix[:, thr]
-        if cudata.varm:
-            for key, matrix in cudata.varm.items():
-                if isinstance(matrix, pd.DataFrame):
-                    cudata.varm[key] = matrix.iloc[thr, :]
-                else:
-                    cudata.varm[key] = matrix[thr, :]
 
-        cudata.var = cudata.var.iloc[cp.asnumpy(thr)]
+        cudata._inplace_subset_var(thr)
     else:
         print(f"please check qc_var")
 
@@ -517,15 +496,7 @@ def filter_cells(
             print(f"Please specify a cutoff to filter against")
         if verbose:
             print(f"filtered out {cudata.obs.shape[0]-inter.shape[0]} cells")
-        cudata.X = cudata.X[inter, :]
-        cudata.obs = cudata.obs.iloc[inter]
-        cudata._update_shape()
-        if cudata.layers:
-            for key, matrix in cudata.layers.items():
-                cudata.layers[key] = matrix[inter, :]
-        if cudata.obsm:
-            for key, matrix in cudata.obsm.items():
-                cudata.obsm[key] = matrix[inter, :]
+        cudata._inplace_subset_obs(inter)
     elif qc_var in ["n_genes_by_counts", "total_counts"]:
         print(
             f"Running `calculate_qc_metrics` for 'n_cells_by_counts' or 'total_counts'"
@@ -544,14 +515,7 @@ def filter_cells(
             print(f"Please specify a cutoff to filter against")
         if verbose:
             print(f"filtered out {cudata.obs.shape[0]-inter.shape[0]} cells")
-        cudata.X = cudata.X[inter, :]
-        cudata.obs = cudata.obs.iloc[inter]
-        if cudata.layers:
-            for key, matrix in cudata.layers.items():
-                cudata.layers[key] = matrix[inter, :]
-        if cudata.obsm:
-            for key, matrix in cudata.obsm.items():
-                cudata.obsm[key] = matrix[inter, :]
+        cudata._inplace_subset_obs(inter)
     else:
         print(f"Please check qc_var.")
 
@@ -567,16 +531,6 @@ def filter_highly_variable(cudata: cunnData) -> None:
     """
     if "highly_variable" in cudata.var.keys():
         thr = np.where(cudata.var["highly_variable"] == True)[0]
-        cudata.X = cudata.X[:, thr]
-        cudata.var = cudata.var.iloc[thr]
-        if cudata.layers:
-            for key, matrix in cudata.layers.items():
-                cudata.layers[key] = matrix[:, thr]
-        if cudata.varm:
-            for key, matrix in cudata.varm.items():
-                if isinstance(matrix, pd.DataFrame):
-                    cudata.varm[key] = matrix.iloc[thr, :]
-                else:
-                    cudata.varm[key] = matrix[thr, :]
+        cudata._inplace_subset_var(thr)
     else:
         print(f"Please calculate highly variable genes first")
