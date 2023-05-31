@@ -41,3 +41,8 @@ Source = "https://github.com/Intron7/rapids_singlecell"
 line-length = 88
 target-version = ['py38']
 include = '^rapids_singlecell/.*\.py$'
+
+[tool.flit.sdist]
+exclude = [
+    "rapids_singlecell/tests",
+]

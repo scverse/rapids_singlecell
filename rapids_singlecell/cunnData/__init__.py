@@ -478,7 +478,7 @@ class cunnData:
         Same as `adata = adata[index, :]`, but inplace.
         """
         obs_dx, _ = _normalize_indices(
-            index, (slice(None, None, None)), self.obs_names, self.var_names
+            (index, slice(None, None, None)), self.obs_names, self.var_names
         )
         x_dim = _get_dimensions(obs_dx, self.shape[0])
         self._X = self.X[obs_dx, :].reshape(x_dim, self.n_vars)
