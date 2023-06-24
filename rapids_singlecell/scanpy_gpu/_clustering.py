@@ -1,6 +1,8 @@
 import cupy as cp
 import cudf
-import cugraph
+from cugraph import Graph
+from cugraph import leiden as culeiden
+from cugraph import louvain as culouvain
 import numpy as np
 import pandas as pd
 from cuml.cluster import KMeans
@@ -16,7 +18,7 @@ import warnings
 def leiden(
     adata: AnnData,
     resolution: float = 1.0,
-    n_iterations: int = -1,
+    n_iterations: int = 100,
     use_weights: bool = True,
     neighbors_key: Optional[int] = None,
     key_added: str = "leiden",
@@ -34,9 +36,9 @@ def leiden(
             Higher values lead to more clusters.
 
         n_iterations
-            How many iterations of the Leiden clustering algorithm to perform.
-            Positive values above 2 define the total number of iterations to perform,
-            -1 has the algorithm run until it reaches its optimal clustering.
+            This controls the maximum number of levels/iterations of the Louvain algorithm.
+            When specified the algorithm will terminate after no more than the specified number of iterations.
+            No error occurs when the algorithm terminates early in this manner.
 
         use_weights
             If `True`, edge weights from the graph are used in the computation
@@ -63,12 +65,12 @@ def leiden(
     else:
         weights = None
 
-    g = cugraph.Graph()
+    g = Graph()
 
     g.from_cudf_adjlist(offsets, indices, weights)
 
     # Cluster
-    leiden_parts, _ = cugraph.leiden(g, resolution=resolution, max_iter=n_iterations)
+    leiden_parts, _ = culeiden(g, resolution=resolution, max_iter=n_iterations)
 
     # Format output
     groups = (
@@ -138,12 +140,12 @@ def louvain(
     else:
         weights = None
 
-    g = cugraph.Graph()
+    g = Graph()
 
     g.from_cudf_adjlist(offsets, indices, weights)
 
     # Cluster
-    louvain_parts, _ = cugraph.louvain(g, resolution=resolution, max_iter=n_iterations)
+    louvain_parts, _ = culouvain(g, resolution=resolution, max_iter=n_iterations)
 
     # Format output
     groups = (

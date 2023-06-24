@@ -46,7 +46,7 @@ def scale(
     X /= stddev
     del stddev
     if max_value:
-        X = cp.clip(X, a_max=max_value)
+        X = cp.clip(X, a_min=-max_value, a_max=max_value)
     if inplace:
         if layer:
             cudata.layers[layer] = X

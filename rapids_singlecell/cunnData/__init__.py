@@ -663,7 +663,7 @@ def _check_X(X):
 
 
 def _get_vector(cudata, k, coldim, idxdim, layer=None):
-    # cudata could be self if Raw and AnnData shared a parent
+    # cudata could be self
     dims = ("obs", "var")
     col = getattr(cudata, coldim).columns
     idx = getattr(cudata, f"{idxdim}_names")
