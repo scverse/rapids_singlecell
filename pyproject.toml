@@ -36,14 +36,13 @@ doc = [
     "sphinx-copybutton",
     "nbsphinx>=0.8.12",
     "myst-nb",
-    "sphinx_rtd_theme>=1.1.1",
-    "scanpydoc[typehints]>=0.7.4",
+    "scanpydoc[typehints,theme]>=0.7.4",
     "readthedocs-sphinx-ext",
 ]
 
 [project.urls]
 Documentation = "https://rapids-singlecell.readthedocs.io"
-Source = "https://github.com/Intron7/rapids_singlecell"
+Source = "https://github.com/scverse/rapids_singlecell"
 
 [tool.black]
 line-length = 88
