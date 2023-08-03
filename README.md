@@ -1,4 +1,4 @@
-[![Stars](https://img.shields.io/github/stars/Intron7/rapids_singlecell?logo=GitHub&color=blue)](https://github.com/Intron7/rapids_singlecell/stargazers)
+[![Stars](https://img.shields.io/github/stars/scverse/rapids_singlecell?logo=GitHub&color=blue)](https://github.com/scverse/rapids_singlecell/stargazers)
 [![PyPI](https://img.shields.io/pypi/v/rapids-singlecell?logo=PyPI)](https://pypi.org/project/rapids-singlecell)
 [![PyPIDownloads](https://pepy.tech/badge/rapids-singlecell)](https://pepy.tech/project/rapids-singlecell)
 [![Documentation Status](https://readthedocs.org/projects/rapids-singlecell/badge/?version=latest)](https://rapids-singlecell.readthedocs.io/en/latest/?badge=latest)
@@ -17,7 +17,7 @@ As always, your thoughts and feedback are valued, as they contribute to the ongo
 
 ## Installation
 ### Conda
-The easiest way to install *rapids-singlecell* is to use one of the *yaml* file provided in the [conda](https://github.com/Intron7/rapids_singlecell/tree/main/conda) folder. These *yaml* files install everything needed to run the example notbooks and get you started.
+The easiest way to install *rapids-singlecell* is to use one of the *yaml* file provided in the [conda](https://github.com/scverse/rapids_singlecell/tree/main/conda) folder. These *yaml* files install everything needed to run the example notbooks and get you started.
 ```
 conda env create -f conda/rsc_rapids_23.04.yml
 # or
