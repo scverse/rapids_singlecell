@@ -15,7 +15,6 @@ authors = [{name = "Severin Dicks"}]
 readme = {file = "README.md", content-type="text/markdown"}
 dynamic = ["version"]
 
-
 dependencies = [
     "anndata>=0.7.4",
     "numpy>=1.17.0",
@@ -32,6 +31,15 @@ dependencies = [
 
 [project.optional-dependencies]
 rapids = ["cudf-cu11", "cuml-cu11", "cugraph-cu11"]
+doc = [
+    "sphinx>=4.5.0",
+    "sphinx-copybutton",
+    "nbsphinx>=0.8.12",
+    "myst-nb",
+    "sphinx_rtd_theme>=1.1.1",
+    "scanpydoc[typehints]>=0.7.4",
+    "readthedocs-sphinx-ext",
+]
 
 [project.urls]
 Documentation = "https://rapids-singlecell.readthedocs.io"
