@@ -123,6 +123,7 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "._*", "*.ipynb_checkpoi
 html_theme = "scanpydoc"
 html_theme_options = dict(
     repository_url=repository_url,
+    repository_branch=os.environ.get("READTHEDOCS_GIT_IDENTIFIER", "main"),
     use_repository_button=True,
 )
 
