@@ -20,7 +20,7 @@ title = "accelerating single cell analysis"
 author = info["Author"]
 copyright = f"{datetime.now():%Y}, {author}."
 version = info["Version"]
-repository_url = f"https://github.com/Intron7/rapids_singlecell"
+repository_url = "https://github.com/scverse/rapids_singlecell"
 
 # The full version, including alpha/beta/rc tags
 release = info["Version"]
@@ -120,25 +120,12 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "._*", "*.ipynb_checkpoi
 # a list of builtin themes.
 #
 
-html_context = dict(
-    display_github=True,  # Integrate GitHub
-    github_user="Intron7",  # Username
-    github_repo="rapids_singlecell",  # Repo name
-    github_version="main",  # Version
-    conf_py_path="/docs/",  # Path in the checkout to the docs root
-)
-
 html_theme = "scanpydoc"
-html_theme_options = {
-    "titles_only": True,
-    "logo_only": True,
-    # Toc options
-    "collapse_navigation": True,
-    "sticky_navigation": False,
-    "navigation_depth": 4,
-    "includehidden": True,
-    "titles_only": False,
-}
+html_theme_options = dict(
+    repository_url=repository_url,
+    repository_branch=os.environ.get("READTHEDOCS_GIT_IDENTIFIER", "main"),
+    use_repository_button=True,
+)
 
 html_show_sphinx = False
 html_logo = "_static/logo3.svg"
@@ -151,12 +138,10 @@ nitpick_ignore = [
     #     ("py:class", "igraph.Graph"),
 ]
 
-# def setup(app):
-#    app.warningiserror = on_rtd
-
 
 def setup(app):
     """App setup hook."""
+    app.warningiserror = True
     app.add_config_value(
         "recommonmark_config",
         {
