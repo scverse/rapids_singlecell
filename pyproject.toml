@@ -39,6 +39,9 @@ doc = [
     "scanpydoc[typehints,theme]>=0.9.4",
     "readthedocs-sphinx-ext",
 ]
+test = [
+    "pytest"
+]
 
 [project.urls]
 Documentation = "https://rapids-singlecell.readthedocs.io"
