@@ -13,6 +13,4 @@ dependencies:
  - cutensor
  - cusparselt
  - pip
- - pip:
-    - scanpy
-    - omnipath
+ 

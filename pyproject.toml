@@ -40,7 +40,9 @@ doc = [
     "readthedocs-sphinx-ext",
 ]
 test = [
-    "pytest"
+    "pytest",
+    "scanpy",
+    "omnipath"
 ]
 
 [project.urls]
