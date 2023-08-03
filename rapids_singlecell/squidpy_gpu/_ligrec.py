@@ -154,10 +154,10 @@ def ligrec(
             Annotated data object.
 
         cluster_key
-            Key in :attr:`anndata.AnnData.obs` where clustering is stored.
+            Key in :attr:`~anndata.AnnData.obs` where clustering is stored.
 
         clusters
-            Clusters from :attr:`anndata.AnnData.obs` `['{cluster_key}']`. \
+            Clusters from :attr:`~anndata.AnnData.obs` `['{cluster_key}']`. \
             Can be specified either as a sequence of :class:`tuple` or just a \
             sequence of cluster names, in which case all combinations \
             considered.
@@ -196,17 +196,17 @@ def ligrec(
             Significance level for FDR correction. Only used when `corr_method != None`.
 
         use_raw
-            Whether to access :attr:`anndata.AnnData.raw`
+            Whether to access :attr:`~anndata.AnnData.raw`
 
         copy
             If `True`, return the result, otherwise save it to the `adata` object.
 
         key_added
-            Key in :attr:`anndata.AnnData.uns` where the result is stored if copy = False. \
+            Key in :attr:`~anndata.AnnData.uns` where the result is stored if copy = False. \
             If None, '{cluster_key}_ligrec' will be used.
 
         gene_symbols
-            Key in :attr:`anndata.AnnData.var` to use instead of :attr:`anndata.AnnData.var_names`.
+            Key in :attr:`~anndata.AnnData.var` to use instead of :attr:`~anndata.AnnData.var_names`.
 
         n_perms
             Number of permutations for the permutation test.
@@ -234,7 +234,7 @@ def ligrec(
         * `metadata` -
             :class:`pandas.DataFrame` containing interaction metadata.
     Otherwise, modifies the adata object with the following key:
-        * :attr:`anndata.AnnData.uns` `['{key_added}']` -
+        * :attr:`~anndata.AnnData.uns` `['{key_added}']` -
             the above mentioned dict.
     NaN p-values mark combinations for which the mean expression of one of the \
     interacting components was 0 or it didnt pass the threshold percentage of \

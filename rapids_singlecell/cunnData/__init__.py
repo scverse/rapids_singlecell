@@ -224,7 +224,7 @@ class cunnData:
 
     @property
     def X(self):
-        """Data matrix of shape :attr:`n_obs` × :attr:`n_vars`."""
+        """Data matrix of shape :attr:`.n_obs` × :attr:`.n_vars`."""
         return self._X
 
     @X.setter
@@ -371,12 +371,12 @@ class cunnData:
 
     @property
     def shape(self):
-        """Shape of data matrix (:attr:`n_obs`, :attr:`n_vars`)."""
+        """Shape of data matrix (:attr:`.n_obs`, :attr:`.n_vars`)."""
         return self.X.shape
 
     @property
     def nnz(self):
-        """Get the count of explicitly-stored values (nonzeros) in :attr:`X`"""
+        """Get the count of explicitly-stored values (nonzeros) in :attr:`.X`"""
         if issparse_gpu(self.X):
             return self.X.nnz
         else:
@@ -532,7 +532,7 @@ class cunnData:
     def obs_vector(self, k: str, *, layer: Optional[str] = None):
         """\
         Convenience function for returning a 1 dimensional ndarray of values
-        from :attr:`X`, :attr:`layers`\\ `[k]`, or :attr:`obs`.
+        from :attr:`.X`, :attr:`.layers`\\ `[k]`, or :attr:`.obs`.
 
         Made for convenience, not performance.
         Intentionally permissive about arguments, for easy iterative use.
@@ -540,14 +540,14 @@ class cunnData:
         Params
         ------
         k
-            Key to use. Should be in :attr:`var_names` or :attr:`obs`\\ `.columns`.
+            Key to use. Should be in :attr:`.var_names` or :attr:`.obs`\\ `.columns`.
         layer
-            What layer values should be returned from. If `None`, :attr:`X` is used.
+            What layer values should be returned from. If `None`, :attr:`.X` is used.
 
         Returns
         -------
         A one dimensional nd array, with values for each obs in the same order
-        as :attr:`obs_names`.
+        as :attr:`.obs_names`.
         """
         if layer == "X":
             if "X" in self.layers:
@@ -564,7 +564,7 @@ class cunnData:
     def var_vector(self, k, *, layer: Optional[str] = None):
         """\
         Convenience function for returning a 1 dimensional ndarray of values
-        from :attr:`X`, :attr:`layers`\\ `[k]`, or :attr:`var`.
+        from :attr:`.X`, :attr:`.layers`\\ `[k]`, or :attr:`.var`.
 
         Made for convenience, not performance. Intentionally permissive about
         arguments, for easy iterative use.
@@ -572,14 +572,14 @@ class cunnData:
         Params
         ------
         k
-            Key to use. Should be in :attr:`obs_names` or :attr:`var`\\ `.columns`.
+            Key to use. Should be in :attr:`.obs_names` or :attr:`.var`\\ `.columns`.
         layer
-            What layer values should be returned from. If `None`, :attr:`X` is used.
+            What layer values should be returned from. If `None`, :attr:`.X` is used.
 
         Returns
         -------
         A one dimensional nd array, with values for each var in the same order
-        as :attr:`var_names`.
+        as :attr:`.var_names`.
         """
         if layer == "X":
             if "X" in self.layers:
@@ -597,19 +597,19 @@ class cunnData:
         return self._gen_repr(self.n_obs, self.n_vars)
 
     def obs_keys(self) -> List[str]:
-        """List keys of observation annotation :attr:`obs`."""
+        """List keys of observation annotation :attr:`.obs`."""
         return self._obs.keys().tolist()
 
     def var_keys(self) -> List[str]:
-        """List keys of variable annotation :attr:`var`."""
+        """List keys of variable annotation :attr:`.var`."""
         return self._var.keys().tolist()
 
     def obsm_keys(self) -> List[str]:
-        """List keys of observation annotation :attr:`obsm`."""
+        """List keys of observation annotation :attr:`.obsm`."""
         return list(self._obsm.keys())
 
     def varm_keys(self) -> List[str]:
-        """List keys of variable annotation :attr:`varm`."""
+        """List keys of variable annotation :attr:`.varm`."""
         return list(self._varm.keys())
 
     def uns_keys(self) -> List[str]:
