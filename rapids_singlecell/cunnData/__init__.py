@@ -51,7 +51,7 @@ class Layer_Mapping(dict):
             super().__setitem__(key, item)
         else:
             raise ValueError(
-                f"Shape of {key} {item.shape} does not match :attr:`.X` {self.shape}"
+                f"Shape of {key} {item.shape} does not match `.X` {self.shape}"
             )
 
 
@@ -71,7 +71,7 @@ class obsm_Mapping(dict):
         if self.shape == item.shape[0]:
             super().__setitem__(key, item)
         else:
-            raise ValueError(f"Shape of {key} does not match :attr:`.n_obs`")
+            raise ValueError(f"Shape of {key} does not match `.n_obs`")
 
 
 class varm_Mapping(dict):
@@ -90,7 +90,7 @@ class varm_Mapping(dict):
         if self.shape == item.shape[0]:
             super().__setitem__(key, item)
         else:
-            raise ValueError(f"Shape of {key} does not match :attr:`.n_vars`")
+            raise ValueError(f"Shape of {key} does not match `.n_vars`")
 
 
 class cunnData:
@@ -224,7 +224,7 @@ class cunnData:
 
     @property
     def X(self):
-        """Data matrix of shape :attr:`.n_obs` × :attr:`.n_vars`."""
+        """Data matrix of shape :attr:`n_obs` × :attr:`n_vars`."""
         return self._X
 
     @X.setter
@@ -371,12 +371,12 @@ class cunnData:
 
     @property
     def shape(self):
-        """Shape of data matrix (:attr:`.n_obs`, :attr:`.n_vars`)."""
+        """Shape of data matrix (:attr:`n_obs`, :attr:`n_vars`)."""
         return self.X.shape
 
     @property
     def nnz(self):
-        """Get the count of explicitly-stored values (nonzeros) in :attr:`.X`"""
+        """Get the count of explicitly-stored values (nonzeros) in :attr:`X`"""
         if issparse_gpu(self.X):
             return self.X.nnz
         else:
