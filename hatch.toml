@@ -1,0 +1,5 @@
+[envs.docs]
+python = "3.11"
+features = ["doc"]
+[envs.docs.scripts]
+build = "sphinx-build -M html docs docs/_build"
