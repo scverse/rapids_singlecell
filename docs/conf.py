@@ -9,7 +9,7 @@ HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE.parent / "src"))
 
 on_rtd = os.environ.get("READTHEDOCS") == "True"
-
+rtd_links_prefix = "src/"
 
 # -- Project information -----------------------------------------------------
 
