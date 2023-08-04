@@ -1,10 +1,12 @@
-import cupy as cp
-import cupyx as cpx
 import math
 import warnings
 from typing import Optional
 
-from ..cunnData import cunnData
+import cupy as cp
+import cupyx as cpx
+
+from rapids_singlecell.cunnData import cunnData
+
 from ._utils import _check_nonnegative_integers
 
 
@@ -100,7 +102,7 @@ def log1p(
             Whether to return a copy or update `cudata`.
 
     Returns
-    ----------
+    -------
             The resulting sparse matrix after applying the natural logarithm of one plus the input matrix. \
             If `copy` is set to True, returns the new sparse matrix. Otherwise, updates the `cudata` object \
             in-place and returns None.
@@ -310,12 +312,11 @@ def normalize_pearson_residuals(
             If True, update cunnData with results. Otherwise, return results. See below for details of what is returned.
 
     Returns
-    ----------
+    -------
         If `inplace=True`, `cudata.X` or the selected layer in `cudata.layers` is updated with the normalized values. \
         If `inplace=False` the normalized matrix is returned.
 
     """
-
     X = cudata.layers[layer] if layer is not None else cudata.X
 
     if check_values and not _check_nonnegative_integers(X):
@@ -324,7 +325,7 @@ def normalize_pearson_residuals(
             UserWarning,
         )
     computed_on = layer if layer else "cudata.X"
-    settings_dict = dict(theta=theta, clip=clip, computed_on=computed_on)
+    settings_dict = {"theta": theta, "clip": clip, "computed_on": computed_on}
     if theta <= 0:
         raise ValueError("Pearson residuals require theta > 0")
     if clip is None:
@@ -424,7 +425,7 @@ def normalize_pearson_residuals(
             ),
         )
 
-    if inplace == True:
+    if inplace is True:
         cudata.uns["pearson_residuals_normalization"] = settings_dict
         if layer:
             cudata.layers[layer] = residuals

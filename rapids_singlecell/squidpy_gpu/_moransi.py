@@ -1,6 +1,7 @@
+import math
+
 import cupy as cp
 import cupyx as cpx
-import math
 
 kernel_morans_I_num_dense = r"""
 extern "C" __global__

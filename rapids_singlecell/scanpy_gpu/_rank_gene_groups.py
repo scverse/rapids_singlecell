@@ -1,9 +1,9 @@
+from typing import Iterable, Literal, Union
+
 import cupy as cp
-from anndata import AnnData
 import numpy as np
 import pandas as pd
-import warnings
-from typing import Iterable, Union, Optional, Literal
+from anndata import AnnData
 
 
 def _select_groups(labels, groups_order_subset="all"):
@@ -75,7 +75,7 @@ def rank_genes_groups_logreg(
             Key from `adata.layers` whose value will be used to perform tests on.
 
     Returns
-    --------
+    -------
         Updates `adata` with the following fields.
 
             **names** : structured `np.ndarray` (`.uns['rank_genes_groups']`)
@@ -93,11 +93,10 @@ def rank_genes_groups_logreg(
             **pvals_adj** : structured `np.ndarray` (`.uns['rank_genes_groups']`)
                 Corrected p-values.
     """
-
     #### Wherever we see "adata.obs[groupby], we should just replace w/ the groups"
 
     # for clarity, rename variable
-    if groups == "all" or groups == None:
+    if groups == "all" or groups is None:
         groups_order = "all"
     elif isinstance(groups, (str, int)):
         raise ValueError("Specify a sequence of groups")
@@ -116,16 +115,16 @@ def rank_genes_groups_logreg(
 
     groups_order, groups_masks = _select_groups(labels, groups_order)
 
-    if layer and use_raw == True:
+    if layer and use_raw is True:
         raise ValueError("Cannot specify `layer` and have `use_raw=True`.")
     elif layer:
         X = adata.layers[layer]
         var_names = adata.var_names
-    elif use_raw == None and adata.raw:
+    elif use_raw is None and adata.raw:
         print("defaulting to using `.raw`")
         X = adata.raw.X
         var_names = adata.raw.var_names
-    elif use_raw == True:
+    elif use_raw is True:
         X = adata.raw.X
         var_names = adata.raw.var_names
     else:
@@ -135,7 +134,7 @@ def rank_genes_groups_logreg(
     # for clarity, rename variable
     n_genes_user = n_genes
     # make sure indices are not OoB in case there are less genes than n_genes
-    if n_genes == None or n_genes_user > X.shape[1]:
+    if n_genes is None or n_genes_user > X.shape[1]:
         n_genes_user = X.shape[1]
     # in the following, n_genes is simply another name for the total number of genes
 
@@ -178,7 +177,7 @@ def rank_genes_groups_logreg(
 
     if len(groups_order) == scores_all.shape[1]:
         scores_all = scores_all.T
-    for igroup, group in enumerate(groups_order):
+    for igroup, _group in enumerate(groups_order):
         if len(groups_order) <= 2:  # binary logistic regression
             scores = scores_all[0]
         else:
@@ -197,17 +196,20 @@ def rank_genes_groups_logreg(
         groups_order_save = [groups_order_save[0]]
 
     scores = np.rec.fromarrays(
-        [n for n in rankings_gene_scores],
+        list(rankings_gene_scores),
         dtype=[(rn, "float32") for rn in groups_order_save],
     )
 
     names = np.rec.fromarrays(
-        [n for n in rankings_gene_names],
+        list(rankings_gene_names),
         dtype=[(rn, "U50") for rn in groups_order_save],
     )
     adata.uns["rank_genes_groups"] = {}
-    adata.uns["rank_genes_groups"]["params"] = dict(
-        groupby=groupby, method="logreg", reference=refname, use_raw=use_raw
-    )
+    adata.uns["rank_genes_groups"]["params"] = {
+        "groupby": groupby,
+        "method": "logreg",
+        "reference": refname,
+        "use_raw": use_raw,
+    }
     adata.uns["rank_genes_groups"]["scores"] = scores
     adata.uns["rank_genes_groups"]["names"] = names

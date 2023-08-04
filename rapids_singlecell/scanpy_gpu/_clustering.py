@@ -1,18 +1,14 @@
-import cupy as cp
+from typing import Optional
+
 import cudf
+import numpy as np
+import pandas as pd
+from anndata import AnnData
 from cugraph import Graph
 from cugraph import leiden as culeiden
 from cugraph import louvain as culouvain
-import numpy as np
-import pandas as pd
 from cuml.cluster import KMeans
-
-from anndata import AnnData
-
-from typing import Optional
 from natsort import natsorted
-
-import warnings
 
 
 def leiden(
@@ -83,10 +79,10 @@ def leiden(
     )
     # store information on the clustering parameters
     adata.uns["leiden"] = {}
-    adata.uns["leiden"]["params"] = dict(
-        resolution=resolution,
-        n_iterations=n_iterations,
-    )
+    adata.uns["leiden"]["params"] = {
+        "resolution": resolution,
+        "n_iterations": n_iterations,
+    }
 
 
 def louvain(
@@ -160,7 +156,7 @@ def louvain(
         categories=natsorted(map(str, np.unique(groups))),
     )
     adata.uns["louvain"] = {}
-    adata.uns["louvain"]["params"] = dict(resolution=resolution)
+    adata.uns["louvain"]["params"] = {"resolution": resolution}
 
 
 def kmeans(
@@ -184,7 +180,6 @@ def kmeans(
             state.
 
     """
-
     kmeans_out = KMeans(n_clusters=n_clusters, random_state=random_state).fit(
         adata.obsm["X_pca"]
     )

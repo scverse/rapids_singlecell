@@ -1,6 +1,6 @@
-from anndata import AnnData
 import cupy as cp
 import numpy as np
+from anndata import AnnData
 
 
 def embedding_density(
@@ -41,6 +41,7 @@ def embedding_density(
         components
             The embedding dimensions over which the density should be calculated.
             This is limited to two components.
+
     Returns
     -------
     Updates `adata.obs` with an additional field specified by the `key_added` \
@@ -122,9 +123,10 @@ def embedding_density(
     if basis != "diffmap":
         components += 1
 
-    adata.uns[f"{density_covariate}_params"] = dict(
-        covariate=groupby, components=components.tolist()
-    )
+    adata.uns[f"{density_covariate}_params"] = {
+        "covariate": groupby,
+        "components": components.tolist(),
+    }
 
 
 def _calc_density(x: cp.ndarray, y: cp.ndarray):

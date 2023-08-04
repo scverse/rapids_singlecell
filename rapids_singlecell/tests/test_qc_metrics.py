@@ -1,12 +1,11 @@
-import scanpy as sc
-import rapids_singlecell as rsc
-from scipy import sparse
-import numpy as np
 import cupy as cp
+import numpy as np
+import pandas as pd
+import pytest
+import rapids_singlecell as rsc
 from anndata import AnnData
 from cupyx.scipy import sparse as sparse_gpu
-import pytest
-import pandas as pd
+from scipy import sparse
 
 
 def test_qc_metrics():
@@ -67,7 +66,7 @@ def test_qc_metrics():
 def adata_mito():
     a = np.random.binomial(100, 0.005, (1000, 1000))
     init_var = pd.DataFrame(
-        dict(mito=np.concatenate((np.ones(100, dtype=bool), np.zeros(900, dtype=bool))))
+        {"mito": np.concatenate((np.ones(100, dtype=bool), np.zeros(900, dtype=bool)))}
     )
     adata_dense = AnnData(X=a, var=init_var.copy())
     return adata_dense

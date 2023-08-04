@@ -1,9 +1,10 @@
-from anndata import AnnData
+from typing import Union
+
 import cudf
 import cugraph
-import numpy as np
 import cupy as cp
-from typing import Union
+import numpy as np
+from anndata import AnnData
 
 
 def draw_graph(
@@ -31,13 +32,12 @@ def draw_graph(
             Above 1000 iterations is discouraged.
 
     Returns
-    ----------
+    -------
         updates `adata` with the following fields.
 
             X_draw_graph_layout_fa : `adata.obsm`
                 Coordinates of graph layout.
     """
-
     from cugraph.layout import force_atlas2
 
     # Adjacency graph
@@ -104,6 +104,6 @@ def draw_graph(
     positions = cp.vstack((positions["x"].to_cupy(), positions["y"].to_cupy())).T
     layout = "fa"
     adata.uns["draw_graph"] = {}
-    adata.uns["draw_graph"]["params"] = dict(layout=layout, random_state=0)
+    adata.uns["draw_graph"]["params"] = {"layout": layout, "random_state": 0}
     key_added = f"X_draw_graph_{layout}"
     adata.obsm[key_added] = positions.get()  # Format output

@@ -1,10 +1,10 @@
 import numpy as np
 import pandas as pd
-from scipy.sparse import csr_matrix
 from anndata import AnnData
 from rapids_singlecell.dcg import run_mlm, run_wsum
 from rapids_singlecell.decoupler_gpu._method_mlm import mlm
 from rapids_singlecell.decoupler_gpu._method_wsum import wsum
+from scipy.sparse import csr_matrix
 
 
 def test_mlm():
@@ -20,7 +20,7 @@ def test_mlm():
         )
     )
     net = np.array([[1.0, 0.0], [2, 0.0], [0.0, -3.0], [0.0, 4.0]], dtype=np.float32)
-    res = mlm(m, net)
+    mlm(m, net)
 
 
 def test_run_mlm():
@@ -56,7 +56,7 @@ def test_wsum():
         )
     )
     net = np.array([[1.0, 0.0], [2, 0.0], [0.0, -3.0], [0.0, 4.0]], dtype=np.float32)
-    res = wsum(m, net, 2, 10000, 42, True)
+    wsum(m, net, 2, 10000, 42, True)
 
 
 def test_run_wsum():

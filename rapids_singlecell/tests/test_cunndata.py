@@ -1,18 +1,16 @@
-import scanpy as sc
-import rapids_singlecell as rsc
-from rapids_singlecell.cunnData import cunnData
-from anndata import AnnData
-import numpy as np
 import cupy as cp
+import cupyx.scipy.sparse as spg
+import numpy as np
 import pandas as pd
 import pytest
+from anndata import AnnData
+from rapids_singlecell.cunnData import cunnData
 from scipy import sparse as sp
-import cupyx.scipy.sparse as spg
 
 
 def test_create_with_dfs():
     X = cp.ones((6, 3))
-    obs = pd.DataFrame(dict(cat_anno=pd.Categorical(["a", "a", "a", "a", "b", "a"])))
+    obs = pd.DataFrame({"cat_anno": pd.Categorical(["a", "a", "a", "a", "b", "a"])})
     obs_copy = obs.copy()
     adata = cunnData(X=X, obs=obs)
     assert obs.index.equals(obs_copy.index)
@@ -23,11 +21,11 @@ def test_creation():
     cunnData(X=np.array([[1, 2], [3, 4]]))
     cunnData(X=np.array([[1, 2], [3, 4]]), obs={}, var={})
     X = np.array([[1, 2, 3], [4, 5, 6]])
-    adata = cunnData(
+    cunnData(
         X=X,
-        obs=dict(Obs=["A", "B"]),
-        var=dict(Feat=["a", "b", "c"]),
-        obsm=dict(X_pca=np.array([[1, 2], [3, 4]])),
+        obs={"Obs": ["A", "B"]},
+        var={"Feat": ["a", "b", "c"]},
+        obsm={"X_pca": np.array([[1, 2], [3, 4]])},
     )
 
 

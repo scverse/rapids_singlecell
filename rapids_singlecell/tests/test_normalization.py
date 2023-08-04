@@ -1,9 +1,9 @@
-import numpy as np
 import cupy as cp
-from anndata import AnnData
-import rapids_singlecell as rsc
-from rapids_singlecell.cunnData import cunnData
+import numpy as np
 import pytest
+import rapids_singlecell as rsc
+from anndata import AnnData
+from rapids_singlecell.cunnData import cunnData
 from scipy.sparse import csr_matrix
 
 X_total = np.array([[1, 0], [3, 0], [5, 6]])

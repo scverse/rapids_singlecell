@@ -1,18 +1,14 @@
-import sys
+import pickle
 from itertools import product
-from typing import TYPE_CHECKING, Mapping, Optional, Sequence, Tuple
+from pathlib import Path
+from typing import TYPE_CHECKING, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
 import pytest
 import scanpy as sc
 from anndata import AnnData, read_h5ad
-from pandas.testing import assert_frame_equal
-from itertools import product
-
 from rapids_singlecell.gr import ligrec
-from pathlib import Path
-import pickle
 
 _CK = "leiden"
 Interactions_t = Tuple[Sequence[str], Sequence[str]]
@@ -90,13 +86,13 @@ class TestInvalidBehavior:
         adata.obs["foo"] = 1
         adata.obs["foo"] = adata.obs["foo"].astype("category")
         with pytest.raises(
-            ValueError, match=rf"Expected at least `2` clusters, found `1`."
+            ValueError, match=r"Expected at least `2` clusters, found `1`."
         ):
             ligrec(adata, "foo", interactions=interactions)
 
     def test_invalid_complex_policy(self, adata: AnnData, interactions: Interactions_t):
         with pytest.raises(
-            ValueError, match=rf"Invalid option `'foobar'` for `ComplexPolicy`."
+            ValueError, match=r"Invalid option `'foobar'` for `ComplexPolicy`."
         ):
             ligrec(adata, _CK, interactions=interactions, complex_policy="foobar")
 

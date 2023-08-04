@@ -1,9 +1,9 @@
+import cupy as cp
+import cupyx as cpx
+import cupyx.scipy.sparse
+import cupyx.scipy.sparse.linalg
 from anndata import AnnData
 from scipy.sparse import issparse
-import cupyx.scipy.sparse.linalg
-import cupyx.scipy.sparse
-import cupyx as cpx
-import cupy as cp
 
 
 def diffmap(
@@ -37,7 +37,7 @@ def diffmap(
             Leave as is for the same behavior as sc.tl.diffmap
 
     Returns
-    ----------
+    -------
         updates `adata` with the following fields.
 
             `X_diffmap` : :class:`numpy.ndarray` (`adata.obsm`)
@@ -47,7 +47,6 @@ def diffmap(
                 Array of size (number of eigen vectors).
                 Eigenvalues of transition matrix.
     """
-
     if neighbors_key:
         connectivities = adata.obsp[neighbors_key + "_connectivities"]
     else:

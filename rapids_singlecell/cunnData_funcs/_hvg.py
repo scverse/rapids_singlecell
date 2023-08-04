@@ -1,12 +1,13 @@
-import cupy as cp
-import cupyx as cpx
-import numpy as np
-import pandas as pd
 import math
 import warnings
 from typing import Optional
 
-from ..cunnData import cunnData
+import cupy as cp
+import numpy as np
+import pandas as pd
+
+from rapids_singlecell.cunnData import cunnData
+
 from ._utils import _check_nonnegative_integers, _get_mean_var
 
 
@@ -203,15 +204,15 @@ def highly_variable_genes(
             df = pd.concat(df, axis=0)
             df["highly_variable"] = df["highly_variable"].astype(int)
             df = df.groupby("gene").agg(
-                dict(
-                    means=np.nanmean,
-                    dispersions=np.nanmean,
-                    dispersions_norm=np.nanmean,
-                    highly_variable=np.nansum,
-                )
+                {
+                    "means": np.nanmean,
+                    "dispersions": np.nanmean,
+                    "dispersions_norm": np.nanmean,
+                    "highly_variable": np.nansum,
+                }
             )
             df.rename(
-                columns=dict(highly_variable="highly_variable_nbatches"), inplace=True
+                columns={"highly_variable": "highly_variable_nbatches"}, inplace=True
             )
             df["highly_variable_intersection"] = df["highly_variable_nbatches"] == len(
                 batches
@@ -269,11 +270,12 @@ def _highly_variable_genes_single_batch(
 ):
     """\
         See `highly_variable_genes`.
-        Returns
-        -------
-        A DataFrame that contains the columns
-        `highly_variable`, `means`, `dispersions`, and `dispersions_norm`.
-        """
+
+    Returns
+    -------
+    A DataFrame that contains the columns
+    `highly_variable`, `means`, `dispersions`, and `dispersions_norm`.
+    """
     if flavor == "seurat":
         X = X.expm1()
     mean, var = _get_mean_var(X, axis=1)
@@ -297,7 +299,7 @@ def _highly_variable_genes_single_batch(
         # only a single gene fell in the bin and implicitly set them to have
         # a normalized disperion of 1
         one_gene_per_bin = disp_std_bin.isnull()
-        gen_indices = np.where(one_gene_per_bin[df["mean_bin"].values])[0].tolist()
+        np.where(one_gene_per_bin[df["mean_bin"].values])[0].tolist()
 
         # Circumvent pandas 0.23 bug. Both sides of the assignment have dtype==float32,
         # but there’s still a dtype error without “.value”.
@@ -368,6 +370,7 @@ def _highly_variable_genes_seurat_v3(
     """\
     See `highly_variable_genes`.
     For further implementation details see https://www.overleaf.com/read/ckptrbgzzzpg
+
     Returns
     -------
     updates `.var` with the following fields:
@@ -663,14 +666,14 @@ def _highly_variable_pearson_residuals(
     means, variances = _get_mean_var(X, axis=1)
     means, variances = means.get(), variances.get()
     df = pd.DataFrame.from_dict(
-        dict(
-            means=means,
-            variances=variances,
-            residual_variances=cp.mean(residual_gene_vars, axis=0).get(),
-            highly_variable_rank=medianrank_residual_var,
-            highly_variable_nbatches=highly_variable_nbatches.astype(np.int64),
-            highly_variable_intersection=highly_variable_nbatches == n_batches,
-        )
+        {
+            "means": means,
+            "variances": variances,
+            "residual_variances": cp.mean(residual_gene_vars, axis=0).get(),
+            "highly_variable_rank": medianrank_residual_var,
+            "highly_variable_nbatches": highly_variable_nbatches.astype(np.int64),
+            "highly_variable_intersection": highly_variable_nbatches == n_batches,
+        }
     )
     df = df.set_index(cudata.var_names)
     df.sort_values(
@@ -715,6 +718,7 @@ def _poisson_gene_selection(
     The method accounts for library size internally, a raw count matrix should be provided.
     Instead of Z-test, enrichment of zeros is quantified by posterior
     probabilites from a binomial model, computed through sampling.
+
     Parameters
     ----------
     cudata
@@ -733,6 +737,7 @@ def _poisson_gene_selection(
         Size of temporary matrix for incremental calculation. Larger is faster but
         requires more RAM or GPU memory. (The default should be fine unless
         there are hundreds of millions cells or millions of genes.)
+
     Returns
     -------
     Depending on `inplace` returns calculated metrics (:class:`~pd.DataFrame`) or
@@ -750,7 +755,6 @@ def _poisson_gene_selection(
     prob_zero_enriched_nbatches : int
         If batch_key is given, this denotes in how many batches genes are detected as zero enriched
     """
-
     try:
         import torch
     except ImportError:

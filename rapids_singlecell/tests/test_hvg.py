@@ -1,13 +1,13 @@
-import scanpy as sc
-import numpy as np
+from pathlib import Path
+
 import cupy as cp
 import cupyx as cpx
-import rapids_singlecell as rsc
-from rapids_singlecell.cunnData import cunnData
+import numpy as np
 import pandas as pd
 import pytest
-
-from pathlib import Path
+import rapids_singlecell as rsc
+import scanpy as sc
+from rapids_singlecell.cunnData import cunnData
 
 FILE = Path(__file__).parent / Path("_scripts/seurat_hvg.csv")
 FILE_V3 = Path(__file__).parent / Path("_scripts/seurat_hvg_v3.csv.gz")

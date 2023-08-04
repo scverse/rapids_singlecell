@@ -1,34 +1,31 @@
+import warnings
+from collections import OrderedDict
+from itertools import repeat
+from typing import Any, List, Mapping, MutableMapping, Optional, Union
+
+import anndata
 import cupy as cp
 import cupyx as cpx
-from anndata import AnnData
-from anndata._core.index import _normalize_indices
-import anndata
-
 import numpy as np
 import pandas as pd
-from scipy import sparse
-from collections import OrderedDict
-from typing import Any, Union, Optional, Mapping, MutableMapping, List
-from pandas.api.types import infer_dtype, is_string_dtype
-from itertools import repeat
-import warnings
-
-from natsort import natsorted
-
-from scipy.sparse import issparse as issparse_cpu
+from anndata import AnnData
+from anndata._core.index import _normalize_indices
 from cupyx.scipy.sparse import issparse as issparse_gpu
+from natsort import natsorted
+from pandas.api.types import infer_dtype, is_string_dtype
+from scipy import sparse
+from scipy.sparse import issparse as issparse_cpu
 
 
 class Layer_Mapping(dict):
-    """
-    Dictonary subclass for layers handeling in cunnData
-    """
+    """Dictonary subclass for layers handeling in cunnData"""
 
     def __init__(self, shape=None):
         super().__init__({})
         self.shape = shape
 
     def update_shape(self, shape):
+        """Updates Shape for Layers"""
         self.shape = shape
 
     def __setitem__(self, key, item):
@@ -56,15 +53,14 @@ class Layer_Mapping(dict):
 
 
 class obsm_Mapping(dict):
-    """
-    Dictonary subclass for obsm handeling in cunnData
-    """
+    """Dictonary subclass for obsm handeling in cunnData"""
 
     def __init__(self, shape=None):
         super().__init__({})
         self.shape = shape
 
     def update_shape(self, shape):
+        """Updates Shape for obsm"""
         self.shape = shape
 
     def __setitem__(self, key, item):
@@ -75,15 +71,14 @@ class obsm_Mapping(dict):
 
 
 class varm_Mapping(dict):
-    """
-    Dictonary subclass for obsm handeling in cunnData
-    """
+    """Dictonary subclass for obsm handeling in cunnData"""
 
     def __init__(self, shape=None):
         super().__init__({})
         self.shape = shape
 
     def update_shape(self, shape):
+        """Updates Shape for varm"""
         self.shape = shape
 
     def __setitem__(self, key, item):
@@ -94,10 +89,11 @@ class varm_Mapping(dict):
 
 
 class cunnData:
-    """
+    """\
     The cunnData objects can be used as an AnnData replacement for the inital preprocessing
     of single cell Datasets. It replaces some of the most common preprocessing steps within
     scanpy for annData objects.
+
     It can be initalized with a preexisting annData object or with a countmatrix and seperate
     Dataframes for var and obs. Index of var will be used as gene_names. Initalization with an
     AnnData object is advised.
@@ -310,8 +306,9 @@ class cunnData:
 
     @property
     def layers(self):
-        """\
+        """
         Dictionary-like object with values of the same dimensions as :attr:`.X`.
+
         Layers in cunnData are inspired by AnnData.
 
         Return the layer named `"unspliced"`::
@@ -329,9 +326,10 @@ class cunnData:
 
     @property
     def obsm(self):
-        """\
+        """
         Multi-dimensional annotation of observations
         (mutable structured :class:`~numpy.ndarray`).
+
         Stores for each key a two or higher-dimensional :class:`~numpy.ndarray`
         of length :attr:`n_obs`.
         Is sliced with `data` and `obs` but behaves otherwise like a :term:`mapping`.
@@ -343,6 +341,7 @@ class cunnData:
         """\
         Multi-dimensional annotation of variables/features
         (mutable structured :class:`~numpy.ndarray`).
+
         Stores for each key a two or higher-dimensional :class:`~numpy.ndarray`
         of length :attr:`n_vars`.
         Is sliced with `data` and `var` but behaves otherwise like a :term:`mapping`.
@@ -614,7 +613,7 @@ class cunnData:
 
     def uns_keys(self) -> List[str]:
         """List keys of unstructured annotation."""
-        return sorted(list(self._uns.keys()))
+        return sorted(self._uns.keys())
 
     def to_AnnData(self):
         """

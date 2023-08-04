@@ -1,11 +1,11 @@
+import math
+from typing import Union
+
 import cupy as cp
 import cupyx as cpx
-import math
 import numpy as np
-import pandas as pd
-import math
-from ..cunnData import cunnData
-from typing import Union
+
+from rapids_singlecell.cunnData import cunnData
 
 _sparse_qc_kernel_csc = cp.RawKernel(
     r"""
@@ -213,7 +213,6 @@ def calculate_qc_metrics(
                 E.g. 'pct_dropout_by_counts'. Percentage of cells this feature does not appear in.
 
     """
-
     X = cudata.X
     sums_cells = cp.zeros(X.shape[0], dtype=cp.float32)
     sums_genes = cp.zeros(X.shape[1], dtype=cp.float32)
@@ -404,7 +403,6 @@ def filter_genes(
         a filtered :class:`~rapids_singlecell.cunnData.cunnData` object inplace
 
     """
-
     if qc_var in cudata.var.keys():
         if min_count is not None and max_count is not None:
             thr = np.where(
@@ -429,7 +427,7 @@ def filter_genes(
         "pct_dropout_by_counts",
     ]:
         print(
-            f"Running `calculate_qc_metrics` for 'n_cells_by_counts','total_counts','mean_counts' or 'pct_dropout_by_counts'"
+            "Running `calculate_qc_metrics` for 'n_cells_by_counts','total_counts','mean_counts' or 'pct_dropout_by_counts'"
         )
         calculate_qc_metrics(cudata=cudata, log1p=False)
         if min_count is not None and max_count is not None:
@@ -448,7 +446,7 @@ def filter_genes(
 
         cudata._inplace_subset_var(thr)
     else:
-        print(f"please check qc_var")
+        print("please check qc_var")
 
 
 def filter_cells(
@@ -493,13 +491,13 @@ def filter_cells(
         elif max_count is not None:
             inter = np.where(cudata.obs[qc_var] < max_count)[0]
         else:
-            print(f"Please specify a cutoff to filter against")
+            print("Please specify a cutoff to filter against")
         if verbose:
             print(f"filtered out {cudata.obs.shape[0]-inter.shape[0]} cells")
         cudata._inplace_subset_obs(inter)
     elif qc_var in ["n_genes_by_counts", "total_counts"]:
         print(
-            f"Running `calculate_qc_metrics` for 'n_cells_by_counts' or 'total_counts'"
+            "Running `calculate_qc_metrics` for 'n_cells_by_counts' or 'total_counts'"
         )
         calculate_qc_metrics(cudata, log1p=False)
         inter = np.array
@@ -512,12 +510,12 @@ def filter_cells(
         elif max_count is not None:
             inter = np.where(cudata.obs[qc_var] < max_count)[0]
         else:
-            print(f"Please specify a cutoff to filter against")
+            print("Please specify a cutoff to filter against")
         if verbose:
             print(f"filtered out {cudata.obs.shape[0]-inter.shape[0]} cells")
         cudata._inplace_subset_obs(inter)
     else:
-        print(f"Please check qc_var.")
+        print("Please check qc_var.")
 
 
 def filter_highly_variable(cudata: cunnData) -> None:
@@ -530,7 +528,7 @@ def filter_highly_variable(cudata: cunnData) -> None:
 
     """
     if "highly_variable" in cudata.var.keys():
-        thr = np.where(cudata.var["highly_variable"] == True)[0]
+        thr = np.where(cudata.var["highly_variable"] is True)[0]
         cudata._inplace_subset_var(thr)
     else:
-        print(f"Please calculate highly variable genes first")
+        print("Please calculate highly variable genes first")

@@ -1,6 +1,5 @@
 from anndata import AnnData
 from cuml.manifold import TSNE
-from typing import Optional
 
 
 def tsne(
@@ -17,7 +16,7 @@ def tsne(
     Performs t-distributed stochastic neighborhood embedding (tSNE) using cuML libraray.
 
     Parameters
-    ---------
+    ----------
         adata
             Annotated data matrix.
         n_pcs
@@ -54,7 +53,7 @@ def tsne(
             **X_tsne** : `np.ndarray` (`adata.obs`, dtype `float`)
                 tSNE coordinates of data.
     """
-    if use_rep == None:
+    if use_rep is None:
         data = adata.obsm["X_pca"]
     else:
         data = adata.obsm[use_rep]

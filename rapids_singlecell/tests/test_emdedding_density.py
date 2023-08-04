@@ -1,6 +1,6 @@
 import numpy as np
-from anndata import AnnData
 import rapids_singlecell as rsc
+from anndata import AnnData
 
 
 def test_embedding_density():
