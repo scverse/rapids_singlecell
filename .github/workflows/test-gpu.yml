@@ -2,7 +2,7 @@ name: AWS GPU
 
 on:
   push:
-#    branches: [main]
+    branches: [main]
   pull_request:
     types:
       - labeled
