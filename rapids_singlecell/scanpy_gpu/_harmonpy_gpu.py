@@ -211,7 +211,7 @@ class Harmony(object):
 
     def init_cluster(self):
         # Start with cluster centroids
-        kmeans_obj = KMeans(n_clusters=self.K, init="k-means++").fit(self.Z_cos.T)
+        kmeans_obj = KMeans(n_clusters=self.K, init="k-means||").fit(self.Z_cos.T)
         self.Y = kmeans_obj.cluster_centers_.T
         # (1) Normalize
         self.Y = self.Y / cp.linalg.norm(self.Y, ord=2, axis=0)
