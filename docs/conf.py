@@ -6,7 +6,7 @@ from importlib.metadata import metadata
 from pathlib import Path
 
 HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE / "rapids_singlecell"))
+sys.path.insert(0, str(HERE / "src/rapids_singlecell"))
 
 on_rtd = os.environ.get("READTHEDOCS") == "True"
 
