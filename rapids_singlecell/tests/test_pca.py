@@ -3,6 +3,7 @@ import pytest
 import rapids_singlecell as rsc
 from anndata import AnnData
 from scanpy.datasets import pbmc3k_processed
+from scipy import sparse
 
 A_list = [
     [0, 0, 7, 0, 0],
@@ -104,3 +105,30 @@ def test_pca_reproducible():
     rsc.tl.pca(cpbmc)
     c = pbmc.obsm["X_pca"]
     np.array_equal(a, c)
+
+
+def test_pca_sparse():
+    sparse_ad = pbmc3k_processed()
+    default = pbmc3k_processed()
+    sparse_ad.X = sparse.csr_matrix(sparse_ad.X.astype(np.float64))
+    default.X = default.X.astype(np.float64)
+    rsc.pp.pca(sparse_ad)
+    rsc.pp.pca(default)
+
+    np.testing.assert_allclose(
+        np.abs(sparse_ad.obsm["X_pca"]),
+        np.abs(default.obsm["X_pca"]),
+        rtol=1e-7,
+        atol=1e-6,
+    )
+
+    np.testing.assert_allclose(
+        np.abs(sparse_ad.varm["PCs"]), np.abs(default.varm["PCs"]), rtol=1e-7, atol=1e-6
+    )
+
+    np.testing.assert_allclose(
+        np.abs(sparse_ad.uns["pca"]["variance_ratio"]),
+        np.abs(default.uns["pca"]["variance_ratio"]),
+        rtol=1e-7,
+        atol=1e-6,
+    )
