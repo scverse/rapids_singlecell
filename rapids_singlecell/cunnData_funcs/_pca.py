@@ -117,14 +117,15 @@ def pca(
         if zero_center:
             if cpissparse(X) or issparse(X):
                 if issparse(X):
-                    X = sparse_scipy_to_cp(X)
+                    X = sparse_scipy_to_cp(X, dtype=X.dtype)
                     X = csr_matrix(X)
                 pca_func = PCA_sparse(n_components=n_comps)
                 X_pca = pca_func.fit_transform(X)
-            pca_func = PCA(
-                n_components=n_comps, random_state=random_state, output_type="numpy"
-            )
-            X_pca = pca_func.fit_transform(X)
+            else:
+                pca_func = PCA(
+                    n_components=n_comps, random_state=random_state, output_type="numpy"
+                )
+                X_pca = pca_func.fit_transform(X)
 
         elif not zero_center:
             pca_func = TruncatedSVD(
@@ -150,11 +151,6 @@ class PCA_sparse:
 
     def fit(self, x):
         if self.n_components is None:
-            print(
-                "Warning(`fit`): As of v0.16, PCA invoked without an"
-                " n_components argument defaults to using"
-                " min(n_samples, n_features) rather than 1"
-            )
             n_rows = x.shape[0]
             n_cols = x.shape[1]
             self.n_components_ = min(n_rows, n_cols)
@@ -166,51 +162,9 @@ class PCA_sparse:
         self.n_samples_ = x.shape[0]
         self.n_features_in_ = x.shape[1] if x.ndim == 2 else 1
         self.dtype = x.data.dtype
-        gram_matrix = cp.zeros((x.shape[1], x.shape[1]), dtype=self.dtype)
 
-        block = (128,)
-        grid = (x.shape[0],)
+        covariance, self.mean_, _ = _cov_sparse(x=x, return_mean=True)
 
-        compute_mean_cov = _cov_kernel_sparse_xx(self.dtype)
-        compute_mean_cov(
-            grid,
-            block,
-            (
-                x.indptr,
-                x.indices,
-                x.data,
-                x.shape[0],
-                x.shape[1],
-                gram_matrix,
-            ),
-        )
-        copy_gram = _warp_copy_kernel(x.data.dtype)
-        block = (32, 32)
-        grid = (math.ceil(x.shape[1] / block[0]), math.ceil(x.shape[1] / block[1]))
-        copy_gram(
-            grid,
-            block,
-            (gram_matrix, x.shape[1]),
-        )
-
-        mean_x = x.sum(axis=0) * (1 / x.shape[0])
-        gram_matrix *= 1 / x.shape[0]
-        cov_result = gram_matrix
-
-        compute_cov = _cov_kernel(self.dtype)
-
-        block_size = (8, 8)
-        grid_size = (
-            math.ceil(gram_matrix.shape[0] / 8),
-            math.ceil(gram_matrix.shape[1] / 8),
-        )
-        compute_cov(
-            grid_size,
-            block_size,
-            (cov_result, gram_matrix, mean_x, mean_x, gram_matrix.shape[0]),
-        )
-
-        covariance, self.mean_ = cov_result, mean_x
         self.explained_variance_, self.components_ = cp.linalg.eigh(
             covariance, UPLO="U"
         )
@@ -241,47 +195,13 @@ class PCA_sparse:
         X = X - self.mean_
         X_transformed = X.dot(self.components_.T)
         self.components_ = self.components_.get()
+        self.explained_variance_ = self.explained_variance_.get()
+        self.explained_variance_ratio_ = self.explained_variance_ratio_.get()
         return X_transformed.get()
 
     def fit_transform(self, X, y=None):
         return self.fit(X).transform(X)
 
-
-cov_kernel_str_sparse_xx = r"""
-(const int *indptr,const int *index, {0} *data,int nrows,int ncols, {0}  * out) {
-    int row = blockIdx.x;
-    int col = threadIdx.x;
-
-    if (row >= nrows) return;
-
-    int start = indptr[row];
-    int end = indptr[row + 1];
-
-    for (int idx1 = start; idx1 < end; idx1++)
-    {
-        int index1 = index[idx1];
-        {0} data1 = data[idx1];
-        for(int idx2 = idx1+col; idx2 < end; idx2 += blockDim.x){
-            int index2 = index[idx2];
-            {0} data2 = data[idx2];
-            atomicAdd(&out[index1*ncols+index2], data1*data2);
-        }
-    }
-}
-"""
-
-copy_kernel = r"""
-({0} *out, int ncols) {
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (row >= ncols || col >= ncols) return;
-
-    if (row > col) {
-        out[row*ncols+col] = out[col*ncols+row]; // Copy the upper triangle to the lower triangle
-    }
-}
-"""
 
 cov_kernel_str = r"""
 ({0} *cov_values, {0} *gram_matrix, {0} *mean_x, {0} *mean_y, int n_cols) {
@@ -296,16 +216,146 @@ cov_kernel_str = r"""
 }
 """
 
+gramm_kernel_csr = r"""
+(const int *indptr, const int *index, {0} *data, int nrows, int ncols, {0} *out) {
+    int row = blockIdx.x;
+    int col = threadIdx.x;
 
-def _cov_kernel_sparse_xx(dtype):
-    return cuda_kernel_factory(
-        cov_kernel_str_sparse_xx, (dtype,), "cov_kernel_sprase_xx"
-    )
+    if(row >= nrows) return;
+
+    int start = indptr[row];
+    int end = indptr[row + 1];
+
+    for (int idx1 = start; idx1 < end; idx1++){
+        int index1 = index[idx1];
+        {0} data1 = data[idx1];
+        for(int idx2 = idx1 + col; idx2 < end; idx2 += blockDim.x){
+            int index2 = index[idx2];
+            {0} data2 = data[idx2];
+            atomicAdd(&out[index1 * ncols + index2], data1 * data2);
+        }
+    }
+}
+"""
 
 
-def _warp_copy_kernel(dtype):
-    return cuda_kernel_factory(copy_kernel, (dtype,), "_copy_kernel")
+copy_kernel = r"""
+({0} *out, int ncols) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (row >= ncols || col >= ncols) return;
+
+    if (row > col) {
+        out[row * ncols + col] = out[col * ncols + row];
+    }
+}
+"""
 
 
 def _cov_kernel(dtype):
     return cuda_kernel_factory(cov_kernel_str, (dtype,), "cov_kernel")
+
+
+def _gramm_kernel_csr(dtype):
+    return cuda_kernel_factory(gramm_kernel_csr, (dtype,), "gramm_kernel_csr")
+
+
+def _copy_kernel(dtype):
+    return cuda_kernel_factory(copy_kernel, (dtype,), "copy_kernel")
+
+
+def _cov_sparse(x, return_gram=False, return_mean=False):
+    """
+    Computes the mean and the covariance of matrix X of
+    the form Cov(X, X) = E(XX) - E(X)E(X)
+
+    This is a temporary fix for
+    cuml issue #5475 and cupy issue #7699,
+    where the operation `x.T.dot(x)` did not work for
+    larger sparse matrices.
+
+    Parameters
+    ----------
+
+    x : cupyx.scipy.sparse of size (m, n)
+    return_gram : boolean (default = False)
+        If True, gram matrix of the form (1 / n) * X.T.dot(X)
+        will be returned.
+        When True, a copy will be created
+        to store the results of the covariance.
+        When False, the local gram matrix result
+        will be overwritten
+    return_mean: boolean (default = False)
+        If True, the Maximum Likelihood Estimate used to
+        calculate the mean of X and X will be returned,
+        of the form (1 / n) * mean(X) and (1 / n) * mean(X)
+
+    Returns
+    -------
+
+    result : cov(X, X) when return_gram and return_mean are False
+            cov(X, X), gram(X, X) when return_gram is True,
+            return_mean is False
+            cov(X, X), mean(X), mean(X) when return_gram is False,
+            return_mean is True
+            cov(X, X), gram(X, X), mean(X), mean(X)
+            when return_gram is True and return_mean is True
+    """
+
+    gram_matrix = cp.zeros((x.shape[1], x.shape[1]), dtype=x.data.dtype)
+
+    block = (128,)
+    grid = (x.shape[0],)
+    compute_mean_cov = _gramm_kernel_csr(x.data.dtype)
+    compute_mean_cov(
+        grid,
+        block,
+        (
+            x.indptr,
+            x.indices,
+            x.data,
+            x.shape[0],
+            x.shape[1],
+            gram_matrix,
+        ),
+    )
+
+    copy_gram = _copy_kernel(x.data.dtype)
+    block = (32, 32)
+    grid = (math.ceil(x.shape[1] / block[0]), math.ceil(x.shape[1] / block[1]))
+    copy_gram(
+        grid,
+        block,
+        (gram_matrix, x.shape[1]),
+    )
+
+    mean_x = x.sum(axis=0) * (1 / x.shape[0])
+    gram_matrix *= 1 / x.shape[0]
+
+    if return_gram:
+        cov_result = cp.zeros(
+            (gram_matrix.shape[0], gram_matrix.shape[0]),
+            dtype=gram_matrix.dtype,
+        )
+    else:
+        cov_result = gram_matrix
+
+    compute_cov = _cov_kernel(x.dtype)
+
+    block_size = (32, 32)
+    grid_size = (math.ceil(gram_matrix.shape[0] / 8),) * 2
+    compute_cov(
+        grid_size,
+        block_size,
+        (cov_result, gram_matrix, mean_x, mean_x, gram_matrix.shape[0]),
+    )
+
+    if not return_gram and not return_mean:
+        return cov_result
+    elif return_gram and not return_mean:
+        return cov_result, gram_matrix
+    elif not return_gram and return_mean:
+        return cov_result, mean_x, mean_x
+    elif return_gram and return_mean:
+        return cov_result, gram_matrix, mean_x, mean_x
