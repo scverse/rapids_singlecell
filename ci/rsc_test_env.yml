@@ -1,0 +1,15 @@
+name: rapids_singlecell
+channels:
+ - rapidsai
+ - nvidia
+ - conda-forge
+dependencies:
+ - cudf=23.06
+ - cuml=23.06
+ - cugraph=23.06
+ - python=3.10
+ - cudatoolkit=11.8
+ - cudnn
+ - cutensor
+ - cusparselt
+ - pip
