@@ -1,7 +1,8 @@
+import math
+
 import cupy as cp
 import cupyx as cpx
 from cupyx.scipy.sparse import issparse
-import math
 
 _get_mean_var_major = cp.RawKernel(
     r"""

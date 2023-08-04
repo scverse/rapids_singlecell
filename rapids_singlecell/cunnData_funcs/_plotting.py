@@ -1,10 +1,9 @@
-from ..cunnData import cunnData
-
-import numpy as np
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
 import os
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from rapids_singlecell.cunnData import cunnData
 
 
 def scatter(
@@ -21,7 +20,7 @@ def scatter(
     Wraps :func:`seaborn.scatterplot` for :class:`~rapids_singlecell.cunnData.cunnData`. This plotting function so far is really basic and doesnt include all the features form :func:`scanpy.pl.scatter`.
 
     Parameters
-    ---------
+    ----------
     cudata
         cunnData object
     x
@@ -38,7 +37,7 @@ def scatter(
 
     """
     fig, ax = plt.subplots()
-    if color == None:
+    if color is None:
         sns.scatterplot(data=cudata.obs, x=x, y=y, s=2, color="grey", edgecolor="grey")
     else:
         sns.scatterplot(data=cudata.obs, x=x, y=y, s=2, hue=color)
@@ -65,7 +64,7 @@ def violin(
     Wraps :func:`seaborn.violinplot` for :class:`~rapids_singlecell.cunnData.cunnData`. This plotting function so far is really basic and doesnt include all the features form :func:`scanpy.pl.violin`.
 
     Parameters
-    ---------
+    ----------
         cudata
             cunnData object
         key
@@ -82,14 +81,14 @@ def violin(
             The resolution in dots per inch for save
 
     Returns
-    ------
+    -------
     nothing
 
     """
     fig, ax = plt.subplots()
-    ax = sns.violinplot(data=cudata.obs, y=key, scale="width", x=groupby, inner=None)
+    sns.violinplot(data=cudata.obs, y=key, scale="width", x=groupby, inner=None)
     if size:
-        ax = sns.stripplot(
+        sns.stripplot(
             data=cudata.obs,
             y=key,
             x=groupby,

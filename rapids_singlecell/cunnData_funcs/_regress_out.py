@@ -1,10 +1,11 @@
+import math
+from typing import Literal, Optional, Union
+
 import cupy as cp
 import cupyx as cpx
 from cuml.linear_model import LinearRegression
+
 from rapids_singlecell.cunnData import cunnData
-from typing import Literal, Union, Optional
-from ..cunnData import cunnData
-import math
 
 
 def regress_out(
@@ -47,7 +48,6 @@ def regress_out(
     Returns a corrected copy or  updates `cudata` with a corrected version of the \
     original `cudata.X` and `cudata.layers['layer']`, depending on `inplace`.
     """
-
     if batchsize != "all" and type(batchsize) not in [int, type(None)]:
         raise ValueError("batchsize must be `int`, `None` or `'all'`")
 
@@ -60,7 +60,7 @@ def regress_out(
     if type(keys) is list:
         dim_regressor = len(keys) + 1
 
-    regressors = cp.ones((X.shape[0] * dim_regressor)).reshape(
+    regressors = cp.ones(X.shape[0] * dim_regressor).reshape(
         (X.shape[0], dim_regressor), order="F"
     )
     if dim_regressor == 2:
@@ -103,7 +103,7 @@ def regress_out(
             X = X.todense()
         for i in range(X.shape[1]):
             if verbose and i % 500 == 0:
-                print("Regressed %s out of %s" % (i, X.shape[1]))
+                print(f"Regressed {i} out of {X.shape[1]}")
 
             y = X[:, i]
             outputs[:, i] = _regress_out_chunk(regressors, y)
@@ -121,12 +121,14 @@ def _regress_out_chunk(X, y):
     """
     Performs a data_cunk.shape[1] number of local linear regressions,
     replacing the data in the original chunk w/ the regressed result.
+
     Parameters
     ----------
     X : cupy.ndarray of shape (n_cells, 3)
         Matrix of regressors
     y : cupy.sparse.spmatrix of shape (n_cells,)
         Sparse matrix containing a single column of the cellxgene matrix
+
     Returns
     -------
     dense_mat : cupy.ndarray of shape (n_cells,)

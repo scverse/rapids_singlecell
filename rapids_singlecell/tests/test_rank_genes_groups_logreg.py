@@ -1,6 +1,6 @@
 import numpy as np
-import scanpy as sc
 import rapids_singlecell as rsc
+import scanpy as sc
 
 
 def test_rank_genes_groups_with_renamed_categories():

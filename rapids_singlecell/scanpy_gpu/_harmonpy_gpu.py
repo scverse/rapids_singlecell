@@ -16,12 +16,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import pandas as pd
-import numpy as np
-import cupy as cp
-
-from cuml import KMeans
 import logging
+
+import cupy as cp
+import numpy as np
+import pandas as pd
+from cuml import KMeans
 
 # create logger
 logger = logging.getLogger("harmonypy_gpu")
@@ -56,7 +56,6 @@ def run_harmony(
     random_state=0,
 ):
     """Run Harmony."""
-
     # theta = None
     # lamb = None
     # sigma = 0.1
@@ -143,7 +142,7 @@ def run_harmony(
     return ho
 
 
-class Harmony(object):
+class Harmony:
     def __init__(
         self,
         Z,
@@ -249,7 +248,7 @@ class Harmony(object):
         converged = False
         for i in range(1, iter_harmony + 1):
             if verbose:
-                logger.info("Iteration {} of {}".format(i, iter_harmony))
+                logger.info(f"Iteration {i} of {iter_harmony}")
             # STEP 1: Clustering
             self.cluster()
             # STEP 2: Regress out covariates

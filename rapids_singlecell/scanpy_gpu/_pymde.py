@@ -1,6 +1,7 @@
-from anndata import AnnData
-from typing import Optional, Literal
+from typing import Literal, Optional
+
 import pandas as pd
+from anndata import AnnData
 
 
 def mde(
@@ -46,12 +47,12 @@ def mde(
         Agrawal, Akshay, Alnur Ali, and Stephen Boyd. "Minimum-distortion embedding." arXiv preprint arXiv:2103.02559 (2021).
     """
     try:
-        import torch
         import pymde
+        import torch
     except ImportError:
         raise ImportError("Please install pymde package via `pip install pymde`")
 
-    if use_rep == None:
+    if use_rep is None:
         data = adata.obsm["X_pca"]
     else:
         data = adata.obsm[use_rep]
@@ -62,14 +63,14 @@ def mde(
         data = data[:, :n_pcs]
 
     device = "cpu" if not torch.cuda.is_available() else "cuda"
-    _kwargs = dict(
-        embedding_dim=2,
-        constraint=pymde.Standardized(),
-        repulsive_fraction=0.7,
-        verbose=False,
-        device=device,
-        n_neighbors=n_neighbors,
-    )
+    _kwargs = {
+        "embedding_dim": 2,
+        "constraint": pymde.Standardized(),
+        "repulsive_fraction": 0.7,
+        "verbose": False,
+        "device": device,
+        "n_neighbors": n_neighbors,
+    }
     _kwargs.update(kwargs)
 
     emb = pymde.preserve_neighbors(data, **_kwargs).embed(verbose=_kwargs["verbose"])

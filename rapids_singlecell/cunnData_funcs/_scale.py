@@ -1,6 +1,8 @@
-import cupy as cp
-from ..cunnData import cunnData
 from typing import Optional
+
+import cupy as cp
+
+from rapids_singlecell.cunnData import cunnData
 
 
 def scale(

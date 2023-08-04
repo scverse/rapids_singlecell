@@ -1,6 +1,6 @@
-import rapids_singlecell as rsc
 import numpy as np
 import pytest
+import rapids_singlecell as rsc
 from anndata import AnnData
 from scanpy.datasets import pbmc3k_processed
 

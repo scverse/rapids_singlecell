@@ -1,8 +1,3 @@
-from . import cunnData
-from . import pp
-from . import dcg
-from . import tl
-from . import pl
-from . import gr
+from . import cunnData, dcg, gr, pl, pp, tl
 
 __version__ = "0.7.2"

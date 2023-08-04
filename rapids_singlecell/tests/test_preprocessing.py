@@ -1,6 +1,6 @@
-import scanpy as sc
-import rapids_singlecell as rsc
 import cupy as cp
+import rapids_singlecell as rsc
+import scanpy as sc
 
 
 def test_scale():

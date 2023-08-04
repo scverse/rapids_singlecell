@@ -1,13 +1,11 @@
+from typing import Optional, Union
+
+import cupy as cp
 import numpy as np
 import pandas as pd
-import cupy as cp
-
-from decoupler.pre import extract, match, rename_net, get_net_mat, filt_min_n
-
 from anndata import AnnData
+from decoupler.pre import extract, filt_min_n, get_net_mat, match, rename_net
 from tqdm import tqdm
-
-from typing import Union, Optional
 
 
 def run_perm(estimate, mat, net, idxs, times, seed):
@@ -51,7 +49,7 @@ def wsum(mat, net, times, batch_size, seed, verbose):
     n_batches = int(np.ceil(n_samples / batch_size))
 
     if verbose:
-        print("Infering activities on {0} batches.".format(n_batches))
+        print(f"Infering activities on {n_batches} batches.")
 
     # Init empty acts
     estimate = np.zeros((n_samples, n_fsets), dtype=np.float32)
@@ -139,7 +137,6 @@ def run_wsum(
             **pvals** : DataFrame
                 Obtained p-values. Stored in `.obsm['wsum_pvals']` if `mat` is AnnData.
     """
-
     # Extract sparse matrix and array of genes
     m, r, c = extract(mat, use_raw=use_raw, verbose=verbose)
     # Transform net
@@ -152,7 +149,7 @@ def run_wsum(
 
     if verbose:
         print(
-            "Running wsum on mat with {0} samples and {1} targets for {2} sources.".format(
+            "Running wsum on mat with {} samples and {} targets for {} sources.".format(
                 m.shape[0], len(c), net.shape[1]
             )
         )

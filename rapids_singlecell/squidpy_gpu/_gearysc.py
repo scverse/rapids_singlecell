@@ -1,7 +1,7 @@
-import cupy as cp
-import cupyx as cpx
 import math
 
+import cupy as cp
+import cupyx as cpx
 
 kernel_gearys_C_num_dense = r"""
 extern "C" __global__ void gearys_C_num_dense(const float* data,

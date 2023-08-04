@@ -1,20 +1,18 @@
+from typing import Optional, Union
+
+import cupy as cp
 import numpy as np
 import pandas as pd
-import cupy as cp
-
-from decoupler.pre import extract, match, rename_net, get_net_mat, filt_min_n
-
 from anndata import AnnData
+from decoupler.pre import extract, filt_min_n, get_net_mat, match, rename_net
 from scipy import stats
-
 from tqdm import tqdm
-from typing import Union, Optional
 
 
 def fit_mlm(X, y, inv, df):
     X = cp.ascontiguousarray(X)
-    n_samples = y.shape[1]
-    n_fsets = X.shape[1]
+    y.shape[1]
+    X.shape[1]
     coef, sse, _, _ = cp.linalg.lstsq(X, y, rcond=-1)
     if len(sse) == 0:
         raise ValueError(
@@ -108,7 +106,6 @@ def run_mlm(
             **pvals** : DataFrame
                 Obtained p-values. Stored in `.obsm['mlm_pvals']` if `mat` is AnnData.
     """
-
     # Extract sparse matrix and array of genes
     m, r, c = extract(mat, use_raw=use_raw, verbose=verbose)
 
@@ -122,7 +119,7 @@ def run_mlm(
 
     if verbose:
         print(
-            "Running mlm on mat with {0} samples and {1} targets for {2} sources.".format(
+            "Running mlm on mat with {} samples and {} targets for {} sources.".format(
                 m.shape[0], len(c), net.shape[1]
             )
         )

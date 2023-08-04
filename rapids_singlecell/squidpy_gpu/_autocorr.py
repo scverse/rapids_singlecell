@@ -1,20 +1,21 @@
-from anndata import AnnData
-import pandas as pd
-import numpy as np
 from typing import (
-    TYPE_CHECKING,
     Literal,  # < 3.8
+    Optional,
     Sequence,
     Union,
-    Optional,
 )
-from scipy import sparse
+
 import cupy as cp
 import cupyx as cpx
-from ._moransi import _morans_I_cupy
-from ._gearysc import _gearys_C_cupy
-from ._utils import _p_value_calc
+import numpy as np
+import pandas as pd
+from anndata import AnnData
+from scipy import sparse
 from statsmodels.stats.multitest import multipletests
+
+from ._gearysc import _gearys_C_cupy
+from ._moransi import _morans_I_cupy
+from ._utils import _p_value_calc
 
 
 def spatial_autocorr(
@@ -76,7 +77,6 @@ def spatial_autocorr(
             DataFrame containing the autocorrelation scores, p-values, and corrected p-values for each gene. \
             If `copy` is False, the results are stored in `adata.uns` and None is returned.
     """
-
     if genes is None:
         if "highly_variable" in adata.var:
             genes = adata[:, adata.var["highly_variable"]].var_names.values

@@ -1,22 +1,23 @@
-import cupy as cp
-import numpy as np
-import pandas as pd
-from scipy.sparse import csc_matrix, issparse
-from cupyx.scipy.sparse import issparse as cpissparse
-import cupyx as cpx
 import math
-from anndata import AnnData
 from itertools import product
 from typing import (
-    Union,
+    Iterable,
     Literal,
+    Mapping,
     Optional,
     Sequence,
-    Mapping,
-    Iterable,
+    Union,
 )
-from ._utils import _create_sparse_df, _assert_categorical_obs
 
+import cupy as cp
+import cupyx as cpx
+import numpy as np
+import pandas as pd
+from anndata import AnnData
+from cupyx.scipy.sparse import issparse as cpissparse
+from scipy.sparse import csc_matrix, issparse
+
+from ._utils import _assert_categorical_obs, _create_sparse_df
 
 SOURCE = "source"
 TARGET = "target"
@@ -696,7 +697,7 @@ def ligrec(
         (len(interactions_), len(interaction_clusters)), dtype=np.float32, order="C"
     )
     if cpissparse(data_cp):
-        for i in range(n_perms):
+        for _i in range(n_perms):
             cp.random.shuffle(clustering_use)
             g = cp.zeros((data_cp.shape[1], n_cls), dtype=cp.float32, order="C")
             mean_kernel_sparse(
@@ -734,7 +735,7 @@ def ligrec(
                 ),
             )
     else:
-        for i in range(n_perms):
+        for _i in range(n_perms):
             cp.random.shuffle(clustering_use)
             g = cp.zeros((data_cp.shape[1], n_cls), dtype=cp.float32, order="C")
             mean_kernel(

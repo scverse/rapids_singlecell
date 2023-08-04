@@ -1,14 +1,15 @@
-import numpy as np
 from typing import (
     TYPE_CHECKING,
     Any,
     Dict,
     Union,
 )
-from scipy import stats
-from scipy.sparse import spmatrix, issparse
+
+import numpy as np
 import pandas as pd
 from pandas.api.types import infer_dtype, is_categorical_dtype
+from scipy import stats
+from scipy.sparse import issparse, spmatrix
 
 
 ### Taken from squidpy: https://github.com/scverse/squidpy/blob/main/squidpy/gr/_ppatterns.py
@@ -20,6 +21,7 @@ def _p_value_calc(
 ):
     """
     Handle p-value calculation for spatial autocorrelation function.
+
     Parameters
     ----------
     score
@@ -28,6 +30,7 @@ def _p_value_calc(
         (n_simulations, n_features).
     params
         Object to store relevant function parameters.
+
     Returns
     -------
     pval_norm
