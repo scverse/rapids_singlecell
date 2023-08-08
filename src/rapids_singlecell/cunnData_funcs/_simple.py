@@ -38,7 +38,7 @@ def calculate_qc_metrics(
         log1p
             Set to `False` to skip computing `log1p` transformed annotations.
         layer
-            If provided, use :attr:`.layers[layer]` for expression values instead of :attr:`.X`.
+            If provided, use :attr:`.layers` for expression values instead of :attr:`.X`.
 
     Returns
     -------
