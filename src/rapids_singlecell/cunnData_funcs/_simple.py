@@ -4,172 +4,21 @@ from typing import Union
 import cupy as cp
 import cupyx as cpx
 import numpy as np
+from anndata import AnnData
+from scanpy.get import _get_obs_rep
 
 from rapids_singlecell.cunnData import cunnData
 
-_sparse_qc_kernel_csc = cp.RawKernel(
-    r"""
-    extern "C" __global__
-    void caluclate_qc_csc(const int *indptr,const int *index,const float *data,
-                                        float* sums_cells, float* sums_genes,
-                                        int* cell_ex, int* gene_ex,
-                                        int n_genes) {
-        int gene = blockDim.x * blockIdx.x + threadIdx.x;
-        if(gene >= n_genes){
-            return;
-        }
-        int start_idx = indptr[gene];
-        int stop_idx = indptr[gene+1];
-
-        for(int cell = start_idx; cell < stop_idx; cell++){
-            float value = data[cell];
-            int cell_number = index[cell];
-            atomicAdd(&sums_genes[gene], value);
-            atomicAdd(&sums_cells[cell_number], value);
-            atomicAdd(&gene_ex[gene], 1);
-            atomicAdd(&cell_ex[cell_number], 1);
-
-        }
-    }
-    """,
-    "caluclate_qc_csc",
-)
-
-_sparse_qc_kernel_csr = cp.RawKernel(
-    r"""
-    extern "C" __global__
-    void caluclate_qc_csr(const int *indptr,const int *index,const float *data,
-                        float* sums_cells, float* sums_genes,
-                        int* cell_ex, int* gene_ex,
-                        int n_cells) {
-        int cell = blockDim.x * blockIdx.x + threadIdx.x;
-        if(cell >= n_cells){
-            return;
-        }
-        int start_idx = indptr[cell];
-        int stop_idx = indptr[cell+1];
-
-        for(int gene = start_idx; gene < stop_idx; gene++){
-            float value = data[gene];
-            int gene_number = index[gene];
-            atomicAdd(&sums_genes[gene_number], value);
-            atomicAdd(&sums_cells[cell], value);
-            atomicAdd(&gene_ex[gene_number], 1);
-            atomicAdd(&cell_ex[cell], 1);
-
-        }
-    }
-    """,
-    "caluclate_qc_csr",
-)
-
-_sparse_qc_kernel_dense = cp.RawKernel(
-    r"""
-    extern "C" __global__
-    void caluclate_qc_dense(const float *data,
-                        float* sums_cells, float* sums_genes,
-                        int* cell_ex, int* gene_ex,
-                        int n_cells,int n_genes) {
-        int cell = blockDim.x * blockIdx.x + threadIdx.x;
-        int gene = blockDim.y * blockIdx.y + threadIdx.y;
-        if(cell >= n_cells || gene >=n_genes){
-            return;
-        }
-
-
-        long long int index = static_cast<long long int>(cell) * n_genes + gene;
-        float value = data[index];
-        if (value>0.0){
-            atomicAdd(&sums_genes[gene], value);
-            atomicAdd(&sums_cells[cell], value);
-            atomicAdd(&gene_ex[gene], 1);
-            atomicAdd(&cell_ex[cell], 1);
-        }
-    }
-    """,
-    "caluclate_qc_dense",
-)
-
-_sparse_qc_kernel_csc_sub = cp.RawKernel(
-    r"""
-    extern "C" __global__
-    void caluclate_qc_csc_sub(const int *indptr,const int *index,const float *data,
-                                        float* sums_cells, bool* mask,
-                                        int n_genes) {
-        int gene = blockDim.x * blockIdx.x + threadIdx.x;
-        if(gene >= n_genes){
-            return;
-        }
-        if(mask[gene] == false){
-            return;
-        }
-        int start_idx = indptr[gene];
-        int stop_idx = indptr[gene+1];
-
-        for(int cell = start_idx; cell < stop_idx; cell++){
-            int cell_number = index[cell];
-            atomicAdd(&sums_cells[cell_number], data[cell]);
-        }
-    }
-    """,
-    "caluclate_qc_csc_sub",
-)
-
-_sparse_qc_kernel_csr_sub = cp.RawKernel(
-    r"""
-    extern "C" __global__
-    void caluclate_qc_csr_sub(const int *indptr,const int *index,const float *data,
-                        float* sums_cells, bool* mask,
-                        int n_cells) {
-        int cell = blockDim.x * blockIdx.x + threadIdx.x;
-        if(cell >= n_cells){
-            return;
-        }
-        int start_idx = indptr[cell];
-        int stop_idx = indptr[cell+1];
-
-        for(int gene = start_idx; gene < stop_idx; gene++){
-            int gene_number = index[gene];
-            if (mask[gene_number]==true){
-                atomicAdd(&sums_cells[cell], data[gene]);
-
-            }
-        }
-    }
-    """,
-    "caluclate_qc_csr_sub",
-)
-
-_sparse_qc_kernel_dense_sub = cp.RawKernel(
-    r"""
-    extern "C" __global__
-    void caluclate_qc_dense_sub(const float *data,
-                        float* sums_cells, bool *mask,
-                        int n_cells, int n_genes) {
-        int cell = blockDim.x * blockIdx.x + threadIdx.x;
-        int gene = blockDim.y * blockIdx.y + threadIdx.y;
-        if(cell >= n_cells || gene >=n_genes){
-            return;
-        }
-        if(mask[gene] == false){
-            return;
-        }
-
-        long long int index = static_cast<long long int>(cell) * n_genes + gene;
-        atomicAdd(&sums_cells[cell], data[index]);
-
-    }
-    """,
-    "caluclate_qc_dense_sub",
-)
+from ._utils import _check_gpu_X
 
 
 def calculate_qc_metrics(
-    cudata: cunnData,
+    cudata: Union[cunnData, AnnData],
     expr_type: str = "counts",
     var_type: str = "genes",
     qc_vars: Union[str, list] = None,
     log1p: bool = True,
+    layer: str = None,
 ) -> None:
     """\
     Calculates basic qc Parameters. Calculates number of genes per cell (n_genes) and number of counts per cell (n_counts).
@@ -188,6 +37,8 @@ def calculate_qc_metrics(
             Run flag_gene_family first
         log1p
             Set to `False` to skip computing `log1p` transformed annotations.
+        layer
+            If provided, use :attr:`.layers[layer]` for expression values instead of :attr:`.X`.
 
     Returns
     -------
@@ -213,16 +64,24 @@ def calculate_qc_metrics(
                 E.g. 'pct_dropout_by_counts'. Percentage of cells this feature does not appear in.
 
     """
-    X = cudata.X
-    sums_cells = cp.zeros(X.shape[0], dtype=cp.float32)
-    sums_genes = cp.zeros(X.shape[1], dtype=cp.float32)
+
+    X = _get_obs_rep(cudata, layer=layer)
+
+    if isinstance(X, AnnData):
+        _check_gpu_X(X)
+
+    sums_cells = cp.zeros(X.shape[0], dtype=X.dtype)
+    sums_genes = cp.zeros(X.shape[1], dtype=X.dtype)
     cell_ex = cp.zeros(X.shape[0], dtype=cp.int32)
     gene_ex = cp.zeros(X.shape[1], dtype=cp.int32)
     if cpx.scipy.sparse.issparse(X):
         if cpx.scipy.sparse.isspmatrix_csr(X):
+            from ._kernels._qc_kernels import _sparse_qc_csr
+
             block = (32,)
             grid = (int(math.ceil(X.shape[0] / block[0])),)
-            _sparse_qc_kernel_csr(
+            sparse_qc_csr = _sparse_qc_csr(X.data.dtype)
+            sparse_qc_csr(
                 grid,
                 block,
                 (
@@ -237,9 +96,12 @@ def calculate_qc_metrics(
                 ),
             )
         elif cpx.scipy.sparse.isspmatrix_csc(X):
+            from ._kernels._qc_kernels import _sparse_qc_csc
+
             block = (32,)
             grid = (int(math.ceil(X.shape[1] / block[0])),)
-            _sparse_qc_kernel_csc(
+            sparse_qc_csc = _sparse_qc_csc(X.data.dtype)
+            sparse_qc_csc(
                 grid,
                 block,
                 (
@@ -256,12 +118,15 @@ def calculate_qc_metrics(
         else:
             raise ValueError("Please use a csr or csc matrix")
     else:
+        from ._kernels._qc_kernels import _sparse_qc_dense
+
         block = (16, 16)
         grid = (
             int(math.ceil(X.shape[0] / block[0])),
             int(math.ceil(X.shape[1] / block[1])),
         )
-        _sparse_qc_kernel_dense(
+        sparse_qc_dense = _sparse_qc_dense(X.dtype)
+        sparse_qc_dense(
             grid,
             block,
             (X, sums_cells, sums_genes, cell_ex, gene_ex, X.shape[0], X.shape[1]),
@@ -289,33 +154,42 @@ def calculate_qc_metrics(
         if type(qc_vars) is str:
             qc_vars = [qc_vars]
         for qc_var in qc_vars:
-            sums_cells_sub = cp.zeros(X.shape[0], dtype=cp.float32)
+            sums_cells_sub = cp.zeros(X.shape[0], dtype=X.dtype)
             mask = cp.array(cudata.var[qc_var], dtype=cp.bool_)
             if cpx.scipy.sparse.issparse(X):
                 if cpx.scipy.sparse.isspmatrix_csr(X):
+                    from ._kernels._qc_kernels import _sparse_qc_csr_sub
+
                     block = (32,)
                     grid = (int(math.ceil(X.shape[0] / block[0])),)
-                    _sparse_qc_kernel_csr_sub(
+                    sparse_qc_csr_sub = _sparse_qc_csr_sub(X.data.dtype)
+                    sparse_qc_csr_sub(
                         grid,
                         block,
                         (X.indptr, X.indices, X.data, sums_cells_sub, mask, X.shape[0]),
                     )
                 elif cpx.scipy.sparse.isspmatrix_csc(X):
+                    from ._kernels._qc_kernels import _sparse_qc_csc_sub
+
                     block = (32,)
                     grid = (int(math.ceil(X.shape[1] / block[0])),)
-                    _sparse_qc_kernel_csc_sub(
+                    sparse_qc_csc_sub = _sparse_qc_csc_sub(X.data.dtype)
+                    sparse_qc_csc_sub(
                         grid,
                         block,
                         (X.indptr, X.indices, X.data, sums_cells_sub, mask, X.shape[1]),
                     )
 
             else:
+                from ._kernels._qc_kernels import _sparse_qc_dense_sub
+
                 block = (16, 16)
                 grid = (
                     int(math.ceil(X.shape[0] / block[0])),
                     int(math.ceil(X.shape[1] / block[1])),
                 )
-                _sparse_qc_kernel_dense_sub(
+                sparse_qc_dense_sub = _sparse_qc_dense_sub(X.dtype)
+                sparse_qc_dense_sub(
                     grid, block, (X, sums_cells_sub, mask, X.shape[0], X.shape[1])
                 )
             cudata.obs[f"total_{expr_type}_{qc_var}"] = cp.asnumpy(sums_cells_sub)

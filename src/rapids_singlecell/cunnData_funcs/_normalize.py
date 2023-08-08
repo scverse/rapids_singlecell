@@ -4,10 +4,12 @@ from typing import Optional
 
 import cupy as cp
 import cupyx as cpx
+from anndata import AnnData
+from scanpy.get import _get_obs_rep, _set_obs_rep
 
 from rapids_singlecell.cunnData import cunnData
 
-from ._utils import _check_nonnegative_integers
+from ._utils import _check_gpu_X, _check_nonnegative_integers
 
 
 def normalize_total(
@@ -37,51 +39,27 @@ def normalize_total(
     the original `cudata.X` and `cudata.layers['layer']`, depending on `inplace`.
 
     """
-    csr_arr = cudata.layers[layer] if layer is not None else cudata.X
+    X = _get_obs_rep(cudata, layer=layer)
+
+    if isinstance(X, AnnData):
+        _check_gpu_X(X)
 
     if not inplace:
-        csr_arr = csr_arr.copy()
+        X = X.copy()
 
-    mul_kernel = cp.RawKernel(
-        r"""
-        extern "C" __global__
-        void mul_kernel(const int *indptr, float *data,
-                        int nrows, int tsum) {
-            int row = blockDim.x * blockIdx.x + threadIdx.x;
+    from ._kernels._norm_kernel import _mul_kernel_csr
 
-            if(row >= nrows)
-                return;
-
-            float scale = 0.0;
-            int start_idx = indptr[row];
-            int stop_idx = indptr[row+1];
-
-            for(int i = start_idx; i < stop_idx; i++)
-                scale += data[i];
-
-            if(scale > 0.0) {
-                scale = tsum / scale;
-                for(int i = start_idx; i < stop_idx; i++)
-                    data[i] *= scale;
-            }
-        }
-        """,
-        "mul_kernel",
-    )
-
+    mul_kernel = _mul_kernel_csr(X.dtype)
     mul_kernel(
-        (math.ceil(csr_arr.shape[0] / 32.0),),
+        (math.ceil(X.shape[0] / 32.0),),
         (32,),
-        (csr_arr.indptr, csr_arr.data, csr_arr.shape[0], int(target_sum)),
+        (X.indptr, X.data, X.shape[0], int(target_sum)),
     )
 
     if inplace:
-        if layer:
-            cudata.layers[layer] = csr_arr
-        else:
-            cudata.X = csr_arr
+        _set_obs_rep(cudata, X, layer=layer)
     else:
-        return csr_arr
+        return X
 
 
 def log1p(
@@ -108,174 +86,17 @@ def log1p(
             in-place and returns None.
 
     """
-    X = cudata.layers[layer] if layer is not None else cudata.X
+    X = _get_obs_rep(cudata, layer=layer)
+
+    if isinstance(X, AnnData):
+        _check_gpu_X(X)
+
     X = X.log1p()
     cudata.uns["log1p"] = {"base": None}
     if not copy:
-        if layer:
-            cudata.layers[layer] = X
-        else:
-            cudata.X = X
+        _set_obs_rep(cudata, X, layer=layer)
     else:
         return X
-
-
-_sparse_kernel_sum_csc = cp.RawKernel(
-    r"""
-    extern "C" __global__
-    void calculate_sum_cg_csc(const int *indptr,const int *index,const float *data,
-                                        float* sums_genes, float* sums_cells,
-                                        int n_genes) {
-        int gene = blockDim.x * blockIdx.x + threadIdx.x;
-        if(gene >= n_genes){
-            return;
-        }
-        int start_idx = indptr[gene];
-        int stop_idx = indptr[gene+1];
-
-        for(int cell = start_idx; cell < stop_idx; cell++){
-            float value = data[cell];
-            int cell_number = index[cell];
-            atomicAdd(&sums_genes[gene], value);
-            atomicAdd(&sums_cells[cell_number], value);
-
-        }
-    }
-    """,
-    "calculate_sum_cg_csc",
-)
-
-_sparse_kernel_norm_res_csc = cp.RawKernel(
-    r"""
-    extern "C" __global__
-    void calculate_res_csc(const int *indptr,const int *index,const float *data,
-                            const float* sums_cells,const float* sums_genes,
-                            float* residuals ,const float* sum_total, const float* clip,
-                            const float* theta,const int n_cells,const int n_genes) {
-        int gene = blockDim.x * blockIdx.x + threadIdx.x;
-        if(gene >= n_genes){
-            return;
-        }
-        int start_idx = indptr[gene];
-        int stop_idx = indptr[gene + 1];
-
-        int sparse_idx = start_idx;
-        for(int cell = 0; cell < n_cells; cell++){
-            float mu = sums_genes[gene]*sums_cells[cell]*sum_total[0];
-            long long int res_index = static_cast<long long int>(cell) * n_genes + gene;
-            if (sparse_idx < stop_idx && index[sparse_idx] == cell){
-                residuals[res_index] += data[sparse_idx];
-                sparse_idx++;
-            }
-            residuals[res_index] -= mu;
-            residuals[res_index] /= sqrt(mu + mu * mu * theta[0]);
-            residuals[res_index]= fminf(fmaxf(residuals[res_index], -clip[0]), clip[0]);
-        }
-    }
-    """,
-    "calculate_res_csc",
-)
-
-
-_sparse_kernel_sum_csr = cp.RawKernel(
-    r"""
-    extern "C" __global__
-    void calculate_sum_cg_csr(const int *indptr,const int *index,const float *data,
-                                        float* sums_genes, float* sums_cells,
-                                        int n_cells) {
-        int cell = blockDim.x * blockIdx.x + threadIdx.x;
-        if(cell >= n_cells){
-            return;
-        }
-        int start_idx = indptr[cell];
-        int stop_idx = indptr[cell + 1];
-
-        for(int gene = start_idx; gene < stop_idx; gene++){
-            float value = data[gene];
-            int gene_number = index[gene];
-            atomicAdd(&sums_genes[gene_number], value);
-            atomicAdd(&sums_cells[cell], value);
-
-        }
-    }
-    """,
-    "calculate_sum_cg_csr",
-)
-
-_sparse_kernel_norm_res_csr = cp.RawKernel(
-    r"""
-    extern "C" __global__
-    void calculate_res_csr(const int * indptr, const int * index, const float * data,
-                       const float * sums_cells, const float * sums_genes,
-                       float * residuals, const float * sum_total, const float * clip,
-                       const float * theta, const int n_cells, const int n_genes) {
-        int cell = blockDim.x * blockIdx.x + threadIdx.x;
-        if(cell >= n_cells){
-            return;
-        }
-        int start_idx = indptr[cell];
-        int stop_idx = indptr[cell + 1];
-
-        int sparse_idx = start_idx;
-        for(int gene = 0; gene < n_genes; gene++){
-            long long int res_index = static_cast<long long int>(cell) * n_genes + gene;
-            float mu = sums_genes[gene]*sums_cells[cell]*sum_total[0];
-            if (sparse_idx < stop_idx && index[sparse_idx] == gene){
-                residuals[res_index] += data[sparse_idx];
-                sparse_idx++;
-            }
-            residuals[res_index] -= mu;
-            residuals[res_index] /= sqrt(mu + mu * mu * theta[0]);
-            residuals[res_index]= fminf(fmaxf(residuals[res_index], -clip[0]), clip[0]);
-        }
-    }
-    """,
-    "calculate_res_csr",
-)
-
-
-_dense_kernel_sum = cp.RawKernel(
-    r"""
-    extern "C" __global__
-    void calculate_sum_dense_cg(const float* residuals,
-                        float* sums_cells,float* sums_genes,
-                        const int n_cells,const int n_genes) {
-        int cell = blockDim.x * blockIdx.x + threadIdx.x;
-        int gene = blockDim.y * blockIdx.y + threadIdx.y;
-        if(cell >= n_cells || gene >= n_genes){
-            return;
-        }
-        long long int res_index = static_cast<long long int>(cell) * n_genes + gene;
-        atomicAdd(&sums_genes[gene], residuals[res_index]);
-        atomicAdd(&sums_cells[cell], residuals[res_index]);
-    }
-    """,
-    "calculate_sum_dense_cg",
-)
-
-
-_kernel_norm_res_dense = cp.RawKernel(
-    r"""
-    extern "C" __global__
-    void calculate_res_dense(const float* X,float* residuals,
-                            const float* sums_cells,const float* sums_genes,
-                            const float* sum_total,const float* clip,const float* theta,
-                            const int n_cells, const int n_genes) {
-        int cell = blockDim.x * blockIdx.x + threadIdx.x;
-        int gene = blockDim.y * blockIdx.y + threadIdx.y;
-        if(cell >= n_cells || gene >= n_genes){
-            return;
-        }
-
-        float mu = sums_genes[gene]*sums_cells[cell]*sum_total[0];
-        long long int res_index = static_cast<long long int>(cell) * n_genes + gene;
-        residuals[res_index] = X[res_index] - mu;
-        residuals[res_index] /= sqrt(mu + mu * mu * theta[0]);
-        residuals[res_index]= fminf(fmaxf(residuals[res_index], -clip[0]), clip[0]);
-    }
-    """,
-    "calculate_res_dense",
-)
 
 
 def normalize_pearson_residuals(
@@ -317,7 +138,9 @@ def normalize_pearson_residuals(
         If `inplace=False` the normalized matrix is returned.
 
     """
-    X = cudata.layers[layer] if layer is not None else cudata.X
+    X = _get_obs_rep(cudata, layer=layer)
+
+    _check_gpu_X(X)
 
     if check_values and not _check_nonnegative_integers(X):
         warnings.warn(
@@ -330,26 +153,30 @@ def normalize_pearson_residuals(
         raise ValueError("Pearson residuals require theta > 0")
     if clip is None:
         n = X.shape[0]
-        clip = cp.sqrt(n, dtype=cp.float32)
+        clip = cp.sqrt(n, dtype=X.dtype)
     if clip < 0:
         raise ValueError("Pearson residuals require `clip>=0` or `clip=None`.")
-    theta = cp.array([1 / theta], dtype=cp.float32)
-    clip = cp.array([clip], dtype=cp.float32)
-    sums_cells = cp.zeros(X.shape[0], dtype=cp.float32)
-    sums_genes = cp.zeros(X.shape[1], dtype=cp.float32)
+    theta = cp.array([1 / theta], dtype=X.dtype)
+    clip = cp.array([clip], dtype=X.dtype)
+    sums_cells = cp.zeros(X.shape[0], dtype=X.dtype)
+    sums_genes = cp.zeros(X.shape[1], dtype=X.dtype)
 
     if cpx.scipy.sparse.issparse(X):
-        residuals = cp.zeros(X.shape, dtype=cp.float32)
+        residuals = cp.zeros(X.shape, dtype=X.dtype)
         if cpx.scipy.sparse.isspmatrix_csc(X):
+            from ._kernels._pr_kernels import _sparse_norm_res_csc, _sparse_sum_csc
+
             block = (8,)
             grid = (int(math.ceil(X.shape[1] / block[0])),)
-            _sparse_kernel_sum_csc(
+            sum_csc = _sparse_sum_csc(X.dtype)
+            sum_csc(
                 grid,
                 block,
                 (X.indptr, X.indices, X.data, sums_genes, sums_cells, X.shape[1]),
             )
             sum_total = 1 / sums_genes.sum().squeeze()
-            _sparse_kernel_norm_res_csc(
+            norm_res = _sparse_norm_res_csc(X.dtype)
+            norm_res(
                 grid,
                 block,
                 (
@@ -367,15 +194,19 @@ def normalize_pearson_residuals(
                 ),
             )
         elif cpx.scipy.sparse.isspmatrix_csr(X):
+            from ._kernels._pr_kernels import _sparse_norm_res_csr, _sparse_sum_csr
+
             block = (8,)
             grid = (int(math.ceil(X.shape[0] / block[0])),)
-            _sparse_kernel_sum_csr(
+            sum_csr = _sparse_sum_csr(X.dtype)
+            sum_csr(
                 grid,
                 block,
                 (X.indptr, X.indices, X.data, sums_genes, sums_cells, X.shape[0]),
             )
             sum_total = 1 / sums_genes.sum().squeeze()
-            _sparse_kernel_norm_res_csr(
+            norm_res = _sparse_norm_res_csr(X.dtype)
+            norm_res(
                 grid,
                 block,
                 (
@@ -397,19 +228,23 @@ def normalize_pearson_residuals(
                 "Please transform you sparse matrix into CSR or CSC format."
             )
     else:
-        residuals = cp.zeros(X.shape, dtype=cp.float32)
+        from ._kernels._pr_kernels import _norm_res_dense, _sum_dense
+
+        residuals = cp.zeros(X.shape, dtype=X.dtype)
         block = (8, 8)
         grid = (
             math.ceil(residuals.shape[0] / block[0]),
             math.ceil(residuals.shape[1] / block[1]),
         )
-        _dense_kernel_sum(
+        sum_dense = _sum_dense(X.dtype)
+        sum_dense(
             grid,
             block,
             (X, sums_cells, sums_genes, residuals.shape[0], residuals.shape[1]),
         )
         sum_total = 1 / sums_genes.sum().squeeze()
-        _kernel_norm_res_dense(
+        norm_res = _norm_res_dense(X.dtype)
+        norm_res(
             grid,
             block,
             (
@@ -427,9 +262,6 @@ def normalize_pearson_residuals(
 
     if inplace is True:
         cudata.uns["pearson_residuals_normalization"] = settings_dict
-        if layer:
-            cudata.layers[layer] = residuals
-        else:
-            cudata.X = residuals
+        _set_obs_rep(cudata, residuals, layer=layer)
     else:
         return residuals
