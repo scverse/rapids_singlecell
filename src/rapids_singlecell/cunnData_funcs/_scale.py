@@ -1,8 +1,11 @@
 from typing import Optional
 
 import cupy as cp
+from scanpy.get import _get_obs_rep, _set_obs_rep
 
 from rapids_singlecell.cunnData import cunnData
+
+from ._utils import _check_gpu_X
 
 
 def scale(
@@ -34,13 +37,16 @@ def scale(
     depending on `inplace`.
 
     """
-    X = cudata.layers[layer] if layer is not None else cudata.X
+    X = _get_obs_rep(cudata, layer=layer)
+    _check_gpu_X(X)
 
-    if type(X) is not cp._core.core.ndarray:
+    if not isinstance(X, cp.ndarray):
         print("densifying _.X")
         X = X.toarray()
-    else:
+
+    if not inplace:
         X = X.copy()
+
     mean = X.sum(axis=0).flatten() / X.shape[0]
     X -= mean
     del mean
@@ -50,9 +56,6 @@ def scale(
     if max_value:
         X = cp.clip(X, a_min=-max_value, a_max=max_value)
     if inplace:
-        if layer:
-            cudata.layers[layer] = X
-        else:
-            cudata.X = X
+        _set_obs_rep(cudata, X, layer=layer)
     else:
         return X
