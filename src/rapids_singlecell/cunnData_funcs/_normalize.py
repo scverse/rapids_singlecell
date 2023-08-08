@@ -1,10 +1,10 @@
 import math
 import warnings
-from typing import Optional
+from typing import Optional, Union
 
 import cupy as cp
-import cupyx as cpx
 from anndata import AnnData
+from cupyx.scipy import sparse
 from scanpy.get import _get_obs_rep, _set_obs_rep
 
 from rapids_singlecell.cunnData import cunnData
@@ -13,8 +13,11 @@ from ._utils import _check_gpu_X, _check_nonnegative_integers
 
 
 def normalize_total(
-    cudata: cunnData, target_sum: int, layer: Optional[str] = None, inplace: bool = True
-) -> Optional[cpx.scipy.sparse.csr_matrix]:
+    cudata: cunnData,
+    target_sum: Optional[int] = None,
+    layer: Optional[str] = None,
+    inplace: bool = True,
+) -> Optional[Union[sparse.csr_matrix]]:
     """
     Normalizes rows in matrix so they sum to `target_sum`
 
@@ -47,14 +50,31 @@ def normalize_total(
     if not inplace:
         X = X.copy()
 
-    from ._kernels._norm_kernel import _mul_kernel_csr
+    if sparse.isspmatrix_csc(X):
+        X = X.tocsr()
+    if not target_sum:
+        counts_per_cell = X.sum(axis=1).ravel()
+        target_sum = cp.median(counts_per_cell)
 
-    mul_kernel = _mul_kernel_csr(X.dtype)
-    mul_kernel(
-        (math.ceil(X.shape[0] / 32.0),),
-        (32,),
-        (X.indptr, X.data, X.shape[0], int(target_sum)),
-    )
+    if sparse.isspmatrix_csr(X):
+        from ._kernels._norm_kernel import _mul_csr
+
+        mul_kernel = _mul_csr(X.dtype)
+        mul_kernel(
+            (math.ceil(X.shape[0] / 128),),
+            (128,),
+            (X.indptr, X.data, X.shape[0], int(target_sum)),
+        )
+
+    else:
+        from ._kernels._norm_kernel import _mul_dense
+
+        mul_kernel = _mul_dense(X.dtype)
+        mul_kernel(
+            (math.ceil(X.shape[0] / 128),),
+            (128,),
+            (X, X.shape[0], X.shape[1], int(target_sum)),
+        )
 
     if inplace:
         _set_obs_rep(cudata, X, layer=layer)
@@ -64,7 +84,7 @@ def normalize_total(
 
 def log1p(
     cudata: cunnData, layer: Optional[str] = None, copy: bool = False
-) -> Optional[cpx.scipy.sparse.spmatrix]:
+) -> Optional[Union[sparse.csr_matrix]]:
     """
     Calculated the natural logarithm of one plus the sparse matrix.
 
@@ -161,9 +181,9 @@ def normalize_pearson_residuals(
     sums_cells = cp.zeros(X.shape[0], dtype=X.dtype)
     sums_genes = cp.zeros(X.shape[1], dtype=X.dtype)
 
-    if cpx.scipy.sparse.issparse(X):
+    if sparse.issparse(X):
         residuals = cp.zeros(X.shape, dtype=X.dtype)
-        if cpx.scipy.sparse.isspmatrix_csc(X):
+        if sparse.isspmatrix_csc(X):
             from ._kernels._pr_kernels import _sparse_norm_res_csc, _sparse_sum_csc
 
             block = (8,)
@@ -193,7 +213,7 @@ def normalize_pearson_residuals(
                     X.shape[1],
                 ),
             )
-        elif cpx.scipy.sparse.isspmatrix_csr(X):
+        elif sparse.isspmatrix_csr(X):
             from ._kernels._pr_kernels import _sparse_norm_res_csr, _sparse_sum_csr
 
             block = (8,)
