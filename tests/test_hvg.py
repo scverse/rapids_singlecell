@@ -7,15 +7,20 @@ import pandas as pd
 import pytest
 import rapids_singlecell as rsc
 import scanpy as sc
-from rapids_singlecell.cunnData import cunnData
+from anndata import AnnData
+from scipy.sparse import csr_matrix
 
 FILE = Path(__file__).parent / Path("_scripts/seurat_hvg.csv")
 FILE_V3 = Path(__file__).parent / Path("_scripts/seurat_hvg_v3.csv.gz")
 FILE_V3_BATCH = Path(__file__).parent / Path("_scripts/seurat_hvg_v3_batch.csv")
 
 
-def test_highly_variable_genes_basic():
-    cudata = cunnData(sc.datasets.blobs())
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_highly_variable_genes_basic(dtype):
+    cudata = sc.datasets.blobs()
+    cudata.X = cudata.X.astype(dtype)
+    cudata.X = csr_matrix(cudata.X)
+    cudata.X = cpx.scipy.sparse.csr_matrix(cudata.X)
     np.random.seed(0)
     cudata.obs["batch"] = np.random.binomial(3, 0.5, size=(cudata.n_obs))
     cudata.obs["batch"] = cudata.obs["batch"].astype("category")
@@ -23,7 +28,10 @@ def test_highly_variable_genes_basic():
     assert "highly_variable_nbatches" in cudata.var.columns
     assert "highly_variable_intersection" in cudata.var.columns
 
-    cudata = cunnData(sc.datasets.blobs())
+    cudata = sc.datasets.blobs()
+    cudata.X = cudata.X.astype(dtype)
+    cudata.X = csr_matrix(cudata.X)
+    cudata.X = cpx.scipy.sparse.csr_matrix(cudata.X)
     batch = np.random.binomial(4, 0.5, size=(cudata.n_obs))
     cudata.obs["batch"] = batch
     cudata.obs["batch"] = cudata.obs["batch"].astype("category")
@@ -32,7 +40,10 @@ def test_highly_variable_genes_basic():
     assert cudata.var["highly_variable"].sum() == 3
     highly_var_first_layer = cudata.var["highly_variable"].copy()
 
-    cudata = cunnData(sc.datasets.blobs())
+    cudata = sc.datasets.blobs()
+    cudata.X = cudata.X.astype(dtype)
+    cudata.X = csr_matrix(cudata.X)
+    cudata.X = cpx.scipy.sparse.csr_matrix(cudata.X)
     new_layer = cudata.X.toarray()
     cp.random.shuffle(new_layer)
     cudata.layers["test_layer"] = cpx.scipy.sparse.csr_matrix(new_layer)
@@ -71,13 +82,14 @@ def test_highly_variable_genes_basic():
     assert np.all(np.isin(colnames, cudata.var.columns))
 
 
-def test_higly_variable_genes_compare_to_seurat():
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_higly_variable_genes_compare_to_seurat(dtype):
     seurat_hvg_info = pd.read_csv(FILE, sep=" ")
 
     pbmc = sc.datasets.pbmc68k_reduced()
     pbmc.X = pbmc.raw.X
     pbmc.var_names_make_unique()
-    pbmc = rsc.cunnData.cunnData(pbmc)
+    pbmc.X = cpx.scipy.sparse.csr_matrix(pbmc.X, dtype=dtype)
 
     rsc.pp.normalize_total(pbmc, target_sum=1e4)
     rsc.pp.log1p(pbmc)
@@ -111,14 +123,15 @@ def test_higly_variable_genes_compare_to_seurat():
     )
 
 
-def test_higly_variable_genes_compare_to_seurat_v3():
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_higly_variable_genes_compare_to_seurat_v3(dtype):
     seurat_hvg_info = pd.read_csv(
         FILE_V3, sep=" ", dtype={"variances_norm": np.float64}
     )
 
     pbmc = sc.datasets.pbmc3k()
     pbmc.var_names_make_unique()
-    pbmc = rsc.cunnData.cunnData(pbmc)
+    pbmc.X = cpx.scipy.sparse.csr_matrix(pbmc.X, dtype=dtype)
 
     rsc.pp.highly_variable_genes(pbmc, n_top_genes=1000, flavor="seurat_v3")
 
@@ -162,10 +175,11 @@ def test_higly_variable_genes_compare_to_seurat_v3():
         rsc.pp.highly_variable_genes(pbmc, n_top_genes=1000, flavor="seurat_v3")
 
 
-def test_seurat_v3_mean_var_output_with_batchkey():
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_seurat_v3_mean_var_output_with_batchkey(dtype):
     pbmc = sc.datasets.pbmc3k()
     pbmc.var_names_make_unique()
-    pbmc = rsc.cunnData.cunnData(pbmc)
+    pbmc.X = cpx.scipy.sparse.csr_matrix(pbmc.X, dtype=dtype)
 
     n_cells = pbmc.shape[0]
     batch = np.zeros((n_cells), dtype=int)
@@ -185,9 +199,10 @@ def test_seurat_v3_mean_var_output_with_batchkey():
     cp.testing.assert_allclose(true_var, pbmc.var["variances"], rtol=2e-05, atol=2e-05)
 
 
-def test_cellranger_n_top_genes_warning():
-    X = np.random.poisson(2, (100, 30))
-    cudata = rsc.cunnData.cunnData(X=X)
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_cellranger_n_top_genes_warning(dtype):
+    X = cp.random.poisson(2, (100, 30), dtype=dtype)
+    cudata = AnnData(X=cpx.scipy.sparse.csr_matrix(X, dtype=dtype))
     rsc.pp.normalize_total(cudata, target_sum=1e4)
     rsc.pp.log1p(cudata)
 
@@ -210,17 +225,19 @@ def _check_pearson_hvg_columns(output_df, n_top_genes):
 @pytest.mark.parametrize("clip", [None, np.Inf, 30])
 @pytest.mark.parametrize("theta", [100, np.Inf])
 @pytest.mark.parametrize("n_top_genes", [100, 200])
-def test_highly_variable_genes_pearson_residuals_general(clip, theta, n_top_genes):
-    adata = sc.datasets.pbmc3k().copy()
-    adata = adata[:1000, :500]
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_highly_variable_genes_pearson_residuals_general(
+    clip, theta, n_top_genes, dtype
+):
+    cudata = sc.datasets.pbmc3k().copy()
+    cudata = cudata[:1000, :500]
     np.random.seed(42)
-    adata.obs["batch"] = np.random.randint(0, 3, size=adata.shape[0])
-    sc.pp.filter_genes(adata, min_cells=1)
+    cudata.obs["batch"] = np.random.randint(0, 3, size=cudata.shape[0])
+    sc.pp.filter_genes(cudata, min_cells=1)
     # cleanup var
-    del adata.var
+    del cudata.var
 
-    cudata = rsc.cunnData.cunnData(adata)
-
+    cudata.X = cpx.scipy.sparse.csr_matrix(cudata.X, dtype=dtype)
     # compute reference output
     residuals_reference = rsc.pp.normalize_pearson_residuals(
         cudata, clip=clip, theta=theta, inplace=False
@@ -265,16 +282,17 @@ def test_highly_variable_genes_pearson_residuals_general(clip, theta, n_top_gene
 
 
 @pytest.mark.parametrize("n_top_genes", [100, 200])
-def test_highly_variable_genes_pearson_residuals_batch(n_top_genes):
-    adata = sc.datasets.pbmc3k().copy()
-    adata = adata[:1000, :500].copy()
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_highly_variable_genes_pearson_residuals_batch(n_top_genes, dtype):
+    cudata = sc.datasets.pbmc3k().copy()
+    cudata = cudata[:1000, :500].copy()
     np.random.seed(42)
-    adata.obs["batch"] = np.random.randint(0, 3, size=adata.shape[0])
-    sc.pp.filter_genes(adata, min_cells=1)
+    cudata.obs["batch"] = np.random.randint(0, 3, size=cudata.shape[0])
+    sc.pp.filter_genes(cudata, min_cells=1)
     # cleanup var
-    del adata.var
+    del cudata.var
 
-    cudata = rsc.cunnData.cunnData(adata)
+    cudata.X = cpx.scipy.sparse.csr_matrix(cudata.X, dtype=dtype)
     n_genes = cudata.shape[1]
 
     rsc.pp.highly_variable_genes(

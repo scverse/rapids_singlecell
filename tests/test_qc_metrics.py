@@ -5,12 +5,14 @@ import pytest
 import rapids_singlecell as rsc
 from anndata import AnnData
 from cupyx.scipy import sparse as sparse_gpu
-from scipy import sparse
 
 
-def test_qc_metrics():
-    cudata = rsc.cunnData.cunnData(
-        X=sparse.csr_matrix(np.random.binomial(100, 0.005, (1000, 1000)))
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_qc_metrics(dtype):
+    cudata = AnnData(
+        X=sparse_gpu.csr_matrix(
+            cp.random.binomial(100, 0.005, (1000, 1000), dtype=dtype), dtype=dtype
+        )
     )
     cudata.var["mito"] = np.concatenate(
         (np.ones(100, dtype=bool), np.zeros(900, dtype=bool))
@@ -51,8 +53,10 @@ def test_qc_metrics():
     for col in cudata.var:
         assert np.allclose(cudata.var[col], old_var[col])
     # with log1p=False
-    cudata = rsc.cunnData.cunnData(
-        X=sparse.csr_matrix(np.random.binomial(100, 0.005, (1000, 1000)))
+    cudata = AnnData(
+        X=sparse_gpu.csr_matrix(
+            cp.random.binomial(100, 0.005, (1000, 1000), dtype=dtype), dtype=dtype
+        )
     )
     cudata.var["mito"] = np.concatenate(
         (np.ones(100, dtype=bool), np.zeros(900, dtype=bool))
@@ -63,8 +67,8 @@ def test_qc_metrics():
     assert not np.any(cudata.var.columns.str.startswith("log1p_"))
 
 
-def adata_mito():
-    a = np.random.binomial(100, 0.005, (1000, 1000))
+def adata_mito(dtype):
+    a = cp.random.binomial(100, 0.005, (1000, 1000), dtype=dtype)
     init_var = pd.DataFrame(
         {"mito": np.concatenate((np.ones(100, dtype=bool), np.zeros(900, dtype=bool)))}
     )
@@ -75,12 +79,12 @@ def adata_mito():
 @pytest.mark.parametrize(
     "cls", [cp.array, sparse_gpu.csc_matrix, sparse_gpu.csr_matrix]
 )
-def test_qc_metrics_format(cls):
-    adata_dense = adata_mito()
-    cudata_dense = rsc.cunnData.cunnData(adata_dense)
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_qc_metrics_format(cls, dtype):
+    cudata_dense = adata_mito(dtype)
     rsc.pp.calculate_qc_metrics(cudata_dense, qc_vars=["mito"])
-    cudata = rsc.cunnData.cunnData(adata_dense)
-    cudata.X = cudata.X
+    cudata = cudata_dense.copy()
+    cudata.X = cls(cudata.X)
 
     rsc.pp.calculate_qc_metrics(cudata, qc_vars=["mito"])
     assert np.allclose(cudata.obs, cudata_dense.obs)
