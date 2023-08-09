@@ -67,10 +67,7 @@ def umap(
         * 'spectral': use a spectral embedding of the graph.
         * 'random': assign initial embedding positions at random.
     random_state
-        If `int`, `random_state` is the seed used by the random number generator;
-        If `RandomState` or `Generator`, `random_state` is the random number generator;
-        If `None`, the random number generator is the `RandomState` instance used
-        by `np.random`.
+        `int`, `random_state` is the seed used by the random number generator
     a
         More specific parameters controlling the embedding. If `None` these
         values are set automatically as determined by `min_dist` and
