@@ -8,3 +8,4 @@ from ._harmony_integrate import harmony_integrate
 from ._pymde import mde
 from ._rank_gene_groups import rank_genes_groups_logreg
 from ._tsne import tsne
+from ._umap import umap

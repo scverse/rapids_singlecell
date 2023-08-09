@@ -84,6 +84,7 @@ Basic plotting function for {class}`~rapids_singlecell.cunnData.cunnData` to ass
    :toctree: generated/
 
     tl.pca
+    tl.umap
     tl.tsne
     tl.diffmap
     tl.draw_graph
