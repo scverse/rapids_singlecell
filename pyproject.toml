@@ -13,6 +13,7 @@ dynamic = ["version"]
 
 dependencies = [
     "anndata>=0.7.4",
+    "scanpy>=1.9.3",
     "numpy>=1.17.0",
     "decoupler>=1.3.2",
     "scipy>=1.4",
@@ -38,8 +39,7 @@ doc = [
 ]
 test = [
     "pytest",
-    "scanpy",
-    "omnipath"
+    "omnipath",
 ]
 
 [project.urls]
