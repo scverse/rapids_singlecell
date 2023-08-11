@@ -1,3 +1,5 @@
+from typing import Optional
+
 from anndata import AnnData
 from cuml.manifold import TSNE
 
@@ -14,7 +16,7 @@ def tsne(
     method: str = "barnes_hut",
     metric: str = "euclidean",
     copy: bool = False,
-) -> None:
+) -> Optional[AnnData]:
     """
     Performs t-distributed stochastic neighborhood embedding (tSNE) using cuML libraray.
 
