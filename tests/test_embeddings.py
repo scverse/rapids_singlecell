@@ -1,5 +1,5 @@
 from rapids_singlecell.scanpy_gpu import tsne, umap
-from scanpy.testing._helpers.data import pbmc68k_reduced
+from scanpy.datasets import pbmc68k_reduced
 
 
 def test_umap():
