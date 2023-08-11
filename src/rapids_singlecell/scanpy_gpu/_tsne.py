@@ -1,6 +1,8 @@
 from anndata import AnnData
 from cuml.manifold import TSNE
 
+from ._utils import _choose_representation
+
 
 def tsne(
     adata: AnnData,
@@ -11,6 +13,7 @@ def tsne(
     learning_rate: int = 200,
     method: str = "barnes_hut",
     metric: str = "euclidean",
+    copy: bool = False,
 ) -> None:
     """
     Performs t-distributed stochastic neighborhood embedding (tSNE) using cuML libraray.
@@ -20,9 +23,12 @@ def tsne(
         adata
             Annotated data matrix.
         n_pcs
-            use this many PCs
+            Use this many PCs. If `n_pcs==0` use `.X` if `use_rep is None`.
         use_rep
-            use this obsm keys (defaults to `X_pca`)
+            Use the indicated representation. `'X'` or any key for `.obsm` is valid.
+            If None, the representation is chosen automatically: For .n_vars < 50, .X
+            is used, otherwise `'X_pca'` is used. If `'X_pca'` is not present, it's
+            computed with default parameters or `n_pcs` if present.
         perplexity
             The perplexity is related to the number of nearest neighbors that is used
             in other manifold learning algorithms. Larger datasets usually require a larger
@@ -45,27 +51,28 @@ def tsne(
         metric
             Distance metric to use. Supported distances are ['l1, 'cityblock', 'manhattan', 'euclidean',
             'l2', 'sqeuclidean', 'minkowski', 'chebyshev', 'cosine', 'correlation']
+        copy
+            Return a copy instead of writing to adata.
 
     Returns
     -------
-        Updates `adata` with the following fields.
+        Depending on `copy`, returns or updates `adata` with the following fields.
 
-            **X_tsne** : `np.ndarray` (`adata.obs`, dtype `float`)
+            **X_tsne** : `np.ndarray` (`adata.obsm`, dtype `float`)
                 tSNE coordinates of data.
     """
-    if use_rep is None:
-        data = adata.obsm["X_pca"]
-    else:
-        data = adata.obsm[use_rep]
-    if n_pcs is not None:
-        data = data[:, :n_pcs]
+
+    adata = adata.copy() if copy else adata
+
+    X = _choose_representation(adata, use_rep=use_rep, n_pcs=n_pcs)
+
     adata.obsm["X_tsne"] = TSNE(
         perplexity=perplexity,
         early_exaggeration=early_exaggeration,
         learning_rate=learning_rate,
         method=method,
         metric=metric,
-    ).fit_transform(data)
+    ).fit_transform(X)
     adata.uns["tsne"] = {
         "params": {
             k: v
@@ -80,3 +87,5 @@ def tsne(
             if v is not None
         }
     }
+
+    return adata if copy else None
