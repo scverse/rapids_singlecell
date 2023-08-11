@@ -5,8 +5,9 @@ from anndata import AnnData
 from cuml import UMAP
 from cuml.manifold.umap_utils import find_ab_params
 from scanpy._utils import NeighborsView
-from scanpy.tools._utils import _choose_representation
 from sklearn.utils import check_random_state
+
+from ._utils import _choose_representation
 
 _InitPos = Literal["spectral", "random"]
 
@@ -120,7 +121,6 @@ def umap(
         adata,
         neigh_params.get("use_rep", None),
         neigh_params.get("n_pcs", None),
-        silent=True,
     )
 
     n_neighbors = neighbors["params"]["n_neighbors"]
@@ -128,7 +128,6 @@ def umap(
         500 if maxiter is None else maxiter
     )  # 0 is not a valid value for rapids, unlike original umap
     metric = neigh_params.get("metric", "euclidean")
-    print(metric)
     X_contiguous = np.ascontiguousarray(X, dtype=np.float32)
     umap = UMAP(
         n_neighbors=n_neighbors,
