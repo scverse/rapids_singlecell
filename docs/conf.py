@@ -128,10 +128,8 @@ html_theme_options = {
     "repository_branch": os.environ.get("READTHEDOCS_GIT_IDENTIFIER", "main"),
     "use_repository_button": True,
 }
-html_css_files = ["css/custom.css"]
-html_js_files = ["js/custom.js"]
 html_show_sphinx = False
-html_logo = "_static/logo_light.svg"
+html_logo = "_static/logo3.svg"
 html_static_path = ["_static"]
 # html_extra_path = ["_extra"]
 
