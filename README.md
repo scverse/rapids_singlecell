@@ -6,14 +6,7 @@
 # rapids-singlecell
 
 ## Background
-This repository offers some tools to make analyses of single cell datasets faster by running them on the GPU.
-The functions are analogous versions of functions that can be found within [scanpy](https://github.com/scverse/scanpy) from the Theis lab or functions from [rapids-single-cell-examples](https://github.com/clara-parabricks/rapids-single-cell-examples) created by the Nvidia RAPIDS team. Most functions are kept close to the original code to ensure compatibility. My aim with this repository was to use the speedup that GPU computing offers and combine it with the ease of use from scanpy.
-
-## News
-
-I'm very honored to announce that I was invited to co-author a technical blog post that demonstrates the capabilities and performance of *rapids-singlecell* for NVIDIA. You can read through the blog [here](https://developer.nvidia.com/blog/gpu-accelerated-single-cell-rna-analysis-with-rapids-singlecell/?ncid=so-link-660513-vt12&=&linkId=100000207171999#cid=an01_so-link_en-us).\
-As always, your thoughts and feedback are valued, as they contribute to the ongoing refinement and development of *rapids-singlecell*.
-
+This library is designed to accelerate single cell data analysis by utilizing the capabilities of GPU computing. Drawing inspiration from both the [scanpy](https://github.com/scverse/scanpy) library by Theis lab and the [rapids-single-cell-examples](https://github.com/clara-parabricks/rapids-single-cell-examples) library from Nvidia's RAPIDS team, it introduces GPU-optimized versions of their functions. While aiming to remain compatible with the original codes, the library's primary objective is to blend the computational strength of GPUs with the user-friendly nature of the scverse ecosystem.
 
 ## Installation
 ### Conda
@@ -52,6 +45,3 @@ Please also consider citing: [rapids-single-cell-examples](https://zenodo.org/ba
 In addition to that please cite the methods' original research articles in the [scanpy documentation](https://scanpy.readthedocs.io/en/latest/references.html)
 
 If you use the accelerated decoupler functions please cite [decoupler](https://doi.org/10.1093/bioadv/vbac016)
-
-## Notebooks
-To show the capability of these functions, I created two example notebooks evaluating the same workflow running on the CPU and GPU. These notebooks should run in the environment, that is described in Requirements. First, run the `data_downloader` notebook to create the AnnData object for the analysis. If you run both `demo_cpu` and `demo_gpu` you should see a big speedup when running the analyses on the GPU.
