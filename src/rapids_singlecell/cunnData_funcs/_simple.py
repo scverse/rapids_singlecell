@@ -528,7 +528,6 @@ def filter_highly_variable(cudata: cunnData) -> None:
 
     """
     if "highly_variable" in cudata.var.keys():
-        thr = np.where(cudata.var["highly_variable"] is True)[0]
-        cudata._inplace_subset_var(thr)
+        cudata._inplace_subset_var(cudata.var["highly_variable"])
     else:
         print("Please calculate highly variable genes first")
