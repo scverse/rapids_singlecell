@@ -5,9 +5,9 @@ channels:
  - conda-forge
  - bioconda
 dependencies:
- - rapids=23.06
+ - rapids=23.08
  - python=3.10
- - cudatoolkit=11.8
+ - cuda-version=11.8
  - cudnn
  - cutensor
  - cusparselt
@@ -17,7 +17,6 @@ dependencies:
  - jupyterlab
  - pip
  - pip:
-    - scanpy
     - decoupler
     - omnipath
     - gdown

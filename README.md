@@ -1,6 +1,6 @@
 [![Stars](https://img.shields.io/github/stars/scverse/rapids_singlecell?logo=GitHub&color=blue)](https://github.com/scverse/rapids_singlecell/stargazers)
 [![PyPI](https://img.shields.io/pypi/v/rapids-singlecell?logo=PyPI)](https://pypi.org/project/rapids-singlecell)
-[![PyPIDownloads](https://pepy.tech/badge/rapids-singlecell)](https://pepy.tech/project/rapids-singlecell)
+[![Downloads](https://static.pepy.tech/badge/rapids-singlecell)](https://pepy.tech/project/rapids-singlecell)
 [![Documentation Status](https://readthedocs.org/projects/rapids-singlecell/badge/?version=latest)](https://rapids-singlecell.readthedocs.io/en/latest/?badge=latest)
 
 # rapids-singlecell
@@ -14,7 +14,7 @@ The easiest way to install *rapids-singlecell* is to use one of the *yaml* file 
 ```
 conda env create -f conda/rsc_rapids_23.04.yml
 # or
-mamba env create -f conda/rsc_rapids_23.06.yml
+mamba env create -f conda/rsc_rapids_23.08.yml
 ```
 ### PyPI
 As of version 0.4.0 *rapids-singlecell* is now on PyPI.
