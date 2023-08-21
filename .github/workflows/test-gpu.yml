@@ -1,4 +1,4 @@
-name: AWS GPU
+name: GPU-CI
 
 on:
   push:
