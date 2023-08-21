@@ -57,7 +57,7 @@ def regress_out(
         X = X.tocsc()
 
     dim_regressor = 2
-    if type(keys) is list:
+    if isinstance(keys, list):
         dim_regressor = len(keys) + 1
 
     regressors = cp.ones(X.shape[0] * dim_regressor).reshape(
