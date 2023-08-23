@@ -1,4 +1,4 @@
-from rapids_singlecell.cunnData_funcs import pca
+from rapids_singlecell.preprocessing import pca
 
 
 def _choose_representation(adata, use_rep=None, n_pcs=None):

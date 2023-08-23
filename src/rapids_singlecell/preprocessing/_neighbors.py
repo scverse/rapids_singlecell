@@ -9,7 +9,7 @@ from cuml.manifold.simpl_set import fuzzy_simplicial_set
 from cuml.neighbors import NearestNeighbors
 from cupyx.scipy.sparse import coo_matrix
 
-from ._utils import _choose_representation
+from rapids_singlecell.tools._utils import _choose_representation
 
 AnyRandom = Union[None, int, np.random.RandomState]
 _Alogithms = Literal["auto", "brute", "ivfflat", "ivfpq"]

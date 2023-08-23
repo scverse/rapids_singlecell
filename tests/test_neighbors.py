@@ -1,6 +1,6 @@
 import numpy as np
 from anndata import AnnData
-from rapids_singlecell.scanpy_gpu import neighbors
+from rapids_singlecell.tools import neighbors
 from scanpy.datasets import pbmc68k_reduced
 
 # the input data
