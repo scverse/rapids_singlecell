@@ -1,21 +1,20 @@
 import cupy as cp
+import pytest
 import rapids_singlecell as rsc
 import scanpy as sc
 
 
-def test_scale():
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_scale(dtype):
     adata = sc.datasets.pbmc68k_reduced()
-    adata.X = adata.raw.X
+    adata.X = adata.raw.X.todense()
 
-    v = adata[:, 0 : adata.shape[1] // 2]
-    cudata = rsc.cunnData.cunnData(v)
-    cudata.X = cudata.X.toarray().astype(cp.float64)
+    adata[:, 0 : adata.shape[1] // 2]
+    adata.X = cp.array(adata.X, dtype=dtype)
 
-    rsc.pp.scale(cudata)
+    rsc.pp.scale(adata)
 
+    cp.testing.assert_allclose(adata.X.var(axis=0), cp.ones(adata.shape[1]), atol=0.01)
     cp.testing.assert_allclose(
-        cudata.X.var(axis=0), cp.ones(cudata.shape[1]), atol=0.01
-    )
-    cp.testing.assert_allclose(
-        cudata.X.mean(axis=0), cp.zeros(cudata.shape[1]), atol=0.00001
+        adata.X.mean(axis=0), cp.zeros(adata.shape[1]), atol=0.00001
     )
