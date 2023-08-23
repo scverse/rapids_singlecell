@@ -1,18 +1,20 @@
 import math
 import warnings
-from typing import Optional
+from typing import Optional, Union
 
 import cupy as cp
 import numpy as np
 import pandas as pd
+from anndata import AnnData
+from scanpy.get import _get_obs_rep
 
 from rapids_singlecell.cunnData import cunnData
 
-from ._utils import _check_nonnegative_integers, _get_mean_var
+from ._utils import _check_gpu_X, _check_nonnegative_integers, _get_mean_var
 
 
 def highly_variable_genes(
-    cudata: cunnData,
+    cudata: Union[cunnData, AnnData],
     layer: str = None,
     min_mean: float = 0.0125,
     max_mean: float = 3,
@@ -149,7 +151,8 @@ def highly_variable_genes(
         )
     else:
         if batch_key is None:
-            X = cudata.layers[layer] if layer is not None else cudata.X
+            X = _get_obs_rep(cudata, layer=layer)
+            _check_gpu_X(X)
             df = _highly_variable_genes_single_batch(
                 X.copy(),
                 min_disp=min_disp,
@@ -401,7 +404,8 @@ def _highly_variable_genes_seurat_v3(
         )
 
     df = pd.DataFrame(index=cudata.var.index)
-    X = cudata.layers[layer] if layer is not None else cudata.X
+    X = _get_obs_rep(cudata, layer=layer)
+    _check_gpu_X(X)
     if check_values and not _check_nonnegative_integers(X):
         warnings.warn(
             "`flavor='seurat_v3'` expects raw count data, but non-integers were found.",
@@ -428,7 +432,7 @@ def _highly_variable_genes_seurat_v3(
         model.fit()
         estimat_var[not_const] = model.outputs.fitted_values
         reg_std = cp.sqrt(10**estimat_var)
-        X_batch.data = X_batch.data.astype(cp.float64)
+        X_batch = X_batch.astype(cp.float64)
         batch_counts = X_batch
         N = X_batch.shape[0]
         vmax = cp.sqrt(N)
@@ -500,7 +504,8 @@ def _highly_variable_pearson_residuals(
     are ranked by residual variance.
     Expects raw count input.
     """
-    X = cudata.layers[layer] if layer is not None else cudata.X
+    X = _get_obs_rep(cudata, layer=layer)
+    _check_gpu_X(X)
     if check_values and not _check_nonnegative_integers(X):
         warnings.warn(
             "`flavor='pearson_residuals'` expects raw count data, but non-integers were found.",
@@ -521,81 +526,10 @@ def _highly_variable_pearson_residuals(
 
     n_batches = len(np.unique(batch_info))
     residual_gene_vars = []
-    sparse_kernel = cp.RawKernel(
-        r"""
-    extern "C" __global__
-    void calculate_sum_cg(const int *indptr,const int *index,const float *data,
-                                        float* sums_genes, float* sums_cells,
-                                        int n_genes) {
-        int gene = blockDim.x * blockIdx.x + threadIdx.x;
-        if(gene >= n_genes){
-            return;
-        }
-        int start_idx = indptr[gene];
-        int stop_idx = indptr[gene+1];
+    from ._kernels._pr_kernels import _csc_hvg_res, _sparse_sum_csc
 
-        for(int cell = start_idx; cell < stop_idx; cell++){
-            float value = data[cell];
-            int cell_number = index[cell];
-            atomicAdd(&sums_genes[gene], value);
-            atomicAdd(&sums_cells[cell_number], value);
-
-        }
-    }
-    """,
-        "calculate_sum_cg",
-    )
-    sparse_kernel_res = cp.RawKernel(
-        r"""
-    extern "C" __global__
-    void calculate_res(const int *indptr,const int *index,const float *data,
-                            const float* sums_genes,const float* sums_cells,
-                            float* residuals ,float* sum_total,float* clip,float* theta,int n_genes, int n_cells) {
-        int gene = blockDim.x * blockIdx.x + threadIdx.x;
-        if(gene >= n_genes){
-            return;
-        }
-        int start_idx = indptr[gene];
-        int stop_idx = indptr[gene + 1];
-
-        int sparse_idx = start_idx;
-        float var_sum = 0.0;
-        float sum_clipped_res = 0.0;
-        for(int cell = 0; cell < n_cells; cell++){
-            float mu = sums_genes[gene]*sums_cells[cell]/sum_total[0];
-            float value = 0.0;
-            if (sparse_idx < stop_idx && index[sparse_idx] == cell){
-                value = data[sparse_idx];
-                sparse_idx++;
-            }
-            float mu_sum = value - mu;
-            float pre_res =  mu_sum / sqrt(mu + mu * mu / theta[0]);
-            float clipped_res = fminf(fmaxf(pre_res, -clip[0]), clip[0]);
-            sum_clipped_res += clipped_res;
-        }
-
-        float mean_clipped_res = sum_clipped_res / n_cells;
-        sparse_idx = start_idx;
-        for(int cell = 0; cell < n_cells; cell++){
-            float mu = sums_genes[gene]*sums_cells[cell]/sum_total[0];
-            float value = 0.0;
-            if (sparse_idx < stop_idx && index[sparse_idx] == cell){
-                value = data[sparse_idx];
-                sparse_idx++;
-            }
-            float mu_sum = value - mu;
-            float pre_res =  mu_sum / sqrt(mu + mu * mu / theta[0]);
-            float clipped_res = fminf(fmaxf(pre_res, -clip[0]), clip[0]);
-            float diff = clipped_res - mean_clipped_res;
-            var_sum += diff * diff;
-        }
-        residuals[gene] = var_sum / n_cells;
-    }
-
-    """,
-        "calculate_res",
-    )
-
+    sum_csc = _sparse_sum_csc(X.dtype)
+    csc_hvg_res = _csc_hvg_res(X.dtype)
     for b in np.unique(batch_info):
         X_batch = X[batch_info == b].tocsc()
         thr_org = cp.diff(X_batch.indptr).ravel()
@@ -603,17 +537,18 @@ def _highly_variable_pearson_residuals(
         X_batch = X_batch[:, nonzero_genes]
         if clip is None:
             n = X_batch.shape[0]
-            clip = cp.sqrt(n, dtype=cp.float32)
+            clip = cp.sqrt(n, dtype=X.dtype)
         if clip < 0:
             raise ValueError("Pearson residuals require `clip>=0` or `clip=None`.")
 
-        clip = cp.array([clip], dtype=cp.float32)
-        theta = cp.array([theta], dtype=cp.float32)
-        sums_genes = cp.zeros(X_batch.shape[1], dtype=cp.float32)
-        sums_cells = cp.zeros(X_batch.shape[0], dtype=cp.float32)
+        clip = cp.array([clip], dtype=X.dtype)
+        theta = cp.array([theta], dtype=X.dtype)
+        sums_genes = cp.zeros(X_batch.shape[1], dtype=X.dtype)
+        sums_cells = cp.zeros(X_batch.shape[0], dtype=X.dtype)
         block = (32,)
         grid = (int(math.ceil(X_batch.shape[1] / block[0])),)
-        sparse_kernel(
+
+        sum_csc(
             grid,
             block,
             (
@@ -626,9 +561,9 @@ def _highly_variable_pearson_residuals(
             ),
         )
         sum_total = sums_genes.sum().squeeze()
-        residual_gene_var = cp.zeros(X_batch.shape[1], dtype=cp.float32, order="C")
+        residual_gene_var = cp.zeros(X_batch.shape[1], dtype=X.dtype, order="C")
 
-        sparse_kernel_res(
+        csc_hvg_res(
             grid,
             block,
             (
@@ -653,7 +588,7 @@ def _highly_variable_pearson_residuals(
     # Get rank per gene within each batch
     # argsort twice gives ranks, small rank means most variable
     ranks_residual_var = cp.argsort(cp.argsort(-residual_gene_vars, axis=1), axis=1)
-    ranks_residual_var = ranks_residual_var.astype(np.float32)
+    ranks_residual_var = ranks_residual_var.astype(X.dtype)
     # count in how many batches a genes was among the n_top_genes
     highly_variable_nbatches = cp.sum(
         (ranks_residual_var < n_top_genes).astype(int), axis=0
@@ -766,7 +701,8 @@ def _poisson_gene_selection(
             UserWarning,
         )
 
-    X = cudata.layers[layer] if layer is not None else cudata.X
+    X = _get_obs_rep(cudata, layer=layer)
+    _check_gpu_X(X)
     if check_values and not _check_nonnegative_integers(X):
         warnings.warn(
             "`flavor='pearson_residuals'` expects raw count data, but non-integers were found.",

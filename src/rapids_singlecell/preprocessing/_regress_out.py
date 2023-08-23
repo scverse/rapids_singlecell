@@ -4,8 +4,11 @@ from typing import Literal, Optional, Union
 import cupy as cp
 import cupyx as cpx
 from cuml.linear_model import LinearRegression
+from scanpy.get import _get_obs_rep, _set_obs_rep
 
 from rapids_singlecell.cunnData import cunnData
+
+from ._utils import _check_gpu_X
 
 
 def regress_out(
@@ -51,7 +54,9 @@ def regress_out(
     if batchsize != "all" and type(batchsize) not in [int, type(None)]:
         raise ValueError("batchsize must be `int`, `None` or `'all'`")
 
-    X = cudata.layers[layer] if layer is not None else cudata.X
+    X = _get_obs_rep(cudata, layer=layer)
+
+    _check_gpu_X(X)
 
     if cpx.scipy.sparse.issparse(X) and not cpx.scipy.sparse.isspmatrix_csc(X):
         X = X.tocsc()
@@ -109,10 +114,7 @@ def regress_out(
             outputs[:, i] = _regress_out_chunk(regressors, y)
 
     if inplace:
-        if layer:
-            cudata.layers[layer] = outputs
-        else:
-            cudata.X = outputs
+        _set_obs_rep(cudata, outputs, layer=layer)
     else:
         return outputs
 
