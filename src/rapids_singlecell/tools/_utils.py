@@ -34,7 +34,7 @@ def _choose_representation(adata, use_rep=None, n_pcs=None):
             X = adata.X
         else:
             raise ValueError(
-                "Did not find {} in `.obsm.keys()`. "
-                "You need to compute it first.".format(use_rep)
+                f"Did not find {use_rep} in `.obsm.keys()`. "
+                "You need to compute it first."
             )
     return X

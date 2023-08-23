@@ -151,7 +151,7 @@ def calculate_qc_metrics(
         cudata.obs[f"log1p_total_{expr_type}"] = cp.asnumpy(cp.log1p(sums_cells))
 
     if qc_vars:
-        if type(qc_vars) is str:
+        if isinstance(qc_vars, str):
             qc_vars = [qc_vars]
         for qc_var in qc_vars:
             sums_cells_sub = cp.zeros(X.shape[0], dtype=X.dtype)

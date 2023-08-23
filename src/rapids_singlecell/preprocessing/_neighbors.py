@@ -137,7 +137,7 @@ def neighbors(
         X_conn,
         n_neighbors,
         random_state,
-        None,
+        metric=metric,
         knn_indices=knn_indices,
         knn_dists=knn_dist,
         set_op_mix_ratio=set_op_mix_ratio,

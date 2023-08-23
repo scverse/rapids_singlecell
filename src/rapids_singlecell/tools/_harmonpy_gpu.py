@@ -81,7 +81,7 @@ def run_harmony(
     if nclust is None:
         nclust = np.min([np.round(N / 30.0), 100]).astype(int)
 
-    if type(sigma) is float and nclust > 1:
+    if isinstance(sigma, float) and nclust > 1:
         sigma = np.repeat(sigma, nclust)
 
     if isinstance(vars_use, str):
