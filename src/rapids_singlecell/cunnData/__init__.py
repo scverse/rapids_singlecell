@@ -113,6 +113,15 @@ class cunnData:
         varm: Optional[Mapping[str, Any]] = None,
     ):
         # Initialize from adata
+
+        warnings.warn(
+            "cunnData is deprecated, please use AnnData with cupy arrays instead. "
+            "cunnData will be removed from rapids-singlecell in early 2024.\n\n"
+            "For more info on how to transition see: "
+            "https://rapids-singlecell.readthedocs.io/en/latest/Usage_Principles.html",
+            FutureWarning,
+        )
+
         if adata:
             if not issparse_cpu(adata.X):
                 inter = sparse.csr_matrix(adata.X)
