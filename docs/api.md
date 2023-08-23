@@ -14,24 +14,14 @@ Import rapids-singlecell as:
 import rapids_singlecell as rsc
 ```
 
-## cunnData
 
-```{eval-rst}
-.. module:: rapids_singlecell.cunnData
-.. currentmodule:: rapids_singlecell
-
-.. autosummary::
-    :toctree: generated
-
-    cunnData.cunnData
-```
+## scanpy_GPU
 
 
-## cunnData_funcs: `pp`
+### preprocessing `pp`
+Filtering of highly-variable genes, per-cell normalization.
 
-`cunnData_funcs` offers functions for preprocessing of {class}`~rapids_singlecell.cunnData.cunnData`.
-
-### Preprocessing
+Any transformation of the data matrix that is not a `tool``. Other than `tools`, preprocessing steps usually don’t return an easily interpretable annotation, but perform a basic transformation on the data matrix.
 ```{eval-rst}
 .. module:: rapids_singlecell.pp
 .. currentmodule:: rapids_singlecell
@@ -51,24 +41,10 @@ import rapids_singlecell as rsc
    pp.flag_gene_family
    pp.filter_highly_variable
 ```
-### Plotting: `pl`
 
-Basic plotting function for {class}`~rapids_singlecell.cunnData.cunnData` to assess the quality of the dataset.
+### tools: `tl`
 
-```{eval-rst}
-.. module:: rapids_singlecell.pl
-.. currentmodule:: rapids_singlecell
-.. autosummary::
-   :toctree: generated/
-
-   pl.scatter
-   pl.violin
-
-```
-
-## scanpy-GPU: `tl`
-
-`scanpy-GPU` offers tools for the accelerated processing of {class}`~anndata.AnnData`. For visualization use {mod}`scanpy.pl`.
+`tools` offers tools for the accelerated processing of {class}`~anndata.AnnData`. For visualization use {mod}`scanpy.pl`.
 
 ```{eval-rst}
 .. module:: rapids_singlecell.tl
@@ -78,7 +54,7 @@ Basic plotting function for {class}`~rapids_singlecell.cunnData.cunnData` to ass
 .. currentmodule:: rapids_singlecell
 ```
 
-### Embedding
+#### Embedding
 ```{eval-rst}
 .. autosummary::
    :toctree: generated/
@@ -92,7 +68,7 @@ Basic plotting function for {class}`~rapids_singlecell.cunnData.cunnData` to ass
     tl.embedding_density
 ```
 
-### Clustering
+#### Clustering
 
 ```{eval-rst}
 .. autosummary::
@@ -102,7 +78,7 @@ Basic plotting function for {class}`~rapids_singlecell.cunnData.cunnData` to ass
     tl.leiden
 ```
 
-### Marker genes
+#### Marker genes
 
 ```{eval-rst}
 .. autosummary::
@@ -111,7 +87,7 @@ Basic plotting function for {class}`~rapids_singlecell.cunnData.cunnData` to ass
     tl.rank_genes_groups_logreg
 ```
 
-### Batch effect correction
+#### Batch effect correction
 
 ```{eval-rst}
 .. autosummary::
@@ -119,6 +95,10 @@ Basic plotting function for {class}`~rapids_singlecell.cunnData.cunnData` to ass
 
     tl.harmony_integrate
 ```
+
+### Plotting
+
+For plotting please use scanpy's plotting API {mod}`scanpy.pl`.
 
 ## squidpy-GPU: `gr`
 
@@ -148,4 +128,18 @@ Basic plotting function for {class}`~rapids_singlecell.cunnData.cunnData` to ass
 
     dcg.run_mlm
     dcg.run_wsum
+```
+
+## cunnData
+
+{class}`~rapids_singlecell.cunnData.cunnData` is depreciated and will be removed in 2024. Please start switching to {class}`~anndata.AnnData`
+
+```{eval-rst}
+.. module:: rapids_singlecell.cunnData
+.. currentmodule:: rapids_singlecell
+
+.. autosummary::
+    :toctree: generated
+
+    cunnData.cunnData
 ```
