@@ -17,7 +17,7 @@ def normalize_total(
     target_sum: Optional[int] = None,
     layer: Optional[str] = None,
     inplace: bool = True,
-) -> Optional[Union[sparse.csr_matrix]]:
+) -> Optional[Union[sparse.csr_matrix, cp.ndarray]]:
     """
     Normalizes rows in matrix so they sum to `target_sum`
 
@@ -84,7 +84,7 @@ def normalize_total(
 
 def log1p(
     cudata: cunnData, layer: Optional[str] = None, copy: bool = False
-) -> Optional[Union[sparse.csr_matrix]]:
+) -> Optional[Union[sparse.csr_matrix, cp.ndarray]]:
     """
     Calculated the natural logarithm of one plus the sparse matrix.
 

@@ -56,7 +56,7 @@ def regress_out(
 
     X = _get_obs_rep(cudata, layer=layer)
 
-    X = _check_gpu_X
+    _check_gpu_X(X)
 
     if cpx.scipy.sparse.issparse(X) and not cpx.scipy.sparse.isspmatrix_csc(X):
         X = X.tocsc()
