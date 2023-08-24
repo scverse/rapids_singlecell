@@ -9,8 +9,13 @@ X_total = cp.array([[1, 0], [3, 0], [5, 6]], dtype=np.float64)
 
 
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])
-def test_normalize_total(dtype):
-    cudata = AnnData(csr_matrix(X_total, dtype=dtype))
+@pytest.mark.parametrize("sparse", [True, False])
+def test_normalize_total(dtype, sparse):
+    if sparse:
+        X = csr_matrix(X_total, dtype=dtype)
+    else:
+        X = X_total.copy().astype(dtype)
+    cudata = AnnData(X)
 
     rsc.pp.normalize_total(cudata, target_sum=1)
     cp.testing.assert_allclose(
