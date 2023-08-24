@@ -6,6 +6,7 @@ import cupy as cp
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from cupyx.scipy.sparse import issparse
 from scanpy.get import _get_obs_rep
 
 from rapids_singlecell.cunnData import cunnData
@@ -169,18 +170,23 @@ def highly_variable_genes(
             df = []
             genes = adata.var.index.to_numpy()
             X = adata.layers[layer] if layer is not None else adata.X
+            _check_gpu_X(X)
             for batch in batches:
-                inter_matrix = X[np.where(adata.obs[batch_key] == batch)[0],].tocsc()
-                thr_org = cp.diff(inter_matrix.indptr).ravel()
-                thr = cp.where(thr_org >= 1)[0]
-                thr_2 = cp.where(thr_org < 1)[0]
-                inter_matrix = inter_matrix[:, thr].tocsr()
-                thr = thr.get()
-                thr_2 = thr_2.get()
-                inter_genes = genes[thr]
-                other_gens_inter = genes[thr_2]
+                if not isinstance(X, cp.ndarray):
+                    X_batch = X[adata.obs[batch_key] == batch,].tocsc()
+                    nnz_per_gene = cp.diff(X_batch.indptr).ravel()
+                else:
+                    X_batch = X[adata.obs[batch_key] == batch,].copy()
+                    nnz_per_gene = cp.sum(X_batch > 0, axis=0).ravel()
+                good_genes = cp.where(nnz_per_gene >= 1)[0]
+                bad_genes = cp.where(nnz_per_gene < 1)[0]
+                X_batch = X_batch[:, good_genes]
+                good_genes = good_genes.get()
+                bad_genes = bad_genes.get()
+                inter_genes = genes[good_genes]
+                other_gens_inter = genes[bad_genes]
                 hvg_inter = _highly_variable_genes_single_batch(
-                    inter_matrix,
+                    X_batch,
                     min_disp=min_disp,
                     max_disp=max_disp,
                     min_mean=min_mean,
@@ -200,7 +206,7 @@ def highly_variable_genes(
                 missing_hvg["gene"] = other_gens_inter
                 # hvg = hvg_inter.append(missing_hvg, ignore_index=True)
                 hvg = pd.concat([hvg_inter, missing_hvg], ignore_index=True)
-                idxs = np.concatenate((thr, thr_2))
+                idxs = np.concatenate((good_genes, bad_genes))
                 hvg = hvg.loc[np.argsort(idxs)]
                 df.append(hvg)
 
@@ -280,8 +286,11 @@ def _highly_variable_genes_single_batch(
     `highly_variable`, `means`, `dispersions`, and `dispersions_norm`.
     """
     if flavor == "seurat":
-        X = X.expm1()
-    mean, var = _get_mean_var(X, axis=1)
+        if issparse(X):
+            X = X.expm1()
+        else:
+            X = cp.expm1(X)
+    mean, var = _get_mean_var(X, axis=0)
     mean[mean == 0] = 1e-12
     disp = var / mean
     if flavor == "seurat":  # logarithmized mean as in Seurat
@@ -412,7 +421,7 @@ def _highly_variable_genes_seurat_v3(
             UserWarning,
         )
 
-    mean, var = _get_mean_var(X, axis=1)
+    mean, var = _get_mean_var(X, axis=0)
     df["means"], df["variances"] = mean.get(), var.get()
     if batch_key is None:
         batch_info = pd.Categorical(np.zeros(adata.shape[0], dtype=int))
@@ -422,7 +431,7 @@ def _highly_variable_genes_seurat_v3(
     norm_gene_vars = []
     for b in np.unique(batch_info):
         X_batch = X[batch_info == b]
-        mean, var = _get_mean_var(X_batch, axis=1)
+        mean, var = _get_mean_var(X_batch, axis=0)
         not_const = var > 0
         estimat_var = cp.zeros(X_batch.shape[1], dtype=np.float64)
 
@@ -437,10 +446,26 @@ def _highly_variable_genes_seurat_v3(
         N = X_batch.shape[0]
         vmax = cp.sqrt(N)
         clip_val = reg_std * vmax + mean
-        mask = batch_counts.data > clip_val[batch_counts.indices]
-        batch_counts.data[mask] = clip_val[batch_counts.indices[mask]]
-        squared_batch_counts_sum = cp.array(batch_counts.power(2).sum(axis=0))
-        batch_counts_sum = cp.array(batch_counts.sum(axis=0))
+        if issparse(batch_counts):
+            mask = batch_counts.data > clip_val[batch_counts.indices]
+            batch_counts.data[mask] = clip_val[batch_counts.indices[mask]]
+            squared_batch_counts_sum = cp.array(batch_counts.power(2).sum(axis=0))
+            batch_counts_sum = cp.array(batch_counts.sum(axis=0))
+        else:
+            clip_val_broad = cp.repeat(clip_val, batch_counts.shape[0]).reshape(
+                batch_counts.shape
+            )
+
+            cp.putmask(
+                batch_counts,
+                batch_counts > clip_val_broad,
+                clip_val_broad,
+            )
+            # Calculate the sum of squared values for each column
+            squared_batch_counts_sum = cp.sum(batch_counts**2, axis=0)
+
+            # Calculate the sum for each column
+            batch_counts_sum = cp.sum(batch_counts, axis=0)
 
         norm_gene_var = (1 / ((N - 1) * cp.square(reg_std))) * (
             (N * cp.square(mean))
@@ -526,14 +551,24 @@ def _highly_variable_pearson_residuals(
 
     n_batches = len(np.unique(batch_info))
     residual_gene_vars = []
-    from ._kernels._pr_kernels import _csc_hvg_res, _sparse_sum_csc
+    if issparse(X):
+        from ._kernels._pr_kernels import _csc_hvg_res, _sparse_sum_csc
 
-    sum_csc = _sparse_sum_csc(X.dtype)
-    csc_hvg_res = _csc_hvg_res(X.dtype)
+        sum_csc = _sparse_sum_csc(X.dtype)
+        csc_hvg_res = _csc_hvg_res(X.dtype)
+    else:
+        from ._kernels._pr_kernels import _dense_hvg_res
+
+        dense_hvg_res = _dense_hvg_res(X.dtype)
+
     for b in np.unique(batch_info):
-        X_batch = X[batch_info == b].tocsc()
-        thr_org = cp.diff(X_batch.indptr).ravel()
-        nonzero_genes = cp.array(thr_org >= 1)
+        if issparse(X):
+            X_batch = X[batch_info == b].tocsc()
+            nnz_per_gene = cp.diff(X_batch.indptr).ravel()
+        else:
+            X_batch = cp.array(X[batch_info == b], dtype=X.dtype)
+            nnz_per_gene = cp.sum(X_batch != 0, axis=0).ravel()
+        nonzero_genes = cp.array(nnz_per_gene >= 1)
         X_batch = X_batch[:, nonzero_genes]
         if clip is None:
             n = X_batch.shape[0]
@@ -543,43 +578,65 @@ def _highly_variable_pearson_residuals(
 
         clip = cp.array([clip], dtype=X.dtype)
         theta = cp.array([theta], dtype=X.dtype)
-        sums_genes = cp.zeros(X_batch.shape[1], dtype=X.dtype)
-        sums_cells = cp.zeros(X_batch.shape[0], dtype=X.dtype)
-        block = (32,)
-        grid = (int(math.ceil(X_batch.shape[1] / block[0])),)
-
-        sum_csc(
-            grid,
-            block,
-            (
-                X_batch.indptr,
-                X_batch.indices,
-                X_batch.data,
-                sums_genes,
-                sums_cells,
-                X_batch.shape[1],
-            ),
-        )
-        sum_total = sums_genes.sum().squeeze()
         residual_gene_var = cp.zeros(X_batch.shape[1], dtype=X.dtype, order="C")
+        if issparse(X_batch):
+            sums_genes = cp.zeros(X_batch.shape[1], dtype=X.dtype)
+            sums_cells = cp.zeros(X_batch.shape[0], dtype=X.dtype)
+            block = (32,)
+            grid = (int(math.ceil(X_batch.shape[1] / block[0])),)
 
-        csc_hvg_res(
-            grid,
-            block,
-            (
-                X_batch.indptr,
-                X_batch.indices,
-                X_batch.data,
-                sums_genes,
-                sums_cells,
-                residual_gene_var,
-                sum_total,
-                clip,
-                theta,
-                X_batch.shape[1],
-                X_batch.shape[0],
-            ),
-        )
+            sum_csc(
+                grid,
+                block,
+                (
+                    X_batch.indptr,
+                    X_batch.indices,
+                    X_batch.data,
+                    sums_genes,
+                    sums_cells,
+                    X_batch.shape[1],
+                ),
+            )
+            sum_total = sums_genes.sum().squeeze()
+            csc_hvg_res(
+                grid,
+                block,
+                (
+                    X_batch.indptr,
+                    X_batch.indices,
+                    X_batch.data,
+                    sums_genes,
+                    sums_cells,
+                    residual_gene_var,
+                    sum_total,
+                    clip,
+                    theta,
+                    X_batch.shape[1],
+                    X_batch.shape[0],
+                ),
+            )
+        else:
+            sums_genes = cp.sum(X_batch, axis=0, dtype=X.dtype).ravel()
+            sums_cells = cp.sum(X_batch, axis=1, dtype=X.dtype).ravel()
+            sum_total = sums_genes.sum().squeeze()
+            block = (32,)
+            grid = (int(math.ceil(X_batch.shape[1] / block[0])),)
+            dense_hvg_res(
+                grid,
+                block,
+                (
+                    cp.array(X_batch, dtype=X.dtype, order="F"),
+                    sums_genes,
+                    sums_cells,
+                    residual_gene_var,
+                    sum_total,
+                    clip,
+                    theta,
+                    X_batch.shape[1],
+                    X_batch.shape[0],
+                ),
+            )
+
         unmasked_residual_gene_var = cp.zeros(len(nonzero_genes))
         unmasked_residual_gene_var[nonzero_genes] = residual_gene_var
         residual_gene_vars.append(unmasked_residual_gene_var.reshape(1, -1))
@@ -598,7 +655,7 @@ def _highly_variable_pearson_residuals(
     ranks_masked_array = np.ma.masked_invalid(ranks_residual_var)
     # Median rank across batches, ignoring batches in which gene was not selected
     medianrank_residual_var = np.ma.median(ranks_masked_array, axis=0).filled(np.nan)
-    means, variances = _get_mean_var(X, axis=1)
+    means, variances = _get_mean_var(X, axis=0)
     means, variances = means.get(), variances.get()
     df = pd.DataFrame.from_dict(
         {

@@ -217,3 +217,44 @@ _csc_hvg_res_kernel = r"""
 
 def _csc_hvg_res(dtype):
     return cuda_kernel_factory(_csc_hvg_res_kernel, (dtype,), "_csc_hvg_res_kernel")
+
+
+_dense_hvg_res_kernel = r"""
+    (const {0} *data,
+        const {0}* sums_genes,const {0}* sums_cells,
+        {0}* residuals ,{0}* sum_total,{0}* clip,{0}* theta,int n_genes, int n_cells) {
+        int gene = blockDim.x * blockIdx.x + threadIdx.x;
+        if(gene >= n_genes){
+            return;
+        }
+
+        {0} var_sum = 0.0;
+        {0} sum_clipped_res = 0.0;
+        for(int cell = 0; cell < n_cells; cell++){
+            long long int res_index = static_cast<long long int>(gene) * n_cells + cell;
+            {0} mu = sums_genes[gene]*sums_cells[cell]/sum_total[0];
+            {0} value = data[res_index];
+            {0} mu_sum = value - mu;
+            {0} pre_res =  mu_sum / sqrt(mu + mu * mu / theta[0]);
+            {0} clipped_res = fminf(fmaxf(pre_res, -clip[0]), clip[0]);
+            sum_clipped_res += clipped_res;
+        }
+
+        {0} mean_clipped_res = sum_clipped_res / n_cells;
+        for(int cell = 0; cell < n_cells; cell++){
+            long long int res_index = static_cast<long long int>(gene) * n_cells + cell;
+            {0} mu = sums_genes[gene]*sums_cells[cell]/sum_total[0];
+            {0} value = data[res_index];
+            {0} mu_sum = value - mu;
+            {0} pre_res =  mu_sum / sqrt(mu + mu * mu / theta[0]);
+            {0} clipped_res = fminf(fmaxf(pre_res, -clip[0]), clip[0]);
+            {0} diff = clipped_res - mean_clipped_res;
+            var_sum += diff * diff;
+        }
+        residuals[gene] = var_sum / n_cells;
+    }
+    """
+
+
+def _dense_hvg_res(dtype):
+    return cuda_kernel_factory(_dense_hvg_res_kernel, (dtype,), "_dense_hvg_res_kernel")

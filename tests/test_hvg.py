@@ -15,12 +15,16 @@ FILE_V3 = Path(__file__).parent / Path("_scripts/seurat_hvg_v3.csv.gz")
 FILE_V3_BATCH = Path(__file__).parent / Path("_scripts/seurat_hvg_v3_batch.csv")
 
 
-@pytest.mark.parametrize("dtype", ["float32", "float64"])
-def test_highly_variable_genes_basic(dtype):
+@pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
+@pytest.mark.parametrize("sparse", [True, False])
+def test_highly_variable_genes_basic(dtype, sparse):
     cudata = sc.datasets.blobs()
     cudata.X = cudata.X.astype(dtype)
-    cudata.X = csr_matrix(cudata.X)
-    cudata.X = cpx.scipy.sparse.csr_matrix(cudata.X)
+    if sparse:
+        cudata.X = csr_matrix(cudata.X)
+        cudata.X = cpx.scipy.sparse.csr_matrix(cudata.X)
+    else:
+        cudata.X = cp.array(cudata.X)
     np.random.seed(0)
     cudata.obs["batch"] = np.random.binomial(3, 0.5, size=(cudata.n_obs))
     cudata.obs["batch"] = cudata.obs["batch"].astype("category")
@@ -30,8 +34,11 @@ def test_highly_variable_genes_basic(dtype):
 
     cudata = sc.datasets.blobs()
     cudata.X = cudata.X.astype(dtype)
-    cudata.X = csr_matrix(cudata.X)
-    cudata.X = cpx.scipy.sparse.csr_matrix(cudata.X)
+    if sparse:
+        cudata.X = csr_matrix(cudata.X)
+        cudata.X = cpx.scipy.sparse.csr_matrix(cudata.X)
+    else:
+        cudata.X = cp.array(cudata.X)
     batch = np.random.binomial(4, 0.5, size=(cudata.n_obs))
     cudata.obs["batch"] = batch
     cudata.obs["batch"] = cudata.obs["batch"].astype("category")
@@ -42,11 +49,20 @@ def test_highly_variable_genes_basic(dtype):
 
     cudata = sc.datasets.blobs()
     cudata.X = cudata.X.astype(dtype)
-    cudata.X = csr_matrix(cudata.X)
-    cudata.X = cpx.scipy.sparse.csr_matrix(cudata.X)
-    new_layer = cudata.X.toarray()
+    if sparse:
+        cudata.X = csr_matrix(cudata.X)
+        cudata.X = cpx.scipy.sparse.csr_matrix(cudata.X)
+    else:
+        cudata.X = cp.array(cudata.X)
+    if sparse:
+        new_layer = cudata.X.toarray()
+    else:
+        new_layer = cudata.X.copy()
     cp.random.shuffle(new_layer)
-    cudata.layers["test_layer"] = cpx.scipy.sparse.csr_matrix(new_layer)
+    if sparse:
+        cudata.layers["test_layer"] = cpx.scipy.sparse.csr_matrix(new_layer)
+    else:
+        cudata.layers["test_layer"] = new_layer
     cudata.obs["batch"] = batch
     cudata.obs["batch"] = cudata.obs["batch"].astype("category")
     rsc.pp.highly_variable_genes(
@@ -176,21 +192,27 @@ def test_higly_variable_genes_compare_to_seurat_v3(dtype):
 
 
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
-def test_seurat_v3_mean_var_output_with_batchkey(dtype):
+@pytest.mark.parametrize("sparse", [True, False])
+def test_seurat_v3_mean_var_output_with_batchkey(dtype, sparse):
     pbmc = sc.datasets.pbmc3k()
     pbmc.var_names_make_unique()
-    pbmc.X = cpx.scipy.sparse.csr_matrix(pbmc.X, dtype=dtype)
-
+    if sparse:
+        pbmc.X = cpx.scipy.sparse.csr_matrix(pbmc.X, dtype=dtype)
+    else:
+        pbmc.X = cpx.scipy.sparse.csr_matrix(pbmc.X, dtype=dtype).toarray()
     n_cells = pbmc.shape[0]
     batch = np.zeros((n_cells), dtype=int)
     batch[1500:] = 1
     pbmc.obs["batch"] = batch
 
     # true_mean, true_var = _get_mean_var(pbmc.X)
-    true_mean = cp.mean(pbmc.X.toarray().astype(cp.float64), axis=0)
-    true_var = cp.var(
-        pbmc.X.toarray().astype(cp.float64), axis=0, dtype=np.float64, ddof=1
-    )
+    if sparse:
+        X = pbmc.X.toarray().astype(cp.float64)
+    else:
+        X = pbmc.X.copy().astype(cp.float64)
+
+    true_mean = cp.mean(X, axis=0)
+    true_var = cp.var(X, axis=0, dtype=np.float64, ddof=1)
 
     rsc.pp.highly_variable_genes(
         pbmc, batch_key="batch", flavor="seurat_v3", n_top_genes=4000
@@ -226,8 +248,9 @@ def _check_pearson_hvg_columns(output_df, n_top_genes):
 @pytest.mark.parametrize("theta", [100, np.Inf])
 @pytest.mark.parametrize("n_top_genes", [100, 200])
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
+@pytest.mark.parametrize("sparse", [True, False])
 def test_highly_variable_genes_pearson_residuals_general(
-    clip, theta, n_top_genes, dtype
+    clip, theta, n_top_genes, dtype, sparse
 ):
     cudata = sc.datasets.pbmc3k().copy()
     cudata = cudata[:1000, :500]
@@ -236,8 +259,10 @@ def test_highly_variable_genes_pearson_residuals_general(
     sc.pp.filter_genes(cudata, min_cells=1)
     # cleanup var
     del cudata.var
-
-    cudata.X = cpx.scipy.sparse.csr_matrix(cudata.X, dtype=dtype)
+    if sparse:
+        cudata.X = cpx.scipy.sparse.csr_matrix(cudata.X, dtype=dtype)
+    else:
+        cudata.X = cp.array(cudata.X.toarray(), dtype=dtype)
     # compute reference output
     residuals_reference = rsc.pp.normalize_pearson_residuals(
         cudata, clip=clip, theta=theta, inplace=False
