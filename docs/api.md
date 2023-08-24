@@ -118,8 +118,8 @@ These functions offer convineant ways to move arrays and matrices from and to th
 .. currentmodule:: rapids_singlecell
 .. autosummary::
    :toctree: generated/
-    utlis.anndata_to_GPU
-    utlis.anndata_to_CPU
+    utils.anndata_to_GPU
+    utils.anndata_to_CPU
 ```
 
 
