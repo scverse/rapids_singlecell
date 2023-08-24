@@ -8,7 +8,7 @@
 
 ```{toctree}
 :hidden: true
-:maxdepth: 1
+:maxdepth: 2
 
 Installation.md
 Usage_Principles.md

@@ -72,4 +72,4 @@ sc.pl.umap(acts_mlm, color=['KLF5',"FOXA1", 'CellType'], cmap='coolwarm', vcente
 :width: 500px
 ```
 
-The {class}`~rapids_singlecell.cunnData.cunnData` object can replace {class}`~anndata.AnnData` for preprocessing. All {mod}`~.pp` and {mod}`~.pl` functions are aimed towards cunnData. {attr}`~.X` and {attr}`~.layers` are stored on the GPU. The other components are stored in the host memory.
+The {class}`~rapids_singlecell.cunnData.cunnData` object can replace {class}`~anndata.AnnData` for preprocessing. All {mod}`~.pp` (except `~.pp.neighbors`) functions are aimed towards cunnData. {attr}`~.X` and {attr}`~.layers` are stored on the GPU. The other components are stored in the host memory.
