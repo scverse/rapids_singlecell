@@ -14,15 +14,16 @@ Import rapids-singlecell as:
 import rapids_singlecell as rsc
 ```
 
-
 ## scanpy_GPU
 
-
+These functions offer accelerated near drop-in replacements for common tools porvided by `scanpy``.
 
 ### preprocessing `pp`
-Filtering of highly-variable genes, per-cell normalization.
+Filtering of highly-variable genes, batch-effect correction, per-cell normalization.
 
-Any transformation of the data matrix that is not a `tool``. Other than `tools`, preprocessing steps usually don’t return an easily interpretable annotation, but perform a basic transformation on the data matrix.
+Any transformation of the data matrix that is not a tool. Other than `tools`, preprocessing steps usually don’t return an easily interpretable annotation, but perform a basic transformation on the data matrix.
+
+All `preprocessing` functions work with {class}`~rapids_singlecell.cunnData.cunnData` except {func}`~rapids_singlecell.pp.neighbors`
 ```{eval-rst}
 .. module:: rapids_singlecell.pp
 .. currentmodule:: rapids_singlecell
@@ -42,6 +43,22 @@ Any transformation of the data matrix that is not a `tool``. Other than `tools`,
    pp.flag_gene_family
    pp.filter_highly_variable
 ```
+#### Batch effect correction
+
+```{eval-rst}
+.. autosummary::
+   :toctree: generated/
+
+   pp.harmony_integrate
+```
+
+#### Neighbors
+```{eval-rst}
+.. autosummary::
+   :toctree: generated/
+
+   pp.neighbors
+```
 
 ### tools: `tl`
 
@@ -60,7 +77,6 @@ Any transformation of the data matrix that is not a `tool``. Other than `tools`,
 .. autosummary::
    :toctree: generated/
 
-    tl.pca
     tl.umap
     tl.tsne
     tl.diffmap
@@ -86,15 +102,6 @@ Any transformation of the data matrix that is not a `tool``. Other than `tools`,
    :toctree: generated/
 
     tl.rank_genes_groups_logreg
-```
-
-#### Batch effect correction
-
-```{eval-rst}
-.. autosummary::
-   :toctree: generated/
-
-    tl.harmony_integrate
 ```
 
 ### Plotting
