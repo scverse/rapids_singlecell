@@ -18,7 +18,7 @@ def tsne(
     copy: bool = False,
 ) -> Optional[AnnData]:
     """
-    Performs t-distributed stochastic neighborhood embedding (tSNE) using cuML libraray.
+    Performs t-distributed stochastic neighborhood embedding (tSNE) using cuml library.
 
     Parameters
     ----------
