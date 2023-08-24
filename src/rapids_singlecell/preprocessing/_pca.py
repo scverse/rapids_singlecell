@@ -14,7 +14,7 @@ from rapids_singlecell.cunnData import cunnData
 
 
 def pca(
-    cudata: Union[cunnData, AnnData],
+    adata: Union[AnnData, cunnData],
     layer: str = None,
     n_comps: Optional[int] = None,
     zero_center: bool = True,
@@ -28,11 +28,11 @@ def pca(
 
     Parameters
     ----------
-        cudata :
-            cunnData, AnnData object
+        adata :
+            AnnData/ cunnData object
 
         layer
-            If provided, use `cudata.layers[layer]` for expression values instead of `cudata.X`.
+            If provided, use `adata.layers[layer]` for expression values instead of `adata.X`.
 
         n_comps
             Number of principal components to compute. Defaults to 50, or 1 - minimum
@@ -61,7 +61,7 @@ def pca(
 
     Returns
     -------
-        adds fields to `cudata` :
+        adds fields to `adata` :
             `.obsm['X_pca']`
                 PCA representation of data.
             `.varm['PCs']`
@@ -72,20 +72,20 @@ def pca(
                 Explained variance, equivalent to the eigenvalues of the
                 covariance matrix.
     """
-    if use_highly_variable is True and "highly_variable" not in cudata.var.keys():
+    if use_highly_variable is True and "highly_variable" not in adata.var.keys():
         raise ValueError(
-            "Did not find cudata.var['highly_variable']. "
+            "Did not find adata.var['highly_variable']. "
             "Either your data already only consists of highly-variable genes "
             "or consider running `highly_variable_genes` first."
         )
 
-    X = cudata.layers[layer] if layer is not None else cudata.X
+    X = adata.layers[layer] if layer is not None else adata.X
 
     if use_highly_variable is None:
-        use_highly_variable = True if "highly_variable" in cudata.var.keys() else False
+        use_highly_variable = True if "highly_variable" in adata.var.keys() else False
 
     if use_highly_variable:
-        X = X[:, cudata.var["highly_variable"]]
+        X = X[:, adata.var["highly_variable"]]
 
     if n_comps is None:
         min_dim = min(X.shape[0], X.shape[1])
@@ -132,16 +132,16 @@ def pca(
             )
             X_pca = pca_func.fit_transform(X)
 
-    cudata.obsm["X_pca"] = X_pca
-    cudata.uns["pca"] = {
+    adata.obsm["X_pca"] = X_pca
+    adata.uns["pca"] = {
         "variance": pca_func.explained_variance_,
         "variance_ratio": pca_func.explained_variance_ratio_,
     }
     if use_highly_variable:
-        cudata.varm["PCs"] = np.zeros(shape=(cudata.n_vars, n_comps))
-        cudata.varm["PCs"][cudata.var["highly_variable"]] = pca_func.components_.T
+        adata.varm["PCs"] = np.zeros(shape=(adata.n_vars, n_comps))
+        adata.varm["PCs"][adata.var["highly_variable"]] = pca_func.components_.T
     else:
-        cudata.varm["PCs"] = pca_func.components_.T
+        adata.varm["PCs"] = pca_func.components_.T
 
 
 class PCA_sparse:

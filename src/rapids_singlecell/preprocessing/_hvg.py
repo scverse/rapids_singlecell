@@ -14,7 +14,7 @@ from ._utils import _check_gpu_X, _check_nonnegative_integers, _get_mean_var
 
 
 def highly_variable_genes(
-    cudata: Union[cunnData, AnnData],
+    adata: Union[AnnData, cunnData],
     layer: str = None,
     min_mean: float = 0.0125,
     max_mean: float = 3,
@@ -51,10 +51,10 @@ def highly_variable_genes(
 
     Parameters
     ----------
-        cudata
-            cunnData object
+        adata
+            AnnData/ cunnData object
         layer
-            If provided, use `cudata.layers[layer]` for expression values instead of `cudata.X`.
+            If provided, use `adata.layers[layer]` for expression values instead of `adata.X`.
         min_mean
             If n_top_genes unequals None, this and all other cutoffs for the means and the normalized dispersions are ignored.
         max_mean
@@ -94,7 +94,7 @@ def highly_variable_genes(
 
     Returns
     -------
-        upates `cudata.var` with the following fields:
+        upates `adata.var` with the following fields:
 
             `highly_variable` : bool
                 boolean indicator of highly-variable genes
@@ -122,7 +122,7 @@ def highly_variable_genes(
     """
     if flavor == "seurat_v3":
         _highly_variable_genes_seurat_v3(
-            cudata=cudata,
+            adata=adata,
             layer=layer,
             n_top_genes=n_top_genes,
             batch_key=batch_key,
@@ -131,7 +131,7 @@ def highly_variable_genes(
         )
     elif flavor == "pearson_residuals":
         _highly_variable_pearson_residuals(
-            cudata=cudata,
+            adata=adata,
             theta=theta,
             clip=clip,
             n_top_genes=n_top_genes,
@@ -141,7 +141,7 @@ def highly_variable_genes(
         )
     elif flavor == "poisson_gene_selection":
         _poisson_gene_selection(
-            cudata=cudata,
+            adata=adata,
             n_top_genes=n_top_genes,
             batch_key=batch_key,
             check_values=check_values,
@@ -151,7 +151,7 @@ def highly_variable_genes(
         )
     else:
         if batch_key is None:
-            X = _get_obs_rep(cudata, layer=layer)
+            X = _get_obs_rep(adata, layer=layer)
             _check_gpu_X(X)
             df = _highly_variable_genes_single_batch(
                 X.copy(),
@@ -164,13 +164,13 @@ def highly_variable_genes(
                 flavor=flavor,
             )
         else:
-            cudata.obs[batch_key] = cudata.obs[batch_key].astype("category")
-            batches = cudata.obs[batch_key].cat.categories
+            adata.obs[batch_key] = adata.obs[batch_key].astype("category")
+            batches = adata.obs[batch_key].cat.categories
             df = []
-            genes = cudata.var.index.to_numpy()
-            X = cudata.layers[layer] if layer is not None else cudata.X
+            genes = adata.var.index.to_numpy()
+            X = adata.layers[layer] if layer is not None else adata.X
             for batch in batches:
-                inter_matrix = X[np.where(cudata.obs[batch_key] == batch)[0],].tocsc()
+                inter_matrix = X[np.where(adata.obs[batch_key] == batch)[0],].tocsc()
                 thr_org = cp.diff(inter_matrix.indptr).ravel()
                 thr = cp.where(thr_org >= 1)[0]
                 thr_2 = cp.where(thr_org < 1)[0]
@@ -247,16 +247,16 @@ def highly_variable_genes(
                 )
                 df["highly_variable"] = gene_subset
 
-        cudata.var["highly_variable"] = df["highly_variable"].values
-        cudata.var["means"] = df["means"].values
-        cudata.var["dispersions"] = df["dispersions"].values
-        cudata.var["dispersions_norm"] = df["dispersions_norm"].values
-        cudata.uns["hvg"] = {"flavor": flavor}
+        adata.var["highly_variable"] = df["highly_variable"].values
+        adata.var["means"] = df["means"].values
+        adata.var["dispersions"] = df["dispersions"].values
+        adata.var["dispersions_norm"] = df["dispersions_norm"].values
+        adata.uns["hvg"] = {"flavor": flavor}
         if batch_key is not None:
-            cudata.var["highly_variable_nbatches"] = df[
+            adata.var["highly_variable_nbatches"] = df[
                 "highly_variable_nbatches"
             ].values
-            cudata.var["highly_variable_intersection"] = df[
+            adata.var["highly_variable_intersection"] = df[
                 "highly_variable_intersection"
             ].values
 
@@ -363,7 +363,7 @@ def _highly_variable_genes_single_batch(
 
 
 def _highly_variable_genes_seurat_v3(
-    cudata: cunnData,
+    adata: cunnData,
     layer: Optional[str] = None,
     n_top_genes: int = None,
     batch_key: Optional[str] = None,
@@ -403,8 +403,8 @@ def _highly_variable_genes_seurat_v3(
             "Please install skmisc package via `pip install --user scikit-misc"
         )
 
-    df = pd.DataFrame(index=cudata.var.index)
-    X = _get_obs_rep(cudata, layer=layer)
+    df = pd.DataFrame(index=adata.var.index)
+    X = _get_obs_rep(adata, layer=layer)
     _check_gpu_X(X)
     if check_values and not _check_nonnegative_integers(X):
         warnings.warn(
@@ -415,9 +415,9 @@ def _highly_variable_genes_seurat_v3(
     mean, var = _get_mean_var(X, axis=1)
     df["means"], df["variances"] = mean.get(), var.get()
     if batch_key is None:
-        batch_info = pd.Categorical(np.zeros(cudata.shape[0], dtype=int))
+        batch_info = pd.Categorical(np.zeros(adata.shape[0], dtype=int))
     else:
-        batch_info = cudata.obs[batch_key].values
+        batch_info = adata.obs[batch_key].values
 
     norm_gene_vars = []
     for b in np.unique(batch_info):
@@ -475,20 +475,20 @@ def _highly_variable_genes_seurat_v3(
     )
     df["highly_variable"] = False
     df.loc[sorted_index[: int(n_top_genes)], "highly_variable"] = True
-    cudata.var["highly_variable"] = df["highly_variable"].values
-    cudata.var["highly_variable_rank"] = df["highly_variable_rank"].values
-    cudata.var["means"] = df["means"].values
-    cudata.var["variances"] = df["variances"].values
-    cudata.var["variances_norm"] = df["variances_norm"].values.astype(
+    adata.var["highly_variable"] = df["highly_variable"].values
+    adata.var["highly_variable_rank"] = df["highly_variable_rank"].values
+    adata.var["means"] = df["means"].values
+    adata.var["variances"] = df["variances"].values
+    adata.var["variances_norm"] = df["variances_norm"].values.astype(
         "float64", copy=False
     )
     if batch_key:
-        cudata.var["highly_variable_nbatches"] = df["highly_variable_nbatches"].values
-    cudata.uns["hvg"] = {"flavor": "seurat_v3"}
+        adata.var["highly_variable_nbatches"] = df["highly_variable_nbatches"].values
+    adata.uns["hvg"] = {"flavor": "seurat_v3"}
 
 
 def _highly_variable_pearson_residuals(
-    cudata: cunnData,
+    adata: cunnData,
     theta: float = 100,
     clip: Optional[float] = None,
     n_top_genes: int = 2000,
@@ -504,7 +504,7 @@ def _highly_variable_pearson_residuals(
     are ranked by residual variance.
     Expects raw count input.
     """
-    X = _get_obs_rep(cudata, layer=layer)
+    X = _get_obs_rep(adata, layer=layer)
     _check_gpu_X(X)
     if check_values and not _check_nonnegative_integers(X):
         warnings.warn(
@@ -520,9 +520,9 @@ def _highly_variable_pearson_residuals(
     if theta <= 0:
         raise ValueError("Pearson residuals require theta > 0")
     if batch_key is None:
-        batch_info = pd.Categorical(np.zeros(cudata.shape[0], dtype=int))
+        batch_info = pd.Categorical(np.zeros(adata.shape[0], dtype=int))
     else:
-        batch_info = cudata.obs[batch_key].values
+        batch_info = adata.obs[batch_key].values
 
     n_batches = len(np.unique(batch_info))
     residual_gene_vars = []
@@ -610,7 +610,7 @@ def _highly_variable_pearson_residuals(
             "highly_variable_intersection": highly_variable_nbatches == n_batches,
         }
     )
-    df = df.set_index(cudata.var_names)
+    df = df.set_index(adata.var_names)
     df.sort_values(
         ["highly_variable_nbatches", "highly_variable_rank"],
         ascending=[False, True],
@@ -620,24 +620,24 @@ def _highly_variable_pearson_residuals(
     high_var = np.zeros(df.shape[0], dtype=bool)
     high_var[:n_top_genes] = True
     df["highly_variable"] = high_var
-    df = df.loc[cudata.var_names, :]
+    df = df.loc[adata.var_names, :]
 
     computed_on = layer if layer else "adata.X"
-    cudata.uns["hvg"] = {"flavor": "pearson_residuals", "computed_on": computed_on}
-    cudata.var["means"] = df["means"].values
-    cudata.var["variances"] = df["variances"].values
-    cudata.var["residual_variances"] = df["residual_variances"]
-    cudata.var["highly_variable_rank"] = df["highly_variable_rank"].values
+    adata.uns["hvg"] = {"flavor": "pearson_residuals", "computed_on": computed_on}
+    adata.var["means"] = df["means"].values
+    adata.var["variances"] = df["variances"].values
+    adata.var["residual_variances"] = df["residual_variances"]
+    adata.var["highly_variable_rank"] = df["highly_variable_rank"].values
     if batch_key is not None:
-        cudata.var["highly_variable_nbatches"] = df["highly_variable_nbatches"].values
-        cudata.var["highly_variable_intersection"] = df[
+        adata.var["highly_variable_nbatches"] = df["highly_variable_nbatches"].values
+        adata.var["highly_variable_intersection"] = df[
             "highly_variable_intersection"
         ].values
-    cudata.var["highly_variable"] = df["highly_variable"].values
+    adata.var["highly_variable"] = df["highly_variable"].values
 
 
 def _poisson_gene_selection(
-    cudata: cunnData,
+    adata: cunnData,
     layer: Optional[str] = None,
     n_top_genes: int = None,
     n_samples: int = 10000,
@@ -656,8 +656,8 @@ def _poisson_gene_selection(
 
     Parameters
     ----------
-    cudata
-        cunnData object (with sparse X matrix).
+    adata
+        AnnData/ cunnData object (with sparse X matrix).
     layer
         If provided, use `adata.layers[layer]` for expression values instead of `adata.X`.
     n_top_genes
@@ -701,7 +701,7 @@ def _poisson_gene_selection(
             UserWarning,
         )
 
-    X = _get_obs_rep(cudata, layer=layer)
+    X = _get_obs_rep(adata, layer=layer)
     _check_gpu_X(X)
     if check_values and not _check_nonnegative_integers(X):
         warnings.warn(
@@ -709,9 +709,9 @@ def _poisson_gene_selection(
             UserWarning,
         )
     if batch_key is None:
-        batch_info = pd.Categorical(np.zeros(cudata.shape[0], dtype=int))
+        batch_info = pd.Categorical(np.zeros(adata.shape[0], dtype=int))
     else:
-        batch_info = cudata.obs[batch_key].values
+        batch_info = adata.obs[batch_key].values
 
     prob_zero_enrichments = []
     obs_frac_zeross = []
@@ -798,10 +798,10 @@ def _poisson_gene_selection(
     median_ranked = np.median(ranked_prob_zero_enrichments, axis=0)
 
     num_batches_zero_enriched = np.sum(
-        ranked_prob_zero_enrichments >= (cudata.shape[1] - n_top_genes), axis=0
+        ranked_prob_zero_enrichments >= (adata.shape[1] - n_top_genes), axis=0
     )
 
-    df = pd.DataFrame(index=np.array(cudata.var_names))
+    df = pd.DataFrame(index=np.array(adata.var_names))
     df["observed_fraction_zeros"] = median_obs_frac_zeross
     df["expected_fraction_zeros"] = median_exp_frac_zeross
     df["prob_zero_enriched_nbatches"] = num_batches_zero_enriched
@@ -813,15 +813,15 @@ def _poisson_gene_selection(
     top_genes = df.nlargest(n_top_genes, sort_columns).index
     df.loc[top_genes, "highly_variable"] = True
 
-    cudata.uns["hvg"] = {"flavor": "poisson_zeros"}
-    cudata.var["highly_variable"] = df["highly_variable"].values
-    cudata.var["observed_fraction_zeros"] = df["observed_fraction_zeros"].values
-    cudata.var["expected_fraction_zeros"] = df["expected_fraction_zeros"].values
-    cudata.var["prob_zero_enriched_nbatches"] = df["prob_zero_enriched_nbatches"].values
-    cudata.var["prob_zero_enrichment"] = df["prob_zero_enrichment"].values
-    cudata.var["prob_zero_enrichment_rank"] = df["prob_zero_enrichment_rank"].values
+    adata.uns["hvg"] = {"flavor": "poisson_zeros"}
+    adata.var["highly_variable"] = df["highly_variable"].values
+    adata.var["observed_fraction_zeros"] = df["observed_fraction_zeros"].values
+    adata.var["expected_fraction_zeros"] = df["expected_fraction_zeros"].values
+    adata.var["prob_zero_enriched_nbatches"] = df["prob_zero_enriched_nbatches"].values
+    adata.var["prob_zero_enrichment"] = df["prob_zero_enrichment"].values
+    adata.var["prob_zero_enrichment_rank"] = df["prob_zero_enrichment_rank"].values
 
     if batch_key is not None:
-        cudata.var["prob_zero_enriched_nbatches"] = df[
+        adata.var["prob_zero_enriched_nbatches"] = df[
             "prob_zero_enriched_nbatches"
         ].values

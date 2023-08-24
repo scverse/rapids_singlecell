@@ -3,6 +3,7 @@ from typing import Literal, Optional, Union
 
 import cupy as cp
 import cupyx as cpx
+from anndata import AnnData
 from cuml.linear_model import LinearRegression
 from scanpy.get import _get_obs_rep, _set_obs_rep
 
@@ -12,7 +13,7 @@ from ._utils import _check_gpu_X
 
 
 def regress_out(
-    cudata: cunnData,
+    adata: Union[AnnData, cunnData],
     keys: Union[str, list],
     layer: Optional[str] = None,
     inplace: bool = True,
@@ -25,8 +26,8 @@ def regress_out(
 
     Parameters
     ----------
-        cudata
-            cunnData object
+        adata
+            AnnData/ cunnData object
 
         keys
             Keys for numerical observation annotation on which to regress on.
@@ -35,7 +36,7 @@ def regress_out(
             Layer to regress instead of `X`. If `None`, `X` is regressed.
 
         inplace
-            Whether to update `cudata` or return the corrected matrix of `cudata.X` and `cudata.layers`.
+            Whether to update `adata` or return the corrected matrix of `adata.X` and `adata.layers`.
 
         batchsize
             Number of genes that should be processed together. \
@@ -48,13 +49,13 @@ def regress_out(
 
     Returns
     -------
-    Returns a corrected copy or  updates `cudata` with a corrected version of the \
-    original `cudata.X` and `cudata.layers['layer']`, depending on `inplace`.
+    Returns a corrected copy or  updates `adata` with a corrected version of the \
+    original `adata.X` and `adata.layers['layer']`, depending on `inplace`.
     """
     if batchsize != "all" and type(batchsize) not in [int, type(None)]:
         raise ValueError("batchsize must be `int`, `None` or `'all'`")
 
-    X = _get_obs_rep(cudata, layer=layer)
+    X = _get_obs_rep(adata, layer=layer)
 
     _check_gpu_X(X)
 
@@ -69,10 +70,10 @@ def regress_out(
         (X.shape[0], dim_regressor), order="F"
     )
     if dim_regressor == 2:
-        regressors[:, 1] = cp.array(cudata.obs[keys]).ravel()
+        regressors[:, 1] = cp.array(adata.obs[keys]).ravel()
     else:
         for i in range(dim_regressor - 1):
-            regressors[:, i + 1] = cp.array(cudata.obs[keys[i]]).ravel()
+            regressors[:, i + 1] = cp.array(adata.obs[keys[i]]).ravel()
 
     outputs = cp.empty(X.shape, dtype=X.dtype, order="F")
 
@@ -114,7 +115,7 @@ def regress_out(
             outputs[:, i] = _regress_out_chunk(regressors, y)
 
     if inplace:
-        _set_obs_rep(cudata, outputs, layer=layer)
+        _set_obs_rep(adata, outputs, layer=layer)
     else:
         return outputs
 

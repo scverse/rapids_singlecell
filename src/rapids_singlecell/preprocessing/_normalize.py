@@ -13,7 +13,7 @@ from ._utils import _check_gpu_X, _check_nonnegative_integers
 
 
 def normalize_total(
-    cudata: cunnData,
+    adata: Union[AnnData, cunnData],
     target_sum: Optional[int] = None,
     layer: Optional[str] = None,
     inplace: bool = True,
@@ -23,29 +23,28 @@ def normalize_total(
 
     Parameters
     ----------
-        cudata:
-            cunnData object
+        adata:
+            AnnData/ cunnData object
 
         target_sum :
-            Each row will be normalized to sum to this value
+            If `None`, after normalization, each observation (cell) has a total count equal to the median of total counts for observations (cells) before normalization.
 
         layer
             Layer to normalize instead of `X`. If `None`, `X` is normalized.
 
         inplace
-            Whether to update `cudata` or return the normalized matrix.
+            Whether to update `adata` or return the normalized matrix.
 
 
     Returns
     -------
-    Returns a normalized copy or  updates `cudata` with a normalized version of \
-    the original `cudata.X` and `cudata.layers['layer']`, depending on `inplace`.
+    Returns a normalized copy or  updates `adata` with a normalized version of \
+    the original `adata.X` and `adata.layers['layer']`, depending on `inplace`.
 
     """
-    X = _get_obs_rep(cudata, layer=layer)
+    X = _get_obs_rep(adata, layer=layer)
 
-    if isinstance(X, AnnData):
-        _check_gpu_X(X)
+    _check_gpu_X(X)
 
     if not inplace:
         X = X.copy()
@@ -77,50 +76,49 @@ def normalize_total(
         )
 
     if inplace:
-        _set_obs_rep(cudata, X, layer=layer)
+        _set_obs_rep(adata, X, layer=layer)
     else:
         return X
 
 
 def log1p(
-    cudata: cunnData, layer: Optional[str] = None, copy: bool = False
+    adata: Union[AnnData, cunnData], layer: Optional[str] = None, copy: bool = False
 ) -> Optional[Union[sparse.csr_matrix, cp.ndarray]]:
     """
     Calculated the natural logarithm of one plus the sparse matrix.
 
     Parameters
     ----------
-        cudata
-            cunnData object
+        adata:
+            AnnData/ cunnData object
 
         layer
             Layer to normalize instead of `X`. If `None`, `X` is normalized.
 
         copy
-            Whether to return a copy or update `cudata`.
+            Whether to return a copy or update `adata`.
 
     Returns
     -------
             The resulting sparse matrix after applying the natural logarithm of one plus the input matrix. \
-            If `copy` is set to True, returns the new sparse matrix. Otherwise, updates the `cudata` object \
+            If `copy` is set to True, returns the new sparse matrix. Otherwise, updates the `adata` object \
             in-place and returns None.
 
     """
-    X = _get_obs_rep(cudata, layer=layer)
+    X = _get_obs_rep(adata, layer=layer)
 
-    if isinstance(X, AnnData):
-        _check_gpu_X(X)
+    _check_gpu_X(X)
 
     X = X.log1p()
-    cudata.uns["log1p"] = {"base": None}
+    adata.uns["log1p"] = {"base": None}
     if not copy:
-        _set_obs_rep(cudata, X, layer=layer)
+        _set_obs_rep(adata, X, layer=layer)
     else:
         return X
 
 
 def normalize_pearson_residuals(
-    cudata: cunnData,
+    adata: Union[AnnData, cunnData],
     theta: float = 100,
     clip: Optional[float] = None,
     check_values: bool = True,
@@ -135,8 +133,8 @@ def normalize_pearson_residuals(
 
     Parameters
     ----------
-        cudata
-            cunnData object
+        adata:
+            AnnData/ cunnData object
         theta
             The negative binomial overdispersion parameter theta for Pearson residuals.
             Higher values correspond to less overdispersion (var = mean + mean^2/theta), and theta=np.Inf corresponds to a Poisson model.
@@ -154,11 +152,11 @@ def normalize_pearson_residuals(
 
     Returns
     -------
-        If `inplace=True`, `cudata.X` or the selected layer in `cudata.layers` is updated with the normalized values. \
+        If `inplace=True`, `adata.X` or the selected layer in `adata.layers` is updated with the normalized values. \
         If `inplace=False` the normalized matrix is returned.
 
     """
-    X = _get_obs_rep(cudata, layer=layer)
+    X = _get_obs_rep(adata, layer=layer)
 
     _check_gpu_X(X)
 
@@ -167,7 +165,7 @@ def normalize_pearson_residuals(
             "`flavor='pearson_residuals'` expects raw count data, but non-integers were found.",
             UserWarning,
         )
-    computed_on = layer if layer else "cudata.X"
+    computed_on = layer if layer else "adata.X"
     settings_dict = {"theta": theta, "clip": clip, "computed_on": computed_on}
     if theta <= 0:
         raise ValueError("Pearson residuals require theta > 0")
@@ -281,7 +279,7 @@ def normalize_pearson_residuals(
         )
 
     if inplace is True:
-        cudata.uns["pearson_residuals_normalization"] = settings_dict
-        _set_obs_rep(cudata, residuals, layer=layer)
+        adata.uns["pearson_residuals_normalization"] = settings_dict
+        _set_obs_rep(adata, residuals, layer=layer)
     else:
         return residuals

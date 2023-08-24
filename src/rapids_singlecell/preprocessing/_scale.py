@@ -1,6 +1,7 @@
-from typing import Optional
+from typing import Optional, Union
 
 import cupy as cp
+from anndata import AnnData
 from scanpy.get import _get_obs_rep, _set_obs_rep
 
 from rapids_singlecell.cunnData import cunnData
@@ -9,7 +10,7 @@ from ._utils import _check_gpu_X
 
 
 def scale(
-    cudata: cunnData,
+    adata: Union[AnnData, cunnData],
     max_value: Optional[int] = None,
     layer: Optional[str] = None,
     inplace: bool = True,
@@ -19,8 +20,8 @@ def scale(
 
     Parameters
     ----------
-        cudata
-            cunnData object
+        adata
+            AnnData/ cunnData object
 
         max_value
             After scaling matrix to unit variance, values will be clipped to this number of std deviations.
@@ -33,11 +34,11 @@ def scale(
 
     Returns
     -------
-    Returns a sacled copy or updates `cudata` with a scaled version of the original `cudata.X` and `cudata.layers['layer']`, \
+    Returns a sacled copy or updates `adata` with a scaled version of the original `adata.X` and `adata.layers['layer']`, \
     depending on `inplace`.
 
     """
-    X = _get_obs_rep(cudata, layer=layer)
+    X = _get_obs_rep(adata, layer=layer)
     _check_gpu_X(X)
 
     if not isinstance(X, cp.ndarray):
@@ -56,6 +57,6 @@ def scale(
     if max_value:
         X = cp.clip(X, a_min=-max_value, a_max=max_value)
     if inplace:
-        _set_obs_rep(cudata, X, layer=layer)
+        _set_obs_rep(adata, X, layer=layer)
     else:
         return X
