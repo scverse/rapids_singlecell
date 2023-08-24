@@ -22,7 +22,7 @@ def calculate_qc_metrics(
 ) -> None:
     """\
     Calculates basic qc Parameters. Calculates number of genes per cell (n_genes) and number of counts per cell (n_counts).
-    Loosly based on calculate_qc_metrics from scanpy [Wolf et al. 2018]. Updates :attr:`.obs` and :attr:`.var`  with columns with qc data.
+    Loosly based on calculate_qc_metrics from scanpy [Wolf et al. 2018]. Updates :attr:`~anndata.AnnData.obs` and :attr:`~anndata.AnnData.var`  with columns with qc data.
 
     Parameters
     ----------
@@ -33,7 +33,7 @@ def calculate_qc_metrics(
         var_type
             The kind of thing the variables are.
         qc_vars
-            Keys for boolean columns of :attr:`.var` which identify variables you could want to control for (e.g. Mito).
+            Keys for boolean columns of :attr:`~anndata.AnnData.var` which identify variables you could want to control for (e.g. Mito).
             Run flag_gene_family first
         log1p
             Set to `False` to skip computing `log1p` transformed annotations.
@@ -42,7 +42,7 @@ def calculate_qc_metrics(
 
     Returns
     -------
-        adds the following columns in :attr:`.obs` :
+        adds the following columns in :attr:`~anndata.AnnData.obs` :
             `total_{var_type}_by_{expr_type}`
                 E.g. 'total_genes_by_counts'. Number of genes with positive counts in a cell.
             `total_{expr_type}`
@@ -53,7 +53,7 @@ def calculate_qc_metrics(
                 `pct_{expr_type}_{qc_var}`
                     Proportion of counts of qc_var (percent of counts mitochondrial genes)
 
-        adds the following columns in :attr:`.var` :
+        adds the following columns in :attr:`~anndata.AnnData.var` :
             `total_{expr_type}`
                 E.g. 'total_counts'. Sum of counts for a gene.
             `n_genes_by_{expr_type}`
@@ -251,8 +251,8 @@ def filter_genes(
     Filter genes based on number of cells or counts.
 
     Filters genes, that have greater than a max number of genes or less than
-    a minimum number of a feature in a given :attr:`.var` columns. Can so far only be used for numerical columns.
-    You can run this function on 'n_cells' or 'n_counts' with a previous columns in :attr:`.var`.
+    a minimum number of a feature in a given :attr:`~anndata.AnnData.var` columns. Can so far only be used for numerical columns.
+    You can run this function on 'n_cells' or 'n_counts' with a previous columns in :attr:`~anndata.AnnData.var`.
 
     Parameters
     ----------
@@ -260,7 +260,7 @@ def filter_genes(
             AnnData/ cunnData object
 
         qc_var
-            column in :attr:`.var` with numerical entries to filter against
+            column in :attr:`~anndata.AnnData.var` with numerical entries to filter against
 
         min_count
             Lower bound on number of a given feature to keep gene
@@ -332,7 +332,7 @@ def filter_cells(
     """\
     Filter cell outliers based on counts and numbers of genes expressed.
 
-    Filter cells based on numerical columns in the :attr:`.obs` by selecting those with a feature count greater than a specified maximum or less than a specified minimum.
+    Filter cells based on numerical columns in the :attr:`~anndata.AnnData.obs` by selecting those with a feature count greater than a specified maximum or less than a specified minimum.
     It is recommended to run :func:`calculate_qc_metrics` before using this function. You can run this function on n_genes or n_counts before running :func:`calculate_qc_metrics`.
 
     Parameters
