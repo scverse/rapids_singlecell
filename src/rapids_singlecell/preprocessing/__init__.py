@@ -1,3 +1,4 @@
+from ._harmony_integrate import harmony_integrate
 from ._hvg import highly_variable_genes
 from ._neighbors import neighbors
 from ._normalize import log1p, normalize_pearson_residuals, normalize_total
