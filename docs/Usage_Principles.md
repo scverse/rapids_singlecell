@@ -23,7 +23,7 @@ adata.X = cpx.scipy.sparse.csr_matrix(adata.X)  # moves `.X` to the GPU
 adata.X = adata.X.get() # moves `.X` back to the GPU
 ```
 
-You can also use the utilities provided by *rapids-singlecell* to move arrays and matrices.
+You can also use the {mod}`rapids_singlecell.utils` to move arrays and matrices.
 
 ```
 rsc.utils.anndata_to_GPU(adata) # moves `.X` to the GPU
@@ -72,4 +72,4 @@ sc.pl.umap(acts_mlm, color=['KLF5',"FOXA1", 'CellType'], cmap='coolwarm', vcente
 :width: 500px
 ```
 
-The {class}`~rapids_singlecell.cunnData.cunnData` object can replace {class}`~anndata.AnnData` for preprocessing. All {mod}`~.pp` (except `~.pp.neighbors`) functions are aimed towards cunnData. {attr}`~.X` and {attr}`~.layers` are stored on the GPU. The other components are stored in the host memory.
+The {class}`~rapids_singlecell.cunnData.cunnData` object can replace {class}`~anndata.AnnData` for preprocessing. All {mod}`~.pp` functions (except {func}`~.pp.neighbors`) are aimed towards cunnData. {attr}`~.X` and {attr}`~.layers` are stored on the GPU. The other components are stored in the host memory.

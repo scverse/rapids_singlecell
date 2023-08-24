@@ -16,14 +16,16 @@ import rapids_singlecell as rsc
 
 ## scanpy_GPU
 
-These functions offer accelerated near drop-in replacements for common tools porvided by `scanpy``.
+These functions offer accelerated near drop-in replacements for common tools porvided by `scanpy`.
 
-### preprocessing `pp`
+### Preprocessing `pp`
 Filtering of highly-variable genes, batch-effect correction, per-cell normalization.
 
 Any transformation of the data matrix that is not a tool. Other than `tools`, preprocessing steps usually don’t return an easily interpretable annotation, but perform a basic transformation on the data matrix.
 
 All `preprocessing` functions work with {class}`~rapids_singlecell.cunnData.cunnData` except {func}`~rapids_singlecell.pp.neighbors`
+
+#### Basic Preprocessing
 ```{eval-rst}
 .. module:: rapids_singlecell.pp
 .. currentmodule:: rapids_singlecell
@@ -60,7 +62,7 @@ All `preprocessing` functions work with {class}`~rapids_singlecell.cunnData.cunn
    pp.neighbors
 ```
 
-### tools: `tl`
+### Tools: `tl`
 
 `tools` offers tools for the accelerated processing of {class}`~anndata.AnnData`. For visualization use {mod}`scanpy.pl`.
 
@@ -107,6 +109,20 @@ All `preprocessing` functions work with {class}`~rapids_singlecell.cunnData.cunn
 ### Plotting
 
 For plotting please use scanpy's plotting API {mod}`scanpy.pl`.
+
+### Utils
+
+These functions offer convineant ways to move arrays and matrices from and to the GPU.
+```{eval-rst}
+.. module:: rapids_singlecell.utils
+.. currentmodule:: rapids_singlecell
+.. autosummary::
+   :toctree: generated/
+    utlis.anndata_to_GPU
+    utlis.anndata_to_CPU
+```
+
+
 
 ## squidpy-GPU: `gr`
 
