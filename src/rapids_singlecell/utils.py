@@ -43,9 +43,9 @@ def anndata_to_GPU(
                 anndata_to_GPU(adata, layer=key)
     else:
         X = _get_obs_rep(adata, layer=layer)
-        if isspmatrix_csr_cpu(isspmatrix_csr_cpu):
+        if isspmatrix_csr_cpu(X):
             X = csr_matrix_gpu(X)
-        elif isspmatrix_csc_cpu(isspmatrix_csr_cpu):
+        elif isspmatrix_csc_cpu(X):
             X = csc_matrix_gpu(X)
         elif isinstance(X, np.ndarray):
             X = cp.array(X)
@@ -86,9 +86,9 @@ def anndata_to_CPU(
                 anndata_to_CPU(adata, layer=key)
     else:
         X = _get_obs_rep(adata, layer=layer)
-        if isspmatrix_csr_gpu(isspmatrix_csr_cpu):
+        if isspmatrix_csr_gpu(X):
             X = X.get()
-        elif isspmatrix_csc_gpu(isspmatrix_csr_cpu):
+        elif isspmatrix_csc_gpu(X):
             X = X.get()
         elif isinstance(X, cp.ndarray):
             X = X.get()
