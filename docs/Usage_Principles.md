@@ -20,7 +20,7 @@ To get your {class}`~anndata.AnnData` object onto the GPU you can set {attr}`~an
 
 ```
 adata.X = cpx.scipy.sparse.csr_matrix(adata.X)  # moves `.X` to the GPU
-adata.X = adata.X.get() # moves `.X` back to the GPU
+adata.X = adata.X.get() # moves `.X` back to the CPU
 ```
 
 You can also use the {mod}`rapids_singlecell.utils` to move arrays and matrices.
