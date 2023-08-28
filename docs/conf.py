@@ -52,6 +52,7 @@ extensions = [
     "scanpydoc",
     "sphinx.ext.linkcode",
     "sphinx_copybutton",
+    "sphinx_design",
 ]
 
 autosummary_generate = True
