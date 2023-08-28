@@ -8,11 +8,11 @@
 
 ```{toctree}
 :hidden: true
-:maxdepth: 2
+:maxdepth: 1
 
 Installation.md
 Usage_Principles.md
-api.md
+api/index.md
 references.md
 notebooks.rst
 acknowledgements.md
