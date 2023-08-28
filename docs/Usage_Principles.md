@@ -66,7 +66,7 @@ acts_mlm = dc.get_acts(adata, obsm_key='mlm_estimate')
 sc.pl.umap(acts_mlm, color=['KLF5',"FOXA1", 'CellType'], cmap='coolwarm', vcenter=0)
 ```
 
-### cunnData (depreciated)
+### cunnData (deprecated)
 
 ```{image} _static/cunndata.svg
 :width: 500px
