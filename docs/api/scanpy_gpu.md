@@ -1,19 +1,3 @@
-```{eval-rst}
-.. module:: rapids_singlecell
-```
-
-```{eval-rst}
-.. automodule:: rapids_singlecell
-   :noindex:
-```
-# API
-
-Import rapids-singlecell as:
-
-```
-import rapids_singlecell as rsc
-```
-
 ## scanpy_GPU
 
 These functions offer accelerated near drop-in replacements for common tools porvided by `scanpy`.
@@ -123,48 +107,4 @@ These functions offer convineant ways to move arrays and matrices from and to th
 
     utils.anndata_to_GPU
     utils.anndata_to_CPU
-```
-
-## squidpy-GPU: `gr`
-
-{mod}`squidpy.gr` is a tool for the analysis of spatial molecular data. {mod}`rapids_singlecell.gr` acclerates some of these functions.
-
-```{eval-rst}
-.. module:: rapids_singlecell.gr
-.. currentmodule:: rapids_singlecell
-
-.. autosummary::
-    :toctree: generated
-
-    gr.spatial_autocorr
-    gr.ligrec
-```
-
-## decoupler-GPU: `dcg`
-
-{mod}`decoupler` contains different statistical methods to extract biological activities. {mod}`rapids_singlecell.dcg` acclerates some of these methods.
-
-```{eval-rst}
-.. module:: rapids_singlecell.dcg
-.. currentmodule:: rapids_singlecell
-
-.. autosummary::
-    :toctree: generated
-
-    dcg.run_mlm
-    dcg.run_wsum
-```
-
-## cunnData
-
-{class}`~rapids_singlecell.cunnData.cunnData` is depreciated and will be removed in 2024. Please start switching to {class}`~anndata.AnnData`
-
-```{eval-rst}
-.. module:: rapids_singlecell.cunnData
-.. currentmodule:: rapids_singlecell
-
-.. autosummary::
-    :toctree: generated
-
-    cunnData.cunnData
 ```
