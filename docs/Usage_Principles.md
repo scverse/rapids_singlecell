@@ -32,7 +32,7 @@ rsc.utils.anndata_to_CPU(adata) # moves `.X` to the CPU
 
 ### Preprocessing
 
-The preprocessing can handled by {class}`~anndata.AnnData` and {class}`~rapids_singlecell.cunnData.cunnData`. It offers accelerated versions of functions within {mod}`scanpy.pp`.
+The preprocessing can  be handled by {class}`~anndata.AnnData` and {class}`~rapids_singlecell.cunnData.cunnData`. It offers accelerated versions of functions within {mod}`scanpy.pp`.
 
 Example:
 ```
