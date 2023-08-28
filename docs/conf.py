@@ -43,6 +43,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.intersphinx",
     "sphinx.ext.githubpages",
+    "sphinx.ext.extlinks",
     "sphinx_autodoc_typehints",
     "readthedocs_ext.readthedocs",
     "sphinx.ext.imgconverter",
@@ -155,3 +156,10 @@ def setup(app):
         },
         True,
     )
+
+
+# extlinks config
+extlinks = {
+    "issue": ("https://github.com/scverse/rapids-singlecell/issues/%s", "issue%s"),
+    "pr": ("https://github.com/scverse/rapids-singlecell/pull/%s", "pr%s"),
+}
