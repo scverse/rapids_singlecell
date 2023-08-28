@@ -13,6 +13,7 @@
 Installation.md
 Usage_Principles.md
 api/index.md
+release-notes/index.md
 references.md
 notebooks.rst
 acknowledgements.md

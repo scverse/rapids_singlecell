@@ -131,6 +131,7 @@ html_theme_options = {
 html_show_sphinx = False
 html_logo = "_static/logo3.svg"
 html_static_path = ["_static"]
+html_css_files = ["css/override.css"]
 # html_extra_path = ["_extra"]
 
 nitpick_ignore = [
