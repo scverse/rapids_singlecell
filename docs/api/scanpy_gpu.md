@@ -1,15 +1,15 @@
-## scanpy_GPU
+# scanpy_GPU
 
 These functions offer accelerated near drop-in replacements for common tools porvided by `scanpy`.
 
-### Preprocessing `pp`
+## Preprocessing `pp`
 Filtering of highly-variable genes, batch-effect correction, per-cell normalization.
 
 Any transformation of the data matrix that is not a tool. Other than `tools`, preprocessing steps usually don’t return an easily interpretable annotation, but perform a basic transformation on the data matrix.
 
 All `preprocessing` functions work with {class}`~rapids_singlecell.cunnData.cunnData` except {func}`~rapids_singlecell.pp.neighbors`
 
-#### Basic Preprocessing
+### Basic Preprocessing
 ```{eval-rst}
 .. module:: rapids_singlecell.pp
 .. currentmodule:: rapids_singlecell
@@ -29,7 +29,7 @@ All `preprocessing` functions work with {class}`~rapids_singlecell.cunnData.cunn
    pp.flag_gene_family
    pp.filter_highly_variable
 ```
-#### Batch effect correction
+### Batch effect correction
 
 ```{eval-rst}
 .. autosummary::
@@ -38,7 +38,7 @@ All `preprocessing` functions work with {class}`~rapids_singlecell.cunnData.cunn
    pp.harmony_integrate
 ```
 
-#### Neighbors
+### Neighbors
 ```{eval-rst}
 .. autosummary::
    :toctree: generated/
@@ -46,7 +46,7 @@ All `preprocessing` functions work with {class}`~rapids_singlecell.cunnData.cunn
    pp.neighbors
 ```
 
-### Tools: `tl`
+## Tools: `tl`
 
 `tools` offers tools for the accelerated processing of {class}`~anndata.AnnData`. For visualization use {mod}`scanpy.pl`.
 
@@ -58,7 +58,7 @@ All `preprocessing` functions work with {class}`~rapids_singlecell.cunnData.cunn
 .. currentmodule:: rapids_singlecell
 ```
 
-#### Embedding
+### Embedding
 ```{eval-rst}
 .. autosummary::
    :toctree: generated/
@@ -71,7 +71,7 @@ All `preprocessing` functions work with {class}`~rapids_singlecell.cunnData.cunn
     tl.embedding_density
 ```
 
-#### Clustering
+### Clustering
 
 ```{eval-rst}
 .. autosummary::
@@ -81,7 +81,7 @@ All `preprocessing` functions work with {class}`~rapids_singlecell.cunnData.cunn
     tl.leiden
 ```
 
-#### Marker genes
+### Marker genes
 
 ```{eval-rst}
 .. autosummary::
@@ -90,11 +90,11 @@ All `preprocessing` functions work with {class}`~rapids_singlecell.cunnData.cunn
     tl.rank_genes_groups_logreg
 ```
 
-### Plotting
+## Plotting
 
 For plotting please use scanpy's plotting API {mod}`scanpy.pl`.
 
-### Utils
+## Utils
 
 These functions offer convineant ways to move arrays and matrices from and to the GPU.
 
