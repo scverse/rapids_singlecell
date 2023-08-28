@@ -35,7 +35,7 @@ doc = [
     "myst-parser",
     "myst-nb",
     "sphinx-design",
-    "scanpydoc[typehints,theme]>=0.9.4",
+    "scanpydoc[typehints,theme]>=0.9.5",
     "readthedocs-sphinx-ext",
     "sphinx_copybutton",
 ]
