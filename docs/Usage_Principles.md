@@ -36,7 +36,7 @@ The preprocessing can  be handled by {class}`~anndata.AnnData` and {class}`~rapi
 
 Example:
 ```
-rsc.pp.highly_variable_genes(adata,n_top_genes=5000,flavor="seurat_v3",batch_key= "PatientNumber",layer = "counts")
+rsc.pp.highly_variable_genes(adata, n_top_genes=5000, flavor="seurat_v3", batch_key= "PatientNumber", layer = "counts")
 adata = adata[:,adata.var["highly_variable"]==True]
 rsc.pp.regress_out(adata,keys=["n_counts", "percent_MT"])
 rsc.pp.scale(adata,max_value=10)
