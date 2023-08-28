@@ -12,7 +12,7 @@ The workflow of *rapids-singlecell* is basically the same as *scanpy's*. The mai
 
 ### AnnData setup
 
-With the release of version 0.10.0 {class}`~anndata.AnnData` support GPU arrays and Sparse Matrices.
+With the release of version 0.10.0 {class}`~anndata.AnnData` supports GPU arrays and Sparse Matrices.
 
 Rapids-singlecell leverages this capability to perform analyses directly on GPU-enabled {class}`~anndata.AnnData` objects. This also leads to the depreciation of {class}`~rapids_singlecell.cunnData.cunnData` and it's removal in early 2024.
 
