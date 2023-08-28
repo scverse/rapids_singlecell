@@ -160,6 +160,6 @@ def setup(app):
 
 # extlinks config
 extlinks = {
-    "issue": ("https://github.com/scverse/rapids-singlecell/issues/%s", "issue%s"),
-    "pr": ("https://github.com/scverse/rapids-singlecell/pull/%s", "pr%s"),
+    "issue": ("https://github.com/scverse/rapids_singlecell/issues/%s", "issue%s"),
+    "pr": ("https://github.com/scverse/rapids_singlecell/pull/%s", "pr%s"),
 }
