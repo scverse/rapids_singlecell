@@ -68,10 +68,9 @@ default_role = "literal"
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
 napoleon_include_init_with_doc = False
-napoleon_use_rtype = False  # having a separate entry generally helps readability
+napoleon_use_rtype = True  # having a separate entry generally helps readability
 napoleon_use_param = True
 api_dir = HERE / "api"
-myst_heading_anchors = 3  # create anchors for h1-h3
 myst_enable_extensions = [
     "amsmath",
     "colon_fence",
@@ -133,8 +132,8 @@ html_theme_options = {
 html_show_sphinx = False
 html_logo = "_static/logo3.svg"
 html_static_path = ["_static"]
-html_css_files = ["css/override.css"]
-# html_extra_path = ["_extra"]
+html_css_files = ["_static/css/override.css"]
+html_title = "rapids-singlecell"
 
 nitpick_ignore = [
     # If building the documentation fails because of a missing link that is outside your control,
