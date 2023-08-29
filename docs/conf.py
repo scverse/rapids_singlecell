@@ -28,6 +28,9 @@ release = info["Version"]
 templates_path = ["_templates"]
 nitpicky = True  # Warn about broken links
 needs_sphinx = "4.5"
+suppress_warnings = [
+    "myst.header",  # https://github.com/executablebooks/MyST-Parser/issues/262
+]
 
 # -- General configuration ---------------------------------------------------
 
