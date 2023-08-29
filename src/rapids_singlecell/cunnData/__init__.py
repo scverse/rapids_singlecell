@@ -1,7 +1,7 @@
 import warnings
 from collections import OrderedDict
 from itertools import repeat
-from typing import Any, List, Mapping, MutableMapping, Optional, Union
+from typing import Any, List, Literal, Mapping, MutableMapping, Optional, Union
 
 import anndata
 import cupy as cp
@@ -624,9 +624,13 @@ class cunnData:
         """List keys of unstructured annotation."""
         return sorted(self._uns.keys())
 
-    def to_AnnData(self):
+    def to_AnnData(self, device: Literal["cpu", "gpu"] = "cpu") -> AnnData:
         """
         Takes the cunnData object and creates an AnnData object
+        Params
+        ------
+        device
+            Where to place `.X` and `.layers`. 'gpu' is intented a as 0 copy transfer to `AnnData`
 
         Returns
         -------
@@ -634,19 +638,34 @@ class cunnData:
             Annotated data matrix.
 
         """
-        adata = AnnData(self.X.get())
-        adata.obs = self.obs.copy()
-        adata.var = self.var.copy()
-        adata.uns = self.uns.copy()
-        if self.layers:
-            for key, matrix in self.layers.items():
-                adata.layers[key] = matrix.get()
-        if self.obsm:
-            for key, matrix in self.obsm.items():
-                adata.obsm[key] = matrix.copy()
-        if self.varm:
-            for key, matrix in self.varm.items():
-                adata.varm[key] = matrix.copy()
+        if device == "cpu":
+            adata = AnnData(self.X.get())
+            adata.obs = self.obs.copy()
+            adata.var = self.var.copy()
+            adata.uns = self.uns.copy()
+            if self.layers:
+                for key, matrix in self.layers.items():
+                    adata.layers[key] = matrix.get()
+            if self.obsm:
+                for key, matrix in self.obsm.items():
+                    adata.obsm[key] = matrix.copy()
+            if self.varm:
+                for key, matrix in self.varm.items():
+                    adata.varm[key] = matrix.copy()
+        elif device == "gpu":
+            adata = AnnData(self.X)
+            adata.obs = self.obs
+            adata.var = self.var
+            adata.uns = self.uns
+            if self.layers:
+                for key, matrix in self.layers.items():
+                    adata.layers[key] = matrix
+            if self.obsm:
+                for key, matrix in self.obsm.items():
+                    adata.obsm[key] = matrix
+            if self.varm:
+                for key, matrix in self.varm.items():
+                    adata.varm[key] = matrix
         return adata
 
 
