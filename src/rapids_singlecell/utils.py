@@ -27,14 +27,14 @@ def anndata_to_GPU(
         AnnData object
 
     layer
-        Layer to use as input instead of X. If None, X is used.
+        Layer to use as input instead of `X`. If `None`, `X` is used.
 
     convert_all
         If True, move all supported arrays and matrices on the GPU
 
     Returns
     -------
-    Updates AnnData inplace
+    Updates `adata` inplace
     """
     if convert_all:
         anndata_to_GPU(adata)
@@ -70,14 +70,14 @@ def anndata_to_CPU(
         AnnData object
 
     layer
-        Layer to use as input instead of X. If None, X is used.
+        Layer to use as input instead of `X`. If `None`, `X` is used.
 
     convert_all
         If True, move all GPU based arrays and matrices to the host memory
 
     Returns
     -------
-    Updates AnnData inplace
+    Updates `adata` inplace
     """
     if convert_all:
         anndata_to_CPU(adata)
