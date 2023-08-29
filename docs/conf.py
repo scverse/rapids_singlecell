@@ -43,7 +43,6 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.intersphinx",
     "sphinx.ext.githubpages",
-    "sphinx.ext.extlinks",
     "sphinx_autodoc_typehints",
     "readthedocs_ext.readthedocs",
     "sphinx.ext.imgconverter",
@@ -52,7 +51,6 @@ extensions = [
     "scanpydoc",
     "sphinx.ext.linkcode",
     "sphinx_copybutton",
-    "sphinx_design",
 ]
 
 autosummary_generate = True
@@ -68,7 +66,7 @@ default_role = "literal"
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
 napoleon_include_init_with_doc = False
-napoleon_use_rtype = True  # having a separate entry generally helps readability
+napoleon_use_rtype = False  # having a separate entry generally helps readability
 napoleon_use_param = True
 api_dir = HERE / "api"
 myst_enable_extensions = [
