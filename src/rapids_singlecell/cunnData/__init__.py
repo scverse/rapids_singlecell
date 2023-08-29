@@ -627,6 +627,7 @@ class cunnData:
     def to_AnnData(self, device: Literal["cpu", "gpu"] = "cpu") -> AnnData:
         """
         Takes the cunnData object and creates an AnnData object
+
         Params
         ------
         device
