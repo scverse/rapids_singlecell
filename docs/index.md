@@ -1,3 +1,11 @@
+```{eval-rst}
+.. role:: small
+```
+
+```{eval-rst}
+.. role:: smaller
+```
+
 [![Stars](https://img.shields.io/github/stars/scverse/rapids_singlecell?logo=GitHub&color=blue)](https://github.com/scverse/rapids_singlecell/stargazers)
 [![PyPI](https://img.shields.io/pypi/v/rapids-singlecell?logo=PyPI)](https://pypi.org/project/rapids-singlecell)
 [![Downloads](https://static.pepy.tech/badge/rapids-singlecell)](https://pepy.tech/project/rapids-singlecell)
