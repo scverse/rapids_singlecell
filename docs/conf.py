@@ -44,6 +44,7 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.githubpages",
     "sphinx_autodoc_typehints",
+    "sphinx.ext.extlinks",
     "readthedocs_ext.readthedocs",
     "sphinx.ext.imgconverter",
     "sphinx_copybutton",
