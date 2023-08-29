@@ -119,6 +119,8 @@ def calculate_qc_metrics(
     else:
         from ._kernels._qc_kernels import _sparse_qc_dense
 
+        if not X.flags.c_contiguous:
+            X = cp.asarray(X, order="C")
         block = (16, 16)
         grid = (
             int(math.ceil(X.shape[0] / block[0])),

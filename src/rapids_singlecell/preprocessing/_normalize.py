@@ -68,6 +68,8 @@ def normalize_total(
     else:
         from ._kernels._norm_kernel import _mul_dense
 
+        if not X.flags.c_contiguous:
+            X = cp.asarray(X, order="C")
         mul_kernel = _mul_dense(X.dtype)
         mul_kernel(
             (math.ceil(X.shape[0] / 128),),

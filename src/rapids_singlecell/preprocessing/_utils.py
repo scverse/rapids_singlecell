@@ -61,7 +61,6 @@ def _get_mean_var(X, axis=0):
     else:
         mean = X.mean(axis=axis)
         var = X.var(axis=axis)
-        major = X.shape[0]
         var *= X.shape[axis] / (X.shape[axis] - 1)
     return mean, var
 

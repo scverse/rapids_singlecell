@@ -2,11 +2,12 @@ from typing import Optional, Union
 
 import cupy as cp
 from anndata import AnnData
+from scanpy._utils import view_to_actual
 from scanpy.get import _get_obs_rep, _set_obs_rep
 
 from rapids_singlecell.cunnData import cunnData
 
-from ._utils import _check_gpu_X
+from ._utils import _check_gpu_X, _get_mean_var
 
 
 def scale(
@@ -38,6 +39,9 @@ def scale(
     depending on `inplace`.
 
     """
+    if isinstance(adata, AnnData):
+        view_to_actual(adata)
+
     X = _get_obs_rep(adata, layer=layer)
     _check_gpu_X(X)
 
@@ -48,12 +52,15 @@ def scale(
     if not inplace:
         X = X.copy()
 
-    mean = X.sum(axis=0).flatten() / X.shape[0]
+    if not X.flags.c_contiguous:
+        X = cp.asarray(X, order="C")
+
+    mean, var = _get_mean_var(X)
+    std = cp.sqrt(var)
+    std[std == 0] = 1
     X -= mean
-    del mean
-    stddev = cp.sqrt(X.var(axis=0))
-    X /= stddev
-    del stddev
+    X /= std
+
     if max_value:
         X = cp.clip(X, a_min=-max_value, a_max=max_value)
     if inplace:

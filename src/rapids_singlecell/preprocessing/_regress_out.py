@@ -5,6 +5,7 @@ import cupy as cp
 import cupyx as cpx
 from anndata import AnnData
 from cuml.linear_model import LinearRegression
+from scanpy._utils import view_to_actual
 from scanpy.get import _get_obs_rep, _set_obs_rep
 
 from rapids_singlecell.cunnData import cunnData
@@ -54,6 +55,9 @@ def regress_out(
     """
     if batchsize != "all" and type(batchsize) not in [int, type(None)]:
         raise ValueError("batchsize must be `int`, `None` or `'all'`")
+
+    if isinstance(adata, AnnData):
+        view_to_actual(adata)
 
     X = _get_obs_rep(adata, layer=layer)
 
