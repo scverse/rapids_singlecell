@@ -280,17 +280,15 @@ def filter_genes(
     """
     if qc_var in adata.var.keys():
         if min_count is not None and max_count is not None:
-            thr = np.where(
-                (adata.var[qc_var] <= max_count) & (min_count <= adata.var[qc_var])
-            )[0]
+            thr = (adata.var[qc_var] <= max_count) & (min_count <= adata.var[qc_var])
         elif min_count is not None:
-            thr = np.where(adata.var[qc_var] >= min_count)[0]
+            thr = adata.var[qc_var] >= min_count
         elif max_count is not None:
-            thr = np.where(adata.var[qc_var] <= max_count)[0]
+            thr = adata.var[qc_var] <= max_count
 
         if verbose:
             print(
-                f"filtered out {adata.var.shape[0]-thr.shape[0]} genes based on {qc_var}"
+                f"filtered out {adata.var.shape[0]-thr.sum()} genes based on {qc_var}"
             )
 
         adata._inplace_subset_var(thr)
@@ -306,17 +304,14 @@ def filter_genes(
         )
         calculate_qc_metrics(adata=adata, log1p=False)
         if min_count is not None and max_count is not None:
-            thr = np.where(
-                (adata.var[qc_var] <= max_count) & (min_count <= adata.var[qc_var])
-            )[0]
+            thr = (adata.var[qc_var] <= max_count) & (min_count <= adata.var[qc_var])
         elif min_count is not None:
-            thr = np.where(adata.var[qc_var] >= min_count)[0]
+            thr = adata.var[qc_var] >= min_count
         elif max_count is not None:
-            thr = np.where(adata.var[qc_var] <= max_count)[0]
-
+            thr = adata.var[qc_var] <= max_count
         if verbose:
             print(
-                f"filtered out {adata.var.shape[0]-thr.shape[0]} genes based on {qc_var}"
+                f"filtered out {adata.var.shape[0]-thr.sum()} genes based on {qc_var}"
             )
 
         adata._inplace_subset_var(thr)
@@ -358,17 +353,15 @@ def filter_cells(
     if qc_var in adata.obs.keys():
         inter = np.array
         if min_count is not None and max_count is not None:
-            inter = np.where(
-                (adata.obs[qc_var] < max_count) & (min_count < adata.obs[qc_var])
-            )[0]
+            inter = (adata.obs[qc_var] <= max_count) & (min_count <= adata.obs[qc_var])
         elif min_count is not None:
-            inter = np.where(adata.obs[qc_var] > min_count)[0]
+            inter = adata.obs[qc_var] >= min_count
         elif max_count is not None:
-            inter = np.where(adata.obs[qc_var] < max_count)[0]
+            inter = adata.obs[qc_var] <= max_count
         else:
             print("Please specify a cutoff to filter against")
         if verbose:
-            print(f"filtered out {adata.obs.shape[0]-inter.shape[0]} cells")
+            print(f"filtered out {adata.obs.shape[0]-inter.sum()} cells")
         adata._inplace_subset_obs(inter)
     elif qc_var in ["n_genes_by_counts", "total_counts"]:
         print(
@@ -377,17 +370,15 @@ def filter_cells(
         calculate_qc_metrics(adata, log1p=False)
         inter = np.array
         if min_count is not None and max_count is not None:
-            inter = np.where(
-                (adata.obs[qc_var] < max_count) & (min_count < adata.obs[qc_var])
-            )[0]
+            inter = (adata.obs[qc_var] <= max_count) & (min_count <= adata.obs[qc_var])
         elif min_count is not None:
-            inter = np.where(adata.obs[qc_var] > min_count)[0]
+            inter = adata.obs[qc_var] >= min_count
         elif max_count is not None:
-            inter = np.where(adata.obs[qc_var] < max_count)[0]
+            inter = adata.obs[qc_var] <= max_count
         else:
             print("Please specify a cutoff to filter against")
         if verbose:
-            print(f"filtered out {adata.obs.shape[0]-inter.shape[0]} cells")
+            print(f"filtered out {adata.obs.shape[0]-inter.sum()} cells")
         adata._inplace_subset_obs(inter)
     else:
         print("Please check qc_var.")
