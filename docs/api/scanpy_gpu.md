@@ -1,6 +1,6 @@
-# scanpy_GPU
+# scanpy-GPU
 
-These functions offer accelerated near drop-in replacements for common tools porvided by `scanpy`.
+These functions offer accelerated near drop-in replacements for common tools porvided by {mod}`scanpy`.
 
 ## Preprocessing `pp`
 Filtering of highly-variable genes, batch-effect correction, per-cell normalization.
@@ -93,18 +93,3 @@ All `preprocessing` functions work with {class}`~rapids_singlecell.cunnData.cunn
 ## Plotting
 
 For plotting please use scanpy's plotting API {mod}`scanpy.pl`.
-
-## Utils
-
-These functions offer convineant ways to move arrays and matrices from and to the GPU.
-
-```{eval-rst}
-.. module:: rapids_singlecell.utils
-.. currentmodule:: rapids_singlecell
-
-.. autosummary::
-    :toctree: generated
-
-    utils.anndata_to_GPU
-    utils.anndata_to_CPU
-```

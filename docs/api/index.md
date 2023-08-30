@@ -13,5 +13,6 @@ import rapids_singlecell as rsc
 scanpy_gpu
 squidpy_gpu
 decoupler_gpu
+utils
 cunndata
 ```
