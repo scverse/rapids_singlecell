@@ -545,8 +545,8 @@ class cunnData:
         Made for convenience, not performance.
         Intentionally permissive about arguments, for easy iterative use.
 
-        Params
-        ------
+        Parameters
+        ----------
         k
             Key to use. Should be in :attr:`.var_names` or :attr:`.obs`\\ `.columns`.
         layer
@@ -577,8 +577,8 @@ class cunnData:
         Made for convenience, not performance. Intentionally permissive about
         arguments, for easy iterative use.
 
-        Params
-        ------
+        Parameters
+        ----------
         k
             Key to use. Should be in :attr:`.obs_names` or :attr:`.var`\\ `.columns`.
         layer
@@ -628,8 +628,8 @@ class cunnData:
         """
         Takes the cunnData object and creates an AnnData object
 
-        Params
-        ------
+        Parameters
+        ----------
         device
             Where to place `.X` and `.layers`. 'gpu' is intented a as 0 copy transfer to `AnnData`
 
