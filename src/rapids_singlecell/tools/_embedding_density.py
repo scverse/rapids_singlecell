@@ -1,3 +1,5 @@
+import math
+
 import cupy as cp
 import numpy as np
 from anndata import AnnData
@@ -139,7 +141,13 @@ def _calc_density(x: cp.ndarray, y: cp.ndarray):
     xy = cp.vstack([x, y]).T
     bandwidth = cp.power(xy.shape[0], (-1.0 / (xy.shape[1] + 4)))
     kde = KernelDensity(kernel="gaussian", bandwidth=bandwidth).fit(xy)
-    z = kde.score_samples(xy)
+    z = cp.zeros(xy.shape[0])
+    batchsize = 25000
+    n_batches = math.ceil(xy.shape[0] / batchsize)
+    for batch in range(n_batches):
+        start_idx = batch * batchsize
+        stop_idx = min(batch * batchsize + batchsize, xy.shape[0])
+        z[start_idx:stop_idx] = kde.score_samples(xy[start_idx:stop_idx, :])
     min_z = cp.min(z)
     max_z = cp.max(z)
 
