@@ -129,6 +129,13 @@ def umap(
     )  # 0 is not a valid value for rapids, unlike original umap
     metric = neigh_params.get("metric", "euclidean")
     X_contiguous = np.ascontiguousarray(X, dtype=np.float32)
+    n_obs = adata.shape[0]
+    if neigh_params.get("method") == "rapids":
+        knn_dist = neighbors["distances"].data.reshape(n_obs, n_neighbors)
+        knn_indices = neighbors["distances"].indices.reshape(n_obs, n_neighbors)
+        pre_knn = (knn_indices, knn_dist)
+    else:
+        pre_knn = None
     umap = UMAP(
         n_neighbors=n_neighbors,
         n_components=n_components,
@@ -143,7 +150,9 @@ def umap(
         b=b,
         random_state=random_state,
         output_type="numpy",
+        precomputed_knn=pre_knn,
     )
+
     X_umap = umap.fit_transform(X_contiguous)
     adata.obsm["X_umap"] = X_umap
     return adata if copy else None

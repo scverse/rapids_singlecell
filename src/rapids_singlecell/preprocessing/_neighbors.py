@@ -1,4 +1,3 @@
-import math
 from types import MappingProxyType
 from typing import Any, Literal, Mapping, Optional, Union
 
@@ -7,7 +6,6 @@ import numpy as np
 from anndata import AnnData
 from cuml.manifold.simpl_set import fuzzy_simplicial_set
 from cuml.neighbors import NearestNeighbors
-from cupyx.scipy.sparse import coo_matrix
 
 from rapids_singlecell.tools._utils import _choose_representation
 
@@ -128,8 +126,10 @@ def neighbors(
     )
     X_contiguous = np.ascontiguousarray(X, dtype=np.float32)
     nn.fit(X_contiguous)
-    knn_dist, knn_indices = nn.kneighbors(X_contiguous)
+    distances = nn.kneighbors_graph(X_contiguous, mode="distance")
     n_obs = adata.shape[0]
+    knn_dist = distances.data.reshape(n_obs, n_neighbors)
+    knn_indices = distances.indices.reshape(n_obs, n_neighbors)
     set_op_mix_ratio = 1.0
     local_connectivity = 1.0
     X_conn = cp.empty((n_obs, 1), dtype=np.float32)
@@ -143,56 +143,8 @@ def neighbors(
         set_op_mix_ratio=set_op_mix_ratio,
         local_connectivity=local_connectivity,
     )
-    knn_indices = knn_indices.astype(np.int32)
-    rows = cp.zeros((n_obs * n_neighbors), dtype=cp.int32)
-    cols = cp.zeros((n_obs * n_neighbors), dtype=cp.int32)
-    vals = cp.zeros((n_obs * n_neighbors), dtype=cp.float64)
-    create_coo_dist = cp.RawKernel(
-        r"""
-        extern "C" __global__
-        void create_coo_dist(const int* knn_indices, const float* knn_dist,
-                             int* rows, int* cols, double* vals,
-                             const int n_obs, const int n_neighbors)
-        {
-            const long long int i = blockIdx.x * blockDim.x + threadIdx.x;
-
-            if(i >= n_obs * n_neighbors) return;
-
-            const int n = i / n_neighbors;
-            const int j = i % n_neighbors;
-
-            const int j_dex = knn_indices[i];
-            double val = 0.0;
-
-            if (j_dex == -1) return;
-            if (j_dex != n) val = knn_dist[i];
-
-            rows[i] = n;
-            cols[i] = j_dex;
-            vals[i] = val;
-        }
-        """,
-        "create_coo_dist",
-    )
-    block = (32,)
-    grid = (int(math.ceil(n_obs * n_neighbors / block[0])),)
-    create_coo_dist(
-        grid,
-        block,
-        (
-            knn_indices,
-            knn_dist,
-            rows,
-            cols,
-            vals,
-            n_obs,
-            n_neighbors,
-        ),
-    )
-    distances = coo_matrix((vals, (rows, cols)), shape=(n_obs, n_obs))
-    distances.eliminate_zeros()
     connectivities = connectivities.tocsr().get()
-    distances = distances.tocsr().get()
+    distances = distances.get()
     if key_added is None:
         key_added = "neighbors"
         conns_key = "connectivities"
