@@ -120,7 +120,7 @@ def run_harmony(
 
     phi_moe = np.vstack((np.repeat(1, N), phi))
 
-    np.random.seed(random_state)
+    cp.random.seed(random_state)
 
     ho = Harmony(
         data_mat,
@@ -137,6 +137,7 @@ def run_harmony(
         block_size,
         lamb_mat,
         verbose,
+        random_state,
     )
 
     return ho
@@ -159,6 +160,7 @@ class Harmony:
         block_size,
         lamb,
         verbose,
+        random_state,
     ):
         self.Z_corr = cp.array(Z)
         self.Z_orig = cp.array(Z)
@@ -185,6 +187,7 @@ class Harmony:
         self.max_iter_kmeans = max_iter_kmeans
         self.verbose = verbose
         self.theta = cp.array(theta)
+        self.random_state = random_state
 
         self.objective_harmony = []
         self.objective_kmeans = []
@@ -210,7 +213,9 @@ class Harmony:
 
     def init_cluster(self):
         # Start with cluster centroids
-        kmeans_obj = KMeans(n_clusters=self.K, init="k-means||").fit(self.Z_cos.T)
+        kmeans_obj = KMeans(
+            n_clusters=self.K, random_state=self.random_state, init="k-means||"
+        ).fit(self.Z_cos.T)
         self.Y = kmeans_obj.cluster_centers_.T
         # (1) Normalize
         self.Y = self.Y / cp.linalg.norm(self.Y, ord=2, axis=0)
