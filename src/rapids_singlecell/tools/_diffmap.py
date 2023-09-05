@@ -1,6 +1,7 @@
 import cupy as cp
 from anndata import AnnData
 from cupyx.scipy import sparse
+from cupyx.scipy.sparse import linalg
 from scipy.sparse import issparse
 
 
@@ -72,7 +73,7 @@ def diffmap(
         Z = sparse.spdiags(1.0 / z, 0, K.shape[0], K.shape[0])
     matrix = Z @ K @ Z
     if n_comps == 0:
-        evals, evecs = sparse.linalg.eigsh(matrix)
+        evals, evecs = linalg.eigsh(matrix)
     else:
         n_comps = min(matrix.shape[0] - 1, n_comps)
         # ncv = max(2 * n_comps + 1, int(np.sqrt(matrix.shape[0])))
@@ -80,7 +81,7 @@ def diffmap(
         which = "LM" if sort == "decrease" else "SM"
         # it pays off to increase the stability with a bit more precision
         matrix = matrix.astype(cp.float64)
-        evals, evecs = sparse.linalg.eigsh(matrix, k=n_comps, which=which, ncv=ncv)
+        evals, evecs = linalg.eigsh(matrix, k=n_comps, which=which, ncv=ncv)
         evals, evecs = evals.astype(cp.float32), evecs.astype(cp.float32)
     if sort == "decrease":
         evals = evals[::-1]
