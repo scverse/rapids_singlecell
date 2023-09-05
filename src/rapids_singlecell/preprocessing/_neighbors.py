@@ -108,12 +108,12 @@ def neighbors(
     See `key_added` parameter description for the storage path of
     connectivities and distances.
 
-    **connectivities** : sparse matrix of dtype `float32`.
-        Weighted adjacency matrix of the neighborhood graph of data
-        points. Weights should be interpreted as connectivities.
-    **distances** : sparse matrix of dtype `float64`.
-        Instead of decaying weights, this stores distances for each pair of
-        neighbors.
+        **connectivities** : sparse matrix of dtype `float32`.
+            Weighted adjacency matrix of the neighborhood graph of data
+            points. Weights should be interpreted as connectivities.
+        **distances** : sparse matrix of dtype `float32`.
+            Instead of decaying weights, this stores distances for each pair of
+            neighbors.
     """
 
     adata = adata.copy() if copy else adata

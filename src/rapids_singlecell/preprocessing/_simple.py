@@ -275,7 +275,7 @@ def filter_genes(
 
     Returns
     -------
-        a filtered :class:`~rapids_singlecell.cunnData.cunnData` object inplace
+        a filtered :class:`~anndata.AnnData` object inplace
 
     """
     if qc_var in adata.var.keys():
@@ -347,7 +347,7 @@ def filter_cells(
 
     Returns
     -------
-       a filtered :class:`~rapids_singlecell.cunnData.cunnData` object inplace
+       a filtered :class:`~anndata.AnnData` object inplace
 
     """
     if qc_var in adata.obs.keys():
@@ -386,11 +386,11 @@ def filter_cells(
 
 def filter_highly_variable(adata: Union[AnnData, cunnData]) -> None:
     """
-    Filters the :class:`~rapids_singlecell.cunnData.cunnData` object for highly_variable genes. Run highly_varible_genes first.
+    Filters the :class:`~anndata.AnnData` object for highly_variable genes. Run highly_varible_genes first.
 
     Returns
     -------
-        updates :class:`~rapids_singlecell.cunnData.cunnData` object to only contain highly variable genes.
+        updates :class:`~anndata.AnnData` object to only contain highly variable genes.
 
     """
     if "highly_variable" in adata.var.keys():
