@@ -4,10 +4,6 @@ import cudf
 import numpy as np
 import pandas as pd
 from anndata import AnnData
-from cugraph import Graph
-from cugraph import leiden as culeiden
-from cugraph import louvain as culouvain
-from cuml.cluster import KMeans
 from natsort import natsorted
 
 
@@ -49,6 +45,8 @@ def leiden(
 
     """
     # Adjacency graph
+    from cugraph import Graph
+    from cugraph import leiden as culeiden
 
     if neighbors_key:
         adjacency = adata.obsp[neighbors_key + "_connectivities"]
@@ -123,6 +121,8 @@ def louvain(
 
     """
     # Adjacency graph
+    from cugraph import Graph
+    from cugraph import louvain as culouvain
 
     if neighbors_key:
         adjacency = adata.obsp[neighbors_key + "_connectivities"]
@@ -180,6 +180,8 @@ def kmeans(
             state.
 
     """
+    from cuml.cluster import KMeans
+
     kmeans_out = KMeans(n_clusters=n_clusters, random_state=random_state).fit(
         adata.obsm["X_pca"]
     )

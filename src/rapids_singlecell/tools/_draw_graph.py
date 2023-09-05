@@ -1,7 +1,6 @@
 from typing import Union
 
 import cudf
-import cugraph
 import cupy as cp
 import numpy as np
 from anndata import AnnData
@@ -38,13 +37,14 @@ def draw_graph(
             X_draw_graph_layout_fa : `adata.obsm`
                 Coordinates of graph layout.
     """
+    from cugraph import Graph
     from cugraph.layout import force_atlas2
 
     # Adjacency graph
     adjacency = adata.obsp["connectivities"]
     offsets = cudf.Series(adjacency.indptr)
     indices = cudf.Series(adjacency.indices)
-    g = cugraph.Graph()
+    g = Graph()
     if hasattr(g, "add_adj_list"):
         g.add_adj_list(offsets, indices, None)
     else:
