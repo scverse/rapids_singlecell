@@ -40,6 +40,7 @@ doc = [
 test = [
     "pytest",
     "omnipath",
+    "profimp",
 ]
 
 [project.urls]
