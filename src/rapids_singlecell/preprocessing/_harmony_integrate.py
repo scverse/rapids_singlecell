@@ -1,3 +1,4 @@
+import numpy as np
 from anndata import AnnData
 
 
@@ -42,8 +43,10 @@ def harmony_integrate(
         different experiments are integrated.
 
     """
-    from . import _harmonpy_gpu
+    from . import _harmonypy_gpu
 
-    harmony_out = _harmonpy_gpu.run_harmony(adata.obsm[basis], adata.obs, key, **kwargs)
+    X = adata.obsm[basis].astype(np.float64)
+
+    harmony_out = _harmonypy_gpu.run_harmony(X, adata.obs, key, **kwargs)
 
     adata.obsm[adjusted_basis] = harmony_out.Z_corr.T.get()
