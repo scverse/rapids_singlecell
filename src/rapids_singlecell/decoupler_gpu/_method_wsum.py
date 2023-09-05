@@ -5,11 +5,15 @@ import numpy as np
 import pandas as pd
 from anndata import AnnData
 from decoupler.pre import extract, filt_min_n, get_net_mat, match, rename_net
+from scipy.sparse import csr_matrix
 from tqdm import tqdm
 
 
-def run_perm(estimate, mat, net, idxs, times, seed):
+def run_perm(mat, net, idxs, times, seed):
+    mat = cp.array(mat)
     mat = cp.ascontiguousarray(mat)
+    net = cp.array(net)
+    estimate = mat.dot(net)
     cp.random.seed(seed)
     # Init null distirbution
     null_dst = cp.zeros((mat.shape[0], net.shape[1], times), dtype=np.float32)
@@ -43,13 +47,9 @@ def run_perm(estimate, mat, net, idxs, times, seed):
 
 
 def wsum(mat, net, times, batch_size, seed, verbose):
-    # Get number of batches
+    # Get dims
     n_samples = mat.shape[0]
     n_features, n_fsets = net.shape
-    n_batches = int(np.ceil(n_samples / batch_size))
-
-    if verbose:
-        print(f"Infering activities on {n_batches} batches.")
 
     # Init empty acts
     estimate = np.zeros((n_samples, n_fsets), dtype=np.float32)
@@ -57,25 +57,35 @@ def wsum(mat, net, times, batch_size, seed, verbose):
         norm = np.zeros((n_samples, n_fsets), dtype=np.float32)
         corr = np.zeros((n_samples, n_fsets), dtype=np.float32)
         pvals = np.zeros((n_samples, n_fsets), dtype=np.float32)
+        idxs = cp.arange(n_features, dtype=np.int64)
     else:
         norm, corr, pvals = None, None, None
 
-    for i in tqdm(range(n_batches), disable=not verbose):
-        # Subset batch
-        srt, end = i * batch_size, i * batch_size + batch_size
-        tmp = mat[srt:end].A
-        # Run WSUM
-        estimate[srt:end] = tmp.dot(net)
+    if isinstance(mat, csr_matrix):
+        n_batches = int(np.ceil(n_samples / batch_size))
+        for i in tqdm(range(n_batches), disable=not verbose):
+            # Subset batch
+            srt, end = i * batch_size, i * batch_size + batch_size
+            tmp = mat[srt:end].A
+
+            # Run WSUM
+
+            if times > 1:
+                (
+                    estimate[srt:end],
+                    norm[srt:end],
+                    corr[srt:end],
+                    pvals[srt:end],
+                ) = run_perm(tmp, net, idxs, times, seed)
+            else:
+                estimate[srt:end] = tmp.dot(net)
+    else:
+        estimate = mat.dot(net)
         if times > 1:
-            idxs = np.arange(n_features, dtype=np.int32)
-            estimate[srt:end], norm[srt:end], corr[srt:end], pvals[srt:end] = run_perm(
-                cp.array(estimate[srt:end]),
-                cp.array(tmp),
-                cp.array(net),
-                cp.array(idxs),
-                times,
-                seed,
-            )
+            estimate, norm, corr, pvals = run_perm(mat, net, idxs, times, seed)
+        else:
+            estimate = mat.dot(net)
+
     return estimate, norm, corr, pvals
 
 
