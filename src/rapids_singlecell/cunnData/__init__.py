@@ -5,11 +5,11 @@ from typing import Any, List, Literal, Mapping, MutableMapping, Optional, Union
 
 import anndata
 import cupy as cp
-import cupyx as cpx
 import numpy as np
 import pandas as pd
 from anndata import AnnData
 from anndata._core.index import _normalize_indices
+from cupyx.scipy import sparse as sparse_gpu
 from cupyx.scipy.sparse import issparse as issparse_gpu
 from natsort import natsorted
 from pandas.api.types import infer_dtype, is_string_dtype
@@ -36,9 +36,9 @@ class Layer_Mapping(dict):
                 item = item.astype(cp.float32)
             elif not issparse_cpu(item):
                 inter = sparse.csr_matrix(item)
-                item = cpx.scipy.sparse.csr_matrix(inter, dtype=cp.float32)
+                item = sparse_gpu.csr_matrix(inter, dtype=cp.float32)
             else:
-                item = cpx.scipy.sparse.csr_matrix(item, dtype=cp.float32)
+                item = sparse_gpu.csr_matrix(item, dtype=cp.float32)
             if issparse_gpu(item):
                 if item.nnz > 2**31 - 1:
                     raise ValueError(
@@ -103,7 +103,7 @@ class cunnData:
         self,
         adata: Optional[AnnData] = None,
         X: Optional[
-            Union[np.ndarray, sparse.spmatrix, cp.ndarray, cpx.scipy.sparse.csr_matrix]
+            Union[np.ndarray, sparse.spmatrix, cp.ndarray, sparse_gpu.csr_matrix]
         ] = None,
         obs: Optional[Union[pd.DataFrame, Mapping, None]] = None,
         var: Optional[Union[pd.DataFrame, Mapping, None]] = None,
@@ -125,10 +125,10 @@ class cunnData:
         if adata:
             if not issparse_cpu(adata.X):
                 inter = sparse.csr_matrix(adata.X)
-                self._X = cpx.scipy.sparse.csr_matrix(inter, dtype=cp.float32)
+                self._X = sparse_gpu.csr_matrix(inter, dtype=cp.float32)
                 del inter
             else:
-                self._X = cpx.scipy.sparse.csr_matrix(adata.X, dtype=cp.float32)
+                self._X = sparse_gpu.csr_matrix(adata.X, dtype=cp.float32)
             self._obs = adata.obs.copy()
             self._var = adata.var.copy()
             self._uns = adata.uns.copy()
@@ -155,10 +155,10 @@ class cunnData:
                 self._X = X.astype(cp.float32)
             elif not issparse_cpu(X):
                 inter = sparse.csr_matrix(X)
-                self._X = cpx.scipy.sparse.csr_matrix(inter, dtype=cp.float32)
+                self._X = sparse_gpu.csr_matrix(inter, dtype=cp.float32)
                 del inter
             else:
-                self._X = cpx.scipy.sparse.csr_matrix(X, dtype=cp.float32)
+                self._X = sparse_gpu.csr_matrix(X, dtype=cp.float32)
             if obs is not None:
                 if isinstance(obs, Mapping):
                     self._obs = pd.DataFrame(obs)
@@ -233,7 +233,7 @@ class cunnData:
         return self._X
 
     @X.setter
-    def X(self, value: Optional[Union[cp.ndarray, cpx.scipy.sparse.spmatrix]]):
+    def X(self, value: Optional[Union[cp.ndarray, sparse_gpu.spmatrix]]):
         if value.shape != self.shape:
             raise ValueError(
                 f"Dimension mismatch: value has shape {value.shape}, but expected shape is {self.shape}"
@@ -685,9 +685,7 @@ def _get_dimensions(s_object, shape):
 
 
 def _check_X(X):
-    return isinstance(
-        X, (cp.ndarray, cpx.scipy.sparse.csr_matrix, cpx.scipy.sparse.csc_matrix)
-    )
+    return isinstance(X, (cp.ndarray, sparse_gpu.csr_matrix, sparse_gpu.csc_matrix))
 
 
 def _get_vector(cudata, k, coldim, idxdim, layer=None):

@@ -2,9 +2,9 @@ import math
 from typing import Union
 
 import cupy as cp
-import cupyx as cpx
 import numpy as np
 from anndata import AnnData
+from cupyx.scipy import sparse
 from scanpy.get import _get_obs_rep
 
 from rapids_singlecell.cunnData import cunnData
@@ -73,8 +73,8 @@ def calculate_qc_metrics(
     sums_genes = cp.zeros(X.shape[1], dtype=X.dtype)
     cell_ex = cp.zeros(X.shape[0], dtype=cp.int32)
     gene_ex = cp.zeros(X.shape[1], dtype=cp.int32)
-    if cpx.scipy.sparse.issparse(X):
-        if cpx.scipy.sparse.isspmatrix_csr(X):
+    if sparse.issparse(X):
+        if sparse.isspmatrix_csr(X):
             from ._kernels._qc_kernels import _sparse_qc_csr
 
             block = (32,)
@@ -94,7 +94,7 @@ def calculate_qc_metrics(
                     X.shape[0],
                 ),
             )
-        elif cpx.scipy.sparse.isspmatrix_csc(X):
+        elif sparse.isspmatrix_csc(X):
             from ._kernels._qc_kernels import _sparse_qc_csc
 
             block = (32,)
@@ -157,8 +157,8 @@ def calculate_qc_metrics(
         for qc_var in qc_vars:
             sums_cells_sub = cp.zeros(X.shape[0], dtype=X.dtype)
             mask = cp.array(adata.var[qc_var], dtype=cp.bool_)
-            if cpx.scipy.sparse.issparse(X):
-                if cpx.scipy.sparse.isspmatrix_csr(X):
+            if sparse.issparse(X):
+                if sparse.isspmatrix_csr(X):
                     from ._kernels._qc_kernels import _sparse_qc_csr_sub
 
                     block = (32,)
@@ -169,7 +169,7 @@ def calculate_qc_metrics(
                         block,
                         (X.indptr, X.indices, X.data, sums_cells_sub, mask, X.shape[0]),
                     )
-                elif cpx.scipy.sparse.isspmatrix_csc(X):
+                elif sparse.isspmatrix_csc(X):
                     from ._kernels._qc_kernels import _sparse_qc_csc_sub
 
                     block = (32,)

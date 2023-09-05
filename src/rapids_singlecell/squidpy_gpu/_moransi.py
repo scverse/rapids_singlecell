@@ -1,7 +1,7 @@
 import math
 
 import cupy as cp
-import cupyx as cpx
+from cupyx.scipy import sparse
 
 kernel_morans_I_num_dense = r"""
 extern "C" __global__
@@ -161,7 +161,7 @@ def _morans_I_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
 
 
 def _morans_I_cupy(data, adj_matrix_cupy, n_permutations=100):
-    if cpx.scipy.sparse.isspmatrix_csr(data):
+    if sparse.isspmatrix_csr(data):
         return _morans_I_cupy_sparse(data, adj_matrix_cupy, n_permutations)
     elif isinstance(data, cp.ndarray):
         return _morans_I_cupy_dense(data, adj_matrix_cupy, n_permutations)

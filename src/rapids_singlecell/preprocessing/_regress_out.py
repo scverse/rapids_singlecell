@@ -2,9 +2,9 @@ import math
 from typing import Literal, Optional, Union
 
 import cupy as cp
-import cupyx as cpx
 from anndata import AnnData
 from cuml.linear_model import LinearRegression
+from cupyx.scipy import sparse
 from scanpy._utils import view_to_actual
 from scanpy.get import _get_obs_rep, _set_obs_rep
 
@@ -63,7 +63,7 @@ def regress_out(
 
     _check_gpu_X(X)
 
-    if cpx.scipy.sparse.issparse(X) and not cpx.scipy.sparse.isspmatrix_csc(X):
+    if sparse.issparse(X) and not sparse.isspmatrix_csc(X):
         X = X.tocsc()
 
     dim_regressor = 2
@@ -85,7 +85,7 @@ def regress_out(
 
     if cuml_supports_multi_target and batchsize:
         if batchsize == "all" and X.shape[0] < 100000:
-            if cpx.scipy.sparse.issparse(X):
+            if sparse.issparse(X):
                 X = X.todense()
             lr = LinearRegression(
                 fit_intercept=False, output_type="cupy", algorithm="svd"
@@ -99,7 +99,7 @@ def regress_out(
             for batch in range(n_batches):
                 start_idx = batch * batchsize
                 stop_idx = min(batch * batchsize + batchsize, X.shape[1])
-                if cpx.scipy.sparse.issparse(X):
+                if sparse.issparse(X):
                     arr_batch = X[:, start_idx:stop_idx].todense()
                 else:
                     arr_batch = X[:, start_idx:stop_idx].copy()
@@ -109,7 +109,7 @@ def regress_out(
                 lr.fit(regressors, arr_batch, convert_dtype=True)
                 outputs[:, start_idx:stop_idx] = arr_batch - lr.predict(regressors)
     else:
-        if X.shape[0] < 100000 and cpx.scipy.sparse.issparse(X):
+        if X.shape[0] < 100000 and sparse.issparse(X):
             X = X.todense()
         for i in range(X.shape[1]):
             if verbose and i % 500 == 0:
@@ -141,7 +141,7 @@ def _regress_out_chunk(X, y):
     dense_mat : cupy.ndarray of shape (n_cells,)
         Adjusted column
     """
-    if cpx.scipy.sparse.issparse(y):
+    if sparse.issparse(y):
         y = y.todense()
 
     lr = LinearRegression(fit_intercept=False, output_type="cupy")
