@@ -4,9 +4,11 @@ import os
 from datetime import datetime
 from importlib.metadata import metadata
 from pathlib import Path, PurePosixPath
+import anndata  # noqa
+
 
 HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE.parent / "src"))
+sys.path.insert(0, str(HERE.parent / "src/"))
 
 on_rtd = os.environ.get("READTHEDOCS") == "True"
 rtd_links_prefix = PurePosixPath("src")
@@ -16,7 +18,7 @@ rtd_links_prefix = PurePosixPath("src")
 info = metadata("rapids_singlecell")
 project_name = "rapids-singlecell"
 project = "rapids-singlecell"
-title = "accelerating single cell analysis"
+title = "GPU accelerated single cell analysis"
 author = info["Author"]
 copyright = f"{datetime.now():%Y}, {author}."
 version = info["Version"]
@@ -28,6 +30,10 @@ release = info["Version"]
 templates_path = ["_templates"]
 nitpicky = True  # Warn about broken links
 needs_sphinx = "4.5"
+suppress_warnings = [
+    "ref.citation",
+    "myst.header",  # https://github.com/executablebooks/MyST-Parser/issues/262
+]
 
 # -- General configuration ---------------------------------------------------
 
@@ -44,6 +50,7 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.githubpages",
     "sphinx_autodoc_typehints",
+    "sphinx.ext.extlinks",
     "readthedocs_ext.readthedocs",
     "sphinx.ext.imgconverter",
     "sphinx_copybutton",
@@ -54,14 +61,8 @@ extensions = [
 ]
 
 autosummary_generate = True
-autodoc_member_order = "groupwise"
-autodoc_mock_imports = [
-    "cudf",
-    "cuml",
-    "cugraph",
-    "cupy",
-    "cupyx",
-]
+autodoc_member_order = "bysource"
+autodoc_mock_imports = ["cudf", "cuml", "cugraph", "cupy", "cupyx"]
 default_role = "literal"
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
@@ -69,7 +70,6 @@ napoleon_include_init_with_doc = False
 napoleon_use_rtype = False  # having a separate entry generally helps readability
 napoleon_use_param = True
 api_dir = HERE / "api"
-myst_heading_anchors = 3  # create anchors for h1-h3
 myst_enable_extensions = [
     "amsmath",
     "colon_fence",
@@ -91,7 +91,7 @@ source_suffix = {
 }
 
 intersphinx_mapping = {
-    "anndata": ("https://anndata.readthedocs.io/en/stable/", None),
+    "anndata": ("https://anndata.readthedocs.io/en/latest/", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
     "scipy": ("https://docs.scipy.org/doc/scipy/", None),
     "cupy": ("https://docs.cupy.dev/en/stable/", None),
@@ -131,12 +131,20 @@ html_theme_options = {
 html_show_sphinx = False
 html_logo = "_static/logo3.svg"
 html_static_path = ["_static"]
-# html_extra_path = ["_extra"]
+html_css_files = ["_static/css/override.css"]
+html_title = "rapids-singlecell"
 
 nitpick_ignore = [
-    # If building the documentation fails because of a missing link that is outside your control,
-    # you can add an exception to this list.
-    #     ("py:class", "igraph.Graph"),
+    ("py:class", "scipy.sparse.base.spmatrix"),
+    ("py:meth", "pandas.DataFrame.iloc"),
+    ("py:meth", "pandas.DataFrame.loc"),
+    ("py:class", "anndata._core.views.ArrayView"),
+    ("py:class", "anndata._core.raw.Raw"),
+    *[
+        ("py:class", f"anndata._core.aligned_mapping.{cls}{kind}")
+        for cls in "Layers AxisArrays PairwiseArrays".split()
+        for kind in ["", "View"]
+    ],
 ]
 
 
@@ -154,3 +162,10 @@ def setup(app):
         },
         True,
     )
+
+
+# extlinks config
+extlinks = {
+    "issue": ("https://github.com/scverse/rapids_singlecell/issues/%s", "issue%s"),
+    "pr": ("https://github.com/scverse/rapids_singlecell/pull/%s", "pr%s"),
+}

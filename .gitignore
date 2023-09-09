@@ -12,6 +12,7 @@ __pycache__/
 # Sphinx documentation
 /docs/_build/
 /docs/generated/
+/docs/api/generated/
 
 # Venvs
 *venv/

@@ -1,7 +1,7 @@
 import math
 
 import cupy as cp
-import cupyx as cpx
+from cupyx.scipy import sparse
 
 kernel_gearys_C_num_dense = r"""
 extern "C" __global__ void gearys_C_num_dense(const float* data,
@@ -168,7 +168,7 @@ def _gearys_C_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
 
 
 def _gearys_C_cupy(data, adj_matrix_cupy, n_permutations=100):
-    if cpx.scipy.sparse.isspmatrix_csr(data):
+    if sparse.isspmatrix_csr(data):
         return _gearys_C_cupy_sparse(data, adj_matrix_cupy, n_permutations)
     elif isinstance(data, cp.ndarray):
         return _gearys_C_cupy_dense(data, adj_matrix_cupy, n_permutations)

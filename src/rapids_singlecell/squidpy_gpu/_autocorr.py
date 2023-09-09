@@ -6,10 +6,10 @@ from typing import (
 )
 
 import cupy as cp
-import cupyx as cpx
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from cupyx.scipy import sparse as sparse_gpu
 from scipy import sparse
 from statsmodels.stats.multitest import multipletests
 
@@ -98,22 +98,20 @@ def spatial_autocorr(
             vals = adata[:, genes].X
     # create Adj-Matrix
     adj_matrix = adata.obsp[connectivity_key]
-    adj_matrix_cupy = cpx.scipy.sparse.csr_matrix(adj_matrix, dtype=cp.float32)
+    adj_matrix_cupy = sparse_gpu.csr_matrix(adj_matrix, dtype=cp.float32)
 
     if transformation:  # row-normalize
         row_sums = adj_matrix_cupy.sum(axis=1).reshape(-1, 1)
         non_zero_rows = row_sums != 0
         row_sums[non_zero_rows] = 1.0 / row_sums[non_zero_rows]
-        adj_matrix_cupy = adj_matrix_cupy.multiply(
-            cpx.scipy.sparse.csr_matrix(row_sums)
-        )
+        adj_matrix_cupy = adj_matrix_cupy.multiply(sparse_gpu.csr_matrix(row_sums))
 
     params = {"two_tailed": two_tailed}
 
     # check sparse:
     if use_sparse:
         vals = sparse.csr_matrix(vals)
-        data = cpx.scipy.sparse.csr_matrix(vals, dtype=cp.float32)
+        data = sparse_gpu.csr_matrix(vals, dtype=cp.float32)
     else:
         if sparse.issparse(vals):
             vals = vals.toarray()

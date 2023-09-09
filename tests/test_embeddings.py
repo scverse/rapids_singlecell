@@ -1,4 +1,4 @@
-from rapids_singlecell.scanpy_gpu import tsne, umap
+from rapids_singlecell.tools import tsne, umap
 from scanpy.datasets import pbmc68k_reduced
 
 

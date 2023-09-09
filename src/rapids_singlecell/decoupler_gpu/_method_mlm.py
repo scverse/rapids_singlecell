@@ -6,6 +6,7 @@ import pandas as pd
 from anndata import AnnData
 from decoupler.pre import extract, filt_min_n, get_net_mat, match, rename_net
 from scipy import stats
+from scipy.sparse import csr_matrix
 from tqdm import tqdm
 
 
@@ -26,7 +27,7 @@ def fit_mlm(X, y, inv, df):
     inv = cp.reshape(inv, (1, inv.shape[0]))
     se = cp.sqrt(sse * inv)
     t = coef.T / se
-    return t.astype(np.float32)
+    return t.astype(np.float32).get()
 
 
 def mlm(mat, net, batch_size=10000, verbose=False):
@@ -40,20 +41,24 @@ def mlm(mat, net, batch_size=10000, verbose=False):
 
     # Compute inv and df for lm
     inv = cp.linalg.inv(cp.dot(net.T, net))
-    df = n_features - n_fsets
+    df = n_features - n_fsets - 1
 
-    # Init empty acts
-    es = cp.zeros((n_samples, n_fsets), dtype=np.float32)
-    for i in tqdm(range(n_batches), disable=not verbose):
-        # Subset batch
-        srt, end = i * batch_size, i * batch_size + batch_size
-        y = mat[srt:end].A.T
+    if isinstance(mat, csr_matrix):
+        # Init empty acts
+        n_batches = int(np.ceil(n_samples / batch_size))
+        es = np.zeros((n_samples, n_fsets), dtype=np.float32)
+        for i in tqdm(range(n_batches), disable=not verbose):
+            # Subset batch
+            srt, end = i * batch_size, i * batch_size + batch_size
+            y = mat[srt:end].A.T
 
-        # Compute MLM for batch
-        es[srt:end] = fit_mlm(net, cp.array(y), inv, df)[:, 1:]
+            # Compute MLM for batch
+            es[srt:end] = fit_mlm(net, cp.array(y), inv, df)[:, 1:]
+    else:
+        # Compute MLM for all
+        es = fit_mlm(net, cp.array(mat.T), inv, df)[:, 1:]
 
     # Get p-values
-    es = es.get()
     pvals = 2 * (1 - stats.t.cdf(np.abs(es), df))
 
     return es, pvals
