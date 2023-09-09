@@ -4,6 +4,9 @@ import os
 from datetime import datetime
 from importlib.metadata import metadata
 from pathlib import Path, PurePosixPath
+import anndata
+
+adv = anndata.__version__
 
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE.parent / "src/"))
@@ -60,11 +63,7 @@ extensions = [
 
 autosummary_generate = True
 autodoc_member_order = "bysource"
-autodoc_mock_imports = [
-    "cudf",
-    "cuml",
-    "cugraph",
-]
+autodoc_mock_imports = ["cudf", "cuml", "cugraph", "cupy", "cupyx"]
 default_role = "literal"
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
