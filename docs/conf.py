@@ -6,7 +6,7 @@ from importlib.metadata import metadata
 from pathlib import Path, PurePosixPath
 
 HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE.parent / "src"))
+sys.path.insert(0, str(HERE.parent / "src/"))
 
 on_rtd = os.environ.get("READTHEDOCS") == "True"
 rtd_links_prefix = PurePosixPath("src")
@@ -16,7 +16,7 @@ rtd_links_prefix = PurePosixPath("src")
 info = metadata("rapids_singlecell")
 project_name = "rapids-singlecell"
 project = "rapids-singlecell"
-title = "accelerating single cell analysis"
+title = "GPU accelerated single cell analysis"
 author = info["Author"]
 copyright = f"{datetime.now():%Y}, {author}."
 version = info["Version"]
@@ -29,6 +29,7 @@ templates_path = ["_templates"]
 nitpicky = True  # Warn about broken links
 needs_sphinx = "4.5"
 suppress_warnings = [
+    "ref.citation",
     "myst.header",  # https://github.com/executablebooks/MyST-Parser/issues/262
 ]
 
@@ -58,13 +59,11 @@ extensions = [
 ]
 
 autosummary_generate = True
-autodoc_member_order = "groupwise"
+autodoc_member_order = "bysource"
 autodoc_mock_imports = [
     "cudf",
     "cuml",
     "cugraph",
-    "cupy",
-    "cupyx",
 ]
 default_role = "literal"
 napoleon_google_docstring = False
@@ -94,7 +93,7 @@ source_suffix = {
 }
 
 intersphinx_mapping = {
-    "anndata": ("https://anndata.readthedocs.io/en/stable/", None),
+    "anndata": ("https://anndata.readthedocs.io/en/latest/", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
     "scipy": ("https://docs.scipy.org/doc/scipy/", None),
     "cupy": ("https://docs.cupy.dev/en/stable/", None),
@@ -138,9 +137,16 @@ html_css_files = ["_static/css/override.css"]
 html_title = "rapids-singlecell"
 
 nitpick_ignore = [
-    # If building the documentation fails because of a missing link that is outside your control,
-    # you can add an exception to this list.
-    #     ("py:class", "igraph.Graph"),
+    ("py:class", "scipy.sparse.base.spmatrix"),
+    ("py:meth", "pandas.DataFrame.iloc"),
+    ("py:meth", "pandas.DataFrame.loc"),
+    ("py:class", "anndata._core.views.ArrayView"),
+    ("py:class", "anndata._core.raw.Raw"),
+    *[
+        ("py:class", f"anndata._core.aligned_mapping.{cls}{kind}")
+        for cls in "Layers AxisArrays PairwiseArrays".split()
+        for kind in ["", "View"]
+    ],
 ]
 
 
