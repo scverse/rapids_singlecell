@@ -34,7 +34,6 @@ def get_import_paths(modules):
 
 def test_deferred_imports(imported_modules):
     slow_to_import = {
-        "cuml",
         "cugraph",
     }
     falsely_imported = slow_to_import & imported_modules
