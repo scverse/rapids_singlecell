@@ -1,4 +1,5 @@
 import math
+from typing import Optional, Sequence, Union
 
 import cupy as cp
 import numpy as np
@@ -8,9 +9,10 @@ from anndata import AnnData
 def embedding_density(
     adata: AnnData,
     basis: str = "umap",
-    groupby=None,
-    key_added=None,
-    components=None,
+    groupby: Optional[str] = None,
+    key_added: Optional[str] = None,
+    batchsize: int = 10000,
+    components: Union[str, Sequence[str]] = None,
 ) -> None:
     """\
     Calculate the density of cells in an embedding (per condition).
@@ -40,6 +42,8 @@ def embedding_density(
         key_added
             Name of the `.obs` covariate that will be added with the density
             estimates.
+        batchsize
+            Number of cells that should be processed together.
         components
             The embedding dimensions over which the density should be calculated.
             This is limited to two components.
@@ -106,7 +110,7 @@ def embedding_density(
             embed_x = adata.obsm[f"X_{basis}"][cat_mask, components[0]]
             embed_y = adata.obsm[f"X_{basis}"][cat_mask, components[1]]
 
-            dens_embed = _calc_density(cp.array(embed_x), cp.array(embed_y))
+            dens_embed = _calc_density(cp.array(embed_x), cp.array(embed_y), batchsize)
             density_values[cat_mask] = dens_embed
 
         adata.obs[density_covariate] = density_values
@@ -116,7 +120,7 @@ def embedding_density(
         embed_y = adata.obsm[f"X_{basis}"][:, components[1]]
 
         adata.obs[density_covariate] = _calc_density(
-            cp.array(embed_x), cp.array(embed_y)
+            cp.array(embed_x), cp.array(embed_y), batchsize
         )
 
     # Reduce diffmap components for labeling
@@ -131,7 +135,7 @@ def embedding_density(
     }
 
 
-def _calc_density(x: cp.ndarray, y: cp.ndarray):
+def _calc_density(x: cp.ndarray, y: cp.ndarray, batchsize: int):
     """\
     Calculates the density of points in 2 dimensions.
     """
@@ -142,7 +146,6 @@ def _calc_density(x: cp.ndarray, y: cp.ndarray):
     bandwidth = cp.power(xy.shape[0], (-1.0 / (xy.shape[1] + 4)))
     kde = KernelDensity(kernel="gaussian", bandwidth=bandwidth).fit(xy)
     z = cp.zeros(xy.shape[0])
-    batchsize = 25000
     n_batches = math.ceil(xy.shape[0] / batchsize)
     for batch in range(n_batches):
         start_idx = batch * batchsize
