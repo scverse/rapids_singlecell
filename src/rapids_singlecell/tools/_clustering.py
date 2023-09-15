@@ -1,34 +1,52 @@
-from typing import Optional
+from typing import Optional, Sequence, Tuple
 
 import cudf
 import numpy as np
 import pandas as pd
 from anndata import AnnData
 from natsort import natsorted
+from scanpy.tools._utils import _choose_graph
+from scanpy.tools._utils_clustering import rename_groups, restrict_adjacency
+from scipy import sparse
 
 
 def leiden(
     adata: AnnData,
     resolution: float = 1.0,
+    *,
+    restrict_to: Optional[Tuple[str, Sequence[str]]] = None,
+    key_added: str = "leiden",
+    adjacency: Optional[sparse.spmatrix] = None,
     n_iterations: int = 100,
     use_weights: bool = True,
     neighbors_key: Optional[int] = None,
-    key_added: str = "leiden",
-) -> None:
+    obsp: Optional[str] = None,
+    copy: bool = False,
+) -> Optional[AnnData]:
     """
     Performs Leiden Clustering using cuGraph
 
     Parameters
     ----------
         adata :
-            annData object with 'neighbors' field.
+            annData object
 
         resolution
             A parameter value controlling the coarseness of the clustering.
             Higher values lead to more clusters.
 
+        restrict_to
+            Restrict the clustering to the categories within the key for sample
+            annotation, tuple needs to contain `(obs_key, list_of_categories)`.
+
+        key_added
+            `adata.obs` key under which to add the cluster labels.
+
+        adjacency
+            Sparse adjacency matrix of the graph, defaults to neighbors connectivities.
+
         n_iterations
-            This controls the maximum number of levels/iterations of the Louvain algorithm.
+            This controls the maximum number of levels/iterations of the Leiden algorithm.
             When specified the algorithm will terminate after no more than the specified number of iterations.
             No error occurs when the algorithm terminates early in this manner.
 
@@ -40,18 +58,30 @@ def leiden(
             If not specified, `leiden` looks at `.obsp['connectivities']` for neighbors connectivities
             If specified, `leiden` looks at `.obsp['neighbors_key_ connectivities']` for neighbors connectivities
 
-        key_added
-            `adata.obs` key under which to add the cluster labels.
+        obsp
+            Use .obsp[obsp] as adjacency. You can't specify both
+            `obsp` and `neighbors_key` at the same time.
+
+        copy
+            Whether to copy `adata` or modify it inplace.
 
     """
     # Adjacency graph
     from cugraph import Graph
     from cugraph import leiden as culeiden
 
-    if neighbors_key:
-        adjacency = adata.obsp[neighbors_key + "_connectivities"]
-    else:
-        adjacency = adata.obsp["connectivities"]
+    adata = adata.copy() if copy else adata
+
+    if adjacency is None:
+        adjacency = _choose_graph(adata, obsp, neighbors_key)
+    if restrict_to is not None:
+        restrict_key, restrict_categories = restrict_to
+        adjacency, restrict_indices = restrict_adjacency(
+            adata,
+            restrict_key,
+            restrict_categories,
+            adjacency,
+        )
     offsets = cudf.Series(adjacency.indptr)
     indices = cudf.Series(adjacency.indices)
     if use_weights:
@@ -70,7 +100,17 @@ def leiden(
     groups = (
         leiden_parts.to_pandas().sort_values("vertex")[["partition"]].to_numpy().ravel()
     )
-
+    if restrict_to is not None:
+        if key_added == "leiden":
+            key_added += "_R"
+        groups = rename_groups(
+            adata,
+            key_added,
+            restrict_key,
+            restrict_categories,
+            restrict_indices,
+            groups,
+        )
     adata.obs[key_added] = pd.Categorical(
         values=groups.astype("U"),
         categories=natsorted(map(str, np.unique(groups))),
@@ -81,27 +121,43 @@ def leiden(
         "resolution": resolution,
         "n_iterations": n_iterations,
     }
+    return adata if copy else None
 
 
 def louvain(
     adata: AnnData,
     resolution: float = 1.0,
+    *,
+    restrict_to: Optional[Tuple[str, Sequence[str]]] = None,
+    key_added: str = "louvain",
+    adjacency: Optional[sparse.spmatrix] = None,
     n_iterations: int = 100,
     use_weights: bool = True,
-    neighbors_key: Optional[str] = None,
-    key_added: str = "louvain",
-) -> None:
+    neighbors_key: Optional[int] = None,
+    obsp: Optional[str] = None,
+    copy: bool = False,
+) -> Optional[AnnData]:
     """
     Performs Louvain Clustering using cuGraph
 
     Parameters
     ----------
         adata :
-            annData object with 'neighbors' field.
+            annData object
 
         resolution
             A parameter value controlling the coarseness of the clustering.
             Higher values lead to more clusters.
+
+        restrict_to
+            Restrict the clustering to the categories within the key for sample
+            annotation, tuple needs to contain `(obs_key, list_of_categories)`.
+
+        key_added
+            `adata.obs` key under which to add the cluster labels.
+
+        adjacency
+            Sparse adjacency matrix of the graph, defaults to neighbors connectivities.
 
         n_iterations
             This controls the maximum number of levels/iterations of the Louvain algorithm.
@@ -116,18 +172,29 @@ def louvain(
             If not specified, `louvain` looks at `.obsp['connectivities']` for neighbors connectivities
             If specified, `louvain` looks at `.obsp['neighbors_key_ connectivities']` for neighbors connectivities
 
-        key_added
-            `adata.obs` key under which to add the cluster labels.
+        obsp
+            Use .obsp[obsp] as adjacency. You can't specify both
+            `obsp` and `neighbors_key` at the same time.
+
+        copy
+            Whether to copy `adata` or modify it inplace.
 
     """
     # Adjacency graph
     from cugraph import Graph
     from cugraph import louvain as culouvain
 
-    if neighbors_key:
-        adjacency = adata.obsp[neighbors_key + "_connectivities"]
-    else:
-        adjacency = adata.obsp["connectivities"]
+    adata = adata.copy() if copy else adata
+    if adjacency is None:
+        adjacency = _choose_graph(adata, obsp, neighbors_key)
+    if restrict_to is not None:
+        restrict_key, restrict_categories = restrict_to
+        adjacency, restrict_indices = restrict_adjacency(
+            adata,
+            restrict_key,
+            restrict_categories,
+            adjacency,
+        )
 
     offsets = cudf.Series(adjacency.indptr)
     indices = cudf.Series(adjacency.indices)
@@ -150,6 +217,17 @@ def louvain(
         .to_numpy()
         .ravel()
     )
+    if restrict_to is not None:
+        if key_added == "louvain":
+            key_added += "_R"
+        groups = rename_groups(
+            adata,
+            key_added,
+            restrict_key,
+            restrict_categories,
+            restrict_indices,
+            groups,
+        )
 
     adata.obs[key_added] = pd.Categorical(
         values=groups.astype("U"),
@@ -157,6 +235,7 @@ def louvain(
     )
     adata.uns["louvain"] = {}
     adata.uns["louvain"]["params"] = {"resolution": resolution}
+    return adata if copy else None
 
 
 def kmeans(
