@@ -5,6 +5,5 @@ runners:
     machine_image: ami-067a4ba2816407ee9
     region: eu-north-1
     preemptible: false
-    workflow: .github/workflows/test-gpu.yml
     labels:
       - cirun-aws-gpu
