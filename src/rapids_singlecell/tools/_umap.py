@@ -6,6 +6,9 @@ from cuml import UMAP
 from cuml.manifold.umap_utils import find_ab_params
 from scanpy._utils import NeighborsView
 from sklearn.utils import check_random_state
+import cupy as cp
+from cupyx.scipy import sparse
+
 
 from ._utils import _choose_representation
 
@@ -128,7 +131,14 @@ def umap(
         500 if maxiter is None else maxiter
     )  # 0 is not a valid value for rapids, unlike original umap
     metric = neigh_params.get("metric", "euclidean")
-    X_contiguous = np.ascontiguousarray(X, dtype=np.float32)
+
+    if isinstance(X, cp.ndarray):
+        X_contiguous = cp.ascontiguousarray(X, dtype=np.float32)
+    elif isinstance(X, sparse.spmatrix):
+        X_contiguous = X 
+    else:
+        X_contiguous = np.ascontiguousarray(X, dtype=np.float32)
+    
     n_obs = adata.shape[0]
     if neigh_params.get("method") == "rapids":
         knn_dist = neighbors["distances"].data.reshape(n_obs, n_neighbors)
