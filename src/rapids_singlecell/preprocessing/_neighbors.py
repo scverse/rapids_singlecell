@@ -6,6 +6,7 @@ import numpy as np
 from anndata import AnnData
 from cuml.manifold.simpl_set import fuzzy_simplicial_set
 from cuml.neighbors import NearestNeighbors
+from cupyx.scipy import sparse
 
 from rapids_singlecell.tools._utils import _choose_representation
 
@@ -124,7 +125,12 @@ def neighbors(
     nn = NearestNeighbors(
         n_neighbors=n_neighbors, algorithm=algorithm, metric=metric, output_type="cupy"
     )
-    X_contiguous = np.ascontiguousarray(X, dtype=np.float32)
+    if isinstance(X, cp.ndarray):
+        X_contiguous = cp.ascontiguousarray(X, dtype=np.float32)
+    elif isinstance(X, sparse.spmatrix):
+        X_contiguous = X
+    else:
+        X_contiguous = np.ascontiguousarray(X, dtype=np.float32)
     nn.fit(X_contiguous)
     distances = nn.kneighbors_graph(X_contiguous, mode="distance")
     n_obs = adata.shape[0]
