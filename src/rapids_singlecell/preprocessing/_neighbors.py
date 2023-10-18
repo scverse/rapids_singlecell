@@ -2,11 +2,11 @@ from types import MappingProxyType
 from typing import Any, Literal, Mapping, Optional, Union
 
 import cupy as cp
-from cupyx.scipy import sparse
 import numpy as np
 from anndata import AnnData
 from cuml.manifold.simpl_set import fuzzy_simplicial_set
 from cuml.neighbors import NearestNeighbors
+from cupyx.scipy import sparse
 
 from rapids_singlecell.tools._utils import _choose_representation
 
@@ -128,7 +128,7 @@ def neighbors(
     if isinstance(X, cp.ndarray):
         X_contiguous = cp.ascontiguousarray(X, dtype=np.float32)
     elif isinstance(X, sparse.spmatrix):
-        X_contiguous = X 
+        X_contiguous = X
     else:
         X_contiguous = np.ascontiguousarray(X, dtype=np.float32)
     nn.fit(X_contiguous)
