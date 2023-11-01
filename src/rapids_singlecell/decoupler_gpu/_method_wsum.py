@@ -159,9 +159,7 @@ def run_wsum(
 
     if verbose:
         print(
-            "Running wsum on mat with {} samples and {} targets for {} sources.".format(
-                m.shape[0], len(c), net.shape[1]
-            )
+            f"Running wsum on mat with {m.shape[0]} samples and {len(c)} targets for {net.shape[1]} sources."
         )
 
     # Run WSUM
