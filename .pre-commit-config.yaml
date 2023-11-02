@@ -16,5 +16,5 @@ repos:
     -   id: check-yaml
     -   id: check-merge-conflict
     -   id: no-commit-to-branch
-        args: ["--branch=master", "--branch=main"]
+        args: [--branch=main]
     -   id: detect-private-key
