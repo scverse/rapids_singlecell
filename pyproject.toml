@@ -48,14 +48,9 @@ test = [
 Documentation = "https://rapids-singlecell.readthedocs.io"
 Source = "https://github.com/scverse/rapids_singlecell"
 
-[tool.black]
-line-length = 88
-target-version = ['py38']
-include = '^rapids_singlecell/.*\.py$'
-
 [tool.ruff]
 src = ["rapids_singlecell"]
-exclude = ["rapids_singlecell/tests"]
+exclude = ["tests/"]
 line-length = 88
 select = [
     "F",  # Errors detected by Pyflakes
@@ -66,10 +61,11 @@ select = [
     "C4",  # flake8-comprehensions
     "BLE",  # flake8-blind-except
     "UP",  # pyupgrade
+    "TID251",  # Banned imports
     "RUF100",  # Report unused noqa directives
 ]
 ignore = [
-    # line too long -> we accept long comment lines; black gets rid of long code lines
+    # line too long -> we accept long comment lines; formatting gets rid of long code lines
     "E501",
     # Do not assign a lambda expression, use a def -> lambda expression assignments are convenient
     "E731",
