@@ -62,7 +62,7 @@ extensions = [
 
 autosummary_generate = True
 autodoc_member_order = "bysource"
-autodoc_mock_imports = ["cudf", "cuml", "cugraph", "cupy", "cupyx"]
+autodoc_mock_imports = ["cudf", "cuml", "cugraph", "cupy", "cupyx", "pylibraft"]
 default_role = "literal"
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
