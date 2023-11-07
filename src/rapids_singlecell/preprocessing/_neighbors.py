@@ -53,11 +53,15 @@ _MetricsSparse = Literal[
 _Metrics = Union[_MetricsDense, _MetricsSparse]
 
 
-def _brute_knn(X, k, metric):
+def _brute_knn(X, k, metric, metric_kwds):
     from cuml.neighbors import NearestNeighbors
 
     nn = NearestNeighbors(
-        n_neighbors=k, algorithm="brute", metric=metric, output_type="cupy"
+        n_neighbors=k,
+        algorithm="brute",
+        metric=metric,
+        output_type="cupy",
+        metric_params=metric_kwds,
     )
     nn.fit(X)
     distances, neighbors = nn.kneighbors(X)
@@ -103,7 +107,11 @@ def _ivf_flat_knn(X, k, metric):
     from pylibraft.neighbors import ivf_flat
 
     handle = DeviceResources()
-    index_params = ivf_flat.IndexParams(n_lists=1024, metric=metric)
+    if X.shape[0] < 2048:
+        n_lists = X.shape[0] // 2
+    else:
+        n_lists = 1024
+    index_params = ivf_flat.IndexParams(n_lists=n_lists, metric=metric)
     index = ivf_flat.build(index_params, X, handle=handle)
 
     distances, neighbors = ivf_flat.search(
@@ -119,7 +127,11 @@ def _ivf_pq_knn(X, k, metric):
     from pylibraft.neighbors import ivf_pq
 
     handle = DeviceResources()
-    index_params = ivf_pq.IndexParams(n_lists=1024, metric=metric)
+    if X.shape[0] < 2048:
+        n_lists = X.shape[0] // 2
+    else:
+        n_lists = 1024
+    index_params = ivf_pq.IndexParams(n_lists=n_lists, metric=metric)
     index = ivf_pq.build(index_params, X, handle=handle)
 
     distances, neighbors = ivf_pq.search(
@@ -151,9 +163,9 @@ def _check_neighbors_X(X, algorithm):
 
     else:
         if isinstance(X, np.ndarray):
-            X_contiguous = cp.asarray(X, order="C")
+            X_contiguous = cp.asarray(X, order="C", dtype=np.float32)
         elif isinstance(X, cp.ndarray):
-            X_contiguous = cp.ascontiguousarray(X)
+            X_contiguous = cp.ascontiguousarray(X, dtype=np.float32)
         else:
             raise TypeError(
                 "Unsupported type for X. Expected ndarray or sparse matrix."
@@ -279,7 +291,9 @@ def neighbors(
 
     n_obs = adata.shape[0]
     if algorithm == "brute":
-        knn_indices, knn_dist = _brute_knn(X_contiguous, n_neighbors, metric)
+        knn_indices, knn_dist = _brute_knn(
+            X_contiguous, n_neighbors, metric, metric_kwds
+        )
     elif algorithm == "cagra":
         knn_indices, knn_dist = _cagra_knn(X_contiguous, n_neighbors, metric)
     elif algorithm == "ivfflat":
