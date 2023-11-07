@@ -13,7 +13,7 @@ from scipy import sparse as sc_sparse
 from rapids_singlecell.tools._utils import _choose_representation
 
 AnyRandom = Union[None, int, np.random.RandomState]
-_Alogithms = Literal["auto", "brute", "ivfflat", "ivfpq"]
+_Alogithms = Literal["brute", "ivfflat", "ivfpq", "cagra"]
 _MetricsDense = Literal[
     "l2",
     "chebyshev",
@@ -137,7 +137,7 @@ def _check_neighbors_X(X, algorithm):
     X_contiguous (cupy.ndarray or sparse.csr_matrix): Contiguous array or CSR matrix.
     """
     if cp_sparse.issparse(X) or sc_sparse.issparse(X):
-        if algorithm not in ["auto", "brute"]:
+        if algorithm != "brute":
             raise ValueError(
                 f"Sparse input is not supported for {algorithm} algorithm. Use 'brute' instead."
             )
@@ -167,8 +167,8 @@ def _check_metrics(algorithm, metric):
     Returns:
     bool: True if the metric is compatible, otherwise ValueError is raised.
     """
-    if algorithm in ["auto", "brute"]:
-        # 'auto' and 'brute' support all metrics, no need to check further.
+    if algorithm == "brute":
+        # 'brute' support all metrics, no need to check further.
         return True
     elif algorithm == "cagra":
         if metric not in ["euclidean", "sqeuclidean"]:
@@ -192,10 +192,10 @@ def neighbors(
     n_pcs: Optional[int] = None,
     use_rep: Optional[str] = None,
     random_state: AnyRandom = 0,
+    algorithm: _Alogithms = "brute",
     metric: _Metrics = "euclidean",
     metric_kwds: Mapping[str, Any] = MappingProxyType({}),
     key_added: Optional[str] = None,
-    algorithm: _Alogithms = "auto",
     copy: bool = False,
 ) -> Optional[AnnData]:
     """\
@@ -223,6 +223,13 @@ def neighbors(
         computed with default parameters or `n_pcs` if present.
     random_state
         A numpy random seed.
+    algorithm
+        The query algorithm to use. Valid options are:
+            'brute': Brute-force search that computes distances to all data points, guaranteeing exact results.
+            'ivfflat': Uses inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
+            'ivfpq': Combines inverted file indexing with product quantization to encode sub-vectors of the dataset, facilitating faster distance computation.
+            'cagra': Employs the Compressed, Accurate Graph-based search to quickly find nearest neighbors by traversing a graph structure.
+        Please ensure that the chosen algorithm is compatible with your dataset and the specific requirements of your search problem.
     metric
         A known metric's name or a callable that returns a distance.
     metric_kwds
@@ -261,7 +268,7 @@ def neighbors(
     _check_metrics(algorithm, metric)
 
     n_obs = adata.shape[0]
-    if algorithm == "brute" or algorithm == "auto":
+    if algorithm == "brute":
         knn_indices, knn_dist = _brute_knn(X_contiguous, n_neighbors, metric)
     elif algorithm == "cagra":
         knn_indices, knn_dist = _cagra_knn(X_contiguous, n_neighbors, metric)
