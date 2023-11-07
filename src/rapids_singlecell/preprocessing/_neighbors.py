@@ -65,7 +65,13 @@ def _brute_knn(X, k, metric):
 
 
 def _cagra_knn(X, k, metric):
-    from pylibraft.neighbors import cagra
+    try:
+        from pylibraft.neighbors import cagra
+    except ImportError:
+        raise ImportError(
+            "The 'cagra' module is not available in your current RAFT installation. "
+            "Please update RAFT to a version that supports 'cagra'."
+        )
 
     handle = DeviceResources()
     build_params = cagra.IndexParams(metric="sqeuclidean", build_algo="nn_descent")
@@ -225,10 +231,14 @@ def neighbors(
         A numpy random seed.
     algorithm
         The query algorithm to use. Valid options are:
-            'brute': Brute-force search that computes distances to all data points, guaranteeing exact results.
-            'ivfflat': Uses inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
-            'ivfpq': Combines inverted file indexing with product quantization to encode sub-vectors of the dataset, facilitating faster distance computation.
-            'cagra': Employs the Compressed, Accurate Graph-based search to quickly find nearest neighbors by traversing a graph structure.
+            * 'brute': Brute-force search that computes distances to all data points, guaranteeing exact results.
+
+            * 'ivfflat': Uses inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
+
+            * 'ivfpq': Combines inverted file indexing with product quantization to encode sub-vectors of the dataset, facilitating faster distance computation.
+
+            * 'cagra': Employs the Compressed, Accurate Graph-based search to quickly find nearest neighbors by traversing a graph structure.
+
         Please ensure that the chosen algorithm is compatible with your dataset and the specific requirements of your search problem.
     metric
         A known metric's name or a callable that returns a distance.
