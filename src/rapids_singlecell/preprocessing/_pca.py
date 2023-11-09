@@ -134,6 +134,10 @@ def pca(
 
     adata.obsm["X_pca"] = X_pca
     adata.uns["pca"] = {
+        "params": {
+            "zero_center": zero_center,
+            "use_highly_variable": use_highly_variable,
+        },
         "variance": pca_func.explained_variance_,
         "variance_ratio": pca_func.explained_variance_ratio_,
     }
