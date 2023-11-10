@@ -1,6 +1,13 @@
 # Welcome to the rapids-singlecell documentation
 
-This library is designed to accelerate single cell data analysis by utilizing the capabilities of GPU computing. Drawing inspiration from both the [scanpy](https://github.com/scverse/scanpy) library by Theis lab and the [rapids-single-cell-examples](https://github.com/clara-parabricks/rapids-single-cell-examples) library from Nvidia's RAPIDS team, it introduces GPU-optimized versions of their functions. While aiming to remain compatible with the original codes, the library's primary objective is to blend the computational strength of GPUs with the user-friendly nature of the scverse ecosystem.
+Rapids-singlecell offers enhanced single-cell data analysis as a near drop-in replacement predominantly for scanpy, while also incorporating select functionalities from squidpy and decoupler. Utilizing GPU computing with cupy and Nvidia’s RAPIDS, it emphasizes high computational efficiency. As part of the scverse ecosystem, rapids-singlecell continuously aims to maintain compatibility, adapting and growing through community collaboration.
+
+* **Broad GPU Optimization:** Facilitates accelerated processing of large datasets, particularly with GPU-enabled AnnData objects.
+* **Selective scverse Library Integration:** Incorporates key functionalities from scanpy, with additional features from squidpy and decoupler.
+* **Easy Installation Process:** Available via Conda and PyPI, with detailed setup guidelines.
+* **Accessible Documentation:** Provides comprehensive guides and examples tailored for efficient application.
+
+Our commitment with rapids-singlecell is to deliver a powerful, user-centric tool that significantly enhances single-cell data analysis capabilities in bioinformatics.
 
 ## News
 
