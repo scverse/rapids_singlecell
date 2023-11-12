@@ -29,7 +29,7 @@ def spatial_autocorr(
     corr_method: Union[str, None] = "fdr_bh",
     layer: Union[str, None] = None,
     use_raw: bool = False,
-    use_sparse: bool = False,
+    use_sparse: bool = True,
     copy: bool = False,
 ) -> Optional[pd.DataFrame]:
     """
@@ -68,7 +68,7 @@ def spatial_autocorr(
         use_raw
             If True, use the raw data in the AnnData object, by default False.
         use_sparse
-            If True, use a sparse representation for the input matrix `vals` when it is a sparse matrix, by default False.
+            If True, use a sparse representation for the input matrix `vals` when it is a sparse matrix, by default True.
         copy
             If True, return the results as a DataFrame instead of storing them in `adata.uns`, by default False.
 
@@ -108,14 +108,26 @@ def spatial_autocorr(
 
     params = {"two_tailed": two_tailed}
 
-    # check sparse:
-    if use_sparse:
-        vals = sparse.csr_matrix(vals)
-        data = sparse_gpu.csr_matrix(vals, dtype=cp.float32)
-    else:
-        if sparse.issparse(vals):
-            vals = vals.toarray()
-        data = cp.array(vals, dtype=cp.float32)
+    def process_input_data(vals, use_sparse):
+        # Check if input is already a sparse matrix
+        is_sparse_input = sparse.issparse(vals) or sparse_gpu.isspmatrix(vals)
+        if use_sparse and is_sparse_input:
+            # Convert to CuPy CSR format if not already in sparse GPU format
+            data = (
+                sparse_gpu.csr_matrix(vals.tocsr(), dtype=cp.float32)
+                if not sparse_gpu.isspmatrix(vals)
+                else vals.tocsr().astype(cp.float32)
+            )
+        elif is_sparse_input:
+            # Convert sparse input to dense format
+            data = cp.array(vals.toarray(), dtype=cp.float32)
+        else:
+            # Keep dense input as is
+            data = cp.array(vals, dtype=cp.float32)
+        return data
+
+    data = process_input_data(vals, use_sparse)
+
     # Run Spartial Autocorr
     if mode == "moran":
         score, score_perms = _morans_I_cupy(
