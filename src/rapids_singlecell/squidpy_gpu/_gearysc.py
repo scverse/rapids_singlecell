@@ -29,72 +29,72 @@ float* num, int n_samples, int n_features) {
 """
 kernel_gearys_C_num_sparse = r"""
 extern "C" __global__
-    void gearys_C_num_sparse(const int* adj_matrix_row_ptr, const int* adj_matrix_col_ind, const float* adj_matrix_data,
-                        const int* data_row_ptr, const int* data_col_ind, const float* data_values,
-                        const int n_samples, const int n_features,
-                        float* num) {
-            int i = blockIdx.x;
-            int numThreads = blockDim.x;
-            int threadid = threadIdx.x;
+void gearys_C_num_sparse(const int* adj_matrix_row_ptr, const int* adj_matrix_col_ind, const float* adj_matrix_data,
+                    const int* data_row_ptr, const int* data_col_ind, const float* data_values,
+                    const int n_samples, const int n_features,
+                    float* num) {
+    int i = blockIdx.x;
+    int numThreads = blockDim.x;
+    int threadid = threadIdx.x;
 
-            // Create cache
-            __shared__ float cell1[3072];
-            __shared__ float cell2[3072];
+    // Create cache
+    __shared__ float cell1[3072];
+    __shared__ float cell2[3072];
 
-            int numruns = (n_features + 3072 - 1) / 3072;
+    int numruns = (n_features + 3072 - 1) / 3072;
 
-            if (i >= n_samples) {
-                return;
+    if (i >= n_samples) {
+        return;
+    }
+
+    int k_start = adj_matrix_row_ptr[i];
+    int k_end = adj_matrix_row_ptr[i + 1];
+
+    for (int k = k_start; k < k_end; ++k) {
+        int j = adj_matrix_col_ind[k];
+        float edge_weight = adj_matrix_data[k];
+
+        int cell1_start = data_row_ptr[i];
+        int cell1_stop = data_row_ptr[i+1];
+
+        int cell2_start = data_row_ptr[j];
+        int cell2_stop = data_row_ptr[j+1];
+
+        for(int batch_runner = 0; batch_runner < numruns; batch_runner++){
+            // Set cache to 0
+            for (int idx = threadid; idx < 3072; idx += numThreads) {
+                cell1[idx] = 0.0f;
+                cell2[idx] = 0.0f;
             }
+            __syncthreads();
+            int batch_start = 3072 * batch_runner;
+            int batch_end = 3072 * (batch_runner + 1);
 
-            int k_start = adj_matrix_row_ptr[i];
-            int k_end = adj_matrix_row_ptr[i + 1];
-
-            for (int k = k_start; k < k_end; ++k) {
-                int j = adj_matrix_col_ind[k];
-                float edge_weight = adj_matrix_data[k];
-
-                int cell1_start = data_row_ptr[i];
-                int cell1_stop = data_row_ptr[i+1];
-
-                int cell2_start = data_row_ptr[j];
-                int cell2_stop = data_row_ptr[j+1];
-
-                for(int batch_runner = 0; batch_runner < numruns; batch_runner++){
-                    // Set cache to 0
-                    for (int idx = threadid; idx < 3072; idx += numThreads) {
-                        cell1[idx] = 0.0f;
-                        cell2[idx] = 0.0f;
-                    }
-                    __syncthreads();
-                    int batch_start = 3072 * batch_runner;
-                    int batch_end = 3072 * (batch_runner + 1);
-
-                    // Densify sparse into cache
-                    for (int cell1_idx = cell1_start+ threadid; cell1_idx < cell1_stop;cell1_idx+=numThreads) {
-                        int gene_id = data_col_ind[cell1_idx];
-                        if (gene_id >= batch_start && gene_id < batch_end){
-                            cell1[gene_id % 3072] = data_values[cell1_idx];
-                        }
-                    }
-                    __syncthreads();
-                    for (int cell2_idx = cell2_start+threadid; cell2_idx < cell2_stop;cell2_idx+=numThreads) {
-                        int gene_id = data_col_ind[cell2_idx];
-                        if (gene_id >= batch_start && gene_id < batch_end){
-                            cell2[gene_id % 3072] = data_values[cell2_idx];
-                        }
-                    }
-                    __syncthreads();
-
-                    // Calc num
-                    for(int gene = threadid; gene < 3072; gene+= numThreads){
-                            int global_gene_index = batch_start + gene;
-                            if (global_gene_index < n_features) {
-                                float diff_sq = (cell1[gene] - cell2[gene]) * (cell1[gene] - cell2[gene]);
-                                atomicAdd(&num[global_gene_index], edge_weight * diff_sq);
-                            }
-                    }
+            // Densify sparse into cache
+            for (int cell1_idx = cell1_start+ threadid; cell1_idx < cell1_stop;cell1_idx+=numThreads) {
+                int gene_id = data_col_ind[cell1_idx];
+                if (gene_id >= batch_start && gene_id < batch_end){
+                    cell1[gene_id % 3072] = data_values[cell1_idx];
                 }
+            }
+            __syncthreads();
+            for (int cell2_idx = cell2_start+threadid; cell2_idx < cell2_stop;cell2_idx+=numThreads) {
+                int gene_id = data_col_ind[cell2_idx];
+                if (gene_id >= batch_start && gene_id < batch_end){
+                    cell2[gene_id % 3072] = data_values[cell2_idx];
+                }
+            }
+            __syncthreads();
+
+            // Calc num
+            for(int gene = threadid; gene < 3072; gene+= numThreads){
+                int global_gene_index = batch_start + gene;
+                if (global_gene_index < n_features) {
+                    float diff_sq = (cell1[gene] - cell2[gene]) * (cell1[gene] - cell2[gene]);
+                    atomicAdd(&num[global_gene_index], edge_weight * diff_sq);
+                }
+            }
+        }
     }
 }
 """
