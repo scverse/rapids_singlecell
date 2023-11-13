@@ -40,6 +40,7 @@ extern "C" __global__
             int numThreads = blockDim.x;
             int threadid = threadIdx.x;
 
+            // Create cache
             __shared__ float cell1[3072];
             __shared__ float cell2[3072];
 
@@ -59,6 +60,7 @@ extern "C" __global__
                 int cell2_stop = data_row_ptr[j+1];
 
                 for(int batch_runner = 0; batch_runner < numruns; batch_runner++){
+                    // Set cache to 0
                     for (int idx = threadid; idx < 3072; idx += numThreads) {
                         cell1[idx] = 0.0f;
                         cell2[idx] = 0.0f;
@@ -67,6 +69,7 @@ extern "C" __global__
                     int batch_start = 3072 * batch_runner;
                     int batch_end = 3072 * (batch_runner + 1);
 
+                    // Densify sparse into cache
                     for (int cell1_idx = cell1_start+ threadid; cell1_idx < cell1_stop;cell1_idx+=numThreads) {
                         int gene_id = data_col_ind[cell1_idx];
                         if (gene_id >= batch_start && gene_id < batch_end){
@@ -82,6 +85,7 @@ extern "C" __global__
                     }
                     __syncthreads();
 
+                    // Calc num
                     for(int gene = threadid; gene < 3072; gene+= numThreads){
                             int global_gene_index = batch_start + gene;
                             if (global_gene_index < n_features) {
@@ -89,7 +93,6 @@ extern "C" __global__
                                 atomicAdd(&num[global_gene_index], edge_weight * product);
                             }
                     }
-                    __syncthreads();
                 }
     }
 }
@@ -138,7 +141,11 @@ def _morans_I_cupy_dense(data, adj_matrix_cupy, n_permutations=100):
             n_features,
         ),
     )
+
+    # Calculate the denominator for Moarn's I
     den = cp.sum(data_centered_cupy**2, axis=0)
+
+    # Calculate Moarn's I
     morans_I = num / den
     # Calculate p-values using permutation tests
     if n_permutations:
@@ -194,6 +201,7 @@ def _morans_I_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
         ),
     )
 
+    # Calculate the denominator for Moarn's I
     den = cp.zeros(n_features, dtype=cp.float32)
     counter = cp.zeros(n_features, dtype=cp.int32)
     block_den = math.ceil(data.nnz / 32)
@@ -204,6 +212,8 @@ def _morans_I_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
     )
     counter = n_samples - counter
     den += counter * means**2
+
+    # Calculate Moarn's I
     morans_I = num / den
 
     if n_permutations:
