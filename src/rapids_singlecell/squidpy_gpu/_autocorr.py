@@ -93,7 +93,7 @@ def spatial_autocorr(
         vals = adata.raw[:, genes].X
     else:
         if layer:
-            vals = adata[:, genes].layers["layer"]
+            vals = adata[:, genes].layers[layer]
         else:
             vals = adata[:, genes].X
     # create Adj-Matrix
@@ -127,7 +127,6 @@ def spatial_autocorr(
         return data
 
     data = process_input_data(vals, use_sparse)
-
     # Run Spartial Autocorr
     if mode == "moran":
         score, score_perms = _morans_I_cupy(

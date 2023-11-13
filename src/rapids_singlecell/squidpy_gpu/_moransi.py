@@ -33,6 +33,10 @@ extern "C" __global__
                         const int n_samples, const int n_features, const float* mean_array,
                         float* num) {
             int i = blockIdx.x;
+
+            if (i >= n_samples) {
+                return;
+            }
             int numThreads = blockDim.x;
             int threadid = threadIdx.x;
 
@@ -40,10 +44,6 @@ extern "C" __global__
             __shared__ float cell2[3072];
 
             int numruns = (n_features + 3072 - 1) / 3072;
-
-            if (i >= n_samples) {
-                return;
-            }
 
             int k_start = adj_matrix_row_ptr[i];
             int k_end = adj_matrix_row_ptr[i + 1];
@@ -82,7 +82,6 @@ extern "C" __global__
                     }
                     __syncthreads();
 
-
                     for(int gene = threadid; gene < 3072; gene+= numThreads){
                             int global_gene_index = batch_start + gene;
                             if (global_gene_index < n_features) {
@@ -90,8 +89,8 @@ extern "C" __global__
                                 atomicAdd(&num[global_gene_index], edge_weight * product);
                             }
                     }
+                    __syncthreads();
                 }
-
     }
 }
 """
@@ -176,7 +175,7 @@ def _morans_I_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
     means = data.mean(axis=0).ravel()
 
     n_samples, n_features = data.shape
-    sg = n_features
+    sg = n_samples
     # Launch the kernel
     num_kernel(
         (sg,),

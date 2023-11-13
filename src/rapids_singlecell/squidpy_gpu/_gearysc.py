@@ -162,7 +162,7 @@ def _gearys_C_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
     num_kernel = cp.RawKernel(kernel_gearys_C_num_sparse, "gearys_C_num_sparse")
 
     n_samples, n_features = data.shape
-    sg = n_features
+    sg = n_samples
     # Launch the kernel
     num_kernel(
         (sg,),
