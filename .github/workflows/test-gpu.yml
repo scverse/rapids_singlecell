@@ -38,19 +38,14 @@ jobs:
         run: nvidia-smi
 
 
-      - uses: mamba-org/setup-micromamba@v1
-        with:
-          micromamba-version: "1.3.1-0"
-          environment-file: ci/rsc_test_env.yml
-          init-shell: >-
-            bash
-          generate-run-shell: false
-
-      - name: Install rapids-singlecell
-        run: pip install .[test]
-
-      - name: Mamba list
-        run: micromamba list
-
-      - name: Run test
-        run: pytest
+          # Pull the RAPIDS container
+      - name: Pull RAPIDS Docker container
+        run: docker pull nvcr.io/nvidia/rapidsai/base:23.10-cuda11.8-py3.10
+      # Run the container, install the package, and execute tests
+      - name: Install package and run tests in RAPIDS container
+        run: |
+          docker run --gpus all --rm -it \
+              --shm-size=1g --ulimit memlock=-1 \
+              -v ${GITHUB_WORKSPACE}:/workspace -w /workspace \
+              nvcr.io/nvidia/rapidsai/base:23.10-cuda11.8-py3.10 \
+              /bin/bash -c "pip install .[test] && pytest"
