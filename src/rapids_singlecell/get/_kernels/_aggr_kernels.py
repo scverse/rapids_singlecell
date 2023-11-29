@@ -1,27 +1,23 @@
 from cuml.common.kernel_utils import cuda_kernel_factory
 
 sparse_sparse_aggr_kernel = r"""
-        (const int* groupptr, const int* groupidx,const int *indptr, const int *index,const {0} *data,
-        int* counts,double* sums, double* means, double* vars,int n_groups, int n_genes){
-        int group = blockIdx.x;
-        if(group >= n_groups){
-            return;
-        }
-        int start_group = groupptr[group];
-        int stop_group = groupptr[group+1];
-        int major = stop_group - start_group;
-        for (int cell = start_group+threadIdx.x; cell<stop_group; cell+= blockDim.x){
-            int cell_id = groupidx[cell];
-            int cell_start = indptr[cell_id];
-            int cell_end = indptr[cell_id+1];
-            for (int gene = cell_start; gene<cell_end; gene++){
-                int gene_pos = index[gene];
-                double value = (double)data[gene];
-                atomicAdd(&sums[group*n_genes+gene_pos], value);
-                atomicAdd(&counts[group*n_genes+gene_pos], 1);
-                atomicAdd(&means[group*n_genes+gene_pos], value/major);
-                atomicAdd(&vars[group*n_genes+gene_pos], value*value/major);
-        }
+    (const int *indptr, const int *index,const {0} *data,
+    int* counts,double* sums, double* means, double* vars, int* cats, double* numcells,int n_cells, int n_genes){
+    int cell = blockIdx.x;
+    if(cell >= n_cells){
+        return;
+    }
+    int cell_start = indptr[cell];
+    int cell_end = indptr[cell+1];
+    int group = cats[cell];
+    double major = numcells[group];
+    for (int gene = cell_start+threadIdx.x; gene<cell_end; gene+= blockDim.x){
+        int gene_pos = index[gene];
+        double value = (double)data[gene];
+        atomicAdd(&sums[group*n_genes+gene_pos], value);
+        atomicAdd(&counts[group*n_genes+gene_pos], 1);
+        atomicAdd(&means[group*n_genes+gene_pos], value/major);
+        atomicAdd(&vars[group*n_genes+gene_pos], value*value/major);
     }
 }
 """

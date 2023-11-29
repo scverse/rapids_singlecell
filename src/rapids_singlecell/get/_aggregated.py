@@ -71,35 +71,36 @@ def count_mean_var_sparse(by, data):
     return sums, counts, means, var
 
 
-def count_mean_var_sparse(gmat, X):
+def _sparse_dense_aggr(gmat, X, cats):
     means = cp.zeros((gmat.shape[0], X.shape[1]), dtype=cp.float64)
     var = cp.zeros((gmat.shape[0], X.shape[1]), dtype=cp.float64)
     sums = cp.zeros((gmat.shape[0], X.shape[1]), dtype=cp.float64)
-    count = cp.zeros((gmat.shape[0], X.shape[1]), dtype=cp.int32)
-    block = (512,)
-    grid = (gmat.shape[0],)
-    get_mean_var_minor = _get_aggr_kernel(X.data.dtype)
-    get_mean_var_minor(
+    counts = cp.zeros((gmat.shape[0], X.shape[1]), dtype=cp.int32)
+    block = (128,)
+    grid = (X.shape[0],)
+    aggr_kernel = _get_aggr_kernel(X.data.dtype)
+    n_cells = gmat.sum(axis=1).astype(cp.float64)
+    aggr_kernel(
         grid,
         block,
         (
-            gmat.indptr,
-            gmat.indices,
             X.indptr,
             X.indices,
             X.data,
-            count,
+            counts,
             sums,
             means,
             var,
-            gmat.shape[0],
+            cats,
+            n_cells,
+            X.shape[0],
             X.shape[1],
         ),
     )
-    n_cells = gmat.sum(axis=1).astype(cp.float64)
+
     var = var - cp.power(means, 2)
     var *= n_cells / (n_cells - 1)
-    return sums, count, means, var
+    return sums, counts, means, var
 
 
 def count_mean_var_dense(by, data):
