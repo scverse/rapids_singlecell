@@ -80,6 +80,7 @@ ignore = [
 "docs/*" = ["I"]
 "tests/*" = ["D"]
 "*/__init__.py" = ["F401"]
+"src/rapids_singlecell/get/_aggregated.py" = ["F811"]
 
 [tool.hatch.build]
 # exclude big files that don’t need to be installed
