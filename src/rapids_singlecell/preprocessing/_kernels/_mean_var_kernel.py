@@ -16,16 +16,28 @@ _get_mean_var_major_kernel = r"""
 
         mean_place[threadIdx.x] = 0.0;
         var_place[threadIdx.x] = 0.0;
+        __syncthreads();
 
         for(int minor_idx = start_idx+threadIdx.x; minor_idx < stop_idx; minor_idx+= blockDim.x){
                double value = (double)data[minor_idx];
                mean_place[threadIdx.x] += value;
                var_place[threadIdx.x] += value*value;
         }
+        __syncthreads();
 
-        atomicAdd(&means[major_idx], mean_place[threadIdx.x]);
-        atomicAdd(&vars[major_idx], var_place[threadIdx.x]);
-}
+        for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+            if (threadIdx.x < s) {
+                mean_place[threadIdx.x] += mean_place[threadIdx.x + s];
+                var_place[threadIdx.x] += var_place[threadIdx.x + s];
+            }
+            __syncthreads(); // Synchronize at each step of the reduction
+        }
+        if (threadIdx.x == 0) {
+            means[major_idx] = mean_place[threadIdx.x];
+            vars[major_idx] = var_place[threadIdx.x];
+        }
+
+        }
 """
 
 _get_mean_var_minor_kernel = r"""
