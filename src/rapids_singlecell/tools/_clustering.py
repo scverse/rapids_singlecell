@@ -143,7 +143,7 @@ def louvain(
     described in:
 
     Blondel, V.D., Guillaume, J.-L., Lambiotte, R., & Lefebvre, E. (2008).
-    Fast unfolding of community hierarchies in large networks, J. Stat. 
+    Fast unfolding of community hierarchies in large networks, J. Stat.
     Mech., P10008. DOI: 10.1088/1742-5468/2008/10/P10008
 
     Parameters
@@ -165,19 +165,19 @@ def louvain(
             `adata.obs` key under which to add the cluster labels.
 
         adjacency
-            Sparse adjacency matrix of the graph, defaults to neighbors 
+            Sparse adjacency matrix of the graph, defaults to neighbors
             connectivities.
 
         n_iterations
-            This controls the maximum number of levels/iterations of the 
-            Louvain algorithm. When specified the algorithm will terminate 
-            after no more than the specified number of iterations. No error 
+            This controls the maximum number of levels/iterations of the
+            Louvain algorithm. When specified the algorithm will terminate
+            after no more than the specified number of iterations. No error
             occurs when the algorithm terminates early in this manner.
             Capped at 500 to prevent excessive runtime.
 
         threshold
             Modularity gain threshold for each level/iteration. If the gain
-            of modularity between two levels of the algorithm is less than 
+            of modularity between two levels of the algorithm is less than
             the given threshold then the algorithm stops and returns the
             resulting communities. Defaults to 1e-7.
 
@@ -186,8 +186,8 @@ def louvain(
             computation (placing more emphasis on stronger edges).
 
         neighbors_key
-            If not specified, `louvain` looks at `.obsp['connectivities']` 
-            for neighbors connectivities. If specified, `louvain` looks at 
+            If not specified, `louvain` looks at `.obsp['connectivities']`
+            for neighbors connectivities. If specified, `louvain` looks at
             `.obsp[.uns[neighbors_key]['connectivities_key']]` for neighbors
             connectivities.
 
