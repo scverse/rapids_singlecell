@@ -64,11 +64,11 @@ def leiden(
             occurs when the algorithm terminates early in this manner.
 
         use_weights
-            If `True`, edge weights from the graph are used in the 
+            If `True`, edge weights from the graph are used in the
             computation (placing more emphasis on stronger edges).
 
         neighbors_key
-            If not specified, `leiden` looks at `.obsp['connectivities']` 
+            If not specified, `leiden` looks at `.obsp['connectivities']`
             for neighbors connectivities. If specified, `leiden` looks at
             `.obsp[.uns[neighbors_key]['connectivities_key']]` for neighbors
             connectivities.
