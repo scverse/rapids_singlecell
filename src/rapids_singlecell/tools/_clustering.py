@@ -20,7 +20,7 @@ def leiden(
     adjacency: Optional[sparse.spmatrix] = None,
     n_iterations: int = 100,
     use_weights: bool = True,
-    neighbors_key: Optional[int] = None,
+    neighbors_key: Optional[str] = None,
     obsp: Optional[str] = None,
     copy: bool = False,
 ) -> Optional[AnnData]:
