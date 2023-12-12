@@ -49,7 +49,7 @@ Documentation = "https://rapids-singlecell.readthedocs.io"
 Source = "https://github.com/scverse/rapids_singlecell"
 
 [tool.ruff]
-src = ["src/rapids_singlecell"]
+src = ["rapids_singlecell"]
 exclude = ["tests/"]
 line-length = 88
 select = [
