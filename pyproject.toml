@@ -49,7 +49,7 @@ Documentation = "https://rapids-singlecell.readthedocs.io"
 Source = "https://github.com/scverse/rapids_singlecell"
 
 [tool.ruff]
-src = ["rapids_singlecell"]
+src = ["src/rapids_singlecell"]
 exclude = ["tests/"]
 line-length = 88
 select = [
@@ -63,6 +63,10 @@ select = [
     "UP",  # pyupgrade
     "TID251",  # Banned imports
     "RUF100",  # Report unused noqa directives
+    "ICN",     # Follow import conventions
+    "PTH",     # Pathlib instead of os.path
+    "TCH",     # manage type checking blocks
+
 ]
 ignore = [
     # line too long -> we accept long comment lines; formatting gets rid of long code lines
@@ -73,7 +77,6 @@ ignore = [
     "E741",
     # Missing docstring in public package
     "F403",
-    # First line should be in imperative mood; try rephrasing
 ]
 
 [tool.ruff.per-file-ignores]
