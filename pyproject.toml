@@ -92,3 +92,6 @@ exclude = [
 version-file = "src/rapids_singlecell/_version.py"
 [tool.hatch.version]
 source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = ['src/rapids_singlecell']
