@@ -65,8 +65,8 @@ select = [
     "ICN",     # Follow import conventions
     "PTH",     # Pathlib instead of os.path
     "TCH",     # manage type checking blocks
-    "B", # flake8-bugbear
 ]
+
 ignore = [
     # line too long -> we accept long comment lines; formatting gets rid of long code lines
     "E501",
