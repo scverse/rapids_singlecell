@@ -152,13 +152,19 @@ def louvain(
     key_added: str = "louvain",
     adjacency: Optional[sparse.spmatrix] = None,
     n_iterations: int = 100,
+    threshold: float = 1e-7,
     use_weights: bool = True,
     neighbors_key: Optional[int] = None,
     obsp: Optional[str] = None,
     copy: bool = False,
 ) -> Optional[AnnData]:
     """
-    Performs Louvain Clustering using cuGraph
+    Performs Louvain clustering using cuGraph, which implements the method
+    described in:
+
+    Blondel, V.D., Guillaume, J.-L., Lambiotte, R., & Lefebvre, E. (2008).
+    Fast unfolding of community hierarchies in large networks, J. Stat.
+    Mech., P10008. DOI: 10.1088/1742-5468/2008/10/P10008
 
     Parameters
     ----------
@@ -166,38 +172,51 @@ def louvain(
             annData object
 
         resolution
-            A parameter value controlling the coarseness of the clustering.
-            Higher values lead to more clusters.
+            A parameter value controlling the coarseness of the clustering
+            (alled gamma in the modularity formula). Higher values lead to
+            more clusters.
 
         restrict_to
-            Restrict the clustering to the categories within the key for sample
-            annotation, tuple needs to contain `(obs_key, list_of_categories)`.
+            Restrict the clustering to the categories within the key for
+            sample annotation, tuple needs to contain
+            `(obs_key, list_of_categories)`.
 
         key_added
             `adata.obs` key under which to add the cluster labels.
 
         adjacency
-            Sparse adjacency matrix of the graph, defaults to neighbors connectivities.
+            Sparse adjacency matrix of the graph, defaults to neighbors
+            connectivities.
 
         n_iterations
-            This controls the maximum number of levels/iterations of the Louvain algorithm.
-            When specified the algorithm will terminate after no more than the specified number of iterations.
-            No error occurs when the algorithm terminates early in this manner.
+            This controls the maximum number of levels/iterations of the
+            Louvain algorithm. When specified the algorithm will terminate
+            after no more than the specified number of iterations. No error
+            occurs when the algorithm terminates early in this manner.
+            Capped at 500 to prevent excessive runtime.
+
+        threshold
+            Modularity gain threshold for each level/iteration. If the gain
+            of modularity between two levels of the algorithm is less than
+            the given threshold then the algorithm stops and returns the
+            resulting communities. Defaults to 1e-7.
 
         use_weights
-            If `True`, edge weights from the graph are used in the computation
-            (placing more emphasis on stronger edges).
+            If `True`, edge weights from the graph are used in the
+            computation (placing more emphasis on stronger edges).
 
         neighbors_key
-            If not specified, `louvain` looks at `.obsp['connectivities']` for neighbors connectivities
-            If specified, `louvain` looks at `.obsp['neighbors_key_ connectivities']` for neighbors connectivities
+            If not specified, `louvain` looks at `.obsp['connectivities']`
+            for neighbors connectivities. If specified, `louvain` looks at
+            `.obsp[.uns[neighbors_key]['connectivities_key']]` for neighbors
+            connectivities.
 
         obsp
-            Use .obsp[obsp] as adjacency. You can't specify both
-            `obsp` and `neighbors_key` at the same time.
+            Use `.obsp[obsp]` as adjacency. You can't specify both `obsp`
+            and `neighbors_key` at the same time.
 
         copy
-            Whether to copy `adata` or modify it inplace.
+            Whether to copy `adata` or modify it in place.
 
     """
     # Adjacency graph
@@ -228,7 +247,12 @@ def louvain(
     g.from_cudf_adjlist(offsets, indices, weights)
 
     # Cluster
-    louvain_parts, _ = culouvain(g, resolution=resolution, max_iter=n_iterations)
+    louvain_parts, _ = culouvain(
+        g,
+        resolution=resolution,
+        max_level=n_iterations,
+        threshold=threshold,
+    )
 
     # Format output
     groups = (
@@ -254,7 +278,11 @@ def louvain(
         categories=natsorted(map(str, np.unique(groups))),
     )
     adata.uns["louvain"] = {}
-    adata.uns["louvain"]["params"] = {"resolution": resolution}
+    adata.uns["louvain"]["params"] = {
+        "resolution": resolution,
+        "n_iterations": n_iterations,
+        "threshold": threshold,
+    }
     return adata if copy else None
 
 
