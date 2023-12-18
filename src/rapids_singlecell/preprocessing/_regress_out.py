@@ -148,6 +148,4 @@ def _regress_out_chunk(X, y):
     lr.fit(X, y, convert_dtype=True)
     return y.reshape(
         y.shape[0],
-    ) - lr.predict(
-        X
-    ).reshape(y.shape[0])
+    ) - lr.predict(X).reshape(y.shape[0])

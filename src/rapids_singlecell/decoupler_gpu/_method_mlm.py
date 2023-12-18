@@ -124,9 +124,7 @@ def run_mlm(
 
     if verbose:
         print(
-            "Running mlm on mat with {} samples and {} targets for {} sources.".format(
-                m.shape[0], len(c), net.shape[1]
-            )
+            f"Running mlm on mat with {m.shape[0]} samples and {len(c)} targets for {net.shape[1]} sources."
         )
 
     # Run MLM

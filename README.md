@@ -4,10 +4,16 @@
 [![Documentation Status](https://readthedocs.org/projects/rapids-singlecell/badge/?version=latest)](https://rapids-singlecell.readthedocs.io/en/latest/?badge=latest)
 [![Build and Test](https://github.com/scverse/rapids_singlecell/actions/workflows/test-gpu.yml/badge.svg)](https://github.com/scverse/rapids_singlecell/actions/workflows/test-gpu.yml)
 
-# rapids-singlecell
+# rapids-singlecell: GPU-Accelerated Single-Cell Analysis within scverse
 
-## Background
-This library is designed to accelerate single cell data analysis by utilizing the capabilities of GPU computing. Drawing inspiration from both the [scanpy](https://github.com/scverse/scanpy) library by Theis lab and the [rapids-single-cell-examples](https://github.com/clara-parabricks/rapids-single-cell-examples) library from Nvidia's RAPIDS team, it introduces GPU-optimized versions of their functions. While aiming to remain compatible with the original codes, the library's primary objective is to blend the computational strength of GPUs with the user-friendly nature of the scverse ecosystem.
+Rapids-singlecell offers enhanced single-cell data analysis as a near drop-in replacement predominantly for scanpy, while also incorporating select functionalities from squidpy and decoupler. Utilizing GPU computing with cupy and Nvidia’s RAPIDS, it emphasizes high computational efficiency. As part of the scverse ecosystem, rapids-singlecell continuously aims to maintain compatibility, adapting and growing through community collaboration.
+
+* **Broad GPU Optimization:** Facilitates accelerated processing of large datasets, with GPU-enabled AnnData objects.
+* **Selective scverse Library Integration:** Incorporates key functionalities from scanpy, with additional features from squidpy and decoupler.
+* **Easy Installation Process:** Available via Conda and PyPI, with detailed setup guidelines.
+* **Accessible Documentation:** Provides comprehensive guides and examples tailored for efficient application.
+
+Our commitment with rapids-singlecell is to deliver a powerful, user-centric tool that significantly enhances single-cell data analysis capabilities in bioinformatics.
 
 ## Installation
 ### Conda
@@ -15,23 +21,20 @@ The easiest way to install *rapids-singlecell* is to use one of the *yaml* file 
 ```
 conda env create -f conda/rsc_rapids_23.04.yml
 # or
-mamba env create -f conda/rsc_rapids_23.08.yml
+mamba env create -f conda/rsc_rapids_23.10.yml
 ```
 ### PyPI
-As of version 0.4.0 *rapids-singlecell* is now on PyPI.
 ```
 pip install rapids-singlecell
 ```
 The default installer doesn't cover RAPIDS nor cupy. Information on how to install RAPIDS & cupy can be found [here](https://rapids.ai/start.html).
 
-If you want to use RAPIDS new PyPI packages, the whole library with all dependencies can be install with:
+If you want to use RAPIDS PyPI packages, the whole library with all dependencies can be install with:
 ````
 pip install 'rapids-singlecell[rapids11]' --extra-index-url=https://pypi.nvidia.com #CUDA11.X
 pip install 'rapids-singlecell[rapids12]' --extra-index-url=https://pypi.nvidia.com #CUDA12
 ````
 It is important to ensure that the CUDA environment is set up correctly so that RAPIDS and Cupy can locate the necessary libraries.
-
-To view a full guide how to set up a fully functioned single cell GPU accelerated conda environment visit [GPU_SingleCell_Setup](https://github.com/Intron7/GPU_SingleCell_Setup)
 
 ## Documentation
 

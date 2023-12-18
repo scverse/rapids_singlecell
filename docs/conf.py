@@ -62,7 +62,7 @@ extensions = [
 
 autosummary_generate = True
 autodoc_member_order = "bysource"
-autodoc_mock_imports = ["cudf", "cuml", "cugraph", "cupy", "cupyx"]
+autodoc_mock_imports = ["cudf", "cuml", "cugraph", "cupy", "cupyx", "pylibraft"]
 default_role = "literal"
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
@@ -127,6 +127,7 @@ html_theme_options = {
     "repository_url": repository_url,
     "repository_branch": os.environ.get("READTHEDOCS_GIT_IDENTIFIER", "main"),
     "use_repository_button": True,
+    "navigation_with_keys": False,
 }
 html_show_sphinx = False
 html_logo = "_static/logo3.svg"

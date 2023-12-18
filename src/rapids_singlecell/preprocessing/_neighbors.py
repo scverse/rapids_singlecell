@@ -1,3 +1,4 @@
+import math
 from types import MappingProxyType
 from typing import Any, Literal, Mapping, Optional, Union
 
@@ -5,13 +6,14 @@ import cupy as cp
 import numpy as np
 from anndata import AnnData
 from cuml.manifold.simpl_set import fuzzy_simplicial_set
-from cuml.neighbors import NearestNeighbors
-from cupyx.scipy import sparse
+from cupyx.scipy import sparse as cp_sparse
+from pylibraft.common import DeviceResources
+from scipy import sparse as sc_sparse
 
 from rapids_singlecell.tools._utils import _choose_representation
 
 AnyRandom = Union[None, int, np.random.RandomState]
-_Alogithms = Literal["auto", "brute", "ivfflat", "ivfpq"]
+_Alogithms = Literal["brute", "ivfflat", "ivfpq", "cagra"]
 _MetricsDense = Literal[
     "l2",
     "chebyshev",
@@ -51,16 +53,167 @@ _MetricsSparse = Literal[
 _Metrics = Union[_MetricsDense, _MetricsSparse]
 
 
+def _brute_knn(X, k, metric, metric_kwds):
+    from cuml.neighbors import NearestNeighbors
+
+    nn = NearestNeighbors(
+        n_neighbors=k,
+        algorithm="brute",
+        metric=metric,
+        output_type="cupy",
+        metric_params=metric_kwds,
+    )
+    nn.fit(X)
+    distances, neighbors = nn.kneighbors(X)
+    return neighbors, distances
+
+
+def _cagra_knn(X, k, metric):
+    try:
+        from pylibraft.neighbors import cagra
+    except ImportError:
+        raise ImportError(
+            "The 'cagra' module is not available in your current RAFT installation. "
+            "Please update RAFT to a version that supports 'cagra'."
+        )
+
+    handle = DeviceResources()
+    build_params = cagra.IndexParams(metric="sqeuclidean", build_algo="nn_descent")
+    index = cagra.build(build_params, X, handle=handle)
+
+    n_samples = X.shape[0]
+    all_neighbors = cp.zeros((n_samples, k), dtype=cp.int32)
+    all_distances = cp.zeros((n_samples, k), dtype=cp.float32)
+
+    batchsize = 65000
+    n_batches = math.ceil(X.shape[0] / batchsize)
+    for batch in range(n_batches):
+        start_idx = batch * batchsize
+        stop_idx = min(batch * batchsize + batchsize, X.shape[0])
+        batch_X = X[start_idx:stop_idx, :]
+        search_params = cagra.SearchParams()
+        distances, neighbors = cagra.search(
+            search_params, index, batch_X, k, handle=handle
+        )
+        all_neighbors[start_idx:stop_idx, :] = cp.asarray(neighbors)
+        all_distances[start_idx:stop_idx, :] = cp.asarray(distances)
+        handle.sync()
+    if metric == "euclidean":
+        all_distances = cp.sqrt(all_distances)
+    return all_neighbors, all_distances
+
+
+def _ivf_flat_knn(X, k, metric):
+    from pylibraft.neighbors import ivf_flat
+
+    handle = DeviceResources()
+    if X.shape[0] < 2048:
+        n_lists = X.shape[0] // 2
+    else:
+        n_lists = 1024
+    index_params = ivf_flat.IndexParams(n_lists=n_lists, metric=metric)
+    index = ivf_flat.build(index_params, X, handle=handle)
+
+    distances, neighbors = ivf_flat.search(
+        ivf_flat.SearchParams(), index, X, k, handle=handle
+    )
+    distances = cp.asarray(distances)
+    neighbors = cp.asarray(neighbors)
+    handle.sync()
+    return neighbors, distances
+
+
+def _ivf_pq_knn(X, k, metric):
+    from pylibraft.neighbors import ivf_pq
+
+    handle = DeviceResources()
+    if X.shape[0] < 2048:
+        n_lists = X.shape[0] // 2
+    else:
+        n_lists = 1024
+    index_params = ivf_pq.IndexParams(n_lists=n_lists, metric=metric)
+    index = ivf_pq.build(index_params, X, handle=handle)
+
+    distances, neighbors = ivf_pq.search(
+        ivf_pq.SearchParams(), index, X, k, handle=handle
+    )
+    distances = cp.asarray(distances)
+    neighbors = cp.asarray(neighbors)
+    handle.sync()
+    return neighbors, distances
+
+
+def _check_neighbors_X(X, algorithm):
+    """
+    Check and convert input X to the expected format based on algorithm.
+
+    Parameters:
+    X (array-like or sparse matrix): Input data.
+    algorithm (str): The algorithm to be used.
+
+    Returns:
+    X_contiguous (cupy.ndarray or sparse.csr_matrix): Contiguous array or CSR matrix.
+    """
+    if cp_sparse.issparse(X) or sc_sparse.issparse(X):
+        if algorithm != "brute":
+            raise ValueError(
+                f"Sparse input is not supported for {algorithm} algorithm. Use 'brute' instead."
+            )
+        X_contiguous = X.tocsr()
+
+    else:
+        if isinstance(X, np.ndarray):
+            X_contiguous = cp.asarray(X, order="C", dtype=np.float32)
+        elif isinstance(X, cp.ndarray):
+            X_contiguous = cp.ascontiguousarray(X, dtype=np.float32)
+        else:
+            raise TypeError(
+                "Unsupported type for X. Expected ndarray or sparse matrix."
+            )
+
+    return X_contiguous
+
+
+def _check_metrics(algorithm, metric):
+    """
+    Check if the provided metric is compatible with the chosen algorithm.
+
+    Parameters:
+    algorithm (str): The algorithm to be used.
+    metric (str): The metric for distance computation.
+
+    Returns:
+    bool: True if the metric is compatible, otherwise ValueError is raised.
+    """
+    if algorithm == "brute":
+        # 'brute' support all metrics, no need to check further.
+        return True
+    elif algorithm == "cagra":
+        if metric not in ["euclidean", "sqeuclidean"]:
+            raise ValueError(
+                "cagra only supports 'euclidean' and 'sqeuclidean' metrics."
+            )
+    elif algorithm in ["ivfpq", "ivfflat"]:
+        if metric not in ["euclidean", "sqeuclidean", "inner_product"]:
+            raise ValueError(
+                f"{algorithm} only supports 'euclidean', 'sqeuclidean', and 'inner_product' metrics."
+            )
+    else:
+        raise NotImplementedError(f"The {algorithm} algorithm is not implemented yet.")
+
+    return True
+
+
 def neighbors(
     adata: AnnData,
     n_neighbors: int = 15,
     n_pcs: Optional[int] = None,
     use_rep: Optional[str] = None,
     random_state: AnyRandom = 0,
+    algorithm: _Alogithms = "brute",
     metric: _Metrics = "euclidean",
     metric_kwds: Mapping[str, Any] = MappingProxyType({}),
     key_added: Optional[str] = None,
-    algorithm: _Alogithms = "auto",
     copy: bool = False,
 ) -> Optional[AnnData]:
     """\
@@ -88,6 +241,17 @@ def neighbors(
         computed with default parameters or `n_pcs` if present.
     random_state
         A numpy random seed.
+    algorithm
+        The query algorithm to use. Valid options are:
+            * 'brute': Brute-force search that computes distances to all data points, guaranteeing exact results.
+
+            * 'ivfflat': Uses inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
+
+            * 'ivfpq': Combines inverted file indexing with product quantization to encode sub-vectors of the dataset, facilitating faster distance computation.
+
+            * 'cagra': Employs the Compressed, Accurate Graph-based search to quickly find nearest neighbors by traversing a graph structure.
+
+        Please ensure that the chosen algorithm is compatible with your dataset and the specific requirements of your search problem.
     metric
         A known metric's name or a callable that returns a distance.
     metric_kwds
@@ -122,20 +286,27 @@ def neighbors(
         adata._init_as_actual(adata.copy())
     X = _choose_representation(adata, use_rep=use_rep, n_pcs=n_pcs)
 
-    nn = NearestNeighbors(
-        n_neighbors=n_neighbors, algorithm=algorithm, metric=metric, output_type="cupy"
-    )
-    if isinstance(X, cp.ndarray):
-        X_contiguous = cp.ascontiguousarray(X, dtype=np.float32)
-    elif isinstance(X, sparse.spmatrix):
-        X_contiguous = X
-    else:
-        X_contiguous = np.ascontiguousarray(X, dtype=np.float32)
-    nn.fit(X_contiguous)
-    distances = nn.kneighbors_graph(X_contiguous, mode="distance")
+    X_contiguous = _check_neighbors_X(X, algorithm)
+    _check_metrics(algorithm, metric)
+
     n_obs = adata.shape[0]
-    knn_dist = distances.data.reshape(n_obs, n_neighbors)
-    knn_indices = distances.indices.reshape(n_obs, n_neighbors)
+    if algorithm == "brute":
+        knn_indices, knn_dist = _brute_knn(
+            X_contiguous, n_neighbors, metric, metric_kwds
+        )
+    elif algorithm == "cagra":
+        knn_indices, knn_dist = _cagra_knn(X_contiguous, n_neighbors, metric)
+    elif algorithm == "ivfflat":
+        knn_indices, knn_dist = _ivf_flat_knn(X_contiguous, n_neighbors, metric)
+    elif algorithm == "ivfpq":
+        knn_indices, knn_dist = _ivf_pq_knn(X_contiguous, n_neighbors, metric)
+
+    n_nonzero = n_obs * n_neighbors
+    rowptr = cp.arange(0, n_nonzero + 1, n_neighbors)
+    distances = cp_sparse.csr_matrix(
+        (cp.ravel(knn_dist), cp.ravel(knn_indices), rowptr), shape=(n_obs, n_obs)
+    )
+
     set_op_mix_ratio = 1.0
     local_connectivity = 1.0
     X_conn = cp.empty((n_obs, 1), dtype=np.float32)

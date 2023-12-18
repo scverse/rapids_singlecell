@@ -26,6 +26,95 @@ const float* adj_matrix_data, float* num, int n_samples, int n_features) {
 }
 """
 
+kernel_morans_I_num_sparse = r"""
+extern "C" __global__
+void morans_I_num_sparse(const int* adj_matrix_row_ptr, const int* adj_matrix_col_ind, const float* adj_matrix_data,
+            const int* data_row_ptr, const int* data_col_ind, const float* data_values,
+            const int n_samples, const int n_features, const float* mean_array,
+            float* num) {
+    int i = blockIdx.x;
+
+    if (i >= n_samples) {
+        return;
+    }
+    int numThreads = blockDim.x;
+    int threadid = threadIdx.x;
+
+    // Create cache
+    __shared__ float cell1[3072];
+    __shared__ float cell2[3072];
+
+    int numruns = (n_features + 3072 - 1) / 3072;
+
+    int k_start = adj_matrix_row_ptr[i];
+    int k_end = adj_matrix_row_ptr[i + 1];
+
+    for (int k = k_start; k < k_end; ++k) {
+        int j = adj_matrix_col_ind[k];
+        float edge_weight = adj_matrix_data[k];
+
+        int cell1_start = data_row_ptr[i];
+        int cell1_stop = data_row_ptr[i+1];
+
+        int cell2_start = data_row_ptr[j];
+        int cell2_stop = data_row_ptr[j+1];
+
+        for(int batch_runner = 0; batch_runner < numruns; batch_runner++){
+            // Set cache to 0
+            for (int idx = threadid; idx < 3072; idx += numThreads) {
+                cell1[idx] = 0.0f;
+                cell2[idx] = 0.0f;
+            }
+            __syncthreads();
+            int batch_start = 3072 * batch_runner;
+            int batch_end = 3072 * (batch_runner + 1);
+
+            // Densify sparse into cache
+            for (int cell1_idx = cell1_start+ threadid; cell1_idx < cell1_stop;cell1_idx+=numThreads) {
+                int gene_id = data_col_ind[cell1_idx];
+                if (gene_id >= batch_start && gene_id < batch_end){
+                    cell1[gene_id % 3072] = data_values[cell1_idx];
+                }
+            }
+            __syncthreads();
+            for (int cell2_idx = cell2_start+threadid; cell2_idx < cell2_stop;cell2_idx+=numThreads) {
+                int gene_id = data_col_ind[cell2_idx];
+                if (gene_id >= batch_start && gene_id < batch_end){
+                    cell2[gene_id % 3072] = data_values[cell2_idx];
+                }
+            }
+            __syncthreads();
+
+            // Calc num
+            for(int gene = threadid; gene < 3072; gene+= numThreads){
+                int global_gene_index = batch_start + gene;
+                if (global_gene_index < n_features) {
+                    float product = (cell1[gene] - mean_array[global_gene_index]) * (cell2[gene]-mean_array[global_gene_index]);
+                    atomicAdd(&num[global_gene_index], edge_weight * product);
+                }
+            }
+        }
+    }
+}
+"""
+
+pre_den_calc_sparse = r"""
+extern "C" __global__
+    void pre_den_sparse_kernel(const int* data_col_ind, const float* data_values, int nnz,
+                        const float* mean_array,
+                        float* den, int* counter) {
+            int i = blockIdx.x * blockDim.x + threadIdx.x;
+            if(i >= nnz){
+                return;
+            }
+
+            int geneidx = data_col_ind[i];
+            float value = data_values[i]- mean_array[geneidx];
+            atomicAdd(&counter[geneidx], 1);
+            atomicAdd(&den[geneidx], value*value);
+}
+"""
+
 
 def _morans_I_cupy_dense(data, adj_matrix_cupy, n_permutations=100):
     n_samples, n_features = data.shape
@@ -52,7 +141,11 @@ def _morans_I_cupy_dense(data, adj_matrix_cupy, n_permutations=100):
             n_features,
         ),
     )
+
+    # Calculate the denominator for Moarn's I
     den = cp.sum(data_centered_cupy**2, axis=0)
+
+    # Calculate Moarn's I
     morans_I = num / den
     # Calculate p-values using permutation tests
     if n_permutations:
@@ -83,78 +176,71 @@ def _morans_I_cupy_dense(data, adj_matrix_cupy, n_permutations=100):
 
 def _morans_I_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
     n_samples, n_features = data.shape
-    data_mean = data.mean(axis=0).ravel()
+    # Calculate the numerator for Moarn's I
+    num = cp.zeros(n_features, dtype=cp.float32)
+    num_kernel = cp.RawKernel(kernel_morans_I_num_sparse, "morans_I_num_sparse")
+    means = data.mean(axis=0).ravel()
 
-    # Calculate den
-    den = cp.sum((data - data_mean) ** 2, axis=0)
+    n_samples, n_features = data.shape
+    sg = n_samples
+    # Launch the kernel
+    num_kernel(
+        (sg,),
+        (1024,),
+        (
+            adj_matrix_cupy.indptr,
+            adj_matrix_cupy.indices,
+            adj_matrix_cupy.data,
+            data.indptr,
+            data.indices,
+            data.data,
+            n_samples,
+            n_features,
+            means,
+            num,
+        ),
+    )
 
-    # Calculate the numerator and denominator for Moran's I
-    data = data.tocsc()
-    num = cp.zeros(n_features, dtype=data.dtype)
-    block_size = 8
+    # Calculate the denominator for Moarn's I
+    den = cp.zeros(n_features, dtype=cp.float32)
+    counter = cp.zeros(n_features, dtype=cp.int32)
+    block_den = math.ceil(data.nnz / 32)
+    pre_den_kernel = cp.RawKernel(pre_den_calc_sparse, "pre_den_sparse_kernel")
 
-    sg = int(math.ceil(n_samples / block_size))
+    pre_den_kernel(
+        (block_den,), (32,), (data.indices, data.data, data.nnz, means, den, counter)
+    )
+    counter = n_samples - counter
+    den += counter * means**2
 
-    num_kernel = cp.RawKernel(kernel_morans_I_num_dense, "morans_I_num_dense")
-    batchsize = 1000
-    n_batches = math.ceil(n_features / batchsize)
-    for batch in range(n_batches):
-        start_idx = batch * batchsize
-        stop_idx = min(batch * batchsize + batchsize, n_features)
-        data_centered_cupy = data[:, start_idx:stop_idx].toarray()
-        data_centered_cupy = data_centered_cupy - data_mean[start_idx:stop_idx]
-        num_block = cp.zeros(data_centered_cupy.shape[1], dtype=data.dtype)
-        fg = int(math.ceil(data_centered_cupy.shape[1] / block_size))
-        grid_size = (fg, sg, 1)
-
-        num_kernel(
-            grid_size,
-            (block_size, block_size, 1),
-            (
-                data_centered_cupy,
-                adj_matrix_cupy.indptr,
-                adj_matrix_cupy.indices,
-                adj_matrix_cupy.data,
-                num_block,
-                n_samples,
-                data_centered_cupy.shape[1],
-            ),
-        )
-        num[start_idx:stop_idx] = num_block
-        cp.cuda.Stream.null.synchronize()
-
+    # Calculate Moarn's I
     morans_I = num / den
-    # Calculate p-values using permutation tests
+
     if n_permutations:
         morans_I_permutations = cp.zeros((n_permutations, n_features), dtype=cp.float32)
         for p in range(n_permutations):
             idx_shuffle = cp.random.permutation(adj_matrix_cupy.shape[0])
             adj_matrix_permuted = adj_matrix_cupy[idx_shuffle, :]
             num_permuted = cp.zeros(n_features, dtype=data.dtype)
-            for batch in range(n_batches):
-                start_idx = batch * batchsize
-                stop_idx = min(batch * batchsize + batchsize, n_features)
-                data_centered_cupy = data[:, start_idx:stop_idx].toarray()
-                data_centered_cupy = data_centered_cupy - data_mean[start_idx:stop_idx]
-                num_block = cp.zeros(data_centered_cupy.shape[1], dtype=data.dtype)
-                fg = int(math.ceil(data_centered_cupy.shape[1] / block_size))
-                grid_size = (fg, sg, 1)
-                num_kernel(
-                    grid_size,
-                    (block_size, block_size, 1),
-                    (
-                        data_centered_cupy,
-                        adj_matrix_permuted.indptr,
-                        adj_matrix_permuted.indices,
-                        adj_matrix_permuted.data,
-                        num_block,
-                        n_samples,
-                        data_centered_cupy.shape[1],
-                    ),
-                )
-                num_permuted[start_idx:stop_idx] = num_block
-                cp.cuda.Stream.null.synchronize()
+            num_kernel(
+                (sg,),
+                (1024,),
+                (
+                    adj_matrix_permuted.indptr,
+                    adj_matrix_permuted.indices,
+                    adj_matrix_permuted.data,
+                    data.indptr,
+                    data.indices,
+                    data.data,
+                    n_samples,
+                    n_features,
+                    means,
+                    num_permuted,
+                ),
+            )
+
             morans_I_permutations[p, :] = num_permuted / den
+            cp.cuda.Stream.null.synchronize()
     else:
         morans_I_permutations = None
     return morans_I, morans_I_permutations
