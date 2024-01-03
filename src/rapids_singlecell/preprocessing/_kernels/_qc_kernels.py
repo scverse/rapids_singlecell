@@ -12,14 +12,19 @@ _sparse_qc_kernel_csc = r"""
         int start_idx = indptr[gene];
         int stop_idx = indptr[gene+1];
 
+
+
+        {0} sums_genes_i = 0;
+        int gene_ex_i = 0;
         for(int cell = start_idx; cell < stop_idx; cell++){
             {0} value = data[cell];
             int cell_number = index[cell];
-            sums_genes[gene] += value;
+            sums_genes_i += value;
             atomicAdd(&sums_cells[cell_number], value);
-            &gene_ex[gene] += 1;
+            gene_ex_i += 1;
             atomicAdd(&cell_ex[cell_number], 1);
-
+        sums_genes[gene] = sums_genes_i;
+        gene_ex[gene] = gene_ex_i;
         }
     }
 """
@@ -36,14 +41,17 @@ _sparse_qc_kernel_csr = r"""
         int start_idx = indptr[cell];
         int stop_idx = indptr[cell+1];
 
+        {0} sums_cells_i = 0;
+        int cell_ex_i = 0;
         for(int gene = start_idx; gene < stop_idx; gene++){
             {0} value = data[gene];
             int gene_number = index[gene];
             atomicAdd(&sums_genes[gene_number], value);
-            sums_cells[cell] += value;
+            sums_cells_i += value;
             atomicAdd(&gene_ex[gene_number], 1);
-            cell_ex[cell] += 1;
-
+            cell_ex_i += 1;
+        sums_cells[cell] = sums_cells_i;
+        cell_ex[cell] = cell_ex_i;
         }
     }
 """
@@ -101,12 +109,14 @@ _sparse_qc_kernel_csr_sub = r"""
         int start_idx = indptr[cell];
         int stop_idx = indptr[cell+1];
 
+        {0} sums_cells_i = 0;
         for(int gene = start_idx; gene < stop_idx; gene++){
             int gene_number = index[gene];
             if (mask[gene_number]==true){
-                sums_cells[cell] += data[gene];
+                sums_cells_i += data[gene];
 
             }
+        sums_cells[cell] = sums_cells_i;
         }
     }
 """
