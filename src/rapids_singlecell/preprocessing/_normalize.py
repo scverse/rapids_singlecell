@@ -52,7 +52,18 @@ def normalize_total(
     if sparse.isspmatrix_csc(X):
         X = X.tocsr()
     if not target_sum:
-        counts_per_cell = X.sum(axis=1).ravel()
+        if sparse.issparse(X):
+            from ._kernels._norm_kernel import _get_sparse_sum_major
+
+            counts_per_cell = cp.zeros(X.shape[0], dtype=X.dtype)
+            sum_kernel = _get_sparse_sum_major(X.dtype)
+            sum_kernel(
+                (X.shape[0],),
+                (64,),
+                (X.indptr, X.data, counts_per_cell, X.shape[0]),
+            )
+        else:
+            counts_per_cell = X.sum(axis=1)
         target_sum = cp.median(counts_per_cell)
 
     if sparse.isspmatrix_csr(X):
