@@ -12,8 +12,6 @@ _sparse_qc_kernel_csc = r"""
         int start_idx = indptr[gene];
         int stop_idx = indptr[gene+1];
 
-
-
         {0} sums_genes_i = 0;
         int gene_ex_i = 0;
         for(int cell = start_idx; cell < stop_idx; cell++){
