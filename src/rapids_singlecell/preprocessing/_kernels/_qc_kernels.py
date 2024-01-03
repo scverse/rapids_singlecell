@@ -15,9 +15,9 @@ _sparse_qc_kernel_csc = r"""
         for(int cell = start_idx; cell < stop_idx; cell++){
             {0} value = data[cell];
             int cell_number = index[cell];
-            atomicAdd(&sums_genes[gene], value);
+            sums_genes[gene] += value;
             atomicAdd(&sums_cells[cell_number], value);
-            atomicAdd(&gene_ex[gene], 1);
+            &gene_ex[gene] += 1;
             atomicAdd(&cell_ex[cell_number], 1);
 
         }
@@ -40,9 +40,9 @@ _sparse_qc_kernel_csr = r"""
             {0} value = data[gene];
             int gene_number = index[gene];
             atomicAdd(&sums_genes[gene_number], value);
-            atomicAdd(&sums_cells[cell], value);
+            sums_cells[cell] += value;
             atomicAdd(&gene_ex[gene_number], 1);
-            atomicAdd(&cell_ex[cell], 1);
+            cell_ex[cell] += 1;
 
         }
     }
@@ -58,8 +58,6 @@ _sparse_qc_kernel_dense = r"""
         if(cell >= n_cells || gene >=n_genes){
             return;
         }
-
-
         long long int index = static_cast<long long int>(cell) * n_genes + gene;
         {0} value = data[index];
         if (value>0.0){
@@ -106,7 +104,7 @@ _sparse_qc_kernel_csr_sub = r"""
         for(int gene = start_idx; gene < stop_idx; gene++){
             int gene_number = index[gene];
             if (mask[gene_number]==true){
-                atomicAdd(&sums_cells[cell], data[gene]);
+                sums_cells[cell] += data[gene];
 
             }
         }
