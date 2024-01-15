@@ -23,10 +23,10 @@ def normalize_total(
 
     Parameters
     ----------
-        adata:
+        adata
             AnnData/ cunnData object
 
-        target_sum :
+        target_sum
             If `None`, after normalization, each observation (cell) has a total count equal to the median of total counts for observations (cells) before normalization.
 
         layer
