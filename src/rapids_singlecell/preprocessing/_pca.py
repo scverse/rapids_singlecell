@@ -28,40 +28,41 @@ def pca(
 
     Parameters
     ----------
-        adata :
+        adata
             AnnData/ cunnData object
 
         layer
             If provided, use `adata.layers[layer]` for expression values instead of `adata.X`.
 
         n_comps
-            Number of principal components to compute. Defaults to 50, or 1 - minimum
+            Number of principal components to compute. Defaults to 50, or 1 - minimum \
             dimension size of selected representation
 
         zero_center
-            If `True`, compute standard PCA from covariance matrix.
+            If `True`, compute standard PCA from covariance matrix. \
             If `False`, omit zero-centering variables
 
         random_state
             Change to use different initial states for the optimization.
 
         use_highly_variable
-            Whether to use highly variable genes only, stored in
-            `.var['highly_variable']`.
+            Whether to use highly variable genes only, stored in \
+            `.var['highly_variable']`. \
             By default uses them if they have been determined beforehand.
 
         chunked
-            If `True`, perform an incremental PCA on segments of `chunk_size`.
-            The incremental PCA automatically zero centers and ignores settings of
+            If `True`, perform an incremental PCA on segments of `chunk_size`. \
+            The incremental PCA automatically zero centers and ignores settings of \
             `random_seed` and `svd_solver`. If `False`, perform a full PCA.
 
         chunk_size
-            Number of observations to include in each chunk.
+            Number of observations to include in each chunk. \
             Required if `chunked=True` was passed.
 
     Returns
     -------
-        adds fields to `adata` :
+        adds fields to `adata`:
+
             `.obsm['X_pca']`
                 PCA representation of data.
             `.varm['PCs']`
@@ -69,7 +70,7 @@ def pca(
             `.uns['pca']['variance_ratio']`
                 Ratio of explained variance.
             `.uns['pca']['variance']`
-                Explained variance, equivalent to the eigenvalues of the
+                Explained variance, equivalent to the eigenvalues of the \
                 covariance matrix.
     """
     if use_highly_variable is True and "highly_variable" not in adata.var.keys():
