@@ -1,10 +1,11 @@
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple, Union
 
 import cudf
 import numpy as np
 import pandas as pd
 from anndata import AnnData
 from natsort import natsorted
+from packaging import version
 from scanpy.tools._utils import _choose_graph
 from scanpy.tools._utils_clustering import rename_groups, restrict_adjacency
 from scipy import sparse
@@ -14,17 +15,23 @@ def leiden(
     adata: AnnData,
     resolution: float = 1.0,
     *,
+    random_state: Union[int, None] = 0,
     restrict_to: Optional[Tuple[str, Sequence[str]]] = None,
     key_added: str = "leiden",
     adjacency: Optional[sparse.spmatrix] = None,
     n_iterations: int = 100,
     use_weights: bool = True,
-    neighbors_key: Optional[int] = None,
+    neighbors_key: Optional[str] = None,
     obsp: Optional[str] = None,
     copy: bool = False,
 ) -> Optional[AnnData]:
     """
-    Performs Leiden Clustering using cuGraph
+    Performs Leiden clustering using cuGraph, which implements the method
+    described in:
+
+    Traag, V.A., Waltman, L., & van Eck, N.J. (2019). From Louvain to
+    Leiden: guaranteeing well-connected communities. Sci. Rep., 9(1), 5233.
+    DOI: 10.1038/s41598-019-41695-z
 
     Parameters
     ----------
@@ -33,38 +40,46 @@ def leiden(
 
         resolution
             A parameter value controlling the coarseness of the clustering.
-            Higher values lead to more clusters.
+            (called gamma in the modularity formula). Higher values lead to
+            more clusters.
+
+        random_state
+            Change the initialization of the optimization. Defaults to 0.
 
         restrict_to
-            Restrict the clustering to the categories within the key for sample
-            annotation, tuple needs to contain `(obs_key, list_of_categories)`.
+            Restrict the clustering to the categories within the key for
+            sample annotation, tuple needs to contain
+            `(obs_key, list_of_categories)`.
 
         key_added
             `adata.obs` key under which to add the cluster labels.
 
         adjacency
-            Sparse adjacency matrix of the graph, defaults to neighbors connectivities.
+            Sparse adjacency matrix of the graph, defaults to neighbors
+            connectivities.
 
         n_iterations
-            This controls the maximum number of levels/iterations of the Leiden algorithm.
-            When specified the algorithm will terminate after no more than the specified number of iterations.
-            No error occurs when the algorithm terminates early in this manner.
+            This controls the maximum number of levels/iterations of the
+            Leiden algorithm. When specified, the algorithm will terminate
+            after no more than the specified number of iterations. No error
+            occurs when the algorithm terminates early in this manner.
 
         use_weights
-            If `True`, edge weights from the graph are used in the computation
-            (placing more emphasis on stronger edges).
+            If `True`, edge weights from the graph are used in the
+            computation (placing more emphasis on stronger edges).
 
         neighbors_key
-            If not specified, `leiden` looks at `.obsp['connectivities']` for neighbors connectivities
-            If specified, `leiden` looks at `.obsp['neighbors_key_ connectivities']` for neighbors connectivities
+            If not specified, `leiden` looks at `.obsp['connectivities']`
+            for neighbors connectivities. If specified, `leiden` looks at
+            `.obsp[.uns[neighbors_key]['connectivities_key']]` for neighbors
+            connectivities.
 
         obsp
             Use .obsp[obsp] as adjacency. You can't specify both
             `obsp` and `neighbors_key` at the same time.
 
         copy
-            Whether to copy `adata` or modify it inplace.
-
+            Whether to copy `adata` or modify it in place.
     """
     # Adjacency graph
     from cugraph import Graph
@@ -94,7 +109,12 @@ def leiden(
     g.from_cudf_adjlist(offsets, indices, weights)
 
     # Cluster
-    leiden_parts, _ = culeiden(g, resolution=resolution, max_iter=n_iterations)
+    leiden_parts, _ = culeiden(
+        g,
+        resolution=resolution,
+        random_state=random_state,
+        max_iter=n_iterations,
+    )
 
     # Format output
     groups = (
@@ -119,6 +139,7 @@ def leiden(
     adata.uns["leiden"] = {}
     adata.uns["leiden"]["params"] = {
         "resolution": resolution,
+        "random_state": random_state,
         "n_iterations": n_iterations,
     }
     return adata if copy else None
@@ -132,13 +153,19 @@ def louvain(
     key_added: str = "louvain",
     adjacency: Optional[sparse.spmatrix] = None,
     n_iterations: int = 100,
+    threshold: float = 1e-7,
     use_weights: bool = True,
     neighbors_key: Optional[int] = None,
     obsp: Optional[str] = None,
     copy: bool = False,
 ) -> Optional[AnnData]:
     """
-    Performs Louvain Clustering using cuGraph
+    Performs Louvain clustering using cuGraph, which implements the method
+    described in:
+
+    Blondel, V.D., Guillaume, J.-L., Lambiotte, R., & Lefebvre, E. (2008).
+    Fast unfolding of community hierarchies in large networks, J. Stat.
+    Mech., P10008. DOI: 10.1088/1742-5468/2008/10/P10008
 
     Parameters
     ----------
@@ -146,42 +173,56 @@ def louvain(
             annData object
 
         resolution
-            A parameter value controlling the coarseness of the clustering.
-            Higher values lead to more clusters.
+            A parameter value controlling the coarseness of the clustering
+            (alled gamma in the modularity formula). Higher values lead to
+            more clusters.
 
         restrict_to
-            Restrict the clustering to the categories within the key for sample
-            annotation, tuple needs to contain `(obs_key, list_of_categories)`.
+            Restrict the clustering to the categories within the key for
+            sample annotation, tuple needs to contain
+            `(obs_key, list_of_categories)`.
 
         key_added
             `adata.obs` key under which to add the cluster labels.
 
         adjacency
-            Sparse adjacency matrix of the graph, defaults to neighbors connectivities.
+            Sparse adjacency matrix of the graph, defaults to neighbors
+            connectivities.
 
         n_iterations
-            This controls the maximum number of levels/iterations of the Louvain algorithm.
-            When specified the algorithm will terminate after no more than the specified number of iterations.
-            No error occurs when the algorithm terminates early in this manner.
+            This controls the maximum number of levels/iterations of the
+            Louvain algorithm. When specified the algorithm will terminate
+            after no more than the specified number of iterations. No error
+            occurs when the algorithm terminates early in this manner.
+            Capped at 500 to prevent excessive runtime.
+
+        threshold
+            Modularity gain threshold for each level/iteration. If the gain
+            of modularity between two levels of the algorithm is less than
+            the given threshold then the algorithm stops and returns the
+            resulting communities. Defaults to 1e-7.
 
         use_weights
-            If `True`, edge weights from the graph are used in the computation
-            (placing more emphasis on stronger edges).
+            If `True`, edge weights from the graph are used in the
+            computation (placing more emphasis on stronger edges).
 
         neighbors_key
-            If not specified, `louvain` looks at `.obsp['connectivities']` for neighbors connectivities
-            If specified, `louvain` looks at `.obsp['neighbors_key_ connectivities']` for neighbors connectivities
+            If not specified, `louvain` looks at `.obsp['connectivities']`
+            for neighbors connectivities. If specified, `louvain` looks at
+            `.obsp[.uns[neighbors_key]['connectivities_key']]` for neighbors
+            connectivities.
 
         obsp
-            Use .obsp[obsp] as adjacency. You can't specify both
-            `obsp` and `neighbors_key` at the same time.
+            Use `.obsp[obsp]` as adjacency. You can't specify both `obsp`
+            and `neighbors_key` at the same time.
 
         copy
-            Whether to copy `adata` or modify it inplace.
+            Whether to copy `adata` or modify it in place.
 
     """
     # Adjacency graph
     from cugraph import Graph
+    from cugraph import __version__ as cuv
     from cugraph import louvain as culouvain
 
     adata = adata.copy() if copy else adata
@@ -208,7 +249,19 @@ def louvain(
     g.from_cudf_adjlist(offsets, indices, weights)
 
     # Cluster
-    louvain_parts, _ = culouvain(g, resolution=resolution, max_iter=n_iterations)
+    if version.parse(cuv) >= version.parse("23.08.00"):
+        louvain_parts, _ = culouvain(
+            g,
+            resolution=resolution,
+            max_level=n_iterations,
+            threshold=threshold,
+        )
+    else:
+        louvain_parts, _ = culouvain(
+            g,
+            resolution=resolution,
+            max_iter=n_iterations,
+        )
 
     # Format output
     groups = (
@@ -234,7 +287,11 @@ def louvain(
         categories=natsorted(map(str, np.unique(groups))),
     )
     adata.uns["louvain"] = {}
-    adata.uns["louvain"]["params"] = {"resolution": resolution}
+    adata.uns["louvain"]["params"] = {
+        "resolution": resolution,
+        "n_iterations": n_iterations,
+        "threshold": threshold,
+    }
     return adata if copy else None
 
 

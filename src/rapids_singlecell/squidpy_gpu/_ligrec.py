@@ -237,10 +237,10 @@ def ligrec(
     Otherwise, modifies the adata object with the following key:
         * :attr:`~anndata.AnnData.uns` `['{key_added}']` -
             the above mentioned dict.
+
     NaN p-values mark combinations for which the mean expression of one of the \
     interacting components was 0 or it didnt pass the threshold percentage of \
     cells being expressed within a given cluster.
-
     """
     # Get and Check interactions
     if interactions is None:

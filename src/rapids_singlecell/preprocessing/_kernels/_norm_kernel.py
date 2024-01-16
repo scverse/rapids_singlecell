@@ -42,6 +42,39 @@ _mul_kernel_dense = r"""
 }
 """
 
+_get_sparse_sum_major_kernel = r"""
+        (const int *indptr,const {0} *data,
+            {0}* sums, int major) {
+        int major_idx = blockIdx.x;
+        if(major_idx >= major){
+            return;
+        }
+        int start_idx = indptr[major_idx];
+        int stop_idx = indptr[major_idx+1];
+
+        __shared__ {0} sum_place[64];
+
+        sum_place[threadIdx.x] = 0.0;
+        __syncthreads();
+
+        for(int minor_idx = start_idx+threadIdx.x; minor_idx < stop_idx; minor_idx+= blockDim.x){
+               sum_place[threadIdx.x] += data[minor_idx];
+        }
+        __syncthreads();
+
+        for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+            if (threadIdx.x < s) {
+                sum_place[threadIdx.x] += sum_place[threadIdx.x + s];
+            }
+            __syncthreads(); // Synchronize at each step of the reduction
+        }
+        if (threadIdx.x == 0) {
+            sums[major_idx] = sum_place[threadIdx.x];
+        }
+
+        }
+"""
+
 
 def _mul_csr(dtype):
     return cuda_kernel_factory(_mul_kernel_csr, (dtype,), "_mul_kernel_csr")
@@ -49,3 +82,9 @@ def _mul_csr(dtype):
 
 def _mul_dense(dtype):
     return cuda_kernel_factory(_mul_kernel_dense, (dtype,), "_mul_kernel_dense")
+
+
+def _get_sparse_sum_major(dtype):
+    return cuda_kernel_factory(
+        _get_sparse_sum_major_kernel, (dtype,), "_get_sparse_sum_major_kernel"
+    )
