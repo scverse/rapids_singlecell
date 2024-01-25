@@ -4,6 +4,8 @@ runners:
     instance_type: g4dn.xlarge
     machine_image: ami-067a4ba2816407ee9
     region: eu-north-1
-    preemptible: false
+    preemptible:
+      - true
+      - false
     labels:
       - cirun-aws-gpu
