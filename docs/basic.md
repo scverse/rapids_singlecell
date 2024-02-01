@@ -13,4 +13,4 @@ Our commitment with rapids-singlecell is to deliver a powerful, user-centric too
 
 * 07.08.23 *rapids-singlecell* is now part of scverse ecosystem.
 * 04.08.23 Thanks to the great team at [scverse](https://www.scverse.org) *rapids-singlecell* is now automatically tested with CI
-* 27.06.23 I'm very honored to announce that I was invited to co-author a [technical blog post](https://www.google.com/search?q=rapids-singlecell+nvidia&oq=rapids-singlecell+nvidia&gs_lcrp=EgZjaHJvbWUyBggAEEUYOTIJCAEQIRgKGKABMgkIAhAhGAoYoAEyCQgDECEYChigAdIBCDM1NzlqMGo3qAIAsAIA&sourceid=chrome&ie=UTF-8) that demonstrates the capabilities and performance of *rapids-singlecell* for NVIDIA.
+* 27.06.23 I'm very honored to announce that I was invited to co-author a [technical blog post](https://developer.nvidia.com/blog/gpu-accelerated-single-cell-rna-analysis-with-rapids-singlecell/) that demonstrates the capabilities and performance of *rapids-singlecell* for NVIDIA.
