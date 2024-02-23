@@ -1,4 +1,4 @@
-# Memory Management with RMM
+# Memory Management
 
 In rapids-singlecell, efficient memory management is crucial for handling large-scale datasets. This is facilitated by the integration of the RAPIDS Memory Manager ({mod}`rmm`). {mod}`rmm` is automatically invoked upon importing `rapids-singlecell`, modifying the default allocator for cupy. Integrating {mod}`rmm` with `rapids-singlecell` slightly modifies the execution speed of {mod}`cupy`. This change typically results in a minimal performance trade-off. However, it's crucial to be aware that certain specific functions, like {func}`~rapids_singlecell.pp.harmony`, might experience a more significant impact on performance efficiency due to this integration. Users can overwrite the default behavior with {func}`rmm.reinitialize`.
 
