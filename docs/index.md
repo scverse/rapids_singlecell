@@ -21,6 +21,7 @@
 Installation.md
 Usage_Principles.md
 api/index.md
+MM.md
 release-notes/index.md
 references.md
 notebooks.rst

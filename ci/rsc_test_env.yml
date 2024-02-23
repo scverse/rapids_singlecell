@@ -4,9 +4,9 @@ channels:
  - nvidia
  - conda-forge
 dependencies:
- - cudf=23.12
- - cuml=23.12
- - cugraph=23.12
+ - cudf=24.02
+ - cuml=24.02
+ - cugraph=24.02
  - python=3.10
  - cuda-version=12.0
  - cudnn
