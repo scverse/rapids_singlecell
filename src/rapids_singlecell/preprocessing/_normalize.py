@@ -14,9 +14,11 @@ from ._utils import _check_gpu_X, _check_nonnegative_integers
 
 def normalize_total(
     adata: Union[AnnData, cunnData],
+    *,
     target_sum: Optional[int] = None,
     layer: Optional[str] = None,
     inplace: bool = True,
+    copy: bool = False,
 ) -> Optional[Union[sparse.csr_matrix, cp.ndarray]]:
     """
     Normalizes rows in matrix so they sum to `target_sum`
@@ -33,8 +35,10 @@ def normalize_total(
             Layer to normalize instead of `X`. If `None`, `X` is normalized.
 
         inplace
-            Whether to update `adata` or return the normalized matrix.
+            Whether to update `adata` or return the matrix.
 
+        copy
+            Whether to return a copy or update `adata`. Not compatible with inplace=False.
 
     Returns
     -------
@@ -42,6 +46,10 @@ def normalize_total(
     the original `adata.X` and `adata.layers['layer']`, depending on `inplace`.
 
     """
+    if copy:
+        if not inplace:
+            raise ValueError("`copy=True` cannot be used with `inplace=False`.")
+        adata = adata.copy()
     X = _get_obs_rep(adata, layer=layer)
 
     _check_gpu_X(X)
@@ -90,12 +98,20 @@ def normalize_total(
 
     if inplace:
         _set_obs_rep(adata, X, layer=layer)
-    else:
+
+    if copy:
+        return adata
+    elif not inplace:
         return X
 
 
 def log1p(
-    adata: Union[AnnData, cunnData], layer: Optional[str] = None, copy: bool = False
+    adata: Union[AnnData, cunnData],
+    *,
+    layer: Optional[str] = None,
+    obsm: Optional[str] = None,
+    inplace: bool = True,
+    copy: bool = False
 ) -> Optional[Union[sparse.csr_matrix, cp.ndarray]]:
     """
     Calculated the natural logarithm of one plus the sparse matrix.
@@ -108,8 +124,14 @@ def log1p(
         layer
             Layer to normalize instead of `X`. If `None`, `X` is normalized.
 
+        obsm
+            Entry of obsm to transform.
+
+        inplace
+            Whether to update `adata` or return the matrix.
+
         copy
-            Whether to return a copy or update `adata`.
+            Whether to return a copy or update `adata`. Not compatible with inplace=False.
 
     Returns
     -------
@@ -118,17 +140,27 @@ def log1p(
             in-place and returns None.
 
     """
-    X = _get_obs_rep(adata, layer=layer)
+    if copy:
+        if not inplace:
+            raise ValueError("`copy=True` cannot be used with `inplace=False`.")
+        adata = adata.copy()
+    X = _get_obs_rep(adata, layer=layer, obsm=obsm)
 
     _check_gpu_X(X)
 
-    X = X.log1p()
-    adata.uns["log1p"] = {"base": None}
-    if not copy:
-        _set_obs_rep(adata, X, layer=layer)
+    if isinstance(X, cp.ndarray):
+        X = cp.log1p(X)
     else:
-        return X
+        X = X.log1p()
 
+    adata.uns["log1p"] = {"base": None}
+    if inplace:
+        _set_obs_rep(adata, X, layer=layer, obsm=obsm)
+
+    if copy:
+        return adata
+    elif not inplace:
+        return X
 
 def normalize_pearson_residuals(
     adata: Union[AnnData, cunnData],
