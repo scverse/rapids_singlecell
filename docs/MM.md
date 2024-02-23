@@ -7,7 +7,7 @@ In rapids-singlecell, efficient memory management is crucial for handling large-
 In {mod}`rmm`, the `managed_memory` feature facilitates VRAM oversubscription, allowing for the processing of data structures larger than the default VRAM capacity. This effectively extends the memory limit up to twice the VRAM size. Leveraging managed memory will introduce a performance overhead. This is particularly evident with substantial oversubscription, as it necessitates increased dependency on the comparatively slower system memory, leading to slowdowns in data processing tasks.
 
 ```
-# How to enable `managed_memory`
+# Enable `managed_memory`
 import rmm
 from rmm.allocators.cupy import rmm_cupy_allocator
 rmm.reinitialize(
@@ -22,7 +22,7 @@ cp.cuda.set_allocator(rmm_cupy_allocator)
 The `pool_allocator` functionality in {mod}`rmm` optimizes memory handling by pre-allocating a pool of memory, which can be swiftly accessed for GPU-related tasks. This approach, while being more memory-intensive, significantly boosts performance. It is particularly beneficial for operations that are heavy on memory usage, such as {func}`~rapids_singlecell.pp.harmony`, by minimizing the time spent on dynamic memory allocation during runtime.
 
 ```
-How to enable `pool_allocator`
+# Enable `pool_allocator`
 import rmm
 from rmm.allocators.cupy import rmm_cupy_allocator
 rmm.reinitialize(
