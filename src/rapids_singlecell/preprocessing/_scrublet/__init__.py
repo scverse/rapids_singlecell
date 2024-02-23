@@ -3,9 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
+import cupy as cp
 import pandas as pd
 from anndata import AnnData
-from scipy import sparse
+from cupyx.scipy import sparse
 
 from ... import logging as logg
 from ... import preprocessing as pp
@@ -188,8 +189,8 @@ def scrublet(
         # counts and simulating doublets
 
         if ad_sim is None:
-            pp.filter_genes(ad_obs, min_cells=3)
-            pp.filter_cells(ad_obs, min_genes=3)
+            pp.filter_genes(ad_obs, min_count=3)
+            pp.filter_cells(ad_obs, min_count=3, qc_var="n_genes_by_counts")
 
             # Doublet simulation will be based on the un-normalised counts, but on the
             # selection of genes following normalisation and variability filtering. So

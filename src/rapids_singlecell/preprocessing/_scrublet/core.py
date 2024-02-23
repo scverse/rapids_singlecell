@@ -4,20 +4,21 @@ import sys
 from dataclasses import InitVar, dataclass, field
 from typing import TYPE_CHECKING, cast
 
+import cupy as cp
 import numpy as np
 import pandas as pd
 from anndata import AnnData, concat
-from scipy import sparse
+from cupyx.scipy import sparse
+from scanpy.preprocessing_utils import sample_comb
 
-from ... import logging as logg
-from ..._utils import AnyRandom, get_random_state
+from rapids_singlecell._utils import AnyRandom, get_random_state
+
 from ...neighbors import (
     Neighbors,
     _get_indices_distances_from_sparse_matrix,
     _Metric,
     _MetricFn,
 )
-from .._utils import sample_comb
 from .sparse_utils import subsample_counts
 
 if TYPE_CHECKING:
@@ -334,10 +335,10 @@ class Scrublet:
         adatas = [
             AnnData(
                 (arr := getattr(self, f"manifold_{n}_")),
-                obs=dict(
-                    obs_names=pd.RangeIndex(arr.shape[0]).astype("string") + n,
-                    doub_labels=n,
-                ),
+                obs={
+                    "obs_names": pd.RangeIndex(arr.shape[0]).astype("string") + n,
+                    "doub_labels": n,
+                },
             )
             for n in ["obs", "sim"]
         ]
@@ -439,17 +440,16 @@ class Scrublet:
             # automatic threshold detection
             # http://scikit-image.org/docs/dev/api/skimage.filters.html
             from cucim.skimage.filters import threshold_minimum
-
             try:
                 threshold = cast(float, threshold_minimum(self.doublet_scores_sim_))
                 if verbose:
-                    logg.info(
+                    print(
                         f"Automatically set threshold at doublet score = {threshold:.2f}"
                     )
             except Exception:
                 self.predicted_doublets_ = None
                 if verbose:
-                    logg.warning(
+                    print(
                         "Failed to automatically identify doublet score threshold. "
                         "Run `call_doublets` with user-specified threshold."
                     )
@@ -471,7 +471,7 @@ class Scrublet:
         )
 
         if verbose:
-            logg.info(
+            print(
                 f"Detected doublet rate = {100 * self.detected_doublet_rate_:.1f}%\n"
                 f"Estimated detectable doublet fraction = {100 * self.detectable_doublet_fraction_:.1f}%\n"
                 "Overall doublet rate:\n"
