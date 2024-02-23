@@ -40,4 +40,3 @@ To achieve optimal memory management in rapids-singlecell, consider the followin
 
 ## Further Reading
 For a more in-depth understanding of rmm and its functionalities, refer to the [RAPIDS Memory Manager documentation](https://docs.rapids.ai/api/rmm/stable/python/).
-
