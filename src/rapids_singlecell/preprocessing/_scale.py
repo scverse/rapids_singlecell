@@ -1,17 +1,15 @@
-from typing import Optional, Union
+from typing import Optional
 
 import cupy as cp
 from anndata import AnnData
 from scanpy._utils import view_to_actual
 from scanpy.get import _get_obs_rep, _set_obs_rep
 
-from rapids_singlecell.cunnData import cunnData
-
 from ._utils import _check_gpu_X, _get_mean_var
 
 
 def scale(
-    adata: Union[AnnData, cunnData],
+    adata: AnnData,
     max_value: Optional[int] = None,
     layer: Optional[str] = None,
     inplace: bool = True,
@@ -22,7 +20,7 @@ def scale(
     Parameters
     ----------
         adata
-            AnnData/ cunnData object
+            AnnData object
 
         max_value
             After scaling matrix to unit variance, values will be clipped to this number of std deviations.
@@ -31,7 +29,7 @@ def scale(
             Layer to use as input instead of X. If None, X is used.
 
         inplace
-            If True, update cunnData with results. Otherwise, return results. See below for details of what is returned.
+            If True, update AnnData with results. Otherwise, return results. See below for details of what is returned.
 
     Returns
     -------
