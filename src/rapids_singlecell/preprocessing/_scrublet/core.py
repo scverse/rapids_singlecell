@@ -4,7 +4,6 @@ import sys
 from dataclasses import InitVar, dataclass, field
 from typing import TYPE_CHECKING, cast
 
-import cupy as cp
 import numpy as np
 import pandas as pd
 from anndata import AnnData, concat
@@ -29,9 +28,9 @@ __all__ = ["Scrublet"]
 
 
 if sys.version_info > (3, 10):
-    kw_only = lambda yes: {"kw_only": yes}  # noqa: E731
+    kw_only = lambda yes: {"kw_only": yes}
 else:
-    kw_only = lambda _: {}  # noqa: E731
+    kw_only = lambda _: {}
 
 
 @dataclass(**kw_only(True))
@@ -440,6 +439,7 @@ class Scrublet:
             # automatic threshold detection
             # http://scikit-image.org/docs/dev/api/skimage.filters.html
             from cucim.skimage.filters import threshold_minimum
+
             try:
                 threshold = cast(float, threshold_minimum(self.doublet_scores_sim_))
                 if verbose:

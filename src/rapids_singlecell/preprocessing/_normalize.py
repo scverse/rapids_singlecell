@@ -111,7 +111,7 @@ def log1p(
     layer: Optional[str] = None,
     obsm: Optional[str] = None,
     inplace: bool = True,
-    copy: bool = False
+    copy: bool = False,
 ) -> Optional[Union[sparse.csr_matrix, cp.ndarray]]:
     """
     Calculated the natural logarithm of one plus the sparse matrix.
@@ -161,6 +161,7 @@ def log1p(
         return adata
     elif not inplace:
         return X
+
 
 def normalize_pearson_residuals(
     adata: Union[AnnData, cunnData],
