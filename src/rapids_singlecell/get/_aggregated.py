@@ -70,7 +70,7 @@ class Aggregate:
         """
 
         assert dof >= 0
-        from ._kernels._aggr_kernels import _get_aggr_kernel
+        from ._kernels._aggr_kernels import _get_aggr_sparse_kernel
 
         if self.data.format == "csc":
             self.data = self.data.tocsr()
@@ -88,7 +88,7 @@ class Aggregate:
         )
         block = (128,)
         grid = (self.data.shape[0],)
-        aggr_kernel = _get_aggr_kernel(self.data.dtype)
+        aggr_kernel = _get_aggr_sparse_kernel(self.data.dtype)
         mask = self._get_mask()
         n_cells = self.indicator_matrix.sum(axis=1).astype(cp.float64)
         aggr_kernel(
@@ -116,31 +116,48 @@ class Aggregate:
 
     def count_mean_var_dense(self, dof: int = 1):
         """
-        This function is used to calculate the sum, mean, and variance of the dense data matrix.
+        This function is used to calculate the sum, mean, and variance of the sparse data matrix.
         It uses a custom cuda-kernel to perform the aggregation.
         """
+
         assert dof >= 0
-        # todo add custom kernels
-        n_cells = self.indicator_matrix.sum(axis=1).astype(self.data.dtype)
-        self.indicator_matrix = self.indicator_matrix.toarray()
-        sums = self.indicator_matrix @ self.data
+        from ._kernels._aggr_kernels import _get_aggr_dense_kernel
 
-        set_non_zero_to_one = cp.ElementwiseKernel(
-            "T x",
-            "T y",
-            """
-            if (x != 0) { y = 1; }
-            else { y = 0; }
-            """,
-            "set_non_zero_to_one",
+        means = cp.zeros(
+            (self.indicator_matrix.shape[0], self.data.shape[1]), dtype=cp.float64
         )
-        nnz = cp.empty_like(self.data)
-        set_non_zero_to_one(self.data, nnz)
-        counts = self.indicator_matrix @ nnz
+        var = cp.zeros(
+            (self.indicator_matrix.shape[0], self.data.shape[1]), dtype=cp.float64
+        )
+        sums = cp.zeros(
+            (self.indicator_matrix.shape[0], self.data.shape[1]), dtype=cp.float64
+        )
+        counts = cp.zeros(
+            (self.indicator_matrix.shape[0], self.data.shape[1]), dtype=cp.int32
+        )
+        block = (128,)
+        grid = (self.data.shape[0],)
+        aggr_kernel = _get_aggr_dense_kernel(self.data.dtype)
+        mask = self._get_mask()
+        n_cells = self.indicator_matrix.sum(axis=1).astype(cp.float64)
+        aggr_kernel(
+            grid,
+            block,
+            (
+                self.data.data,
+                counts,
+                sums,
+                means,
+                var,
+                self.groupby,
+                n_cells,
+                mask,
+                self.data.shape[0],
+                self.data.shape[1],
+            ),
+        )
 
-        means = sums / n_cells
-        sq_mean = self.indicator_matrix @ self.data**2 / n_cells
-        var = sq_mean - means**2
+        var = var - cp.power(means, 2)
         var *= n_cells / (n_cells - dof)
         return sums, counts, means, var
 
