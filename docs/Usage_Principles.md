@@ -65,11 +65,3 @@ rsc.dcg.run_mlm(mat=adata, net=net, source='source', target='target', weight='we
 acts_mlm = dc.get_acts(adata, obsm_key='mlm_estimate')
 sc.pl.umap(acts_mlm, color=['KLF5',"FOXA1", 'CellType'], cmap='coolwarm', vcenter=0)
 ```
-
-### cunnData (deprecated)
-
-```{image} _static/cunndata.svg
-:width: 500px
-```
-
-The {class}`~rapids_singlecell.cunnData.cunnData` object can replace {class}`~anndata.AnnData` for preprocessing. All {mod}`~.pp` functions (except {func}`~.pp.neighbors`) are aimed towards cunnData. {attr}`~.X` and {attr}`~.layers` are stored on the GPU. The other components are stored in the host memory.

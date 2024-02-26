@@ -7,8 +7,6 @@ Filtering of highly-variable genes, batch-effect correction, per-cell normalizat
 
 Any transformation of the data matrix that is not a tool. Other than `tools`, preprocessing steps usually don’t return an easily interpretable annotation, but perform a basic transformation on the data matrix.
 
-All `preprocessing` functions work with {class}`~rapids_singlecell.cunnData.cunnData` except {func}`~rapids_singlecell.pp.neighbors`
-
 ### Basic Preprocessing
 ```{eval-rst}
 .. module:: rapids_singlecell.pp

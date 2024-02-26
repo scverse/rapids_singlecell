@@ -14,5 +14,4 @@ scanpy_gpu
 squidpy_gpu
 decoupler_gpu
 get
-cunndata
 ```
