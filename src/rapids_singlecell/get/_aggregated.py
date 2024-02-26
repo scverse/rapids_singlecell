@@ -1,23 +1,17 @@
-from __future__ import annotations
-
-from functools import singledispatch
-from typing import TYPE_CHECKING, Literal, Union, get_args
+from collections.abc import Collection, Iterable
+from typing import Literal, Union, get_args
 
 import cupy as cp
-import cupyx.scipy.sparse as cp_sparse
+import numpy as np
+import pandas as pd
 from anndata import AnnData
+from cupyx.scipy import sparse as cp_sparse
+from numpy.typing import NDArray
 from scanpy._utils import _resolve_axis
 from scanpy.get import _check_mask
 from scanpy.get._aggregated import _combine_categories, sparse_indicator
 
 from rapids_singlecell.preprocessing._utils import _check_gpu_X
-
-if TYPE_CHECKING:
-    from collections.abc import Collection, Iterable
-
-    import numpy as np
-    import pandas as pd
-    from numpy.typing import NDArray
 
 Array = Union[cp.ndarray, cp_sparse.csc_matrix, cp_sparse.csr_matrix]
 AggType = Literal["count_nonzero", "mean", "sum", "var"]
@@ -162,7 +156,6 @@ class Aggregate:
         return sums, counts, means, var
 
 
-@singledispatch
 def aggregate(
     adata: AnnData,
     by: str | Collection[str],
@@ -270,13 +263,28 @@ def aggregate(
     dim_df = getattr(adata, axis_name)
     categorical, new_label_df = _combine_categories(dim_df, by)
     # Actual computation
-    layers = aggregate(
-        data,
-        by=categorical,
-        func=func,
-        mask=mask,
-        dof=dof,
-    )
+
+    groupby = Aggregate(groupby=categorical, data=data, mask=mask)
+
+    if isinstance(data, cp.ndarray):
+        sums_, counts_, means_, vars_ = groupby.count_mean_var_dense(dof)
+    else:
+        sums_, counts_, means_, vars_ = groupby.count_mean_var_sparse(dof)
+    layers = {}
+
+    funcs = set([func] if isinstance(func, str) else func)
+    if unknown := funcs - set(get_args(AggType)):
+        raise ValueError(f"func {unknown} is not one of {get_args(AggType)}")
+
+    if "sum" in funcs:
+        layers["sum"] = sums_
+    if "mean" in funcs:
+        layers["mean"] = means_
+    if "count_nonzero" in funcs:
+        layers["count_nonzero"] = counts_
+    if "var" in funcs:
+        layers["var"] = vars_
+
     result = AnnData(
         layers=layers,
         obs=new_label_df,
@@ -286,61 +294,3 @@ def aggregate(
         return result.T
     else:
         return result
-
-
-@aggregate.register(cp.ndarray)
-def aggregate_array(
-    data,
-    by: pd.Categorical,
-    func: AggType | Iterable[AggType],
-    *,
-    mask: NDArray[np.bool_] | None = None,
-    dof: int = 1,
-) -> dict[AggType, np.ndarray]:
-    groupby = Aggregate(groupby=by, data=data, mask=mask)
-    sums_, counts_, means_, vars_ = groupby.count_mean_var_dense(dof)
-    result = {}
-
-    funcs = set([func] if isinstance(func, str) else func)
-    if unknown := funcs - set(get_args(AggType)):
-        raise ValueError(f"func {unknown} is not one of {get_args(AggType)}")
-
-    if "sum" in funcs:
-        result["sum"] = sums_
-    if "mean" in funcs:
-        result["mean"] = means_
-    if "count_nonzero" in funcs:
-        result["count_nonzero"] = counts_
-    if "var" in funcs:
-        result["var"] = vars_
-
-    return result
-
-
-@aggregate.register(cp_sparse.spmatrix)
-def aggregate_sparse(
-    data,
-    by: pd.Categorical,
-    func: AggType | Iterable[AggType],
-    *,
-    mask: NDArray[np.bool_] | None = None,
-    dof: int = 1,
-) -> dict[AggType, np.ndarray]:
-    groupby = Aggregate(groupby=by, data=data, mask=mask)
-    sums_, counts_, means_, vars_ = groupby.count_mean_var_sparse(dof)
-    result = {}
-
-    funcs = set([func] if isinstance(func, str) else func)
-    if unknown := funcs - set(get_args(AggType)):
-        raise ValueError(f"func {unknown} is not one of {get_args(AggType)}")
-
-    if "sum" in funcs:
-        result["sum"] = sums_
-    if "mean" in funcs:
-        result["mean"] = means_
-    if "count_nonzero" in funcs:
-        result["count_nonzero"] = counts_
-    if "var" in funcs:
-        result["var"] = vars_
-
-    return result
