@@ -12,9 +12,9 @@ The workflow of *rapids-singlecell* is basically the same as *scanpy's*. The mai
 
 ### AnnData setup
 
-With the release of version 0.10.0 {class}`~anndata.AnnData` supports GPU arrays and Sparse Matrices.
+{class}`~anndata.AnnData` supports GPU arrays and Sparse Matrices.
 
-Rapids-singlecell leverages this capability to perform analyses directly on GPU-enabled {class}`~anndata.AnnData` objects. This also leads to the depreciation of {class}`~rapids_singlecell.cunnData.cunnData` and it's removal in early 2024.
+Rapids-singlecell leverages this capability to perform analyses directly on GPU-enabled {class}`~anndata.AnnData` objects.
 
 To get your {class}`~anndata.AnnData` object onto the GPU you can set {attr}`~anndata.AnnData.X` or each {attr}`~anndata.AnnData.layers` to a GPU based matrix.
 
@@ -32,7 +32,7 @@ rsc.get.anndata_to_CPU(adata) # moves `.X` to the CPU
 
 ### Preprocessing
 
-The preprocessing can  be handled by {class}`~anndata.AnnData` and {class}`~rapids_singlecell.cunnData.cunnData`. It offers accelerated versions of functions within {mod}`scanpy.pp`.
+The preprocessing can be handled by the functions in {mod}`~.pp`. They offer accelerated versions of functions within {mod}`scanpy.pp`.
 
 Example:
 ```
@@ -41,7 +41,6 @@ adata = adata[:,adata.var["highly_variable"]==True]
 rsc.pp.regress_out(adata,keys=["n_counts", "percent_MT"])
 rsc.pp.scale(adata,max_value=10)
 ```
-After preprocessing is done just transform the {class}`~rapids_singlecell.cunnData.cunnData` into {class}`~anndata.AnnData` and continue the analysis.
 
 ### Tools
 
