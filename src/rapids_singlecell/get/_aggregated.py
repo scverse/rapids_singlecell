@@ -1,130 +1,329 @@
-"""
-This is still under active development
+from __future__ import annotations
 
+from functools import singledispatch
+from typing import TYPE_CHECKING, Literal, Union, get_args
 
-"""
-# nF811
 import cupy as cp
-import numpy as np
-import pandas as pd
-from scipy import sparse
+import cupyx.scipy.sparse as cp_sparse
+from anndata import AnnData
+from scanpy._utils import _resolve_axis
+from scanpy.get import _check_mask
+from scanpy.get._aggregated import _combine_categories, sparse_indicator
 
-from ._kernels._aggr_kernels import _div_kernel, _div_kernel2, _get_aggr_kernel
+from rapids_singlecell.preprocessing._utils import _check_gpu_X
+
+if TYPE_CHECKING:
+    from collections.abc import Collection, Iterable
+
+    import numpy as np
+    import pandas as pd
+    from numpy.typing import NDArray
+    from scipy import sparse
+
+Array = Union[cp.ndarray, cp_sparse.csc_matrix, cp_sparse.csr_matrix]
+AggType = Literal["count_nonzero", "mean", "sum", "var"]
 
 
-def _combine_categories(label_df: pd.DataFrame, cols: list[str]) -> pd.Categorical:
-    from itertools import product
+class Aggregate:
+    """\
+    Functionality for generic grouping and aggregating.
 
-    if isinstance(cols, str):
-        cols = [cols]
+    There is currently support for count_nonzero, sum, mean, and variance.
 
-    df = pd.DataFrame(
-        {c: pd.Categorical(label_df[c]).remove_unused_categories() for c in cols},
+    **Implementation**
+
+    Moments are computed using weighted sum aggregation of data by some feature
+    via multiplication by a sparse coordinate matrix A.
+
+    Runtime is effectively computation of the product `A @ X`, i.e. the count of (non-zero)
+    entries in X with multiplicity the number of group memberships for that entry.
+    This is `O(data)` for partitions (each observation belonging to exactly one group),
+    independent of the number of groups.
+
+    Params
+    ------
+    groupby
+        :class:`~pandas.Categorical` containing values for grouping by.
+    data
+        Data matrix for aggregation.
+    mask
+        Mask to be used for aggregation.
+    """
+
+    def __init__(
+        self,
+        groupby: pd.Categorical,
+        data: Array,
+        *,
+        mask: NDArray[np.bool_] | None = None,
+    ) -> None:
+        self.indicator_matrix = cp_sparse.coo_matrix(
+            sparse_indicator(groupby, mask=mask)
+        )
+        self.mask = mask
+        self.groupby = cp.array(groupby.codes, dtype=cp.int32)
+        self.data = data
+
+    groupby: pd.Categorical
+    indicator_matrix: sparse.coo_matrix
+    data: Array
+
+    def _get_mask(self):
+        if self.mask is not None:
+            return cp.array(self.mask)
+        else:
+            return cp.ones(self.data.shape[0], dtype=bool)
+
+    def count_mean_var_sparse(self, dof: int = 1):
+        assert dof >= 0
+        from ._kernels._aggr_kernels import _get_aggr_kernel
+
+        if self.data.format == "csc":
+            self.data = self.data.tocsr()
+        means = cp.zeros(
+            (self.indicator_matrix.shape[0], self.data.shape[1]), dtype=cp.float64
+        )
+        var = cp.zeros(
+            (self.indicator_matrix.shape[0], self.data.shape[1]), dtype=cp.float64
+        )
+        sums = cp.zeros(
+            (self.indicator_matrix.shape[0], self.data.shape[1]), dtype=cp.float64
+        )
+        counts = cp.zeros(
+            (self.indicator_matrix.shape[0], self.data.shape[1]), dtype=cp.int32
+        )
+        block = (128,)
+        grid = (self.data.shape[0],)
+        aggr_kernel = _get_aggr_kernel(self.data.dtype)
+        mask = self._get_mask()
+        n_cells = self.indicator_matrix.sum(axis=1).astype(cp.float64)
+        aggr_kernel(
+            grid,
+            block,
+            (
+                self.data.indptr,
+                self.data.indices,
+                self.data.data,
+                counts,
+                sums,
+                means,
+                var,
+                self.groupby,
+                n_cells,
+                mask,
+                self.data.shape[0],
+                self.data.shape[1],
+            ),
+        )
+
+        var = var - cp.power(means, 2)
+        var *= n_cells / (n_cells - dof)
+        return sums, counts, means, var
+
+    def count_mean_var_dense(self, dof: int = 1):
+        assert dof >= 0
+        # todo add custom kernels
+        n_cells = self.indicator_matrix.sum(axis=1).astype(self.data.dtype)
+        self.indicator_matrix = self.indicator_matrix.toarray()
+        sums = self.indicator_matrix @ self.data
+
+        set_non_zero_to_one = cp.ElementwiseKernel(
+            "T x",
+            "T y",
+            """
+            if (x != 0) { y = 1; }
+            else { y = 0; }
+            """,
+            "set_non_zero_to_one",
+        )
+        nnz = cp.empty_like(self.data)
+        set_non_zero_to_one(self.data, nnz)
+        counts = self.indicator_matrix @ nnz
+
+        means = sums / n_cells
+        sq_mean = self.indicator_matrix @ self.data**2 / n_cells
+        var = sq_mean - means**2
+        var *= n_cells / (n_cells - dof)
+        return sums, counts, means, var
+
+
+@singledispatch
+def aggregate(
+    adata: AnnData,
+    by: str | Collection[str],
+    func: AggType | Iterable[AggType],
+    *,
+    axis: Literal["obs", 0, "var", 1] | None = None,
+    mask: NDArray[np.bool_] | str | None = None,
+    dof: int = 1,
+    layer: str | None = None,
+    obsm: str | None = None,
+    varm: str | None = None,
+) -> AnnData:
+    """\
+    Aggregate data matrix based on some categorical grouping.
+
+    This function is useful for pseudobulking as well as plotting.
+
+    Aggregation to perform is specified by `func`, which can be a single metric or a
+    list of metrics. Each metric is computed over the group and results in a new layer
+    in the output `AnnData` object.
+
+    If none of `layer`, `obsm`, or `varm` are passed in, `X` will be used for aggregation data.
+    If `func` only has length 1 or is just an `AggType`, then aggregation data is written to `X`.
+    Otherwise, it is written to `layers` or `xxxm` as appropriate for the dimensions of the aggregation data.
+
+    Params
+    ------
+    adata
+        :class:`~anndata.AnnData` to be aggregated.
+    by
+        Key of the column to be grouped-by.
+    func
+        How to aggregate.
+    axis
+        Axis on which to find group by column.
+    mask
+        Boolean mask (or key to column containing mask) to apply along the axis.
+    dof
+        Degrees of freedom for variance. Defaults to 1.
+    layer
+        If not None, key for aggregation data.
+    obsm
+        If not None, key for aggregation data.
+    varm
+        If not None, key for aggregation data.
+
+    Returns
+    -------
+    Aggregated :class:`~anndata.AnnData`.
+
+    Examples
+    --------
+
+    Calculating mean expression and number of nonzero entries per cluster:
+
+    >>> import scanpy as sc, pandas as pd
+    >>> pbmc = sc.datasets.pbmc3k_processed().raw.to_adata()
+    >>> pbmc.shape
+    (2638, 13714)
+    >>> aggregated = sc.get.aggregate(pbmc, by="louvain", func=["mean", "count_nonzero"])
+    >>> aggregated
+    AnnData object with n_obs × n_vars = 8 × 13714
+        obs: 'louvain'
+        var: 'n_cells'
+        layers: 'mean', 'count_nonzero'
+
+    We can group over multiple columns:
+
+    >>> pbmc.obs["percent_mito_binned"] = pd.cut(pbmc.obs["percent_mito"], bins=5)
+    >>> sc.get.aggregate(pbmc, by=["louvain", "percent_mito_binned"], func=["mean", "count_nonzero"])
+    AnnData object with n_obs × n_vars = 40 × 13714
+        obs: 'louvain', 'percent_mito_binned'
+        var: 'n_cells'
+        layers: 'mean', 'count_nonzero'
+
+    Note that this filters out any combination of groups that wasn't present in the original data.
+    """
+    if axis is None:
+        axis = 1 if varm else 0
+    axis, axis_name = _resolve_axis(axis)
+    if mask is not None:
+        mask = _check_mask(adata, mask, axis_name)
+    data = adata.X
+    if sum(p is not None for p in [varm, obsm, layer]) > 1:
+        raise TypeError("Please only provide one (or none) of varm, obsm, or layer")
+
+    if varm is not None:
+        if axis != 1:
+            raise ValueError("varm can only be used when axis is 1")
+        data = adata.varm[varm]
+    elif obsm is not None:
+        if axis != 0:
+            raise ValueError("obsm can only be used when axis is 0")
+        data = adata.obsm[obsm]
+    elif layer is not None:
+        data = adata.layers[layer]
+        if axis == 1:
+            data = data.T
+    elif axis == 1:
+        # i.e., all of `varm`, `obsm`, `layers` are None so we use `X` which must be transposed
+        data = data.T
+    _check_gpu_X(data)
+    dim_df = getattr(adata, axis_name)
+    categorical, new_label_df = _combine_categories(dim_df, by)
+    # Actual computation
+    layers = aggregate(
+        data,
+        by=categorical,
+        func=func,
+        mask=mask,
+        dof=dof,
     )
-    result_categories = [
-        "_".join(map(str, x)) for x in product(*[df[c].cat.categories for c in cols])
-    ]
-    n_categories = [len(df[c].cat.categories) for c in cols]
-
-    factors = np.ones(len(cols) + 1, dtype=np.int32)  # First factor needs to be 1
-    np.cumsum(n_categories[::-1], out=factors[1:])
-    factors = factors[:-1][::-1]
-
-    # TODO: pick a more optimal bit width
-    final_codes = np.zeros(df.shape[0], dtype=np.int32)
-    for factor, c in zip(factors, cols):
-        final_codes += df[c].cat.codes * factor
-
-    return pd.Categorical.from_codes(
-        final_codes, categories=result_categories
-    ).remove_unused_categories()
-
-
-def sparse_indicator(
-    categorical, weights: None | np.ndarray = None
-) -> sparse.coo_matrix:
-    if weights is None:
-        weights = np.broadcast_to(1.0, len(categorical))
-    A = sparse.coo_matrix(
-        (weights, (categorical.codes, np.arange(len(categorical)))),
-        shape=(len(categorical.categories), len(categorical)),
+    result = AnnData(
+        layers=layers,
+        obs=new_label_df,
+        var=getattr(adata, "var" if axis == 0 else "obs"),
     )
-    return A
+    if axis == 1:
+        return result.T
+    else:
+        return result
 
 
-# cats = _combine_categories(adata.obs, "CellType")
-# groupby_mat = sparse_cp.csr_matrix(sparse_indicator(cats))
-def count_mean_var_sparse(by, data):
-    sums = by @ data
-    counts = by @ data._with_data(cp.ones(len(data.data), dtype=data.data.dtype))
-    means = sums.copy()
-    n_cells = by.sum(axis=1).astype(data.dtype)
-    block = (128,)
-    grid = (by.shape[0],)
-    divide_sparse = _div_kernel(data.dtype)
-    divide_sparse2 = _div_kernel2(data.dtype)
-    divide_sparse(block, grid, (means.indptr, means.data, by.shape[0], n_cells))
-    sq_mean = by @ data.multiply(data)
-    divide_sparse(block, grid, (sq_mean.indptr, sq_mean.data, by.shape[0], n_cells))
-    var = sq_mean - means.multiply(means)
-    divide_sparse2(block, grid, (var.indptr, var.data, by.shape[0], n_cells))
-    return sums, counts, means, var
+@aggregate.register(cp.ndarray)
+def aggregate_array(
+    data,
+    by: pd.Categorical,
+    func: AggType | Iterable[AggType],
+    *,
+    mask: NDArray[np.bool_] | None = None,
+    dof: int = 1,
+) -> dict[AggType, np.ndarray]:
+    groupby = Aggregate(groupby=by, data=data, mask=mask)
+    sums_, counts_, means_, vars_ = groupby.count_mean_var_dense(dof)
+    result = {}
+
+    funcs = set([func] if isinstance(func, str) else func)
+    if unknown := funcs - set(get_args(AggType)):
+        raise ValueError(f"func {unknown} is not one of {get_args(AggType)}")
+
+    if "sum" in funcs:
+        result["sum"] = sums_
+    if "mean" in funcs:
+        result["mean"] = means_
+    if "count_nonzero" in funcs:
+        result["count_nonzero"] = counts_
+    if "var" in funcs:
+        result["var"] = vars_
+
+    return result
 
 
-def _sparse_dense_aggr(gmat, X, cats):
-    means = cp.zeros((gmat.shape[0], X.shape[1]), dtype=cp.float64)
-    var = cp.zeros((gmat.shape[0], X.shape[1]), dtype=cp.float64)
-    sums = cp.zeros((gmat.shape[0], X.shape[1]), dtype=cp.float64)
-    counts = cp.zeros((gmat.shape[0], X.shape[1]), dtype=cp.int32)
-    block = (128,)
-    grid = (X.shape[0],)
-    aggr_kernel = _get_aggr_kernel(X.data.dtype)
-    n_cells = gmat.sum(axis=1).astype(cp.float64)
-    aggr_kernel(
-        grid,
-        block,
-        (
-            X.indptr,
-            X.indices,
-            X.data,
-            counts,
-            sums,
-            means,
-            var,
-            cats,
-            n_cells,
-            X.shape[0],
-            X.shape[1],
-        ),
-    )
+@aggregate.register(cp_sparse.spmatrix)
+def aggregate_sparse(
+    data,
+    by: pd.Categorical,
+    func: AggType | Iterable[AggType],
+    *,
+    mask: NDArray[np.bool_] | None = None,
+    dof: int = 1,
+) -> dict[AggType, np.ndarray]:
+    groupby = Aggregate(groupby=by, data=data, mask=mask)
+    sums_, counts_, means_, vars_ = groupby.count_mean_var_sparse(dof)
+    result = {}
 
-    var = var - cp.power(means, 2)
-    var *= n_cells / (n_cells - 1)
-    return sums, counts, means, var
+    funcs = set([func] if isinstance(func, str) else func)
+    if unknown := funcs - set(get_args(AggType)):
+        raise ValueError(f"func {unknown} is not one of {get_args(AggType)}")
 
+    if "sum" in funcs:
+        result["sum"] = sums_
+    if "mean" in funcs:
+        result["mean"] = means_
+    if "count_nonzero" in funcs:
+        result["count_nonzero"] = counts_
+    if "var" in funcs:
+        result["var"] = vars_
 
-def count_mean_var_dense(by, data):
-    # todo add custom kernels
-    n_cells = by.sum(axis=1).astype(data.dtype)
-    by = by.toarray()
-
-    sums = by @ data
-
-    set_non_zero_to_one = cp.ElementwiseKernel(
-        "T x",
-        "T y",
-        """
-        if (x != 0) { y = 1; }
-        else { y = 0; }
-        """,
-        "set_non_zero_to_one",
-    )
-    nnz = cp.empty_like(data)
-    set_non_zero_to_one(data, nnz)
-    counts = by @ nnz
-
-    means = sums / n_cells
-    sq_mean = by @ data**2 / n_cells
-    var = sq_mean - means**2
-    var *= n_cells / (n_cells - 1)
-    return sums, counts, means, var
+    return result
