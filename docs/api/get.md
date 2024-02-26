@@ -1,4 +1,4 @@
-# Get
+# Get object from `AnnData`: `get`
 
 These functions offer convineant ways to move arrays and matrices from and to the GPU.
 
@@ -9,6 +9,7 @@ These functions offer convineant ways to move arrays and matrices from and to th
 .. autosummary::
     :toctree: generated
 
+    get.aggregate
     get.anndata_to_GPU
     get.anndata_to_CPU
 ```
