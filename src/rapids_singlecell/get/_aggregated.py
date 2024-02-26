@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     import numpy as np
     import pandas as pd
     from numpy.typing import NDArray
-    from scipy import sparse
 
 Array = Union[cp.ndarray, cp_sparse.csc_matrix, cp_sparse.csr_matrix]
 AggType = Literal["count_nonzero", "mean", "sum", "var"]
@@ -29,16 +28,6 @@ class Aggregate:
     Functionality for generic grouping and aggregating.
 
     There is currently support for count_nonzero, sum, mean, and variance.
-
-    **Implementation**
-
-    Moments are computed using weighted sum aggregation of data by some feature
-    via multiplication by a sparse coordinate matrix A.
-
-    Runtime is effectively computation of the product `A @ X`, i.e. the count of (non-zero)
-    entries in X with multiplicity the number of group memberships for that entry.
-    This is `O(data)` for partitions (each observation belonging to exactly one group),
-    independent of the number of groups.
 
     Params
     ------
@@ -64,8 +53,8 @@ class Aggregate:
         self.groupby = cp.array(groupby.codes, dtype=cp.int32)
         self.data = data
 
-    groupby: pd.Categorical
-    indicator_matrix: sparse.coo_matrix
+    groupby: cp.ndarray
+    indicator_matrix: cp_sparse.coo_matrix
     data: Array
 
     def _get_mask(self):
@@ -75,6 +64,11 @@ class Aggregate:
             return cp.ones(self.data.shape[0], dtype=bool)
 
     def count_mean_var_sparse(self, dof: int = 1):
+        """
+        This function is used to calculate the sum, mean, and variance of the sparse data matrix.
+        It uses a custom cuda-kernel to perform the aggregation.
+        """
+
         assert dof >= 0
         from ._kernels._aggr_kernels import _get_aggr_kernel
 
@@ -121,6 +115,10 @@ class Aggregate:
         return sums, counts, means, var
 
     def count_mean_var_dense(self, dof: int = 1):
+        """
+        This function is used to calculate the sum, mean, and variance of the dense data matrix.
+        It uses a custom cuda-kernel to perform the aggregation.
+        """
         assert dof >= 0
         # todo add custom kernels
         n_cells = self.indicator_matrix.sum(axis=1).astype(self.data.dtype)
@@ -204,10 +202,12 @@ def aggregate(
     Calculating mean expression and number of nonzero entries per cluster:
 
     >>> import scanpy as sc, pandas as pd
+    >>> import rapids_singlecell as rsc
     >>> pbmc = sc.datasets.pbmc3k_processed().raw.to_adata()
+    >>> rsc.get.anndata_to_GPU(pbmc)
     >>> pbmc.shape
     (2638, 13714)
-    >>> aggregated = sc.get.aggregate(pbmc, by="louvain", func=["mean", "count_nonzero"])
+    >>> aggregated = rsc.get.aggregate(pbmc, by="louvain", func=["mean", "count_nonzero"])
     >>> aggregated
     AnnData object with n_obs × n_vars = 8 × 13714
         obs: 'louvain'
@@ -217,7 +217,7 @@ def aggregate(
     We can group over multiple columns:
 
     >>> pbmc.obs["percent_mito_binned"] = pd.cut(pbmc.obs["percent_mito"], bins=5)
-    >>> sc.get.aggregate(pbmc, by=["louvain", "percent_mito_binned"], func=["mean", "count_nonzero"])
+    >>> rsc.get.aggregate(pbmc, by=["louvain", "percent_mito_binned"], func=["mean", "count_nonzero"])
     AnnData object with n_obs × n_vars = 40 × 13714
         obs: 'louvain', 'percent_mito_binned'
         var: 'n_cells'
