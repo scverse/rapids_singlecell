@@ -9,12 +9,15 @@ def _mean_var_major(X, major, minor):
 
     mean = cp.zeros(major, dtype=cp.float64)
     var = cp.zeros(major, dtype=cp.float64)
-    block = (32,)
-    grid = (int(math.ceil(major / block[0])),)
+    block = (64,)
+    grid = (major,)
     get_mean_var_major = _get_mean_var_major(X.data.dtype)
     get_mean_var_major(
         grid, block, (X.indptr, X.indices, X.data, mean, var, major, minor)
     )
+    mean = mean / minor
+    var = var / minor
+    var -= cp.power(mean, 2)
     var *= minor / (minor - 1)
     return mean, var
 
