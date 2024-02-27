@@ -1,6 +1,6 @@
 import math
 import warnings
-from typing import Optional, Union
+from typing import Optional
 
 import cupy as cp
 import numpy as np
@@ -9,13 +9,11 @@ from anndata import AnnData
 from cupyx.scipy.sparse import issparse
 from scanpy.get import _get_obs_rep
 
-from rapids_singlecell.cunnData import cunnData
-
 from ._utils import _check_gpu_X, _check_nonnegative_integers, _get_mean_var
 
 
 def highly_variable_genes(
-    adata: Union[AnnData, cunnData],
+    adata: AnnData,
     layer: str = None,
     min_mean: float = 0.0125,
     max_mean: float = 3,
@@ -53,7 +51,7 @@ def highly_variable_genes(
     Parameters
     ----------
         adata
-            AnnData/ cunnData object
+            AnnData object
         layer
             If provided, use `adata.layers[layer]` for expression values instead of `adata.X`.
         min_mean
@@ -372,7 +370,7 @@ def _highly_variable_genes_single_batch(
 
 
 def _highly_variable_genes_seurat_v3(
-    adata: cunnData,
+    adata: AnnData,
     layer: Optional[str] = None,
     n_top_genes: int = None,
     batch_key: Optional[str] = None,
@@ -513,7 +511,7 @@ def _highly_variable_genes_seurat_v3(
 
 
 def _highly_variable_pearson_residuals(
-    adata: cunnData,
+    adata: AnnData,
     theta: float = 100,
     clip: Optional[float] = None,
     n_top_genes: int = 2000,
@@ -694,7 +692,7 @@ def _highly_variable_pearson_residuals(
 
 
 def _poisson_gene_selection(
-    adata: cunnData,
+    adata: AnnData,
     layer: Optional[str] = None,
     n_top_genes: int = None,
     n_samples: int = 10000,
@@ -714,7 +712,7 @@ def _poisson_gene_selection(
     Parameters
     ----------
     adata
-        AnnData/ cunnData object (with sparse X matrix).
+        AnnData object
     layer
         If provided, use `adata.layers[layer]` for expression values instead of `adata.X`.
     n_top_genes

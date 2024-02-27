@@ -10,11 +10,9 @@ from cupyx.scipy.sparse import csr_matrix, isspmatrix_csr
 from cupyx.scipy.sparse import issparse as cpissparse
 from scipy.sparse import issparse
 
-from rapids_singlecell.cunnData import cunnData
-
 
 def pca(
-    adata: Union[AnnData, cunnData],
+    adata: AnnData,
     layer: str = None,
     n_comps: Optional[int] = None,
     zero_center: bool = True,
@@ -29,7 +27,7 @@ def pca(
     Parameters
     ----------
         adata
-            AnnData/ cunnData object
+            AnnData object
 
         layer
             If provided, use `adata.layers[layer]` for expression values instead of `adata.X`.

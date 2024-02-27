@@ -7,13 +7,11 @@ from anndata import AnnData
 from cupyx.scipy import sparse
 from scanpy.get import _get_obs_rep
 
-from rapids_singlecell.cunnData import cunnData
-
 from ._utils import _check_gpu_X
 
 
 def calculate_qc_metrics(
-    adata: Union[AnnData, cunnData],
+    adata: AnnData,
     expr_type: str = "counts",
     var_type: str = "genes",
     qc_vars: Union[str, list] = None,
@@ -27,7 +25,7 @@ def calculate_qc_metrics(
     Parameters
     ----------
         adata
-            AnnData/ cunnData object
+            AnnData object
         expr_type
             Name of kind of values in X.
         var_type
@@ -38,7 +36,7 @@ def calculate_qc_metrics(
         log1p
             Set to `False` to skip computing `log1p` transformed annotations.
         layer
-            If provided, use :attr:`.layers` for expression values instead of :attr:`.X`.
+            If provided, use :attr:`~anndata.AnnData.layers` for expression values instead of :attr:`~anndata.AnnData.X`.
 
     Returns
     -------
@@ -204,7 +202,7 @@ def calculate_qc_metrics(
 
 
 def flag_gene_family(
-    adata: Union[AnnData, cunnData],
+    adata: AnnData,
     gene_family_name: str,
     gene_family_prefix: str = None,
     gene_list: list = None,
@@ -216,7 +214,7 @@ def flag_gene_family(
     Parameters
     ----------
         adata
-            AnnData/ cunnData object
+            AnnData object
 
         gene_family_name
             name of colums in .var where you want to store informationa as a boolean
@@ -243,7 +241,7 @@ def flag_gene_family(
 
 
 def filter_genes(
-    adata: Union[AnnData, cunnData],
+    adata: AnnData,
     qc_var: str = "n_cells_by_counts",
     min_count: int = None,
     max_count: int = None,
@@ -259,7 +257,7 @@ def filter_genes(
     Parameters
     ----------
         adata:
-            AnnData/ cunnData object
+            AnnData object
 
         qc_var
             column in :attr:`~anndata.AnnData.var` with numerical entries to filter against
@@ -320,7 +318,7 @@ def filter_genes(
 
 
 def filter_cells(
-    adata: Union[AnnData, cunnData],
+    adata: AnnData,
     qc_var: str,
     min_count: float = None,
     max_count: float = None,
@@ -335,7 +333,7 @@ def filter_cells(
     Parameters
     ----------
         adata:
-            AnnData/ cunnData object
+            AnnData object
         qc_var
             column in .obs with numerical entries to filter against
         min_count
@@ -384,7 +382,7 @@ def filter_cells(
         print("Please check qc_var.")
 
 
-def filter_highly_variable(adata: Union[AnnData, cunnData]) -> None:
+def filter_highly_variable(adata: AnnData) -> None:
     """
     Filters the :class:`~anndata.AnnData` object for highly_variable genes. Run highly_varible_genes first.
 

@@ -1,4 +1,5 @@
 import numpy as np
+import cupy as cp
 import pytest
 import rapids_singlecell as rsc
 from anndata import AnnData
@@ -100,8 +101,8 @@ def test_pca_reproducible():
     rsc.tl.pca(pbmc)
     b = pbmc.obsm["X_pca"]
     np.array_equal(a, b)
-    cpbmc = rsc.cunnData.cunnData(pbmc)
-    cpbmc.X = cpbmc.X.toarray()
+    cpbmc = pbmc.copy()
+    cpbmc.X = cp.array(cpbmc.X)
     rsc.tl.pca(cpbmc)
     c = pbmc.obsm["X_pca"]
     np.array_equal(a, c)
