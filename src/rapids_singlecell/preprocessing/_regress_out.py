@@ -8,13 +8,11 @@ from cupyx.scipy import sparse
 from scanpy._utils import view_to_actual
 from scanpy.get import _get_obs_rep, _set_obs_rep
 
-from rapids_singlecell.cunnData import cunnData
-
 from ._utils import _check_gpu_X
 
 
 def regress_out(
-    adata: Union[AnnData, cunnData],
+    adata: AnnData,
     keys: Union[str, list],
     layer: Optional[str] = None,
     inplace: bool = True,
@@ -28,7 +26,7 @@ def regress_out(
     Parameters
     ----------
         adata
-            AnnData/ cunnData object
+            AnnData object
 
         keys
             Keys for numerical observation annotation on which to regress on.

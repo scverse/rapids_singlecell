@@ -7,26 +7,24 @@ from anndata import AnnData
 from cupyx.scipy import sparse
 from scanpy.get import _get_obs_rep, _set_obs_rep
 
-from rapids_singlecell.cunnData import cunnData
-
 from ._utils import _check_gpu_X, _check_nonnegative_integers
 
 
 def normalize_total(
-    adata: Union[AnnData, cunnData],
+    adata: AnnData,
     *,
     target_sum: Optional[int] = None,
     layer: Optional[str] = None,
     inplace: bool = True,
     copy: bool = False,
-) -> Optional[Union[sparse.csr_matrix, cp.ndarray]]:
+) -> Optional[Union[AnnData, sparse.csr_matrix, cp.ndarray]]:
     """
     Normalizes rows in matrix so they sum to `target_sum`
 
     Parameters
     ----------
         adata
-            AnnData/ cunnData object
+            AnnData object
 
         target_sum
             If `None`, after normalization, each observation (cell) has a total count equal to the median of total counts for observations (cells) before normalization.
@@ -112,14 +110,14 @@ def log1p(
     obsm: Optional[str] = None,
     inplace: bool = True,
     copy: bool = False,
-) -> Optional[Union[sparse.csr_matrix, cp.ndarray]]:
+) -> Optional[Union[AnnData, sparse.csr_matrix, cp.ndarray]]:
     """
     Calculated the natural logarithm of one plus the sparse matrix.
 
     Parameters
     ----------
         adata:
-            AnnData/ cunnData object
+            AnnData object
 
         layer
             Layer to normalize instead of `X`. If `None`, `X` is normalized.
@@ -164,7 +162,7 @@ def log1p(
 
 
 def normalize_pearson_residuals(
-    adata: Union[AnnData, cunnData],
+    adata: AnnData,
     theta: float = 100,
     clip: Optional[float] = None,
     check_values: bool = True,
@@ -180,7 +178,7 @@ def normalize_pearson_residuals(
     Parameters
     ----------
         adata:
-            AnnData/ cunnData object
+            AnnData object
         theta
             The negative binomial overdispersion parameter theta for Pearson residuals.
             Higher values correspond to less overdispersion (var = mean + mean^2/theta), and theta=np.Inf corresponds to a Poisson model.
@@ -194,7 +192,7 @@ def normalize_pearson_residuals(
         layer
             Layer to use as input instead of X. If None, X is used.
         inplace
-            If True, update cunnData with results. Otherwise, return results. See below for details of what is returned.
+            If True, update AnnData with results. Otherwise, return results. See below for details of what is returned.
 
     Returns
     -------
