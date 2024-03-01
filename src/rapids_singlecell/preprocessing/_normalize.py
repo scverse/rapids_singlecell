@@ -104,7 +104,7 @@ def normalize_total(
 
 
 def log1p(
-    adata: Union[AnnData, cunnData],
+    adata: AnnData,
     *,
     layer: Optional[str] = None,
     obsm: Optional[str] = None,
