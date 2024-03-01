@@ -7,17 +7,19 @@ import numpy as np
 import pandas as pd
 from anndata import AnnData
 from cupyx.scipy import sparse
+from scanpy import logging as logg
+from scanpy._compat import old_positionals
+from scanpy.get import _get_obs_rep
 
-from ... import logging as logg
-from ... import preprocessing as pp
-from ..._compat import old_positionals
-from ...get import _get_obs_rep
+from rapids_singlecell import preprocessing as pp
+
 from . import pipeline
 from .core import Scrublet
 
 if TYPE_CHECKING:
-    from ..._utils import AnyRandom
-    from ...neighbors import _Metric, _MetricFn
+    from scanpy._utils import AnyRandom
+
+    from rapids_singlecell.pp._neighbors import _Metrics
 
 
 @old_positionals(
@@ -48,7 +50,7 @@ def scrublet(
     expected_doublet_rate: float = 0.05,
     stdev_doublet_rate: float = 0.02,
     synthetic_doublet_umi_subsampling: float = 1.0,
-    knn_dist_metric: _Metric | _MetricFn = "euclidean",
+    knn_dist_metric: _Metrics = "euclidean",
     normalize_variance: bool = True,
     log_transform: bool = False,
     mean_center: bool = True,
@@ -189,8 +191,10 @@ def scrublet(
         # counts and simulating doublets
 
         if ad_sim is None:
-            pp.filter_genes(ad_obs, min_count=3)
-            pp.filter_cells(ad_obs, min_count=3, qc_var="n_genes_by_counts")
+            pp.filter_genes(ad_obs, min_count=3, verbose=False)
+            pp.filter_cells(
+                ad_obs, min_count=3, qc_var="n_genes_by_counts", verbose=False
+            )
 
             # Doublet simulation will be based on the un-normalised counts, but on the
             # selection of genes following normalisation and variability filtering. So
@@ -201,9 +205,10 @@ def scrublet(
 
             # HVG process needs log'd data.
 
-            logged = pp.log1p(ad_obs, copy=True)
-            pp.highly_variable_genes(logged)
-            ad_obs = ad_obs[:, logged.var["highly_variable"]].copy()
+            ad_obs.layers["logged"] = pp.log1p(ad_obs, inplace=False)
+            pp.highly_variable_genes(ad_obs, layer="logged")
+            del ad_obs.layers["logged"]
+            ad_obs = ad_obs[:, ad_obs.var["highly_variable"]].copy()
 
             # Simulate the doublets based on the raw expressions from the normalised
             # and filtered object.
@@ -304,7 +309,7 @@ def _scrublet_call_doublets(
     normalize_variance: bool = True,
     n_prin_comps: int = 30,
     use_approx_neighbors: bool = True,
-    knn_dist_metric: _Metric | _MetricFn = "euclidean",
+    knn_dist_metric: _Metrics = "euclidean",
     get_doublet_neighbor_parents: bool = False,
     threshold: float | None = None,
     random_state: AnyRandom = 0,
@@ -553,7 +558,7 @@ def scrublet_simulate_doublets(
     )
 
     adata_sim = AnnData(scrub._counts_sim)
-    adata_sim.obs["n_counts"] = scrub._total_counts_sim
-    adata_sim.obsm["doublet_parents"] = scrub.doublet_parents_
+    adata_sim.obs["n_counts"] = scrub._total_counts_sim.get()
+    adata_sim.obsm["doublet_parents"] = scrub.doublet_parents_  # .get()
     adata_sim.uns["scrublet"] = {"parameters": {"sim_doublet_ratio": sim_doublet_ratio}}
     return adata_sim

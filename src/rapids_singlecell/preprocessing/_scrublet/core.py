@@ -7,17 +7,11 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 import pandas as pd
 from anndata import AnnData, concat
+from cuml.neighbors import NearestNeighbors
 from cupyx.scipy import sparse
-from scanpy.preprocessing_utils import sample_comb
+from scanpy._utils import AnyRandom, get_random_state
+from scanpy.preprocessing._utils import sample_comb
 
-from rapids_singlecell._utils import AnyRandom, get_random_state
-
-from ...neighbors import (
-    Neighbors,
-    _get_indices_distances_from_sparse_matrix,
-    _Metric,
-    _MetricFn,
-)
 from .sparse_utils import subsample_counts
 
 if TYPE_CHECKING:
@@ -184,7 +178,7 @@ class Scrublet:
     ) -> None:
         self._counts_obs = sparse.csc_matrix(counts_obs)
         self._total_counts_obs = (
-            self._counts_obs.sum(1).A.squeeze()
+            self._counts_obs.sum(1).flatten()
             if total_counts_obs is None
             else total_counts_obs
         )
@@ -278,7 +272,7 @@ class Scrublet:
     def calculate_doublet_scores(
         self,
         use_approx_neighbors: bool = True,
-        distance_metric: _Metric | _MetricFn = "euclidean",
+        distance_metric="euclidean",
         get_doublet_neighbor_parents: bool = False,
     ) -> NDArray[np.float64]:
         """\
@@ -326,7 +320,7 @@ class Scrublet:
         k: int = 40,
         *,
         use_approx_nn: bool = True,
-        distance_metric: _Metric | _MetricFn = "euclidean",
+        distance_metric="euclidean",
         exp_doub_rate: float = 0.1,
         stdev_doub_rate: float = 0.03,
         get_neighbor_parents: bool = False,
@@ -350,20 +344,16 @@ class Scrublet:
         k_adj = int(round(k * (1 + n_sim / float(n_obs))))
 
         # Find k_adj nearest neighbors
-        knn = Neighbors(manifold)
-        knn.compute_neighbors(
-            k_adj,
+        knn = NearestNeighbors(
+            n_neighbors=k_adj,
             metric=distance_metric,
-            knn=True,
-            transformer="pynndescent" if use_approx_nn else "sklearn",
-            method=None,
-            random_state=self._random_state,
         )
-        neighbors, _ = _get_indices_distances_from_sparse_matrix(knn.distances, k_adj)
+        knn.fit(manifold.X)
+        _, neighbors = knn.kneighbors(manifold.X)
 
         # Calculate doublet score based on ratio of simulated cell neighbors vs. observed cell neighbors
         doub_neigh_mask: NDArray[np.bool_] = (
-            manifold.obs["doub_labels"].to_numpy()[neighbors] == "sim"
+            manifold.obs["doub_labels"].to_numpy()[neighbors.get()] == "sim"
         )
         n_sim_neigh: NDArray[np.int64] = doub_neigh_mask.sum(axis=1)
 
@@ -438,7 +428,7 @@ class Scrublet:
         if threshold is None:
             # automatic threshold detection
             # http://scikit-image.org/docs/dev/api/skimage.filters.html
-            from cucim.skimage.filters import threshold_minimum
+            from skimage.filters import threshold_minimum
 
             try:
                 threshold = cast(float, threshold_minimum(self.doublet_scores_sim_))
@@ -446,7 +436,7 @@ class Scrublet:
                     print(
                         f"Automatically set threshold at doublet score = {threshold:.2f}"
                     )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 self.predicted_doublets_ = None
                 if verbose:
                     print(
