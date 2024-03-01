@@ -297,9 +297,10 @@ def filter_genes(
         "mean_counts",
         "pct_dropout_by_counts",
     ]:
-        print(
-            "Running `calculate_qc_metrics` for 'n_cells_by_counts','total_counts','mean_counts' or 'pct_dropout_by_counts'"
-        )
+        if verbose:
+            print(
+                "Running `calculate_qc_metrics` for 'n_cells_by_counts','total_counts','mean_counts' or 'pct_dropout_by_counts'"
+            )
         calculate_qc_metrics(adata=adata, log1p=False)
         if min_count is not None and max_count is not None:
             thr = (adata.var[qc_var] <= max_count) & (min_count <= adata.var[qc_var])
@@ -362,9 +363,10 @@ def filter_cells(
             print(f"filtered out {adata.obs.shape[0]-inter.sum()} cells")
         adata._inplace_subset_obs(inter)
     elif qc_var in ["n_genes_by_counts", "total_counts"]:
-        print(
-            "Running `calculate_qc_metrics` for 'n_cells_by_counts' or 'total_counts'"
-        )
+        if verbose:
+            print(
+                "Running `calculate_qc_metrics` for 'n_cells_by_counts' or 'total_counts'"
+            )
         calculate_qc_metrics(adata, log1p=False)
         inter = np.array
         if min_count is not None and max_count is not None:
