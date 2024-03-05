@@ -342,18 +342,20 @@ class Scrublet:
 
         # Adjust k (number of nearest neighbors) based on the ratio of simulated to observed cells
         k_adj = int(round(k * (1 + n_sim / float(n_obs))))
-
+        # print(manifold.X)
         # Find k_adj nearest neighbors
         knn = NearestNeighbors(
             n_neighbors=k_adj,
             metric=distance_metric,
+            output_type="numpy",
         )
         knn.fit(manifold.X)
         _, neighbors = knn.kneighbors(manifold.X)
-
+        neighbors = neighbors[:, 1:]  # remove self from neighbors
+        # print(neighbors)
         # Calculate doublet score based on ratio of simulated cell neighbors vs. observed cell neighbors
         doub_neigh_mask: NDArray[np.bool_] = (
-            manifold.obs["doub_labels"].to_numpy()[neighbors.get()] == "sim"
+            manifold.obs["doub_labels"].to_numpy()[neighbors] == "sim"
         )
         n_sim_neigh: NDArray[np.int64] = doub_neigh_mask.sum(axis=1)
 

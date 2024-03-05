@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
-from scipy import sparse
+from cupyx import cusparse
+from cupyx.scipy import sparse
 
 from rapids_singlecell.preprocessing._utils import _get_mean_var
 
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
 
 def mean_center(self: Scrublet) -> None:
     gene_means, _ = _get_mean_var(self._counts_obs_norm, axis=0)
+    gene_means = gene_means.astype(self._counts_obs_norm.dtype)
     self._counts_obs_norm = sparse.csc_matrix(self._counts_obs_norm - gene_means)
     if self._counts_sim_norm is not None:
         self._counts_sim_norm = sparse.csc_matrix(self._counts_sim_norm - gene_means)
@@ -55,11 +57,13 @@ def truncated_svd(
         raise RuntimeError("_counts_sim_norm is not set")
     from cuml.decomposition import TruncatedSVD
 
+    self._counts_obs_norm = self._counts_obs_norm.astype(cp.float32)
+    self._counts_sim_norm = self._counts_sim_norm.astype(cp.float32)
     X_obs = self._counts_obs_norm.toarray()
-    X_sim = self._counts_sim_norm.toarray()
-
     svd = TruncatedSVD(n_components=n_prin_comps, random_state=random_state).fit(X_obs)
-    self.set_manifold(svd.transform(X_obs), svd.transform(X_sim))
+    X_obs = svd.transform(X_obs)
+    X_sim = svd.transform(cusparse.sparseToDense(self._counts_sim_norm))
+    self.set_manifold(X_obs, X_sim)
 
 
 def pca(
@@ -73,8 +77,10 @@ def pca(
         raise RuntimeError("_counts_sim_norm is not set")
     from cuml.decomposition import PCA
 
-    X_obs = self._counts_obs_norm
-    X_sim = self._counts_sim_norm
-
+    self._counts_obs_norm = self._counts_obs_norm.astype(cp.float32)
+    self._counts_sim_norm = self._counts_sim_norm.astype(cp.float32)
+    X_obs = self._counts_obs_norm.toarray()
     pca = PCA(n_components=n_prin_comps, random_state=random_state).fit(X_obs)
-    self.set_manifold(pca.transform(X_obs), pca.transform(X_sim))
+    X_obs = pca.transform(X_obs)
+    X_sim = pca.transform(cusparse.sparseToDense(self._counts_sim_norm))
+    self.set_manifold(X_obs, X_sim)

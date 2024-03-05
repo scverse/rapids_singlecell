@@ -224,7 +224,7 @@ def scrublet(
             if log_transform:
                 pp.log1p(ad_obs)
                 pp.log1p(ad_sim)
-
+            del ad_obs.layers["raw"]
             # Now normalise simulated and observed in the same way
 
             pp.normalize_total(ad_obs, target_sum=1e6)
@@ -412,13 +412,13 @@ def _scrublet_call_doublets(
         stdev_doublet_rate=stdev_doublet_rate,
         random_state=random_state,
     )
-
+    del scrub._counts_obs
     # Ensure normalised matrix sparseness as Scrublet does
     # https://github.com/swolock/scrublet/blob/67f8ecbad14e8e1aa9c89b43dac6638cebe38640/src/scrublet/scrublet.py#L100
 
     scrub._counts_obs_norm = sparse.csc_matrix(adata_obs.X)
     scrub._counts_sim_norm = sparse.csc_matrix(adata_sim.X)
-
+    del adata_obs.X, adata_sim.X
     scrub.doublet_parents_ = adata_sim.obsm["doublet_parents"]
 
     # Call scrublet-specific preprocessing where specified
