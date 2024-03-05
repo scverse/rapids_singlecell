@@ -19,7 +19,7 @@ from .core import Scrublet
 if TYPE_CHECKING:
     from scanpy._utils import AnyRandom
 
-    from rapids_singlecell.pp._neighbors import _Metrics
+    from rapids_singlecell.preprocessing._neighbors import _Metrics
 
 
 @old_positionals(
@@ -108,9 +108,7 @@ def scrublet(
         at the specified rate.
     knn_dist_metric
         Distance metric used when finding nearest neighbors. For list of
-        valid values, see the documentation for annoy (if `use_approx_neighbors`
-        is True) or cuml.neighbors.NearestNeighbors (if `use_approx_neighbors`
-        is False).
+        valid values, see the documentation cuml.neighbors.NearestNeighbors.
     normalize_variance
         If True, normalize the data such that each gene has a variance of 1.
         :class:`cuml.decomposition.TruncatedSVD` will be used for dimensionality
@@ -355,9 +353,7 @@ def _scrublet_call_doublets(
         Does not affect the results, just here to stay consistent with :mod:`scanpy`.
     knn_dist_metric
         Distance metric used when finding nearest neighbors. For list of
-        valid values, see the documentation for annoy (if `use_approx_neighbors`
-        is True) or cuml.neighbors.NearestNeighbors (if `use_approx_neighbors`
-        is False).
+        valid values, see the documentation cuml.neighbors.NearestNeighbors.
     get_doublet_neighbor_parents
         If True, return the parent transcriptomes that generated the
         doublet neighbors of each observed transcriptome. This information can
