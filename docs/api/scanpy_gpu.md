@@ -36,6 +36,16 @@ Any transformation of the data matrix that is not a tool. Other than `tools`, pr
    pp.harmony_integrate
 ```
 
+### Doublet detection
+```{eval-rst}
+.. autosummary::
+   :toctree: generated/
+
+   pp.scrublet
+   pp.scrublet_simulate_doublets
+```
+
+
 ### Neighbors
 ```{eval-rst}
 .. autosummary::
