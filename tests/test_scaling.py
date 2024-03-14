@@ -112,3 +112,12 @@ def test_mask_string():
     rsc.pp.scale(adata, mask_obs="some cells")
     cp.testing.assert_allclose(adata.X, X_centered_for_mask)
     assert "mean of some cells" in adata.var.keys()
+
+@pytest.mark.parametrize("zero_center", [True, False])
+def test_clip(zero_center):
+    adata = sc.datasets.pbmc3k()
+    rsc.get.anndata_to_GPU(adata)
+    rsc.pp.scale(adata, max_value=1, zero_center=zero_center)
+    if zero_center:
+        assert adata.X.min() >= -1
+    assert adata.X.max() <= 1

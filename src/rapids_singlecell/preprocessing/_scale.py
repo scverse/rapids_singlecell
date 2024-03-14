@@ -97,7 +97,10 @@ def scale(
         if zero_center:
             X = cp.clip(X, a_min=-max_value, a_max=max_value)
         else:
-            X[X > max_value] = max_value
+            if isinstance(X, sparse.spmatrix):
+                X.data[X.data > max_value] = max_value
+            else:
+                X[X > max_value] = max_value
 
     if inplace:
         _set_obs_rep(adata, X, layer=layer, obsm=obsm)
