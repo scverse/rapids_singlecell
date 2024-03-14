@@ -12,4 +12,4 @@ dependencies:
  - cudnn
  - cutensor
  - cusparselt
- - pip
+ - uv
