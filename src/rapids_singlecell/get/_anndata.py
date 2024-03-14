@@ -17,7 +17,8 @@ def anndata_to_GPU(
     adata: AnnData,
     layer: Optional[str] = None,
     convert_all: bool = False,
-) -> None:
+    copy: bool = False,
+) -> Optional[AnnData]:
     """
     Transfers matrices and arrays to the GPU
 
@@ -32,10 +33,17 @@ def anndata_to_GPU(
     convert_all
         If True, move all supported arrays and matrices on the GPU
 
+    copy
+        Whether to return a copy or update `adata`.
+
     Returns
     -------
-    Updates `adata` inplace
+    Updates `adata` inplace or returns an updated copy
     """
+
+    if copy:
+        adata = adata.copy()
+
     if convert_all:
         anndata_to_GPU(adata)
         if adata.layers:
@@ -55,12 +63,16 @@ def anndata_to_GPU(
 
         _set_obs_rep(adata, X, layer=layer)
 
+    if copy:
+        return adata
+
 
 def anndata_to_CPU(
     adata: AnnData,
     layer: Optional[str] = None,
     convert_all: bool = False,
-) -> None:
+    copy: bool = False,
+) -> Optional[AnnData]:
     """
     Transfers matrices and arrays from the GPU
 
@@ -75,10 +87,17 @@ def anndata_to_CPU(
     convert_all
         If True, move all GPU based arrays and matrices to the host memory
 
+    copy
+        Whether to return a copy or update `adata`.
+
     Returns
     -------
-    Updates `adata` inplace
+    Updates `adata` inplace or returns an updated copy
     """
+
+    if copy:
+        adata = adata.copy()
+
     if convert_all:
         anndata_to_CPU(adata)
         if adata.layers:
@@ -96,3 +115,6 @@ def anndata_to_CPU(
             pass
 
         _set_obs_rep(adata, X, layer=layer)
+
+    if copy:
+        return adata
