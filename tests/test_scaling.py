@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from anndata import AnnData
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, csc_matrix
 from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
 
 import scanpy as sc
@@ -73,7 +73,7 @@ def test_scale_simple(dtype):
     )
 
 
-@pytest.mark.parametrize("typ", [np.array, csr_matrix], ids=lambda x: x.__name__)
+@pytest.mark.parametrize("typ", [np.array, csr_matrix, csc_matrix], ids=lambda x: x.__name__)
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
 @pytest.mark.parametrize(
     ("mask_obs", "X", "X_centered", "X_scaled"),

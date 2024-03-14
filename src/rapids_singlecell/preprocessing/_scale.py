@@ -151,28 +151,14 @@ def scale_sparse(X, *, mask_obs=None, zero_center=True, inplace=True):
         if sparse.isspmatrix_csr(X):
             X.data /= std[X.indices]
         elif sparse.isspmatrix_csc(X):
-            _normalize_csc(X.data, std, X.indptr, out=X.data)
+            from ._kernels._scale_kernel import _csc_scale_diff
+
+            scale_csc = _csc_scale_diff(X.dtype)
+            scale_csc(
+                (X.shape[1],),
+                (64,),
+                (X.indptr, X.data, std, X.shape[1]),
+            )
         else:
             raise ValueError("The sparse matrix must be a CSR or CSC matrix")
         return X, mean, std
-
-
-_normalize_csc = cp.ElementwiseKernel(
-    "T data, raw T std, raw int32 indptr",
-    "T x",
-    """
-    int col = -1;
-    for (int j = 0; j < _indptr_size - 1; ++j) {
-        if (i >= indptr[j] && i < indptr[j + 1]) {
-            col = j;
-            break;
-        }
-    }
-    if (col != -1) {
-        x = data / std[col];
-    } else {
-        x = data; // This should never happen
-    }
-    """,
-    "normalize_csc",
-)
