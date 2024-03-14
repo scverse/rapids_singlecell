@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import cupy as cp
@@ -54,7 +55,7 @@ def scale(
         mask_obs
             Restrict both the derivation of scaling parameters and the scaling itself
             to a certain set of observations. The mask is specified as a boolean array
-            or a string referring to an array in :attr:`~anndata.AnnData.obs`.
+            or a string referring to an array in :attr:`~anndata.AnnData.obs`. If the matrix is in csc format and a mask is provided, the matrix will be transformed to csr format.
 
         inplace
             If True, update AnnData with results. Otherwise, return results. See below for details of what is returned.
@@ -136,10 +137,30 @@ def scale_sparse(X, *, mask_obs=None, zero_center=True, inplace=True):
         return scale_array(X, mask_obs=mask_obs, zero_center=zero_center, inplace=True)
     else:
         if mask_obs is not None:
+            if sparse.isspmatrix_csc(X):
+                X = X.tocsr()
             scale_rv = scale_sparse(
                 X[mask_obs, :], zero_center=zero_center, inplace=True
             )
-            X[mask_obs, :], mean, std = scale_rv
+            X_sub, mean, std = scale_rv
+            mask_array = cp.where(cp.array(mask_obs))[0].astype(cp.int32)
+
+            from ._kernels._scale_kernel import _csr_update
+
+            update_inplace = _csr_update(X.dtype)
+            update_inplace(
+                (math.ceil(X.shape[0] / 64),),
+                (64,),
+                (
+                    X.indptr,
+                    X.data,
+                    X_sub.indptr,
+                    X_sub.data,
+                    mask_array,
+                    X_sub.shape[0],
+                ),
+            )
+
             return X, mean, std
 
         mean, var = _get_mean_var(X)
