@@ -101,8 +101,8 @@ def scale(
 
     if inplace:
         _set_obs_rep(adata, X, layer=layer, obsm=obsm)
-        adata.uns[str_mean_std[0]] = means.get()
-        adata.uns[str_mean_std[1]] = std.get()
+        adata.var[str_mean_std[0]] = means.get()
+        adata.var[str_mean_std[1]] = std.get()
 
     if copy:
         return adata
@@ -112,7 +112,11 @@ def scale(
 
 def scale_array(X, *, mask_obs=None, zero_center=True, inplace=True):
     if mask_obs is not None:
-        X = X[mask_obs, :]
+        scale_rv = scale_array(X[mask_obs, :], zero_center=zero_center, inplace=True)
+        X[mask_obs, :], mean, std = scale_rv
+        return X, mean, std
+    if not inplace:
+        X = X.copy()
     X = cp.ascontiguousarray(X)
     mean, var = _get_mean_var(X)
     std = cp.sqrt(var)
@@ -126,14 +130,19 @@ def scale_array(X, *, mask_obs=None, zero_center=True, inplace=True):
 def scale_sparse(X, *, mask_obs=None, zero_center=True, inplace=True):
     if zero_center:
         X = X.toarray()
-        return scale_array(X, mask_obs=mask_obs, zero_center=zero_center, inplace=False)
+        return scale_array(X, mask_obs=mask_obs, zero_center=zero_center, inplace=True)
     else:
         if mask_obs is not None:
-            X = X[mask_obs, :]
+            scale_rv = scale_sparse(
+                X[mask_obs, :], zero_center=zero_center, inplace=True
+            )
+            X[mask_obs, :], mean, std = scale_rv
+            return X, mean, std
+
         mean, var = _get_mean_var(X)
         std = cp.sqrt(var)
         std[std == 0] = 1
-        if inplace:
+        if not inplace:
             X = X.copy()
 
         if sparse.isspmatrix_csr(X):
