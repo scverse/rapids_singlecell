@@ -1,19 +1,31 @@
-from typing import Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import cupy as cp
 from anndata import AnnData
+from cupyx.scipy import sparse
 from scanpy._utils import view_to_actual
-from scanpy.get import _get_obs_rep, _set_obs_rep
+
+from rapids_singlecell.get import _check_mask, _get_obs_rep, _set_obs_rep
 
 from ._utils import _check_gpu_X, _get_mean_var
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 def scale(
     adata: AnnData,
-    max_value: Optional[int] = None,
-    layer: Optional[str] = None,
+    *,
+    zero_center: bool = True,
+    max_value: float | None = None,
+    copy: bool = False,
+    layer: str | None = None,
+    obsm: str | None = None,
+    mask_obs: np.ndarray | str | None = None,
     inplace: bool = True,
-) -> Optional[cp.ndarray]:
+) -> None | cp.ndarray:
     """
     Scales matrix to unit variance and clips values
 
@@ -22,11 +34,27 @@ def scale(
         adata
             AnnData object
 
+        zero_center
+            If `False`, omit zero-centering variables, which allows to handle sparse
+            input efficiently.
+
         max_value
-            After scaling matrix to unit variance, values will be clipped to this number of std deviations.
+            Clip (truncate) to this value after scaling. If `None`, do not clip.
+
+        copy
+            Whether this function should be performed inplace. If an AnnData object
+            is passed, this also determines if a copy is returned.
 
         layer
-            Layer to use as input instead of X. If None, X is used.
+            If provided, which element of layers to scale.
+
+        obsm
+            If provided, which element of obsm to scale.
+
+        mask_obs
+            Restrict both the derivation of scaling parameters and the scaling itself
+            to a certain set of observations. The mask is specified as a boolean array
+            or a string referring to an array in :attr:`~anndata.AnnData.obs`.
 
         inplace
             If True, update AnnData with results. Otherwise, return results. See below for details of what is returned.
@@ -37,31 +65,102 @@ def scale(
     depending on `inplace`.
 
     """
+    if copy:
+        if not inplace:
+            raise ValueError("`copy=True` cannot be used with `inplace=False`.")
+        adata = adata.copy()
+
     if isinstance(adata, AnnData):
         view_to_actual(adata)
 
-    X = _get_obs_rep(adata, layer=layer)
+    X = _get_obs_rep(adata, layer=layer, obsm=obsm)
     _check_gpu_X(X)
 
-    if not isinstance(X, cp.ndarray):
-        print("densifying _.X")
-        X = X.toarray()
+    str_mean_std = ("mean", "std")
+    if mask_obs is not None:
+        if isinstance(mask_obs, str):
+            str_mean_std = (f"mean of {mask_obs}", f"std of {mask_obs}")
+        else:
+            str_mean_std = ("mean with mask", "std with mask")
+        mask_obs = _check_mask(adata, mask_obs, "obs")
 
-    if not inplace:
-        X = X.copy()
+    if isinstance(X, cp.ndarray):
+        X, means, std = scale_array(
+            X, mask_obs=mask_obs, zero_center=zero_center, inplace=inplace
+        )
+    else:
+        X, means, std = scale_sparse(
+            X, mask_obs=mask_obs, zero_center=zero_center, inplace=inplace
+        )
 
-    if not X.flags.c_contiguous:
-        X = cp.asarray(X, order="C")
+    if max_value:
+        if zero_center:
+            X = cp.clip(X, a_min=-max_value, a_max=max_value)
+        else:
+            X[X > max_value] = max_value
 
+    if inplace:
+        _set_obs_rep(adata, X, layer=layer, obsm=obsm)
+        adata.uns[str_mean_std[0]] = means.get()
+        adata.uns[str_mean_std[1]] = std.get()
+
+    if copy:
+        return adata
+    elif not inplace:
+        return X
+
+
+def scale_array(X, *, mask_obs=None, zero_center=True, inplace=True):
+    if mask_obs is not None:
+        X = X[mask_obs, :]
+    X = cp.ascontiguousarray(X)
     mean, var = _get_mean_var(X)
     std = cp.sqrt(var)
     std[std == 0] = 1
-    X -= mean
+    if zero_center:
+        X -= mean
     X /= std
+    return X, mean, std
 
-    if max_value:
-        X = cp.clip(X, a_min=-max_value, a_max=max_value)
-    if inplace:
-        _set_obs_rep(adata, X, layer=layer)
+
+def scale_sparse(X, *, mask_obs=None, zero_center=True, inplace=True):
+    if zero_center:
+        X = X.toarray()
+        return scale_array(X, mask_obs=mask_obs, zero_center=zero_center, inplace=False)
     else:
-        return X
+        if mask_obs is not None:
+            X = X[mask_obs, :]
+        mean, var = _get_mean_var(X)
+        std = cp.sqrt(var)
+        std[std == 0] = 1
+        if inplace:
+            X = X.copy()
+
+        if sparse.isspmatrix_csr(X):
+            X.data /= std[X.indices]
+        elif sparse.isspmatrix_csc(X):
+            _normalize_csc(X.data, std, X.indptr, out=X.data)
+        else:
+            raise ValueError("The sparse matrix must be a CSR or CSC matrix")
+        return X, mean, std
+
+
+_normalize_csc = cp.ElementwiseKernel(
+    "T data, raw T std, raw int32 indptr",
+    "T x",
+    """
+    int col = -1;
+    for (int j = 0; j < _indptr_size - 1; ++j) {
+        if (i >= indptr[j] && i < indptr[j + 1]) {
+            col = j;
+            break;
+        }
+    }
+    if (col != -1) {
+        x = data / std[col];
+    } else {
+        x = data; // This should never happen
+    }
+    """,
+    "normalize_csc",
+)
