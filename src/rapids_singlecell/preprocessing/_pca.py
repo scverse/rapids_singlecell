@@ -17,6 +17,7 @@ from rapids_singlecell.get import _get_obs_rep
 
 if TYPE_CHECKING:
     from anndata import AnnData
+    from numpy.typing import NDArray
 
 
 def pca(
@@ -27,7 +28,7 @@ def pca(
     zero_center: bool = True,
     svd_solver: str = None,
     random_state: int | None = 0,
-    mask_var: np.ndarray[np.bool_] | str | None | Empty = _empty,
+    mask_var: NDArray[np.bool_] | str | None | Empty = _empty,
     use_highly_variable: bool | None = None,
     dtype: str = "float32",
     copy: bool = False,
