@@ -155,7 +155,7 @@ def spatial_autocorr(
     if n_perms is not None:
         score_perms = score_perms.get()
     with np.errstate(divide="ignore"):
-        pval_results = _p_value_calc(score, score_perms, g, params)
+        pval_results = _p_value_calc(score, sims=score_perms, weights=g, params=params)
 
     df = pd.DataFrame({params["stat"]: score, **pval_results}, index=genes)
 
