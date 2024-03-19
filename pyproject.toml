@@ -83,6 +83,7 @@ ignore = [
 "docs/*" = ["I"]
 "tests/*" = ["D"]
 "*/__init__.py" = ["F401"]
+"src/rapids_singlecell/preprocessing/_harmonypy_gpu.py" = ["PLR0917"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["rapids_singlecell"]
