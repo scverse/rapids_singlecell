@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from __future__ import annotations
 
 import cupy as cp
 import numpy as np
@@ -9,7 +9,7 @@ from scipy.sparse import csr_matrix
 from tqdm import tqdm
 
 
-def run_perm(mat, net, idxs, times, seed):
+def run_perm(mat, net, *, idxs, times, seed):
     mat = cp.array(mat)
     mat = cp.ascontiguousarray(mat)
     net = cp.array(net)
@@ -46,7 +46,7 @@ def run_perm(mat, net, idxs, times, seed):
     return estimate_return, norm_return, corr_return, pvals_return
 
 
-def wsum(mat, net, times, batch_size, seed, verbose):
+def wsum(mat, net, *, times, batch_size, seed, verbose):
     # Get dims
     n_samples = mat.shape[0]
     n_features, n_fsets = net.shape
@@ -76,13 +76,15 @@ def wsum(mat, net, times, batch_size, seed, verbose):
                     norm[srt:end],
                     corr[srt:end],
                     pvals[srt:end],
-                ) = run_perm(tmp, net, idxs, times, seed)
+                ) = run_perm(mat, net, idxs=idxs, times=times, seed=seed)
             else:
                 estimate[srt:end] = tmp.dot(net)
     else:
         estimate = mat.dot(net)
         if times > 1:
-            estimate, norm, corr, pvals = run_perm(mat, net, idxs, times, seed)
+            estimate, norm, corr, pvals = run_perm(
+                mat, net, idxs=idxs, times=times, seed=seed
+            )
         else:
             estimate = mat.dot(net)
 
@@ -90,8 +92,9 @@ def wsum(mat, net, times, batch_size, seed, verbose):
 
 
 def run_wsum(
-    mat: Union[AnnData, pd.DataFrame, list],
+    mat: AnnData | pd.DataFrame | list,
     net: pd.DataFrame,
+    *,
     source="source",
     target="target",
     weight="weight",
@@ -101,7 +104,7 @@ def run_wsum(
     seed: int = 42,
     verbose: bool = False,
     use_raw: bool = True,
-) -> Optional[tuple]:
+) -> tuple | None:
     """
     Weighted sum (WSUM).
     WSUM infers regulator activities by first multiplying each target feature by its associated weight which then are summed
