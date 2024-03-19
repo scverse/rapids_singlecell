@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import math
-from typing import Literal, Optional, Union
+from typing import Literal
 
 import cupy as cp
 from anndata import AnnData
@@ -13,12 +15,13 @@ from ._utils import _check_gpu_X
 
 def regress_out(
     adata: AnnData,
-    keys: Union[str, list],
-    layer: Optional[str] = None,
+    keys: str | list,
+    *,
+    layer: str | None = None,
     inplace: bool = True,
-    batchsize: Union[int, Literal["all"], None] = 100,
+    batchsize: int | Literal["all"] | None = 100,
     verbose: bool = False,
-) -> Optional[cp.ndarray]:
+) -> cp.ndarray | None:
     """
     Use linear regression to adjust for the effects of unwanted noise
     and variation.

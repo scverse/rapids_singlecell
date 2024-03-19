@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from __future__ import annotations
 
 import cupy as cp
 import numpy as np
@@ -65,8 +65,9 @@ def mlm(mat, net, batch_size=10000, verbose=False):
 
 
 def run_mlm(
-    mat: Union[AnnData, pd.DataFrame, list],
+    mat: AnnData | pd.DataFrame | list,
     net: pd.DataFrame,
+    *,
     source: str = "source",
     target: str = "target",
     weight: str = "weight",
@@ -74,7 +75,7 @@ def run_mlm(
     min_n: int = 5,
     verbose: bool = False,
     use_raw: bool = True,
-) -> Optional[tuple]:
+) -> tuple | None:
     """
     Multivariate Linear Model (MLM).
     MLM fits a multivariate linear model for each sample, where the observed molecular readouts in `mat` are the response

@@ -1,9 +1,13 @@
-from typing import Iterable, Literal, Union
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Iterable, Literal
 
 import cupy as cp
 import numpy as np
 import pandas as pd
-from anndata import AnnData
+
+if TYPE_CHECKING:
+    from anndata import AnnData
 
 
 def _select_groups(labels, groups_order_subset="all"):
@@ -44,7 +48,8 @@ def _select_groups(labels, groups_order_subset="all"):
 def rank_genes_groups_logreg(
     adata: AnnData,
     groupby: str,
-    groups: Union[Literal["all"], Iterable[str]] = "all",
+    *,
+    groups: Literal["all"] | Iterable[str] = "all",
     use_raw: bool = None,
     reference: str = "rest",
     n_genes: int = None,

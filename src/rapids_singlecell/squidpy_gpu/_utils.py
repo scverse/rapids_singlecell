@@ -1,8 +1,8 @@
+from __future__ import annotations
+
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
-    Union,
 )
 
 import numpy as np
@@ -15,9 +15,10 @@ from scipy.sparse import issparse, spmatrix
 ### Taken from squidpy: https://github.com/scverse/squidpy/blob/main/squidpy/gr/_ppatterns.py
 def _p_value_calc(
     score: np.ndarray,
-    sims: Union[np.ndarray, None],
-    weights: Union[spmatrix, np.ndarray],
-    params: Dict[str, Any],
+    *,
+    sims: np.ndarray | None,
+    weights: spmatrix | np.ndarray,
+    params: dict[str, Any],
 ):
     """
     Handle p-value calculation for spatial autocorrelation function.
@@ -73,9 +74,7 @@ def _p_value_calc(
     return results
 
 
-def _analytic_pval(
-    score: np.ndarray, g: Union[spmatrix, np.ndarray], params: Dict[str, Any]
-):
+def _analytic_pval(score: np.ndarray, g: spmatrix | np.ndarray, params: dict[str, Any]):
     """
     Analytic p-value computation.
     See `Moran's I <https://pysal.org/esda/_modules/esda/moran.html#Moran>`_ and
@@ -102,7 +101,7 @@ def _analytic_pval(
     return p_norm, Vscore_norm
 
 
-def _g_moments(w: Union[spmatrix, np.ndarray]):
+def _g_moments(w: spmatrix | np.ndarray):
     """
     Compute moments of adjacency matrix for analytic p-value calculation.
     See `pysal <https://pysal.org/libpysal/_modules/libpysal/weights/weights.html#W>`_ implementation.

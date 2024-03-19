@@ -1,19 +1,24 @@
+from __future__ import annotations
+
 import math
 import warnings
-from typing import Optional
+from typing import TYPE_CHECKING
 
 import cupy as cp
 import numpy as np
 import pandas as pd
-from anndata import AnnData
 from cupyx.scipy.sparse import issparse
 from scanpy.get import _get_obs_rep
 
 from ._utils import _check_gpu_X, _check_nonnegative_integers, _get_mean_var
 
+if TYPE_CHECKING:
+    from anndata import AnnData
+
 
 def highly_variable_genes(
     adata: AnnData,
+    *,
     layer: str = None,
     min_mean: float = 0.0125,
     max_mean: float = 3,
@@ -267,6 +272,7 @@ def highly_variable_genes(
 
 def _highly_variable_genes_single_batch(
     X,
+    *,
     min_mean=0.0125,
     max_mean=3,
     min_disp=0.5,
@@ -371,9 +377,10 @@ def _highly_variable_genes_single_batch(
 
 def _highly_variable_genes_seurat_v3(
     adata: AnnData,
-    layer: Optional[str] = None,
+    *,
+    layer: str | None = None,
     n_top_genes: int = None,
-    batch_key: Optional[str] = None,
+    batch_key: str | None = None,
     span: float = 0.3,
     check_values=True,
 ):
@@ -512,12 +519,13 @@ def _highly_variable_genes_seurat_v3(
 
 def _highly_variable_pearson_residuals(
     adata: AnnData,
+    *,
     theta: float = 100,
-    clip: Optional[float] = None,
+    clip: float | None = None,
     n_top_genes: int = 2000,
-    batch_key: Optional[str] = None,
+    batch_key: str | None = None,
     check_values: bool = True,
-    layer: Optional[str] = None,
+    layer: str | None = None,
 ):
     """
     Select highly variable genes using analytic Pearson residuals.
@@ -693,7 +701,8 @@ def _highly_variable_pearson_residuals(
 
 def _poisson_gene_selection(
     adata: AnnData,
-    layer: Optional[str] = None,
+    *,
+    layer: str | None = None,
     n_top_genes: int = None,
     n_samples: int = 10000,
     batch_key: str = None,

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from cuml.common.kernel_utils import cuda_kernel_factory
 
 _get_mean_var_major_kernel = r"""

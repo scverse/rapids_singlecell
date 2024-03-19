@@ -1,17 +1,22 @@
-from collections.abc import Collection, Iterable
-from typing import Literal, Union, get_args
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Literal, Union, get_args
 
 import cupy as cp
-import numpy as np
-import pandas as pd
 from anndata import AnnData
 from cupyx.scipy import sparse as cp_sparse
-from numpy.typing import NDArray
 from scanpy._utils import _resolve_axis
 from scanpy.get._aggregated import _combine_categories, sparse_indicator
 
 from rapids_singlecell.get import _check_mask
 from rapids_singlecell.preprocessing._utils import _check_gpu_X
+
+if TYPE_CHECKING:
+    from collections.abc import Collection, Iterable
+
+    import numpy as np
+    import pandas as pd
+    from numpy.typing import NDArray
 
 Array = Union[cp.ndarray, cp_sparse.csc_matrix, cp_sparse.csr_matrix]
 AggType = Literal["count_nonzero", "mean", "sum", "var"]

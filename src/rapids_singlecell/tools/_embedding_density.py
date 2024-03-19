@@ -1,18 +1,23 @@
+from __future__ import annotations
+
 import math
-from typing import Optional, Sequence, Union
+from typing import TYPE_CHECKING, Sequence
 
 import cupy as cp
 import numpy as np
-from anndata import AnnData
+
+if TYPE_CHECKING:
+    from anndata import AnnData
 
 
 def embedding_density(
     adata: AnnData,
     basis: str = "umap",
-    groupby: Optional[str] = None,
-    key_added: Optional[str] = None,
+    *,
+    groupby: str | None = None,
+    key_added: str | None = None,
     batchsize: int = 10000,
-    components: Union[str, Sequence[str]] = None,
+    components: str | Sequence[str] = None,
 ) -> None:
     """\
     Calculate the density of cells in an embedding (per condition).

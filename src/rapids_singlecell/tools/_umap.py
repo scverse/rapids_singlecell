@@ -1,8 +1,9 @@
-from typing import Literal, Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
 import numpy as np
-from anndata import AnnData
 from cuml import UMAP
 from cuml.manifold.umap_utils import find_ab_params
 from cupyx.scipy import sparse
@@ -11,24 +12,28 @@ from sklearn.utils import check_random_state
 
 from ._utils import _choose_representation
 
+if TYPE_CHECKING:
+    from anndata import AnnData
+
 _InitPos = Literal["spectral", "random"]
 
 
 def umap(
     adata: AnnData,
+    *,
     min_dist: float = 0.5,
     spread: float = 1.0,
     n_components: int = 2,
-    maxiter: Optional[int] = None,
+    maxiter: int | None = None,
     alpha: float = 1.0,
     negative_sample_rate: int = 5,
     init_pos: _InitPos = "spectral",
     random_state=0,
-    a: Optional[float] = None,
-    b: Optional[float] = None,
+    a: float | None = None,
+    b: float | None = None,
     copy: bool = False,
-    neighbors_key: Optional[str] = None,
-) -> Optional[AnnData]:
+    neighbors_key: str | None = None,
+) -> AnnData | None:
     """\
     Embed the neighborhood graph using UMAP's cuml implementation.
 

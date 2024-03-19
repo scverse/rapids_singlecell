@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from cuml.common.kernel_utils import cuda_kernel_factory
 
 _sparse_qc_kernel_csc = r"""

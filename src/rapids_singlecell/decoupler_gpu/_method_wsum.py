@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from __future__ import annotations
 
 import cupy as cp
 import numpy as np
@@ -90,8 +90,9 @@ def wsum(mat, net, times, batch_size, seed, verbose):
 
 
 def run_wsum(
-    mat: Union[AnnData, pd.DataFrame, list],
+    mat: AnnData | pd.DataFrame | list,
     net: pd.DataFrame,
+    *,
     source="source",
     target="target",
     weight="weight",
@@ -101,7 +102,7 @@ def run_wsum(
     seed: int = 42,
     verbose: bool = False,
     use_raw: bool = True,
-) -> Optional[tuple]:
+) -> tuple | None:
     """
     Weighted sum (WSUM).
     WSUM infers regulator activities by first multiplying each target feature by its associated weight which then are summed
