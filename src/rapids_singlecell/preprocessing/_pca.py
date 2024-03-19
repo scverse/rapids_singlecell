@@ -9,10 +9,10 @@ from cuml.decomposition import PCA, TruncatedSVD
 from cuml.internals.input_utils import sparse_scipy_to_cp
 from cupyx.scipy.sparse import csr_matrix, isspmatrix_csr
 from cupyx.scipy.sparse import issparse as cpissparse
+from scanpy._utils import Empty, _empty
 from scanpy.preprocessing._pca import _handle_mask_var
 from scipy.sparse import issparse
 
-from rapids_singlecell._utils import Empty, _empty
 from rapids_singlecell.get import _get_obs_rep
 
 if TYPE_CHECKING:
