@@ -65,6 +65,7 @@ select = [
     "ICN",     # Follow import conventions
     "PTH",     # Pathlib instead of os.path
     "TCH",     # manage type checking blocks
+    "PLR0917", # Ban APIs with too many positional parameters
 ]
 
 ignore = [
@@ -82,7 +83,10 @@ ignore = [
 "docs/*" = ["I"]
 "tests/*" = ["D"]
 "*/__init__.py" = ["F401"]
-"src/rapids_singlecell/get/_aggregated.py" = ["F811"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["rapids_singlecell"]
+required-imports = ["from __future__ import annotations"]
 
 [tool.hatch.build]
 # exclude big files that don’t need to be installed
