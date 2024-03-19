@@ -1,14 +1,19 @@
-from typing import Optional
+from __future__ import annotations
 
-from anndata import AnnData
+from typing import TYPE_CHECKING
+
 from cuml.manifold import TSNE
 
 from ._utils import _choose_representation
+
+if TYPE_CHECKING:
+    from anndata import AnnData
 
 
 def tsne(
     adata: AnnData,
     n_pcs: int = None,
+    *,
     use_rep: str = None,
     perplexity: int = 30,
     early_exaggeration: int = 12,
@@ -16,7 +21,7 @@ def tsne(
     method: str = "barnes_hut",
     metric: str = "euclidean",
     copy: bool = False,
-) -> Optional[AnnData]:
+) -> AnnData | None:
     """
     Performs t-distributed stochastic neighborhood embedding (tSNE) using cuml library.
 

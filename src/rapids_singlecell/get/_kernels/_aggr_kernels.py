@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from cuml.common.kernel_utils import cuda_kernel_factory
 
 sparse_sparse_aggr_kernel = r"""

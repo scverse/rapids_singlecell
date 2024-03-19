@@ -1,16 +1,20 @@
+from __future__ import annotations
+
 import math
 from types import MappingProxyType
-from typing import Any, Literal, Mapping, Optional, Union
+from typing import TYPE_CHECKING, Any, Literal, Mapping, Union
 
 import cupy as cp
 import numpy as np
-from anndata import AnnData
 from cuml.manifold.simpl_set import fuzzy_simplicial_set
 from cupyx.scipy import sparse as cp_sparse
 from pylibraft.common import DeviceResources
 from scipy import sparse as sc_sparse
 
 from rapids_singlecell.tools._utils import _choose_representation
+
+if TYPE_CHECKING:
+    from anndata import AnnData
 
 AnyRandom = Union[None, int, np.random.RandomState]
 _Alogithms = Literal["brute", "ivfflat", "ivfpq", "cagra"]
@@ -207,15 +211,16 @@ def _check_metrics(algorithm, metric):
 def neighbors(
     adata: AnnData,
     n_neighbors: int = 15,
-    n_pcs: Optional[int] = None,
-    use_rep: Optional[str] = None,
+    n_pcs: int | None = None,
+    *,
+    use_rep: str | None = None,
     random_state: AnyRandom = 0,
     algorithm: _Alogithms = "brute",
     metric: _Metrics = "euclidean",
     metric_kwds: Mapping[str, Any] = MappingProxyType({}),
-    key_added: Optional[str] = None,
+    key_added: str | None = None,
     copy: bool = False,
-) -> Optional[AnnData]:
+) -> AnnData | None:
     """\
     Compute a neighborhood graph of observations with cuml.
 

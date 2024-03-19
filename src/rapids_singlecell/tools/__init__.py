@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from rapids_singlecell.preprocessing._pca import pca
 
 from ._clustering import kmeans, leiden, louvain

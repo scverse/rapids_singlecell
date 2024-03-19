@@ -1,14 +1,14 @@
+from __future__ import annotations
+
 from typing import (
+    TYPE_CHECKING,
     Literal,  # < 3.8
-    Optional,
     Sequence,
-    Union,
 )
 
 import cupy as cp
 import numpy as np
 import pandas as pd
-from anndata import AnnData
 from cupyx.scipy import sparse as sparse_gpu
 from scipy import sparse
 from statsmodels.stats.multitest import multipletests
@@ -17,21 +17,25 @@ from ._gearysc import _gearys_C_cupy
 from ._moransi import _morans_I_cupy
 from ._utils import _p_value_calc
 
+if TYPE_CHECKING:
+    from anndata import AnnData
+
 
 def spatial_autocorr(
     adata: AnnData,
+    *,
     connectivity_key: str = "spatial_connectivities",
-    genes: Union[str, Sequence[str], None] = None,
+    genes: str | Sequence[str] | None = None,
     mode: Literal["moran", "geary"] = "moran",
     transformation: bool = True,
-    n_perms: Union[int, None] = None,
+    n_perms: int | None = None,
     two_tailed: bool = False,
-    corr_method: Union[str, None] = "fdr_bh",
-    layer: Union[str, None] = None,
+    corr_method: str | None = "fdr_bh",
+    layer: str | None = None,
     use_raw: bool = False,
     use_sparse: bool = True,
     copy: bool = False,
-) -> Optional[pd.DataFrame]:
+) -> pd.DataFrame | None:
     """
     Calculate spatial autocorrelation for genes in an AnnData object.
 

@@ -1,30 +1,34 @@
-from typing import Optional, Sequence, Tuple, Union
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Sequence
 
 import cudf
 import numpy as np
 import pandas as pd
-from anndata import AnnData
 from natsort import natsorted
 from packaging import version
 from scanpy.tools._utils import _choose_graph
 from scanpy.tools._utils_clustering import rename_groups, restrict_adjacency
-from scipy import sparse
+
+if TYPE_CHECKING:
+    from anndata import AnnData
+    from scipy import sparse
 
 
 def leiden(
     adata: AnnData,
     resolution: float = 1.0,
     *,
-    random_state: Union[int, None] = 0,
-    restrict_to: Optional[Tuple[str, Sequence[str]]] = None,
+    random_state: int | None = 0,
+    restrict_to: tuple[str, Sequence[str]] | None = None,
     key_added: str = "leiden",
-    adjacency: Optional[sparse.spmatrix] = None,
+    adjacency: sparse.spmatrix | None = None,
     n_iterations: int = 100,
     use_weights: bool = True,
-    neighbors_key: Optional[str] = None,
-    obsp: Optional[str] = None,
+    neighbors_key: str | None = None,
+    obsp: str | None = None,
     copy: bool = False,
-) -> Optional[AnnData]:
+) -> AnnData | None:
     """
     Performs Leiden clustering using cuGraph, which implements the method
     described in:
@@ -149,16 +153,16 @@ def louvain(
     adata: AnnData,
     resolution: float = 1.0,
     *,
-    restrict_to: Optional[Tuple[str, Sequence[str]]] = None,
+    restrict_to: tuple[str, Sequence[str]] | None = None,
     key_added: str = "louvain",
-    adjacency: Optional[sparse.spmatrix] = None,
+    adjacency: sparse.spmatrix | None = None,
     n_iterations: int = 100,
     threshold: float = 1e-7,
     use_weights: bool = True,
-    neighbors_key: Optional[int] = None,
-    obsp: Optional[str] = None,
+    neighbors_key: int | None = None,
+    obsp: str | None = None,
     copy: bool = False,
-) -> Optional[AnnData]:
+) -> AnnData | None:
     """
     Performs Louvain clustering using cuGraph, which implements the method
     described in:
@@ -298,6 +302,7 @@ def louvain(
 def kmeans(
     adata: AnnData,
     n_clusters: int = 8,
+    *,
     key_added: str = "kmeans",
     random_state: float = 42,
 ) -> None:

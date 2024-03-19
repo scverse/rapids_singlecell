@@ -1,13 +1,20 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import cupy as cp
-from anndata import AnnData
 from cupyx.scipy import sparse
 from cupyx.scipy.sparse import linalg
 from scipy.sparse import issparse
+
+if TYPE_CHECKING:
+    from anndata import AnnData
 
 
 def diffmap(
     adata: AnnData,
     n_comps: int = 15,
+    *,
     neighbors_key: str = None,
     sort: str = "decrease",
     density_normalize: bool = True,

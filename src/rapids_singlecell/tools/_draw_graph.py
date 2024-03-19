@@ -1,13 +1,17 @@
-from typing import Union
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import cudf
 import cupy as cp
 import numpy as np
-from anndata import AnnData
+
+if TYPE_CHECKING:
+    from anndata import AnnData
 
 
 def draw_graph(
-    adata: AnnData, init_pos: Union[str, bool, None] = None, max_iter: int = 500
+    adata: AnnData, *, init_pos: str | bool | None = None, max_iter: int = 500
 ) -> None:
     """
     Force-directed graph drawing with cugraph's implementation of Force Atlas 2.

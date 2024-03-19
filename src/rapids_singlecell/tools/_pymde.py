@@ -1,12 +1,17 @@
-from typing import Literal, Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Literal
 
 import pandas as pd
-from anndata import AnnData
+
+if TYPE_CHECKING:
+    from anndata import AnnData
 
 
 def mde(
     adata: AnnData,
-    device: Optional[Literal["cpu", "cuda"]] = None,
+    *,
+    device: Literal["cpu", "cuda"] | None = None,
     n_neighbors: int = 15,
     n_pcs: int = None,
     use_rep: str = None,

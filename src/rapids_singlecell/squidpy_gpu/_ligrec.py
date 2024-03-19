@@ -1,12 +1,12 @@
+from __future__ import annotations
+
 import math
 from itertools import product
 from typing import (
     Iterable,
     Literal,
     Mapping,
-    Optional,
     Sequence,
-    Union,
 )
 
 import cupy as cp
@@ -130,22 +130,23 @@ def _check_tuple_needles(
 def ligrec(
     adata: AnnData,
     cluster_key: str,
-    clusters: Optional[list] = None,
-    interactions: Union[pd.DataFrame, Mapping, Sequence, None] = None,
+    *,
+    clusters: list | None = None,
+    interactions: pd.DataFrame | Mapping | Sequence | None = None,
     complex_policy: Literal["min", "all"] = "min",
     threshold: float = 0.01,
-    corr_method: Union[str, None] = None,
+    corr_method: str | None = None,
     corr_axis: Literal["interactions", "clusters"] = "clusters",
     alpha: float = 0.05,
     use_raw: bool = True,
     copy: bool = False,
-    key_added: Union[str, None] = None,
-    gene_symbols: Union[str, None] = None,
+    key_added: str | None = None,
+    gene_symbols: str | None = None,
     n_perms: int = 1000,
     interactions_params: dict = {},
     transmitter_params: dict = {"categories": "ligand"},
     receiver_params: dict = {"categories": "receptor"},
-) -> Optional[pd.DataFrame]:
+) -> pd.DataFrame | None:
     """\
     Perform the permutation test as described in [Efremova et al., 2020].
 

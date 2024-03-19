@@ -1,10 +1,17 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import numpy as np
-from anndata import AnnData
+
+if TYPE_CHECKING:
+    from anndata import AnnData
 
 
 def harmony_integrate(
     adata: AnnData,
     key: str,
+    *,
     basis: str = "X_pca",
     adjusted_basis: str = "X_pca_harmony",
     **kwargs,

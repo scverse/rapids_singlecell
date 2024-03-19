@@ -15,6 +15,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+from __future__ import annotations
 
 import logging
 
@@ -39,6 +40,7 @@ def run_harmony(
     data_mat: np.ndarray,
     meta_data: pd.DataFrame,
     vars_use,
+    *,
     theta=None,
     lamb=None,
     sigma=0.1,

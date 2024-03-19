@@ -1,20 +1,25 @@
+from __future__ import annotations
+
 import math
-from typing import Union
+from typing import TYPE_CHECKING
 
 import cupy as cp
 import numpy as np
-from anndata import AnnData
 from cupyx.scipy import sparse
 from scanpy.get import _get_obs_rep
 
 from ._utils import _check_gpu_X
 
+if TYPE_CHECKING:
+    from anndata import AnnData
+
 
 def calculate_qc_metrics(
     adata: AnnData,
+    *,
     expr_type: str = "counts",
     var_type: str = "genes",
-    qc_vars: Union[str, list] = None,
+    qc_vars: str | list = None,
     log1p: bool = True,
     layer: str = None,
 ) -> None:
@@ -203,6 +208,7 @@ def calculate_qc_metrics(
 
 def flag_gene_family(
     adata: AnnData,
+    *,
     gene_family_name: str,
     gene_family_prefix: str = None,
     gene_list: list = None,
@@ -242,6 +248,7 @@ def flag_gene_family(
 
 def filter_genes(
     adata: AnnData,
+    *,
     qc_var: str = "n_cells_by_counts",
     min_count: int = None,
     max_count: int = None,
@@ -320,6 +327,7 @@ def filter_genes(
 
 def filter_cells(
     adata: AnnData,
+    *,
     qc_var: str,
     min_count: float = None,
     max_count: float = None,
