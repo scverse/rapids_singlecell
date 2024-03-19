@@ -9,7 +9,7 @@ from scipy.sparse import csr_matrix
 from tqdm import tqdm
 
 
-def run_perm(mat, net, *, idxs, times, seed):
+def run_perm(mat, net, idxs, times, seed):
     mat = cp.array(mat)
     mat = cp.ascontiguousarray(mat)
     net = cp.array(net)
@@ -46,7 +46,7 @@ def run_perm(mat, net, *, idxs, times, seed):
     return estimate_return, norm_return, corr_return, pvals_return
 
 
-def wsum(mat, net, *, times, batch_size, seed, verbose):
+def wsum(mat, net, times, batch_size, seed, verbose):
     # Get dims
     n_samples = mat.shape[0]
     n_features, n_fsets = net.shape
@@ -76,15 +76,13 @@ def wsum(mat, net, *, times, batch_size, seed, verbose):
                     norm[srt:end],
                     corr[srt:end],
                     pvals[srt:end],
-                ) = run_perm(mat, net, idxs=idxs, times=times, seed=seed)
+                ) = run_perm(tmp, net, idxs, times, seed)
             else:
                 estimate[srt:end] = tmp.dot(net)
     else:
         estimate = mat.dot(net)
         if times > 1:
-            estimate, norm, corr, pvals = run_perm(
-                mat, net, idxs=idxs, times=times, seed=seed
-            )
+            estimate, norm, corr, pvals = run_perm(mat, net, idxs, times, seed)
         else:
             estimate = mat.dot(net)
 

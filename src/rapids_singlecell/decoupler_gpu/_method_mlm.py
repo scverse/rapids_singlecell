@@ -10,7 +10,7 @@ from scipy.sparse import csr_matrix
 from tqdm import tqdm
 
 
-def fit_mlm(X, y, *, inv, df):
+def fit_mlm(X, y, inv, df):
     X = cp.ascontiguousarray(X)
     y.shape[1]
     X.shape[1]
@@ -30,7 +30,7 @@ def fit_mlm(X, y, *, inv, df):
     return t.astype(np.float32).get()
 
 
-def mlm(mat, net, *, batch_size=10000, verbose=False):
+def mlm(mat, net, batch_size=10000, verbose=False):
     # Get number of batches
     n_samples = mat.shape[0]
     n_features, n_fsets = net.shape
@@ -53,7 +53,7 @@ def mlm(mat, net, *, batch_size=10000, verbose=False):
             y = mat[srt:end].A.T
 
             # Compute MLM for batch
-            es[srt:end] = fit_mlm(net, cp.array(y), inv=inv, df=df)[:, 1:]
+            es[srt:end] = fit_mlm(net, cp.array(y), inv, df)[:, 1:]
     else:
         # Compute MLM for all
         es = fit_mlm(net, cp.array(mat.T), inv, df)[:, 1:]
