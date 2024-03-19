@@ -1,10 +1,13 @@
 import numpy as np
 import cupy as cp
+from cupyx.scipy import sparse as cusparse
 import pytest
 import rapids_singlecell as rsc
 from anndata import AnnData
 from scanpy.datasets import pbmc3k_processed
 from scipy import sparse
+import scanpy as sc
+from scanpy.testing._helpers.data import pbmc3k_normalized
 
 A_list = [
     [0, 0, 7, 0, 0],
@@ -133,3 +136,111 @@ def test_pca_sparse():
         rtol=1e-7,
         atol=1e-6,
     )
+
+def test_mask_highly_var_error():
+    """Check if use_highly_variable=True throws an error if the annotation is missing."""
+    adata = AnnData(np.array(A_list).astype("float32"))
+    with pytest.warns(
+        FutureWarning,
+        match=r"Argument `use_highly_variable` is deprecated, consider using the mask argument\.",
+    ), pytest.raises(
+        ValueError,
+        match=r"Did not find `adata\.var\['highly_variable'\]`\.",
+    ):
+        sc.pp.pca(adata, use_highly_variable=True)
+
+def test_mask_length_error():
+    """Check error for n_obs / mask length mismatch."""
+    adata = AnnData(np.array(A_list).astype("float32"))
+    mask_var = np.random.choice([True, False], adata.shape[1] + 1)
+    with pytest.raises(
+        ValueError, match=r"The shape of the mask do not match the data\."
+    ):
+        rsc.pp.pca(adata, mask_var=mask_var)
+
+@pytest.mark.parametrize("float_dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("array_type", ["array", cusparse.csr_matrix, cusparse.csc_matrix])
+def test_mask_var_argument_equivalence(float_dtype, array_type):
+    """Test if pca result is equal when given mask as boolarray vs string"""
+    X = cp.random.random((100, 10),dtype=float_dtype)
+    if array_type != "array":
+        X = array_type(X)
+    adata_base = AnnData(X)
+    mask_var = np.random.choice([True, False], adata_base.shape[1])
+
+    adata = adata_base.copy()
+    rsc.pp.pca(adata, mask_var=mask_var, dtype=float_dtype)
+
+    adata_w_mask = adata_base.copy()
+    adata_w_mask.var["mask"] = mask_var
+    rsc.pp.pca(adata_w_mask, mask_var="mask", dtype=float_dtype)
+
+    assert cp.allclose(
+        adata.X.toarray() if cusparse.issparse(adata.X) else adata.X,
+        adata_w_mask.X.toarray() if cusparse.issparse(adata_w_mask.X) else adata_w_mask.X,
+    )
+
+
+def test_mask():
+    adata = sc.datasets.blobs(n_variables=10, n_centers=3, n_observations=100)
+    mask_var = np.random.choice([True, False], adata.shape[1])
+
+    adata_masked = adata[:, mask_var].copy()
+    rsc.pp.pca(adata, mask_var=mask_var)
+    rsc.pp.pca(adata_masked)
+
+    masked_var_loadings = adata.varm["PCs"][~mask_var]
+    np.testing.assert_equal(masked_var_loadings, np.zeros_like(masked_var_loadings))
+
+    np.testing.assert_equal(adata.obsm["X_pca"], adata_masked.obsm["X_pca"])
+    # There are slight difference based on whether the matrix was column or row major
+    np.testing.assert_allclose(
+        adata.varm["PCs"][mask_var], adata_masked.varm["PCs"], rtol=1e-11
+    )
+
+@pytest.mark.parametrize("float_dtype", ["float32", "float64"])
+def test_mask_defaults(float_dtype):
+    """
+    Test if pca result is equal without highly variable and with-but mask is None
+    and if pca takes highly variable as mask as default
+    """
+    A = cp.array(A_list).astype("float32")
+    adata = AnnData(A)
+
+    without_var = rsc.pp.pca(adata, copy=True, dtype=float_dtype)
+
+    mask = np.array([True, True,False,True,False])
+
+    adata.var["highly_variable"] = mask
+    with_var = rsc.pp.pca(adata, copy=True, dtype=float_dtype)
+    assert without_var.uns["pca"]["params"]["mask_var"] is None
+    assert with_var.uns["pca"]["params"]["mask_var"] == "highly_variable"
+    assert not np.array_equal(without_var.obsm["X_pca"], with_var.obsm["X_pca"])
+    with_no_mask = rsc.pp.pca(adata, mask_var=None, copy=True, dtype=float_dtype)
+    assert np.array_equal(without_var.obsm["X_pca"], with_no_mask.obsm["X_pca"])
+
+def test_pca_layer():
+    """
+    Tests that layers works the same way as .X
+    """
+    X_adata = pbmc3k_normalized()
+    X_adata.X = X_adata.X.astype(np.float64)
+
+    layer_adata = X_adata.copy()
+    layer_adata.layers["counts"] = X_adata.X.copy()
+    del layer_adata.X
+
+    rsc.pp.pca(X_adata)
+    rsc.pp.pca(layer_adata, layer="counts")
+
+    assert layer_adata.uns["pca"]["params"]["layer"] == "counts"
+    assert "layer" not in X_adata.uns["pca"]["params"]
+
+    np.testing.assert_almost_equal(
+        X_adata.uns["pca"]["variance"], layer_adata.uns["pca"]["variance"]
+    )
+    np.testing.assert_almost_equal(
+        X_adata.uns["pca"]["variance_ratio"], layer_adata.uns["pca"]["variance_ratio"]
+    )
+    np.testing.assert_almost_equal(X_adata.obsm["X_pca"], layer_adata.obsm["X_pca"])
+    np.testing.assert_almost_equal(X_adata.varm["PCs"], layer_adata.varm["PCs"])

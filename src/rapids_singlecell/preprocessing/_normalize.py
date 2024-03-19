@@ -1,23 +1,27 @@
+from __future__ import annotations
+
 import math
 import warnings
-from typing import Optional, Union
+from typing import TYPE_CHECKING
 
 import cupy as cp
-from anndata import AnnData
 from cupyx.scipy import sparse
 from scanpy.get import _get_obs_rep, _set_obs_rep
 
 from ._utils import _check_gpu_X, _check_nonnegative_integers
 
+if TYPE_CHECKING:
+    from anndata import AnnData
+
 
 def normalize_total(
     adata: AnnData,
     *,
-    target_sum: Optional[int] = None,
-    layer: Optional[str] = None,
+    target_sum: int | None = None,
+    layer: int | str = None,
     inplace: bool = True,
     copy: bool = False,
-) -> Optional[Union[AnnData, sparse.csr_matrix, cp.ndarray]]:
+) -> AnnData | sparse.csr_matrix | cp.ndarray | None:
     """
     Normalizes rows in matrix so they sum to `target_sum`
 
@@ -106,11 +110,11 @@ def normalize_total(
 def log1p(
     adata: AnnData,
     *,
-    layer: Optional[str] = None,
-    obsm: Optional[str] = None,
+    layer: str | None = None,
+    obsm: str | None = None,
     inplace: bool = True,
     copy: bool = False,
-) -> Optional[Union[AnnData, sparse.csr_matrix, cp.ndarray]]:
+) -> AnnData | sparse.spmatrix | cp.ndarray | None:
     """
     Calculated the natural logarithm of one plus the sparse matrix.
 
@@ -163,12 +167,13 @@ def log1p(
 
 def normalize_pearson_residuals(
     adata: AnnData,
+    *,
     theta: float = 100,
-    clip: Optional[float] = None,
+    clip: float | None = None,
     check_values: bool = True,
-    layer: Optional[str] = None,
+    layer: str | None = None,
     inplace: bool = True,
-) -> Optional[cp.ndarray]:
+) -> cp.ndarray | None:
     """
     Applies analytic Pearson residual normalization, based on Lause21.
     The residuals are based on a negative binomial offset model with overdispersion

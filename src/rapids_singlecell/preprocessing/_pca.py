@@ -1,26 +1,40 @@
+from __future__ import annotations
+
 import math
-from typing import Optional, Union
+from typing import TYPE_CHECKING
 
 import cupy as cp
 import numpy as np
-from anndata import AnnData
 from cuml.decomposition import PCA, TruncatedSVD
 from cuml.internals.input_utils import sparse_scipy_to_cp
 from cupyx.scipy.sparse import csr_matrix, isspmatrix_csr
 from cupyx.scipy.sparse import issparse as cpissparse
+from scanpy._utils import Empty, _empty
+from scanpy.preprocessing._pca import _handle_mask_var
 from scipy.sparse import issparse
+
+from rapids_singlecell.get import _get_obs_rep
+
+if TYPE_CHECKING:
+    from anndata import AnnData
+    from numpy.typing import NDArray
 
 
 def pca(
     adata: AnnData,
+    n_comps: int | None = None,
+    *,
     layer: str = None,
-    n_comps: Optional[int] = None,
     zero_center: bool = True,
-    random_state: Union[int, None] = 0,
-    use_highly_variable: Optional[bool] = None,
+    svd_solver: str = None,
+    random_state: int | None = 0,
+    mask_var: NDArray[np.bool_] | str | None | Empty = _empty,
+    use_highly_variable: bool | None = None,
+    dtype: str = "float32",
+    copy: bool = False,
     chunked: bool = False,
     chunk_size: int = None,
-) -> None:
+) -> None | AnnData:
     """
     Performs PCA using the cuml decomposition function.
 
@@ -29,24 +43,41 @@ def pca(
         adata
             AnnData object
 
-        layer
-            If provided, use `adata.layers[layer]` for expression values instead of `adata.X`.
-
         n_comps
             Number of principal components to compute. Defaults to 50, or 1 - minimum \
             dimension size of selected representation
+
+        layer
+            If provided, use `adata.layers[layer]` for expression values instead of `adata.X`.
 
         zero_center
             If `True`, compute standard PCA from covariance matrix. \
             If `False`, omit zero-centering variables
 
+        svd_solver
+            Solver to use for the PCA computation. \
+            Must be one of {'full', 'jacobi', 'auto'}. \
+            Defaults to 'auto'.
+
         random_state
             Change to use different initial states for the optimization.
+
+        mask_var
+            Mask to use for the PCA computation. \
+            If `None`, all variables are used. \
+            If `np.ndarray`, use the provided mask. \
+            If `str`, use the mask stored in `adata.var[mask_var]`.
 
         use_highly_variable
             Whether to use highly variable genes only, stored in \
             `.var['highly_variable']`. \
             By default uses them if they have been determined beforehand.
+
+        dtype
+            Numpy data type string to which to convert the result.
+
+        copy
+            Whether to return a copy or update `adata`.
 
         chunked
             If `True`, perform an incremental PCA on segments of `chunk_size`. \
@@ -77,14 +108,17 @@ def pca(
             "Either your data already only consists of highly-variable genes "
             "or consider running `highly_variable_genes` first."
         )
+    if copy:
+        adata = adata.copy()
 
-    X = adata.layers[layer] if layer is not None else adata.X
+    X = _get_obs_rep(adata, layer=layer)
 
-    if use_highly_variable is None:
-        use_highly_variable = True if "highly_variable" in adata.var.keys() else False
+    mask_var_param, mask_var = _handle_mask_var(adata, mask_var, use_highly_variable)
+    del use_highly_variable
+    X = X[:, mask_var] if mask_var is not None else X
 
-    if use_highly_variable:
-        X = X[:, adata.var["highly_variable"]]
+    if svd_solver is None:
+        svd_solver = "auto"
 
     if n_comps is None:
         min_dim = min(X.shape[0], X.shape[1])
@@ -121,30 +155,45 @@ def pca(
                 X_pca = pca_func.fit_transform(X)
             else:
                 pca_func = PCA(
-                    n_components=n_comps, random_state=random_state, output_type="numpy"
+                    n_components=n_comps,
+                    svd_solver=svd_solver,
+                    random_state=random_state,
+                    output_type="numpy",
                 )
                 X_pca = pca_func.fit_transform(X)
 
         elif not zero_center:
             pca_func = TruncatedSVD(
-                n_components=n_comps, random_state=random_state, output_type="numpy"
+                n_components=n_comps,
+                random_state=random_state,
+                algorithm=svd_solver,
+                output_type="numpy",
             )
             X_pca = pca_func.fit_transform(X)
 
+    if X_pca.dtype.descr != np.dtype(dtype).descr:
+        X_pca = X_pca.astype(dtype)
+
     adata.obsm["X_pca"] = X_pca
-    adata.uns["pca"] = {
+    uns_entry = {
         "params": {
             "zero_center": zero_center,
-            "use_highly_variable": use_highly_variable,
+            "use_highly_variable": mask_var_param == "highly_variable",
+            "mask_var": mask_var_param,
         },
         "variance": pca_func.explained_variance_,
         "variance_ratio": pca_func.explained_variance_ratio_,
     }
-    if use_highly_variable:
+    adata.uns["pca"] = uns_entry
+    if layer is not None:
+        adata.uns["pca"]["params"]["layer"] = layer
+    if mask_var is not None:
         adata.varm["PCs"] = np.zeros(shape=(adata.n_vars, n_comps))
-        adata.varm["PCs"][adata.var["highly_variable"]] = pca_func.components_.T
+        adata.varm["PCs"][mask_var] = pca_func.components_.T
     else:
         adata.varm["PCs"] = pca_func.components_.T
+    if copy:
+        return adata
 
 
 class PCA_sparse:
