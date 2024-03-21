@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import cupy as cp
 from cuml.common.kernel_utils import cuda_kernel_factory
 
 cov_kernel_str = r"""
@@ -50,6 +51,17 @@ copy_kernel = r"""
     }
 }
 """
+check_zero_genes = r"""
+extern "C" __global__ void check_zero_genes(const int* indices, int* genes, int nnz) {
+    int value = blockIdx.x * blockDim.x + threadIdx.x;
+    if(value >= nnz){
+        return;
+    }
+    atomicAdd(&genes[indices[value]], 1);
+
+}
+"""
+_zero_genes_kernel = cp.RawKernel(check_zero_genes, "check_zero_genes")
 
 
 def _cov_kernel(dtype):
