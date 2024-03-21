@@ -210,6 +210,7 @@ class PCA_sparse:
 
         if not isspmatrix_csr(x):
             x = x.tocsr()
+        _check_matrix_for_zero_genes(x)
         self.n_samples_ = x.shape[0]
         self.n_features_in_ = x.shape[1] if x.ndim == 2 else 1
         self.dtype = x.data.dtype
@@ -354,3 +355,26 @@ def _cov_sparse(x, return_gram=False, return_mean=False):
         return cov_result, mean_x, mean_x
     elif return_gram and return_mean:
         return cov_result, gram_matrix, mean_x, mean_x
+
+
+def _check_matrix_for_zero_genes(X):
+    gene_ex = cp.zeros(X.shape[1], dtype=cp.int32)
+
+    from ._kernels._pca_sparse_kernel import _zero_genes_kernel
+
+    block = (32,)
+    grid = (int(math.ceil(X.nnz / block[0])),)
+    _zero_genes_kernel(
+        grid,
+        block,
+        (
+            X.indices,
+            gene_ex,
+            X.nnz,
+        ),
+    )
+    if cp.any(gene_ex == 0):
+        raise ValueError(
+            "There are genes with zero expression. "
+            "Please remove them before running PCA."
+        )

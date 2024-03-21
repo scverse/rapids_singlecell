@@ -93,7 +93,8 @@ def _check_gpu_X(X):
     else:
         raise TypeError(
             "The input is not a CuPy ndarray or CuPy sparse matrix. "
-            "Rapids-singlecell only supports GPU matrices, "
+            "Rapids-singlecell only supports GPU matrices in this function, "
             "so your input must be either a CuPy ndarray or a CuPy sparse matrix. "
+            "Please checkout `rapids_singlecell.get.anndata_to_GPU` to convert your data to GPU. "
             "If you're working with CPU-based matrices, please consider using Scanpy instead."
         )

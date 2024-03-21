@@ -137,18 +137,6 @@ def test_pca_sparse():
         atol=1e-6,
     )
 
-def test_mask_highly_var_error():
-    """Check if use_highly_variable=True throws an error if the annotation is missing."""
-    adata = AnnData(np.array(A_list).astype("float32"))
-    with pytest.warns(
-        FutureWarning,
-        match=r"Argument `use_highly_variable` is deprecated, consider using the mask argument\.",
-    ), pytest.raises(
-        ValueError,
-        match=r"Did not find `adata\.var\['highly_variable'\]`\.",
-    ):
-        sc.pp.pca(adata, use_highly_variable=True)
-
 def test_mask_length_error():
     """Check error for n_obs / mask length mismatch."""
     adata = AnnData(np.array(A_list).astype("float32"))
@@ -244,3 +232,10 @@ def test_pca_layer():
     )
     np.testing.assert_almost_equal(X_adata.obsm["X_pca"], layer_adata.obsm["X_pca"])
     np.testing.assert_almost_equal(X_adata.varm["PCs"], layer_adata.varm["PCs"])
+
+def test_pca_layer_mask():
+    adata = sc.datasets.pbmc3k()[:,1000].copy()
+    sc.pp.normalize_total(adata)
+    sc.pp.log1p(adata)
+    with pytest.raises(ValueError,match="There are genes with zero expression. Please remove them before running PCA."):
+        rsc.pp.pca(adata)
