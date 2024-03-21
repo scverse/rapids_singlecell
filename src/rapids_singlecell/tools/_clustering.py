@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Sequence
 
 import cudf
@@ -13,6 +14,26 @@ from scanpy.tools._utils_clustering import rename_groups, restrict_adjacency
 if TYPE_CHECKING:
     from anndata import AnnData
     from scipy import sparse
+
+
+def _create_graph(adjacency, use_weights=True):
+    from cugraph import Graph
+
+    sources, targets = adjacency.nonzero()
+    weights = adjacency[sources, targets]
+    if isinstance(weights, np.matrix):
+        weights = weights.A1
+    df = cudf.DataFrame({"source": sources, "destination": targets, "weights": weights})
+    g = Graph()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        if use_weights:
+            g.from_cudf_edgelist(
+                df, source="source", destination="destination", weight="weights"
+            )
+        else:
+            g.from_cudf_edgelist(df, source="source", destination="destination")
+    return g
 
 
 def leiden(
@@ -86,7 +107,6 @@ def leiden(
             Whether to copy `adata` or modify it in place.
     """
     # Adjacency graph
-    from cugraph import Graph
     from cugraph import leiden as culeiden
 
     adata = adata.copy() if copy else adata
@@ -101,17 +121,8 @@ def leiden(
             restrict_categories=restrict_categories,
             adjacency=adjacency,
         )
-    offsets = cudf.Series(adjacency.indptr)
-    indices = cudf.Series(adjacency.indices)
-    if use_weights:
-        weights = cudf.Series(adjacency.data)
-    else:
-        weights = None
 
-    g = Graph()
-
-    g.from_cudf_adjlist(offsets, indices, weights)
-
+    g = _create_graph(adjacency, use_weights)
     # Cluster
     leiden_parts, _ = culeiden(
         g,
@@ -225,7 +236,6 @@ def louvain(
 
     """
     # Adjacency graph
-    from cugraph import Graph
     from cugraph import __version__ as cuv
     from cugraph import louvain as culouvain
 
@@ -241,16 +251,7 @@ def louvain(
             adjacency=adjacency,
         )
 
-    offsets = cudf.Series(adjacency.indptr)
-    indices = cudf.Series(adjacency.indices)
-    if use_weights:
-        weights = cudf.Series(adjacency.data)
-    else:
-        weights = None
-
-    g = Graph()
-
-    g.from_cudf_adjlist(offsets, indices, weights)
+    g = _create_graph(adjacency, use_weights)
 
     # Cluster
     if version.parse(cuv) >= version.parse("23.08.00"):
