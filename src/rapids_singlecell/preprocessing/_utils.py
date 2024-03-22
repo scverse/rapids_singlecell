@@ -89,7 +89,15 @@ def _check_gpu_X(X):
     if isinstance(X, cp.ndarray):
         return True
     elif issparse(X):
-        return True
+        if X.has_canonical_format:
+            return True
+        else:
+            raise ValueError(
+                "The input sparse matrix is not in canonical format. "
+                "Please convert it to canonical format. "
+                "This can be done with `X.sum_duplicates()` "
+                "and `X.sort_indices()`."
+            )
     else:
         raise TypeError(
             "The input is not a CuPy ndarray or CuPy sparse matrix. "
