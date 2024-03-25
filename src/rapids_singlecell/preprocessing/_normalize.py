@@ -207,7 +207,7 @@ def normalize_pearson_residuals(
     """
     X = _get_obs_rep(adata, layer=layer)
 
-    _check_gpu_X(X)
+    _check_gpu_X(X, require_cf=True)
 
     if check_values and not _check_nonnegative_integers(X):
         warnings.warn(

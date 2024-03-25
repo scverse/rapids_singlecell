@@ -99,14 +99,14 @@ def test_highly_variable_genes_basic(dtype, sparse):
 
 
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
-def test_higly_variable_genes_compare_to_seurat(dtype):
+def test_highly_variable_genes_compare_to_seurat(dtype):
     seurat_hvg_info = pd.read_csv(FILE, sep=" ")
 
     pbmc = sc.datasets.pbmc68k_reduced()
     pbmc.X = pbmc.raw.X
     pbmc.var_names_make_unique()
     pbmc.X = cpx.scipy.sparse.csr_matrix(pbmc.X, dtype=dtype)
-
+    pbmc.X.sort_indices()
     rsc.pp.normalize_total(pbmc, target_sum=1e4)
     rsc.pp.log1p(pbmc)
     rsc.pp.highly_variable_genes(
