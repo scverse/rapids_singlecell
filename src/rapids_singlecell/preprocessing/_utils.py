@@ -85,11 +85,12 @@ def _check_nonnegative_integers(X):
         return True
 
 
-def _check_gpu_X(X):
+def _check_gpu_X(X, require_cf=False):
     if isinstance(X, cp.ndarray):
         return True
     elif issparse(X):
         return True
+
     else:
         raise TypeError(
             "The input is not a CuPy ndarray or CuPy sparse matrix. "
