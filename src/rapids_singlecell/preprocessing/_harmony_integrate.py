@@ -14,6 +14,7 @@ def harmony_integrate(
     *,
     basis: str = "X_pca",
     adjusted_basis: str = "X_pca_harmony",
+    dtype: type = np.float64,
     **kwargs,
 ) -> None:
     """
@@ -52,8 +53,8 @@ def harmony_integrate(
     """
     from . import _harmonypy_gpu
 
-    X = adata.obsm[basis].astype(np.float64)
+    X = adata.obsm[basis].astype(dtype)
 
-    harmony_out = _harmonypy_gpu.run_harmony(X, adata.obs, key, **kwargs)
+    harmony_out = _harmonypy_gpu.run_harmony(X, adata.obs, key, dtype=dtype, **kwargs)
 
     adata.obsm[adjusted_basis] = harmony_out.Z_corr.T.get()

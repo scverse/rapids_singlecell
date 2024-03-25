@@ -56,6 +56,7 @@ def run_harmony(
     reference_values=None,
     cluster_prior=None,
     random_state=0,
+    dtype=cp.float64,
 ):
     """Run Harmony."""
     # theta = None
@@ -140,6 +141,7 @@ def run_harmony(
         lamb_mat,
         verbose,
         random_state,
+        dtype=dtype,
     )
 
     return ho
@@ -163,32 +165,33 @@ class Harmony:
         lamb,
         verbose,
         random_state,
+        dtype,
     ):
-        self.Z_corr = cp.array(Z)
-        self.Z_orig = cp.array(Z)
+        self.Z_corr = cp.array(Z, dtype=dtype)
+        self.Z_orig = cp.array(Z, dtype=dtype)
 
         self.Z_cos = self.Z_orig / self.Z_orig.max(axis=0)
         self.Z_cos = self.Z_cos / cp.linalg.norm(self.Z_cos, ord=2, axis=0)
 
-        self.Phi = cp.array(Phi)
-        self.Phi_moe = cp.array(Phi_moe)
+        self.Phi = cp.array(Phi, dtype=dtype)
+        self.Phi_moe = cp.array(Phi_moe, dtype=dtype)
         self.N = self.Z_corr.shape[1]
-        self.Pr_b = cp.array(Pr_b)
+        self.Pr_b = cp.array(Pr_b, dtype=dtype)
         self.B = self.Phi.shape[0]  # number of batch variables
         self.d = self.Z_corr.shape[0]
         self.window_size = 3
         self.epsilon_kmeans = epsilon_kmeans
         self.epsilon_harmony = epsilon_harmony
 
-        self.lamb = cp.array(lamb)
-        self.sigma = cp.array(sigma)
-        self.sigma_prior = cp.array(sigma)
+        self.lamb = cp.array(lamb, dtype=dtype)
+        self.sigma = cp.array(sigma, dtype=dtype)
+        self.sigma_prior = cp.array(sigma, dtype=dtype)
         self.block_size = block_size
         self.K = K  # number of clusters
         self.max_iter_harmony = max_iter_harmony
         self.max_iter_kmeans = max_iter_kmeans
         self.verbose = verbose
-        self.theta = cp.array(theta)
+        self.theta = cp.array(theta, dtype=dtype)
         self.random_state = random_state
 
         self.objective_harmony = []
@@ -197,6 +200,7 @@ class Harmony:
         self.objective_kmeans_entropy = []
         self.objective_kmeans_cross = []
         self.kmeans_rounds = []
+        self.dtype = dtype
 
         self.allocate_buffers()
         self.init_cluster()
@@ -206,12 +210,12 @@ class Harmony:
         return self.Z_corr
 
     def allocate_buffers(self):
-        self._scale_dist = cp.zeros((self.K, self.N))
-        self.dist_mat = cp.zeros((self.K, self.N))
-        self.O = cp.zeros((self.K, self.B))
-        self.E = cp.zeros((self.K, self.B))
-        self.W = cp.zeros((self.B + 1, self.d))
-        self.Phi_Rk = cp.zeros((self.B + 1, self.N))
+        self._scale_dist = cp.zeros((self.K, self.N), dtype=self.dtype)
+        self.dist_mat = cp.zeros((self.K, self.N), dtype=self.dtype)
+        self.O = cp.zeros((self.K, self.B), dtype=self.dtype)
+        self.E = cp.zeros((self.K, self.B), dtype=self.dtype)
+        self.W = cp.zeros((self.B + 1, self.d), dtype=self.dtype)
+        self.Phi_Rk = cp.zeros((self.B + 1, self.N), dtype=self.dtype)
 
     def init_cluster(self):
         # Start with cluster centroids
