@@ -85,11 +85,11 @@ def _check_nonnegative_integers(X):
         return True
 
 
-def _check_gpu_X(X):
+def _check_gpu_X(X, require_cf=False):
     if isinstance(X, cp.ndarray):
         return True
     elif issparse(X):
-        if X.has_canonical_format:
+        if X.has_canonical_format and not require_cf:
             return True
         else:
             raise ValueError(
