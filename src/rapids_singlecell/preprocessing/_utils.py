@@ -89,7 +89,7 @@ def _check_gpu_X(X, require_cf=False):
     if isinstance(X, cp.ndarray):
         return True
     elif issparse(X):
-        if X.has_canonical_format and not require_cf:
+        if X.has_canonical_format or not require_cf:
             return True
         else:
             raise ValueError(
