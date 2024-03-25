@@ -40,6 +40,9 @@ def harmony_integrate(
             The name of the field in ``adata.obsm`` where the adjusted PCA
             table will be stored after running this function. Defaults to
             ``X_pca_harmony``.
+        dtype
+            The data type to use for the Harmony. If you use 32-bit you may experience
+            numerical instability.
         kwargs
             Any additional arguments will be passed to
             ``harmonpy_gpu.run_harmony()``.
