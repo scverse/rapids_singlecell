@@ -172,7 +172,7 @@ def scrublet(
     --------
     :func:`~rapids_singlecell.pp.scrublet_simulate_doublets`: Run Scrublet's doublet
         simulation separately for advanced usage.
-    `scanpy.pl.scrublet_score_distribution`: Plot histogram of doublet
+    :func:`scanpy.pl.scrublet_score_distribution`: Plot histogram of doublet
         scores for observed transcriptomes and simulated doublets.
     """
 
@@ -539,7 +539,7 @@ def scrublet_simulate_doublets(
     --------
     :func:`~rapids_singlecell.pp.scrublet`: Main way of running Scrublet, runs
         preprocessing, doublet simulation (this function) and calling.
-    `scanpy.pl.scrublet_score_distribution`: Plot histogram of doublet
+    :func:`scanpy.pl.scrublet_score_distribution`: Plot histogram of doublet
         scores for observed transcriptomes and simulated doublets.
     """
 
