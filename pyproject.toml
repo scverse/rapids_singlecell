@@ -41,6 +41,7 @@ test = [
     "pytest",
     "omnipath",
     "profimp",
+    "scanpy[test]>=1.10.0"
 ]
 
 [project.urls]
