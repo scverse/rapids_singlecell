@@ -8,6 +8,7 @@ import pytest
 import rapids_singlecell as rsc
 import scipy.sparse as sparse
 from anndata import AnnData, concat
+from cupyx.scipy.sparse import csc_matrix, coo_matrix
 from anndata.tests.helpers import assert_equal
 from numpy.testing import assert_allclose, assert_array_equal
 
@@ -86,12 +87,12 @@ def test_scrublet_batched():
 
 def _preprocess_for_scrublet(adata: AnnData) -> AnnData:
     adata_pp = adata.copy()
-    sc.pp.filter_genes(adata_pp, min_cells=3)
-    sc.pp.filter_cells(adata_pp, min_genes=3)
+    rsc.pp.filter_genes(adata_pp, min_count=3)
+    rsc.pp.filter_cells(adata_pp,  qc_var="n_genes_by_counts",min_count=3)
     adata_pp.layers["raw"] = adata_pp.X.copy()
-    sc.pp.normalize_total(adata_pp)
-    logged = sc.pp.log1p(adata_pp, copy=True)
-    sc.pp.highly_variable_genes(logged)
+    rsc.pp.normalize_total(adata_pp)
+    logged = rsc.pp.log1p(adata_pp, copy=True)
+    rsc.pp.highly_variable_genes(logged)
     return adata_pp[:, logged.var["highly_variable"]].copy()
 
 
@@ -105,11 +106,11 @@ def _create_sim_from_parents(adata: AnnData, parents: np.ndarray) -> AnnData:
         ),
         (n_sim, adata.n_obs),
     )
-    X = I @ adata.layers["raw"]
+    X = coo_matrix(I) @ adata.layers["raw"]
     return AnnData(
         X,
         var=pd.DataFrame(index=adata.var_names),
-        obs={"total_counts": np.ravel(X.sum(axis=1))},
+        obs={"total_counts": np.ravel(X.sum(axis=1).get())},
         obsm={"doublet_parents": parents.copy()},
     )
 
@@ -121,10 +122,10 @@ def test_scrublet_data():
     Check that simulations run on raw data.
     """
     random_state = 1234
-
+    adata = rsc.get.anndata_to_GPU(pbmc200(), copy=True)
     # Run Scrublet and let the main function run simulations
-    adata_scrublet_auto_sim = sc.pp.scrublet(
-        pbmc200(),
+    adata_scrublet_auto_sim = rsc.pp.scrublet(
+        adata,
         use_approx_neighbors=False,
         copy=True,
         random_state=random_state,
@@ -135,17 +136,18 @@ def test_scrublet_data():
     # broken
 
     # Replicate the preprocessing steps used by the main function
-    adata_obs = _preprocess_for_scrublet(pbmc200())
+    adata_in = rsc.get.anndata_to_GPU(pbmc200(), copy=True)
+    adata_obs = _preprocess_for_scrublet(adata_in)
     # Simulate doublets using the same parents
     adata_sim = _create_sim_from_parents(
         adata_obs, adata_scrublet_auto_sim.uns["scrublet"]["doublet_parents"]
     )
 
     # Apply the same post-normalisation the Scrublet function would
-    sc.pp.normalize_total(adata_obs, target_sum=1e6)
-    sc.pp.normalize_total(adata_sim, target_sum=1e6)
+    rsc.pp.normalize_total(adata_obs, target_sum=1e6)
+    rsc.pp.normalize_total(adata_sim, target_sum=1e6)
 
-    adata_scrublet_manual_sim = sc.pp.scrublet(
+    adata_scrublet_manual_sim = rsc.pp.scrublet(
         adata_obs,
         adata_sim=adata_sim,
         use_approx_neighbors=False,
