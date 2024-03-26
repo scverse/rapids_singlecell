@@ -75,7 +75,7 @@ def scale(
         view_to_actual(adata)
 
     X = _get_obs_rep(adata, layer=layer, obsm=obsm)
-    _check_gpu_X(X)
+    _check_gpu_X(X, require_cf=True)
 
     str_mean_std = ("mean", "std")
     if mask_obs is not None:
