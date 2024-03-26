@@ -26,8 +26,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-rapids11 = ["cudf-cu11", "cuml-cu11", "cugraph-cu11"]
-rapids12 = ["cudf-cu12", "cuml-cu12", "cugraph-cu12"]
+rapids11 = ["cudf-cu11>=24.2.*", "cuml-cu11>=24.2.*", "cugraph-cu11>=24.2.*"]
+rapids12 = ["cudf-cu12>=24.2.*", "cuml-cu12>=24.2.*", "cugraph-cu12>=24.2.*"]
 doc = [
     "sphinx>=4.5.0",
     "sphinx-copybutton",
