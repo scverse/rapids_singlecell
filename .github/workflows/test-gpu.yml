@@ -47,7 +47,7 @@ jobs:
           post-cleanup: 'all'
 
       - name: Install rapids-singlecell
-        run: uv pip install -e .[test,rapids11] --extra-index-url=https://pypi.nvidia.com
+        run: uv pip install -e .[test,rapids12] --extra-index-url=https://pypi.nvidia.com
 
       - name: Mamba list
         run: |
