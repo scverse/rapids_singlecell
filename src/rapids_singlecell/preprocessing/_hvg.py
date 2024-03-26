@@ -156,7 +156,7 @@ def highly_variable_genes(
     else:
         if batch_key is None:
             X = _get_obs_rep(adata, layer=layer)
-            _check_gpu_X(X)
+            _check_gpu_X(X, require_cf=True)
             df = _highly_variable_genes_single_batch(
                 X.copy(),
                 min_disp=min_disp,
@@ -173,7 +173,7 @@ def highly_variable_genes(
             df = []
             genes = adata.var.index.to_numpy()
             X = adata.layers[layer] if layer is not None else adata.X
-            _check_gpu_X(X)
+            _check_gpu_X(X, require_cf=True)
             for batch in batches:
                 if not isinstance(X, cp.ndarray):
                     X_batch = X[adata.obs[batch_key] == batch,].tocsc()
@@ -419,7 +419,7 @@ def _highly_variable_genes_seurat_v3(
 
     df = pd.DataFrame(index=adata.var.index)
     X = _get_obs_rep(adata, layer=layer)
-    _check_gpu_X(X)
+    _check_gpu_X(X, require_cf=True)
     if check_values and not _check_nonnegative_integers(X):
         warnings.warn(
             "`flavor='seurat_v3'` expects raw count data, but non-integers were found.",
@@ -536,7 +536,7 @@ def _highly_variable_pearson_residuals(
     Expects raw count input.
     """
     X = _get_obs_rep(adata, layer=layer)
-    _check_gpu_X(X)
+    _check_gpu_X(X, require_cf=True)
     if check_values and not _check_nonnegative_integers(X):
         warnings.warn(
             "`flavor='pearson_residuals'` expects raw count data, but non-integers were found.",
