@@ -108,7 +108,7 @@ def scrublet(
         at the specified rate.
     knn_dist_metric
         Distance metric used when finding nearest neighbors. For list of
-        valid values, see the documentation cuml.neighbors.NearestNeighbors.
+        valid values, see the documentation :class:`cuml.neighbors.NearestNeighbors`.
     normalize_variance
         If True, normalize the data such that each gene has a variance of 1.
         :class:`cuml.decomposition.tsvd.TruncatedSVD` will be used for dimensionality
@@ -124,7 +124,7 @@ def scrublet(
         Number of principal components used to embed the transcriptomes prior
         to k-nearest-neighbor graph construction.
     use_approx_neighbors
-        Does not affect the results, just here to stay consistent with :mod:`scanpy`.
+        Does not affect the results, just here to stay consistent with :func:`scanpy.pp.scrublet`.
     get_doublet_neighbor_parents
         If True, return (in .uns) the parent transcriptomes that generated the
         doublet neighbors of each observed transcriptome. This information can
@@ -172,7 +172,7 @@ def scrublet(
     --------
     :func:`~rapids_singlecell.pp.scrublet_simulate_doublets`: Run Scrublet's doublet
         simulation separately for advanced usage.
-    `scanpy.pl.scrublet_score_distribution`: Plot histogram of doublet
+    :func:`~scanpy.pl.scrublet_score_distribution`: Plot histogram of doublet
         scores for observed transcriptomes and simulated doublets.
     """
 
@@ -350,7 +350,7 @@ def _scrublet_call_doublets(
         Number of principal components used to embed the transcriptomes prior
         to k-nearest-neighbor graph construction.
     use_approx_neighbors
-        Does not affect the results, just here to stay consistent with :mod:`scanpy`.
+        Does not affect the results, just here to stay consistent with :func:`scanpy.pp.scrublet`.
     knn_dist_metric
         Distance metric used when finding nearest neighbors. For list of
         valid values, see the documentation cuml.neighbors.NearestNeighbors.
@@ -539,7 +539,7 @@ def scrublet_simulate_doublets(
     --------
     :func:`~rapids_singlecell.pp.scrublet`: Main way of running Scrublet, runs
         preprocessing, doublet simulation (this function) and calling.
-    `scanpy.pl.scrublet_score_distribution`: Plot histogram of doublet
+    :func:`~scanpy.pl.scrublet_score_distribution`: Plot histogram of doublet
         scores for observed transcriptomes and simulated doublets.
     """
 

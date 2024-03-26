@@ -26,7 +26,7 @@ def diffmap(
 
     The width ("sigma") of the connectivity kernel is implicitly determined by
     the number of neighbors used to compute the single-cell graph in
-    :func:`~scanpy.pp.neighbors`.
+    :func:`scanpy.pp.neighbors` or :func:`~rapids_singlecell.pp.neighbors`.
 
     Parameters
     ----------
