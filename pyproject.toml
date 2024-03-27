@@ -110,4 +110,4 @@ source = "vcs"
 packages = ['src/rapids_singlecell']
 
 [tool.codespell]
-skip = ".git,*.pdf,*.svg, docs/notebooks/demo_gpu-seuratv3*,"
+skip = ".git,*.pdf,*.svg, docs/notebooks/demo_gpu-seuratv3-brain-1M.ipynb, docs/notebooks/demo_gpu-seuratv3.ipynb"
