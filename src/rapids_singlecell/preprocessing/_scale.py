@@ -62,7 +62,7 @@ def scale(
 
     Returns
     -------
-    Returns a sacled copy or updates `adata` with a scaled version of the original `adata.X` and `adata.layers['layer']`, \
+    Returns a scaled copy or updates `adata` with a scaled version of the original `adata.X` and `adata.layers['layer']`, \
     depending on `inplace`.
 
     """
@@ -75,7 +75,7 @@ def scale(
         view_to_actual(adata)
 
     X = _get_obs_rep(adata, layer=layer, obsm=obsm)
-    _check_gpu_X(X, require_cf=True)
+    _check_gpu_X(X)
 
     str_mean_std = ("mean", "std")
     if mask_obs is not None:
@@ -135,7 +135,7 @@ def scale_array(X, *, mask_obs=None, zero_center=True, inplace=True):
 def scale_sparse(X, *, mask_obs=None, zero_center=True, inplace=True):
     if zero_center:
         X = X.toarray()
-        # inplace is True because we copyed with `toarray`
+        # inplace is True because we copied with `toarray`
         return scale_array(X, mask_obs=mask_obs, zero_center=zero_center, inplace=True)
     else:
         if mask_obs is not None:

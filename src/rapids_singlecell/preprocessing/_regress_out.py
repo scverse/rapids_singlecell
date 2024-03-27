@@ -43,7 +43,7 @@ def regress_out(
         batchsize
             Number of genes that should be processed together. \
             If `'all'` all genes will be processed together if `.n_obs` <100000. \
-            If `None` each gene will be analysed seperatly. \
+            If `None` each gene will be analysed separately. \
             Will be ignored if cuML version < 22.12
 
         verbose

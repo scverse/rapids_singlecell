@@ -108,3 +108,7 @@ source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ['src/rapids_singlecell']
+
+[tool.codespell]
+skip = '*.ipynb,*.csv'
+ignore-words-list = "nd"
