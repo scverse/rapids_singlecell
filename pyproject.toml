@@ -108,3 +108,6 @@ source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ['src/rapids_singlecell']
+
+[tool.codespell]
+skip = ".git,*.pdf,*.svg, docs/notebooks/demo_gpu-seuratv3*,"
