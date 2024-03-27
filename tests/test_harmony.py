@@ -7,7 +7,7 @@ def test_harmony_integrate():
     Test that Harmony integrate works.
 
     This is a very simple test that just checks to see if the Harmony
-    integrate wrapper succesfully added a new field to ``adata.obsm``
+    integrate wrapper successfully added a new field to ``adata.obsm``
     and makes sure it has the same dimensions as the original PCA table.
     """
     adata = sc.datasets.pbmc3k()

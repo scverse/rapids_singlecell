@@ -53,7 +53,7 @@ def draw_graph(
         g.add_adj_list(offsets, indices, None)
     else:
         g.from_cudf_adjlist(offsets, indices, None)
-    # Get Intial Positions
+    # Get Initial Positions
     if init_pos in adata.obsm.keys():
         init_coords = adata.obsm[init_pos]
     elif init_pos == "paga" or init_pos:

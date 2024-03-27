@@ -17,7 +17,7 @@ def fit_mlm(X, y, inv, df):
     coef, sse, _, _ = cp.linalg.lstsq(X, y, rcond=-1)
     if len(sse) == 0:
         raise ValueError(
-            """Couldn\'t fit a multivariate linear model. This can happen because there are more sources
+            """Couldn't fit a multivariate linear model. This can happen because there are more sources
         (covariates) than unique targets (samples), or because the network\'s matrix rank is smaller than the number of
         sources."""
         )
@@ -95,7 +95,7 @@ def run_mlm(
         weight
             Column name in net with weights.
         batch_size
-            Size of the samples to use for each batch. Increasing this will consume more memmory but it will run faster.
+            Size of the samples to use for each batch. Increasing this will consume more memory but it will run faster.
         min_n
             Minimum of targets per source. If less, sources are removed.
         verbose

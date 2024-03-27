@@ -39,9 +39,9 @@ def highly_variable_genes(
     Annotate highly variable genes.
     Expects logarithmized data, except when `flavor='seurat_v3','pearson_residuals','poisson_gene_selection'`, in which count data is expected.
 
-    Reimplentation of scanpy's function.
+    Reimplementation of scanpy's function.
     Depending on flavor, this reproduces the R-implementations of Seurat, Cell Ranger, Seurat v3 and Pearson Residuals.
-    Flavor `poisson_gene_selection` is an implementation of scvi, which is based on M3Drop. It requiers gpu accelerated pytorch to be installed.
+    Flavor `poisson_gene_selection` is an implementation of scvi, which is based on M3Drop. It requires gpu accelerated pytorch to be installed.
 
     For these dispersion-based methods, the normalized dispersion is obtained by scaling
     with the mean and standard deviation of the dispersions for genes falling into a given
@@ -98,7 +98,7 @@ def highly_variable_genes(
 
     Returns
     -------
-        upates `adata.var` with the following fields:
+        updates `adata.var` with the following fields:
 
             `highly_variable` : bool
                 boolean indicator of highly-variable genes
@@ -716,7 +716,7 @@ def _poisson_gene_selection(
     This is based on M3Drop: https://github.com/tallulandrews/M3Drop
     The method accounts for library size internally, a raw count matrix should be provided.
     Instead of Z-test, enrichment of zeros is quantified by posterior
-    probabilites from a binomial model, computed through sampling.
+    probabilities from a binomial model, computed through sampling.
 
     Parameters
     ----------
@@ -731,7 +731,7 @@ def _poisson_gene_selection(
         of enrichment of zeros for each gene.
     batch_key
         key in adata.obs that contains batch info. If None, do not use batch info.
-        Defatult: ``None``.
+        Default: ``None``.
     minibatch_size
         Size of temporary matrix for incremental calculation. Larger is faster but
         requires more RAM or GPU memory. (The default should be fine unless
