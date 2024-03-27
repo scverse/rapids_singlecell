@@ -25,7 +25,7 @@ def calculate_qc_metrics(
 ) -> None:
     """\
     Calculates basic qc Parameters. Calculates number of genes per cell (n_genes) and number of counts per cell (n_counts).
-    Loosly based on calculate_qc_metrics from scanpy [Wolf et al. 2018]. Updates :attr:`~anndata.AnnData.obs` and :attr:`~anndata.AnnData.var`  with columns with qc data.
+    Loosely based on calculate_qc_metrics from scanpy [Wolf et al. 2018]. Updates :attr:`~anndata.AnnData.obs` and :attr:`~anndata.AnnData.var`  with columns with qc data.
 
     Parameters
     ----------
@@ -214,7 +214,7 @@ def flag_gene_family(
     gene_list: list = None,
 ) -> None:
     """
-    Flags a gene or gene_familiy in .var with boolean. (e.g all mitochondrial genes).
+    Flags a gene or gene_family in .var with boolean. (e.g all mitochondrial genes).
     Please only choose gene_family prefix or gene_list
 
     Parameters
@@ -223,10 +223,10 @@ def flag_gene_family(
             AnnData object
 
         gene_family_name
-            name of colums in .var where you want to store informationa as a boolean
+            name of columns in .var where you want to store informationa as a boolean
 
         gene_family_prefix
-            prefix of the gene familiy (eg. mt- for all mitochondrial genes in mice)
+            prefix of the gene family (eg. mt- for all mitochondrial genes in mice)
 
         gene_list
             list of genes to flag in `.var`

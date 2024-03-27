@@ -15,7 +15,7 @@ def run_perm(mat, net, idxs, times, seed):
     net = cp.array(net)
     estimate = mat.dot(net)
     cp.random.seed(seed)
-    # Init null distirbution
+    # Init null distribution
     null_dst = cp.zeros((mat.shape[0], net.shape[1], times), dtype=np.float32)
     pvals = cp.zeros((mat.shape[0], net.shape[1]), dtype=np.float32)
 
@@ -125,7 +125,7 @@ def run_wsum(
         times
             How many random permutations to do.
         batch_size
-            Size of the batches to use. Increasing this will consume more memmory but it will run faster.
+            Size of the batches to use. Increasing this will consume more memory but it will run faster.
         min_n
             Minimum of targets per source. If less, sources are removed.
         seed

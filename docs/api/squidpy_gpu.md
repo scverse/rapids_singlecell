@@ -1,6 +1,6 @@
 # squidpy-GPU: `gr`
 
-{mod}`squidpy.gr` is a tool for the analysis of spatial molecular data. {mod}`rapids_singlecell.gr` acclerates some of these functions.
+{mod}`squidpy.gr` is a tool for the analysis of spatial molecular data. {mod}`rapids_singlecell.gr` accelerates some of these functions.
 
 ```{eval-rst}
 .. module:: rapids_singlecell.gr

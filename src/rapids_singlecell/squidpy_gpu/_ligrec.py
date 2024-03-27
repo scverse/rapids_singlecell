@@ -240,7 +240,7 @@ def ligrec(
             the above mentioned dict.
 
     NaN p-values mark combinations for which the mean expression of one of the \
-    interacting components was 0 or it didnt pass the threshold percentage of \
+    interacting components was 0 or it didn't pass the threshold percentage of \
     cells being expressed within a given cluster.
     """
     # Get and Check interactions

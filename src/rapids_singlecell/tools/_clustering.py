@@ -189,7 +189,7 @@ def louvain(
 
         resolution
             A parameter value controlling the coarseness of the clustering
-            (alled gamma in the modularity formula). Higher values lead to
+            (called gamma in the modularity formula). Higher values lead to
             more clusters.
 
         restrict_to

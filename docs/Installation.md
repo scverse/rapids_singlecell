@@ -24,7 +24,7 @@ It is important to ensure that the CUDA environment is set up correctly so that 
 To view a full guide how to set up a fully functioned single cell GPU accelerated conda environment visit [GPU_SingleCell_Setup](https://github.com/Intron7/GPU_SingleCell_Setup)
 
 
-# GPU-Memory and System Requierments
+# GPU-Memory and System Requirements
 
 *rapids-singlecell* relays for most computation on the GPU. A GPU with sufficient VRAM is therefore required to handle large datasets.
 With a RTX 3090 it's possible to analyze 200000 cells without any issues. With an A100 80GB it is even possible to analyze more than 1000000. For even larger datasets, {mod}`~rmm` is required to oversubscribe GPU memory into host memory, similar to SWAP memory. However, using `managed_memory` can result in a performance penalty, but this is still preferable to CPU runtimes.
