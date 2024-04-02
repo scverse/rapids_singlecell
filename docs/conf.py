@@ -20,7 +20,7 @@ project_name = "rapids-singlecell"
 project = "rapids-singlecell"
 title = "GPU accelerated single cell analysis"
 author = info["Author"]
-copyright = f"{datetime.now():%Y}, {author}."
+copyright = f"{datetime.now():%Y}, {author}"
 version = info["Version"]
 repository_url = "https://github.com/scverse/rapids_singlecell"
 
