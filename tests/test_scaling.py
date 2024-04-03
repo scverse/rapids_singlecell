@@ -28,6 +28,11 @@ X_centered_original = np.array([
     [1, 0, 1, 0],
     [0, 0, 0, 0],
 ]) # with gene std 1,0,1,0 and center 0,0,0,0
+X_scaled_original_clipped = np.array([
+    [-1, 1, 0, 0],
+    [1, 1, 1, 0],
+    [0, 1, 1, 0],
+])  # with gene std 1,0,1,0 and center 0,2,1,0
 
 X_for_mask = np.array([
     [27, 27, 27, 27],
@@ -56,6 +61,16 @@ X_centered_for_mask = np.array([
     [27, 27, 27, 27],
     [27, 27, 27, 27],
 ])
+X_scaled_for_mask_clipped = np.array([
+    [27, 27, 27, 27],
+    [27, 27, 27, 27],
+    [-1, 1, 0, 0],
+    [1, 1, 1, 0],
+    [0, 1, 1, 0],
+    [27, 27, 27, 27],
+    [27, 27, 27, 27],
+])
+
 
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
 def test_scale_simple(dtype):
@@ -121,3 +136,25 @@ def test_clip(zero_center):
     if zero_center:
         assert adata.X.min() >= -1
     assert adata.X.max() <= 1
+
+@pytest.mark.parametrize(
+    ("mask_obs", "X", "X_scaled", "X_clipped"),
+    [
+        (None, X_original, X_scaled_original, X_scaled_original_clipped),
+        (
+            np.array((0, 0, 1, 1, 1, 0, 0), dtype=bool),
+            X_for_mask,
+            X_scaled_for_mask,
+            X_scaled_for_mask_clipped,
+        ),
+    ],
+)
+def test_scale_sparse(*, mask_obs, X, X_scaled, X_clipped):
+    adata = AnnData(csr_matrix(X).astype(np.float32))
+    adata0 = rsc.get.anndata_to_GPU(adata,copy= True)
+    rsc.pp.scale(adata0, mask_obs=mask_obs, zero_center=False)
+    cp.testing.assert_allclose(adata0.X.toarray(), X_scaled)
+    # test scaling with explicit zero_center == True
+    adata1 = rsc.get.anndata_to_GPU(adata,copy= True)
+    rsc.pp.scale(adata1, zero_center=False, mask_obs=mask_obs, max_value=1)
+    cp.testing.assert_allclose(adata1.X.toarray(), X_clipped)

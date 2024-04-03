@@ -87,21 +87,20 @@ def scale(
 
     if isinstance(X, cp.ndarray):
         X, means, std = scale_array(
-            X, mask_obs=mask_obs, zero_center=zero_center, inplace=inplace
+            X,
+            mask_obs=mask_obs,
+            zero_center=zero_center,
+            inplace=inplace,
+            max_value=max_value,
         )
     else:
         X, means, std = scale_sparse(
-            X, mask_obs=mask_obs, zero_center=zero_center, inplace=inplace
+            X,
+            mask_obs=mask_obs,
+            zero_center=zero_center,
+            inplace=inplace,
+            max_value=max_value,
         )
-
-    if max_value:
-        if zero_center:
-            X = cp.clip(X, a_min=-max_value, a_max=max_value)
-        else:
-            if isinstance(X, sparse.spmatrix):
-                X.data[X.data > max_value] = max_value
-            else:
-                X[X > max_value] = max_value
 
     if inplace:
         _set_obs_rep(adata, X, layer=layer, obsm=obsm)
@@ -114,7 +113,7 @@ def scale(
         return X
 
 
-def scale_array(X, *, mask_obs=None, zero_center=True, inplace=True):
+def scale_array(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None):
     if not inplace:
         X = X.copy()
     if mask_obs is not None:
@@ -129,14 +128,26 @@ def scale_array(X, *, mask_obs=None, zero_center=True, inplace=True):
     if zero_center:
         X -= mean
     X /= std
+    if max_value:
+        if zero_center:
+            X = cp.clip(X, a_min=-max_value, a_max=max_value)
+        else:
+            X[X > max_value] = max_value
+
     return X, mean, std
 
 
-def scale_sparse(X, *, mask_obs=None, zero_center=True, inplace=True):
+def scale_sparse(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None):
     if zero_center:
         X = X.toarray()
         # inplace is True because we copied with `toarray`
-        return scale_array(X, mask_obs=mask_obs, zero_center=zero_center, inplace=True)
+        return scale_array(
+            X,
+            mask_obs=mask_obs,
+            zero_center=zero_center,
+            inplace=True,
+            max_value=max_value,
+        )
     else:
         if mask_obs is not None:
             # checking inplace because we are going to update the matrix
@@ -147,7 +158,10 @@ def scale_sparse(X, *, mask_obs=None, zero_center=True, inplace=True):
                 X = X.copy()
 
             scale_rv = scale_sparse(
-                X[mask_obs, :], zero_center=zero_center, inplace=True
+                X[mask_obs, :],
+                zero_center=zero_center,
+                inplace=True,
+                max_value=max_value,
             )
             X_sub, mean, std = scale_rv
             mask_array = cp.where(cp.array(mask_obs))[0].astype(cp.int32)
@@ -188,4 +202,8 @@ def scale_sparse(X, *, mask_obs=None, zero_center=True, inplace=True):
             )
         else:
             raise ValueError("The sparse matrix must be a CSR or CSC matrix")
+
+        if max_value:
+            X.data[X.data > max_value] = max_value
+
         return X, mean, std
