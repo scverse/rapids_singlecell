@@ -190,7 +190,18 @@ def scale_sparse(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=
             X = X.copy()
 
         if sparse.isspmatrix_csr(X):
-            X.data /= std[X.indices]
+            # Elementwise kernel does X.data /= std[X.indices]
+            # This saves memory by not creating a new array
+            elementwise_kernel = cp.ElementwiseKernel(
+                "T x, S idx, raw R std",
+                "T z",
+                """
+                z = x / std[idx];
+                """,
+                "elementwise_division_kernel",
+            )
+            elementwise_kernel(X.data, X.indices, std, X.data)
+
         elif sparse.isspmatrix_csc(X):
             from ._kernels._scale_kernel import _csc_scale_diff
 
