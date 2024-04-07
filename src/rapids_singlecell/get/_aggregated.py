@@ -113,6 +113,75 @@ class Aggregate:
         var *= n_cells / (n_cells - dof)
         return sums, counts, means, var
 
+    def count_mean_var_sparse_sparse(self, dof: int = 1):
+        """
+        This function is used to calculate the sum, mean, and variance of the sparse data matrix.
+        It uses a custom cuda-kernel to perform the aggregation.
+        """
+
+        assert dof >= 0
+        from ._kernels._aggr_kernels import _get_aggr_sparse_sparse_kernel
+
+        if self.data.format == "csc":
+            self.data = self.data.tocsr()
+
+        row_ind = cp.zeros(self.data.nnz, dtype=cp.int32)
+        col_ind = cp.zeros(self.data.nnz, dtype=cp.int32)
+        means = cp.zeros((self.data.nnz), dtype=cp.float64)
+        var = cp.zeros((self.data.nnz), dtype=cp.float64)
+        sums = cp.zeros((self.data.nnz), dtype=cp.float64)
+        counts = cp.zeros((self.data.nnz), dtype=cp.float32)
+        block = (128,)
+        grid = (self.data.shape[0],)
+        aggr_kernel = _get_aggr_sparse_sparse_kernel(self.data.dtype)
+        mask = self._get_mask()
+        n_cells = self.indicator_matrix.sum(axis=1).astype(cp.float64)
+        aggr_kernel(
+            grid,
+            block,
+            (
+                self.data.indptr,
+                self.data.indices,
+                self.data.data,
+                row_ind,
+                col_ind,
+                counts,
+                sums,
+                means,
+                var,
+                self.groupby,
+                n_cells,
+                mask,
+                self.data.shape[0],
+                self.data.shape[1],
+            ),
+        )
+
+        counts = cp_sparse.csr_matrix(
+            (counts.ravel(), (row_ind, col_ind)),
+            shape=(self.indicator_matrix.shape[0], self.data.shape[1]),
+        )
+        means = cp_sparse.csr_matrix(
+            (means.ravel(), (row_ind, col_ind)),
+            shape=(self.indicator_matrix.shape[0], self.data.shape[1]),
+        )
+
+        var = cp_sparse.csr_matrix(
+            (var.ravel(), (row_ind, col_ind)),
+            shape=(self.indicator_matrix.shape[0], self.data.shape[1]),
+        )
+
+        sums = cp_sparse.csr_matrix(
+            (sums.ravel(), (row_ind, col_ind)),
+            shape=(self.indicator_matrix.shape[0], self.data.shape[1]),
+        )
+        """
+        #Todo: Implement this
+        var = var - cp.power(means, 2)
+        var *= n_cells / (n_cells - dof)
+        """
+        return sums, counts, means, var
+
     def count_mean_var_dense(self, dof: int = 1):
         """
         This function is used to calculate the sum, mean, and variance of the sparse data matrix.
@@ -172,6 +241,7 @@ def aggregate(
     layer: str | None = None,
     obsm: str | None = None,
     varm: str | None = None,
+    return_sparse: bool = False,
 ) -> AnnData:
     """\
     Aggregate data matrix based on some categorical grouping.
@@ -206,6 +276,8 @@ def aggregate(
         If not None, key for aggregation data.
     varm
         If not None, key for aggregation data.
+    return_sparse
+        Whether to return a sparse matrix. Only works for sparse input data.
 
     Returns
     -------
@@ -274,7 +346,10 @@ def aggregate(
     if isinstance(data, cp.ndarray):
         sums_, counts_, means_, vars_ = groupby.count_mean_var_dense(dof)
     else:
-        sums_, counts_, means_, vars_ = groupby.count_mean_var_sparse(dof)
+        if return_sparse:
+            sums_, counts_, means_, vars_ = groupby.count_mean_var_sparse_sparse(dof)
+        else:
+            sums_, counts_, means_, vars_ = groupby.count_mean_var_sparse(dof)
     layers = {}
 
     funcs = set([func] if isinstance(func, str) else func)
