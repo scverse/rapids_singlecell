@@ -120,7 +120,10 @@ class Aggregate:
         """
 
         assert dof >= 0
-        from ._kernels._aggr_kernels import _get_aggr_sparse_sparse_kernel
+        from ._kernels._aggr_kernels import (
+            _get_aggr_sparse_sparse_kernel,
+            _get_sparse_var_kernel,
+        )
 
         if self.data.format == "csc":
             self.data = self.data.tocsr()
@@ -175,11 +178,21 @@ class Aggregate:
             (sums.ravel(), (row_ind, col_ind)),
             shape=(self.indicator_matrix.shape[0], self.data.shape[1]),
         )
-        """
-        #Todo: Implement this
-        var = var - cp.power(means, 2)
-        var *= n_cells / (n_cells - dof)
-        """
+
+        sparse_var = _get_sparse_var_kernel(var.dtype)
+        sparse_var(
+            grid,
+            block,
+            (
+                var.indptr,
+                var.indices,
+                var.data,
+                means.data,
+                n_cells,
+                dof,
+                var.shape[0],
+            ),
+        )
         return sums, counts, means, var
 
     def count_mean_var_dense(self, dof: int = 1):
