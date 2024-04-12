@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal, Union, get_args
 
 import cupy as cp
+import numpy as np
 from anndata import AnnData
 from cupyx.scipy import sparse as cp_sparse
 from scanpy._utils import _resolve_axis
-from scanpy.get._aggregated import _combine_categories, sparse_indicator
+from scanpy.get._aggregated import _combine_categories
 
 from rapids_singlecell.get import _check_mask
 from rapids_singlecell.preprocessing._utils import _check_gpu_X
@@ -14,7 +15,6 @@ from rapids_singlecell.preprocessing._utils import _check_gpu_X
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable
 
-    import numpy as np
     import pandas as pd
     from numpy.typing import NDArray
 
@@ -45,15 +45,14 @@ class Aggregate:
         *,
         mask: NDArray[np.bool_] | None = None,
     ) -> None:
-        self.indicator_matrix = cp_sparse.coo_matrix(
-            sparse_indicator(groupby, mask=mask)
-        )
         self.mask = mask
         self.groupby = cp.array(groupby.codes, dtype=cp.int32)
+        self.n_cells = cp.array(np.bincount(groupby.codes), dtype=cp.float64).reshape(
+            -1, 1
+        )
         self.data = data
 
     groupby: cp.ndarray
-    indicator_matrix: cp_sparse.coo_matrix
     data: Array
 
     def _get_mask(self):
@@ -73,23 +72,14 @@ class Aggregate:
 
         if self.data.format == "csc":
             self.data = self.data.tocsr()
-        means = cp.zeros(
-            (self.indicator_matrix.shape[0], self.data.shape[1]), dtype=cp.float64
-        )
-        var = cp.zeros(
-            (self.indicator_matrix.shape[0], self.data.shape[1]), dtype=cp.float64
-        )
-        sums = cp.zeros(
-            (self.indicator_matrix.shape[0], self.data.shape[1]), dtype=cp.float64
-        )
-        counts = cp.zeros(
-            (self.indicator_matrix.shape[0], self.data.shape[1]), dtype=cp.int32
-        )
+        means = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
+        var = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
+        sums = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
+        counts = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.int32)
         block = (128,)
         grid = (self.data.shape[0],)
         aggr_kernel = _get_aggr_sparse_kernel(self.data.dtype)
         mask = self._get_mask()
-        n_cells = self.indicator_matrix.sum(axis=1).astype(cp.float64)
         aggr_kernel(
             grid,
             block,
@@ -102,7 +92,7 @@ class Aggregate:
                 means,
                 var,
                 self.groupby,
-                n_cells,
+                self.n_cells,
                 mask,
                 self.data.shape[0],
                 self.data.shape[1],
@@ -110,7 +100,7 @@ class Aggregate:
         )
 
         var = var - cp.power(means, 2)
-        var *= n_cells / (n_cells - dof)
+        var *= self.n_cells / (self.n_cells - dof)
 
         results = {"sum": sums, "count_nonzero": counts, "mean": means, "var": var}
 
@@ -138,7 +128,6 @@ class Aggregate:
         grid = (self.data.shape[0],)
         aggr_kernel = _get_aggr_sparse_sparse_kernel(self.data.dtype)
         mask = self._get_mask()
-        n_cells = self.indicator_matrix.sum(axis=1).astype(cp.float64)
         aggr_kernel(
             grid,
             block,
@@ -215,7 +204,7 @@ class Aggregate:
 
             results["sum"] = cp_sparse.csr_matrix(
                 (sums, indices, indptr),
-                shape=(self.indicator_matrix.shape[0], self.data.shape[1]),
+                shape=(self.n_cells.shape[0], self.data.shape[1]),
             )
         if "var" in funcs or "mean" in funcs:
             means = cp.zeros(nnz + 1, dtype=cp.float64)
@@ -228,16 +217,16 @@ class Aggregate:
                 atomicAdd(&var[index], (src * src) / ncells[rows]);
                 """,
                 "create_mean_var_sparse_matrix",
-            )(src_data, src_row, index, n_cells, means, var)
+            )(src_data, src_row, index, self.n_cells, means, var)
             if "mean" in funcs:
                 results["mean"] = cp_sparse.csr_matrix(
                     (means, indices, indptr),
-                    shape=(self.indicator_matrix.shape[0], self.data.shape[1]),
+                    shape=(self.n_cells.shape[0], self.data.shape[1]),
                 )
             if "var" in funcs:
                 var = cp_sparse.csr_matrix(
                     (var, indices, indptr),
-                    shape=(self.indicator_matrix.shape[0], self.data.shape[1]),
+                    shape=(self.n_cells.shape[0], self.data.shape[1]),
                 )
 
                 sparse_var = _get_sparse_var_kernel(var.dtype)
@@ -249,7 +238,7 @@ class Aggregate:
                         var.indices,
                         var.data,
                         means,
-                        n_cells,
+                        self.n_cells,
                         dof,
                         var.shape[0],
                     ),
@@ -258,16 +247,18 @@ class Aggregate:
         if "count_nonzero" in funcs:
             counts = cp.zeros(nnz + 1, dtype=cp.float32)
             cp.ElementwiseKernel(
-                "int32 index",
+                "float64 src,int32 index",
                 "raw float32 counts",
                 """
-                atomicAdd(&counts[index], 1.0f);
+                if (src != 0){
+                    atomicAdd(&counts[index], 1.0f);
+                }
                 """,
                 "create_count_nonzero_sparse_matrix",
-            )(index, counts)
+            )(src_data, index, counts)
             results["count_nonzero"] = cp_sparse.csr_matrix(
                 (counts, indices, indptr),
-                shape=(self.indicator_matrix.shape[0], self.data.shape[1]),
+                shape=(self.n_cells.shape[0], self.data.shape[1]),
             )
 
         return results
@@ -281,23 +272,14 @@ class Aggregate:
         assert dof >= 0
         from ._kernels._aggr_kernels import _get_aggr_dense_kernel
 
-        means = cp.zeros(
-            (self.indicator_matrix.shape[0], self.data.shape[1]), dtype=cp.float64
-        )
-        var = cp.zeros(
-            (self.indicator_matrix.shape[0], self.data.shape[1]), dtype=cp.float64
-        )
-        sums = cp.zeros(
-            (self.indicator_matrix.shape[0], self.data.shape[1]), dtype=cp.float64
-        )
-        counts = cp.zeros(
-            (self.indicator_matrix.shape[0], self.data.shape[1]), dtype=cp.int32
-        )
+        means = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
+        var = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
+        sums = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
+        counts = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.int32)
         block = (128,)
         grid = (self.data.shape[0],)
         aggr_kernel = _get_aggr_dense_kernel(self.data.dtype)
         mask = self._get_mask()
-        n_cells = self.indicator_matrix.sum(axis=1).astype(cp.float64)
         aggr_kernel(
             grid,
             block,
@@ -308,7 +290,7 @@ class Aggregate:
                 means,
                 var,
                 self.groupby,
-                n_cells,
+                self.n_cells,
                 mask,
                 self.data.shape[0],
                 self.data.shape[1],
@@ -316,7 +298,7 @@ class Aggregate:
         )
 
         var = var - cp.power(means, 2)
-        var *= n_cells / (n_cells - dof)
+        var *= self.n_cells / (self.n_cells - dof)
 
         results = {"sum": sums, "count_nonzero": counts, "mean": means, "var": var}
 
