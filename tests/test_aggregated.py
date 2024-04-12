@@ -321,9 +321,6 @@ def test_aggregate_examples(matrix, df, keys, metrics, expected):
     rsc.get.anndata_to_GPU(adata)
     result = rsc.get.aggregate(adata, by=keys, func=metrics)
 
-    print(result)
-    print(expected)
-
     assert_equal(expected, result)
 
 def test_factors():
@@ -340,3 +337,17 @@ def test_factors():
 
     res = rsc.get.aggregate(adata, by=["a", "b", "c", "d"], func="sum")
     cp.testing.assert_array_equal(res.layers["sum"], adata.X)
+
+
+def test_sparse_vs_dense():
+    adata = pbmc3k_processed().raw.to_adata()
+    rsc.get.anndata_to_GPU(adata)
+    mask = adata.obs.louvain == "Megakaryocytes"
+    rsc_get = rsc.get.aggregate(adata,by= "louvain", func= ["sum","mean","var","count_nonzero"], mask = mask)
+    rsc_get_sparse = rsc.get.aggregate(adata,by= "louvain", func= ["sum","mean","var","count_nonzero"], mask = mask, return_sparse=True)
+
+    for i in range(4):
+        c = ["sum","mean","var","count_nonzero"][i]
+        a = rsc_get_sparse.layers[c].toarray()
+        b = rsc_get.layers[c]
+        cp.testing.assert_allclose(a,b)
