@@ -325,3 +325,18 @@ def test_aggregate_examples(matrix, df, keys, metrics, expected):
     print(expected)
 
     assert_equal(expected, result)
+
+def test_factors():
+    from itertools import product
+
+    obs = pd.DataFrame(
+        product(range(5), range(5), range(5), range(5)), columns=list("abcd")
+    )
+    obs.index = [f"cell_{i:04d}" for i in range(obs.shape[0])]
+    adata = ad.AnnData(
+        X=cp.arange(obs.shape[0]).reshape(-1, 1),
+        obs=obs,
+    )
+
+    res = rsc.get.aggregate(adata, by=["a", "b", "c", "d"], func="sum")
+    cp.testing.assert_array_equal(res.layers["sum"], adata.X)
