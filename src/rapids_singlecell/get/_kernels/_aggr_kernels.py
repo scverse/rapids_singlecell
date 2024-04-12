@@ -25,8 +25,9 @@ sparse_dense_aggr_kernel = r"""
 """
 
 sparse_sparse_aggr_kernel = r"""
-    (const int *indptr, const int *index,const {0} *data, int* row, int* col,
-    float* counts,double* sums, double* means, double* vars, int* cats, double* numcells,bool* mask,int n_cells, int n_genes){
+    (const int *indptr, const int *index, const {0}* data,
+    int* row, int* col, double* ndata,
+    int* cats,bool* mask,int n_cells){
     int cell = blockIdx.x;
     if(cell >= n_cells || !mask[cell]){
         return;
@@ -34,16 +35,11 @@ sparse_sparse_aggr_kernel = r"""
     int cell_start = indptr[cell];
     int cell_end = indptr[cell+1];
     int group = cats[cell];
-    double major = numcells[group];
     for (int gene = cell_start+threadIdx.x; gene<cell_end; gene+= blockDim.x){
         int gene_pos = index[gene];
-        double value = (double)data[gene];
+        ndata[gene] = (double)data[gene];
         row[gene] = group;
         col[gene] = gene_pos;
-        sums[gene] = value;
-        counts[gene] = 1;
-        means[gene] = value/major;
-        vars[gene] = value*value/major;
     }
 }
 """

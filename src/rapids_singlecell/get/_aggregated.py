@@ -111,9 +111,12 @@ class Aggregate:
 
         var = var - cp.power(means, 2)
         var *= n_cells / (n_cells - dof)
-        return sums, counts, means, var
 
-    def count_mean_var_sparse_sparse(self, dof: int = 1):
+        results = {"sum": sums, "count_nonzero": counts, "mean": means, "var": var}
+
+        return results
+
+    def count_mean_var_sparse_sparse(self, funcs, dof: int = 1):
         """
         This function is used to calculate the sum, mean, and variance of the sparse data matrix.
         It uses a custom cuda-kernel to perform the aggregation.
@@ -128,12 +131,9 @@ class Aggregate:
         if self.data.format == "csc":
             self.data = self.data.tocsr()
 
-        row_ind = cp.zeros(self.data.nnz, dtype=cp.int32)
-        col_ind = cp.zeros(self.data.nnz, dtype=cp.int32)
-        means = cp.zeros((self.data.nnz), dtype=cp.float64)
-        var = cp.zeros((self.data.nnz), dtype=cp.float64)
-        sums = cp.zeros((self.data.nnz), dtype=cp.float64)
-        counts = cp.zeros((self.data.nnz), dtype=cp.float32)
+        src_row = cp.zeros(self.data.nnz, dtype=cp.int32)
+        src_col = cp.zeros(self.data.nnz, dtype=cp.int32)
+        src_data = cp.zeros(self.data.nnz, dtype=cp.float64)
         block = (128,)
         grid = (self.data.shape[0],)
         aggr_kernel = _get_aggr_sparse_sparse_kernel(self.data.dtype)
@@ -146,54 +146,131 @@ class Aggregate:
                 self.data.indptr,
                 self.data.indices,
                 self.data.data,
-                row_ind,
-                col_ind,
-                counts,
-                sums,
-                means,
-                var,
+                src_row,
+                src_col,
+                src_data,
                 self.groupby,
-                n_cells,
                 mask,
                 self.data.shape[0],
-                self.data.shape[1],
             ),
         )
 
-        counts = cp_sparse.csr_matrix(
-            (counts.ravel(), (row_ind, col_ind)),
-            shape=(self.indicator_matrix.shape[0], self.data.shape[1]),
-        )
-        means = cp_sparse.csr_matrix(
-            (means.ravel(), (row_ind, col_ind)),
-            shape=(self.indicator_matrix.shape[0], self.data.shape[1]),
+        keys = cp.stack([src_col, src_row])
+        order = cp.lexsort(keys)
+
+        src_row = src_row[order]
+        src_col = src_col[order]
+        src_data = src_data[order]
+
+        _sum_duplicates_diff = cp.ElementwiseKernel(
+            "raw T row, raw T col",
+            "T diff",
+            """
+            T diff_out = 1;
+            if (i == 0 || row[i - 1] == row[i] && col[i - 1] == col[i]) {
+            diff_out = 0;
+            }
+            diff = diff_out;
+            """,
+            "cupyx_scipy_sparse_coo_sum_duplicates_diff",
         )
 
-        var = cp_sparse.csr_matrix(
-            (var.ravel(), (row_ind, col_ind)),
-            shape=(self.indicator_matrix.shape[0], self.data.shape[1]),
-        )
+        diff = _sum_duplicates_diff(src_row, src_col, size=src_row.size)
+        index = cp.cumsum(diff, dtype=cp.int32)
+        nnz = index[-1].get()
 
-        sums = cp_sparse.csr_matrix(
-            (sums.ravel(), (row_ind, col_ind)),
-            shape=(self.indicator_matrix.shape[0], self.data.shape[1]),
-        )
+        # calculate the rows and indices
+        rows = cp.zeros(nnz + 1, dtype=cp.int32)
+        indices = cp.zeros(nnz + 1, dtype=cp.int32)
 
-        sparse_var = _get_sparse_var_kernel(var.dtype)
-        sparse_var(
-            grid,
-            block,
-            (
-                var.indptr,
-                var.indices,
-                var.data,
-                means.data,
-                n_cells,
-                dof,
-                var.shape[0],
-            ),
-        )
-        return sums, counts, means, var
+        cp.ElementwiseKernel(
+            "int32 src_row, int32 src_col, int32 index",
+            "raw int32 rows, raw int32 indices",
+            """
+            rows[index] = src_row;
+            indices[index] = src_col;
+            """,
+            "cupyx_scipy_sparse_coo_sum_duplicates_assign",
+        )(src_row, src_col, index, rows, indices)
+
+        # Calculate the indptr
+        transitions = cp.where(cp.diff(rows) > 0)[0]
+        indptr = cp.zeros(9, dtype=cp.int32)
+        indptr[1:-1] = transitions + 1
+        indptr[-1] = nnz + 1
+
+        # Calculate the the sparse matrices
+        results = {}
+
+        if "sum" in funcs:
+            sums = cp.zeros(nnz + 1, dtype=cp.float64)
+            cp.ElementwiseKernel(
+                "float64 src, int32 index",
+                "raw float64 sums",
+                """
+                atomicAdd(&sums[index], src);
+                """,
+                "create_sum_sparse_matrix",
+            )(src_data, index, sums)
+
+            results["sum"] = cp_sparse.csr_matrix(
+                (sums, indices, indptr),
+                shape=(self.indicator_matrix.shape[0], self.data.shape[1]),
+            )
+        if "var" in funcs or "mean" in funcs:
+            means = cp.zeros(nnz + 1, dtype=cp.float64)
+            var = cp.zeros(nnz + 1, dtype=cp.float64)
+            cp.ElementwiseKernel(
+                "float64 src, int32 rows, int32 index, raw float64 ncells",
+                "raw float64 means, raw float64 var",
+                """
+                atomicAdd(&means[index], src / ncells[rows]);
+                atomicAdd(&var[index], (src * src) / ncells[rows]);
+                """,
+                "create_mean_var_sparse_matrix",
+            )(src_data, src_row, index, n_cells, means, var)
+            if "mean" in funcs:
+                results["mean"] = cp_sparse.csr_matrix(
+                    (means, indices, indptr),
+                    shape=(self.indicator_matrix.shape[0], self.data.shape[1]),
+                )
+            if "var" in funcs:
+                var = cp_sparse.csr_matrix(
+                    (var, indices, indptr),
+                    shape=(self.indicator_matrix.shape[0], self.data.shape[1]),
+                )
+
+                sparse_var = _get_sparse_var_kernel(var.dtype)
+                sparse_var(
+                    grid,
+                    block,
+                    (
+                        var.indptr,
+                        var.indices,
+                        var.data,
+                        means,
+                        n_cells,
+                        dof,
+                        var.shape[0],
+                    ),
+                )
+                results["var"] = var
+        if "count_nonzero" in funcs:
+            counts = cp.zeros(nnz + 1, dtype=cp.float32)
+            cp.ElementwiseKernel(
+                "int32 index",
+                "raw float32 counts",
+                """
+                atomicAdd(&counts[index], 1.0f);
+                """,
+                "create_count_nonzero_sparse_matrix",
+            )(index, counts)
+            results["count_nonzero"] = cp_sparse.csr_matrix(
+                (counts, indices, indptr),
+                shape=(self.indicator_matrix.shape[0], self.data.shape[1]),
+            )
+
+        return results
 
     def count_mean_var_dense(self, dof: int = 1):
         """
@@ -240,7 +317,10 @@ class Aggregate:
 
         var = var - cp.power(means, 2)
         var *= n_cells / (n_cells - dof)
-        return sums, counts, means, var
+
+        results = {"sum": sums, "count_nonzero": counts, "mean": means, "var": var}
+
+        return results
 
 
 def aggregate(
@@ -356,27 +436,27 @@ def aggregate(
 
     groupby = Aggregate(groupby=categorical, data=data, mask=mask)
 
-    if isinstance(data, cp.ndarray):
-        sums_, counts_, means_, vars_ = groupby.count_mean_var_dense(dof)
-    else:
-        if return_sparse:
-            sums_, counts_, means_, vars_ = groupby.count_mean_var_sparse_sparse(dof)
-        else:
-            sums_, counts_, means_, vars_ = groupby.count_mean_var_sparse(dof)
-    layers = {}
-
     funcs = set([func] if isinstance(func, str) else func)
     if unknown := funcs - set(get_args(AggType)):
         raise ValueError(f"func {unknown} is not one of {get_args(AggType)}")
 
+    if isinstance(data, cp.ndarray):
+        result = groupby.count_mean_var_dense(dof)
+    else:
+        if return_sparse:
+            result = groupby.count_mean_var_sparse_sparse(funcs, dof)
+        else:
+            result = groupby.count_mean_var_sparse(dof)
+    layers = {}
+
     if "sum" in funcs:
-        layers["sum"] = sums_
+        layers["sum"] = result["sum"]
     if "mean" in funcs:
-        layers["mean"] = means_
+        layers["mean"] = result["mean"]
     if "count_nonzero" in funcs:
-        layers["count_nonzero"] = counts_
+        layers["count_nonzero"] = result["count_nonzero"]
     if "var" in funcs:
-        layers["var"] = vars_
+        layers["var"] = result["var"]
 
     result = AnnData(
         layers=layers,
