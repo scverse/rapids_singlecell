@@ -23,9 +23,9 @@ _sparse_qc_kernel_csc = r"""
             atomicAdd(&sums_cells[cell_number], value);
             gene_ex_i += 1;
             atomicAdd(&cell_ex[cell_number], 1);
+        }
         sums_genes[gene] = sums_genes_i;
         gene_ex[gene] = gene_ex_i;
-        }
     }
 """
 
@@ -50,9 +50,9 @@ _sparse_qc_kernel_csr = r"""
             sums_cells_i += value;
             atomicAdd(&gene_ex[gene_number], 1);
             cell_ex_i += 1;
+        }
         sums_cells[cell] = sums_cells_i;
         cell_ex[cell] = cell_ex_i;
-        }
     }
 """
 
