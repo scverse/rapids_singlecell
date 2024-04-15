@@ -40,8 +40,7 @@ def paul15() -> AnnData:
 
 @pytest.fixture()
 def paul15_means() -> pd.DataFrame:
-    file = Path(__file__).parent / Path("_data/paul15_means.pickle")
-    with open(file, "rb") as fin:
+    with open("tests/_data/paul15_means.pickle", "rb") as fin:
         return pickle.load(fin)
 
 
@@ -184,19 +183,6 @@ class TestValidBehavior:
         mask = np.isnan(rc["pvalues"])
 
         assert not np.allclose(rc["pvalues"].values[mask], ri["pvalues"].values[mask])
-
-    """
-    def test_inplace_default_key(self, adata: AnnData, interactions: Interactions_t):
-        res = ligrec(adata, _CK, interactions=interactions, n_perms=5, copy=False)
-
-        assert res is None
-        assert isinstance(adata.uns[key], dict)
-        r = adata.uns[key]
-        assert len(r) == 3
-        assert isinstance(r["means"], pd.DataFrame)
-        assert isinstance(r["pvalues"], pd.DataFrame)
-        assert isinstance(r["metadata"], pd.DataFrame)
-    """
 
     def test_inplace_key_added(self, adata: AnnData, interactions: Interactions_t):
         assert "foobar" not in adata.uns

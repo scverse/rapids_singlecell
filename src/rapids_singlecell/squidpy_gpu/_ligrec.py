@@ -345,7 +345,14 @@ def ligrec(
             return complexes[0]
 
         df = data[complexes].mean()
-        return str(df.index[df.argmin()])
+        try:
+            return str(df.index[df.argmin()])
+        except ValueError as e:
+            if "attempt to get argmin of an empty sequence" in str(e):
+                return str(df.index[0])
+            else:
+                raise ValueError(e)
+
 
     if complex_policy == "min":
         interactions[SOURCE] = interactions[SOURCE].apply(find_min_gene_in_complex)
