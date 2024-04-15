@@ -353,7 +353,6 @@ def ligrec(
             else:
                 raise ValueError(e)
 
-
     if complex_policy == "min":
         interactions[SOURCE] = interactions[SOURCE].apply(find_min_gene_in_complex)
         interactions[TARGET] = interactions[TARGET].apply(find_min_gene_in_complex)
