@@ -132,7 +132,7 @@ def scale_array(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=N
         if zero_center:
             X = cp.clip(X, a_min=-max_value, a_max=max_value)
         else:
-            X[X > max_value] = max_value
+            X = cp.clip(X, a_min=None, a_max=max_value)
 
     return X, mean, std
 
@@ -215,6 +215,6 @@ def scale_sparse(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=
             raise ValueError("The sparse matrix must be a CSR or CSC matrix")
 
         if max_value:
-            X.data[X.data > max_value] = max_value
+            X.data = cp.clip(X.data, a_min=None, a_max=max_value)
 
         return X, mean, std
