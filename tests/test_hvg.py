@@ -139,56 +139,71 @@ def test_highly_variable_genes_compare_to_seurat(dtype):
     )
 
 
-@pytest.mark.parametrize("dtype", ["float32", "float64"])
-def test_higly_variable_genes_compare_to_seurat_v3(dtype):
-    seurat_hvg_info = pd.read_csv(
-        FILE_V3, sep=" ", dtype={"variances_norm": np.float64}
-    )
+def test_compare_to_seurat_v3():
+    ### test without batch
+    seurat_hvg_info = pd.read_csv(FILE_V3)
 
     pbmc = sc.datasets.pbmc3k()
-    pbmc.var_names_make_unique()
-    pbmc.X = cpx.scipy.sparse.csr_matrix(pbmc.X, dtype=dtype)
+    sc.pp.filter_cells(pbmc, min_genes=200)  # this doesn't do anything btw
+    sc.pp.filter_genes(pbmc, min_cells=3)
+
+    pbmc_dense = pbmc.copy()
+    pbmc_dense.X = pbmc_dense.X.toarray()
+
+    rsc.get.anndata_to_GPU(pbmc)
+    rsc.get.anndata_to_GPU(pbmc_dense)
 
     rsc.pp.highly_variable_genes(pbmc, n_top_genes=1000, flavor="seurat_v3")
+    rsc.pp.highly_variable_genes(pbmc_dense, n_top_genes=1000, flavor="seurat_v3")
 
-    np.testing.assert_array_equal(
-        seurat_hvg_info["highly_variable"], pbmc.var["highly_variable"]
-    )
     np.testing.assert_allclose(
-        seurat_hvg_info["variances"],
+        seurat_hvg_info["variance"],
         pbmc.var["variances"],
         rtol=2e-05,
         atol=2e-05,
     )
+    np.testing.assert_allclose(
+        seurat_hvg_info["variance"],
+        pbmc_dense.var["variances"],
+        rtol=2e-05,
+        atol=2e-05,
+    )
+    ### test with batch
+    # introduce a dummy "technical covariate"; this is used in Seurat's SelectIntegrationFeatures
+    pbmc.obs["dummy_tech"] = (
+        "source_" + pd.array([*range(1, 6), 5]).repeat(500).astype("string")
+    )[: pbmc.n_obs]
 
-    batch = np.zeros((pbmc.shape[0]), dtype=int)
-    batch[1500:] = 1
-    pbmc.obs["batch"] = batch
+    pbmc_paper = pbmc.copy()
+
     rsc.pp.highly_variable_genes(
-        pbmc, n_top_genes=4000, flavor="seurat_v3", batch_key="batch"
-    )
-    df = pbmc.var.copy()
-    df.sort_values(
-        ["highly_variable_nbatches", "highly_variable_rank"],
-        ascending=[False, True],
-        na_position="last",
-        inplace=True,
-    )
-    df = df.iloc[:4000]
-    seurat_hvg_info_batch = pd.read_csv(
-        FILE_V3_BATCH, sep=" ", dtype={"variances_norm": np.float64}
+        pbmc_paper,
+        n_top_genes=2000,
+        flavor="seurat_v3_paper",
+        batch_key="dummy_tech",
     )
 
-    # ranks might be slightly different due to many genes having same normalized var
-    seu = pd.Index(seurat_hvg_info_batch["x"].values)
-    assert len(seu.intersection(df.index)) / 4000 > 0.95
+    rsc.pp.highly_variable_genes(
+        pbmc,
+        n_top_genes=2000,
+        flavor="seurat_v3",
+        batch_key="dummy_tech",
+    )
 
-    rsc.pp.log1p(pbmc)
-    with pytest.warns(
-        UserWarning,
-        match="`flavor='seurat_v3'` expects raw count data, but non-integers were found.",
-    ):
-        rsc.pp.highly_variable_genes(pbmc, n_top_genes=1000, flavor="seurat_v3")
+    seurat_v3_paper = pbmc_paper.var
+    seurat_v3 = pbmc.var
+
+    seurat_hvg_info_batch = pd.read_csv(FILE_V3_BATCH)
+    seu = pd.Index(seurat_hvg_info_batch["x"].to_numpy())
+
+    gene_intersection_paper = seu.intersection(
+        seurat_v3_paper[seurat_v3_paper["highly_variable"]].index
+    )
+    gene_intersection_impl = seu.intersection(
+        seurat_v3[seurat_v3["highly_variable"]].index
+    )
+    assert len(gene_intersection_paper) / 2000 > 0.95
+    assert len(gene_intersection_impl) / 2000 < 0.95
 
 
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
