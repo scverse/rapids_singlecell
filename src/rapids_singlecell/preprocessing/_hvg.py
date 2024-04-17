@@ -454,6 +454,7 @@ def _highly_variable_genes_seurat_v3(
         batch_info = adata.obs[batch_key].values
 
     norm_gene_vars = []
+
     for b in np.unique(batch_info):
         X_batch = X[batch_info == b]
         mean, var = _get_mean_var(X_batch, axis=0)
@@ -466,17 +467,33 @@ def _highly_variable_genes_seurat_v3(
         model.fit()
         estimat_var[not_const] = model.outputs.fitted_values
         reg_std = cp.sqrt(10**estimat_var)
-        X_batch = X_batch.astype(cp.float64)
         batch_counts = X_batch
         N = X_batch.shape[0]
         vmax = cp.sqrt(N)
         clip_val = reg_std * vmax + mean
         if issparse(batch_counts):
-            mask = batch_counts.data > clip_val[batch_counts.indices]
-            batch_counts.data[mask] = clip_val[batch_counts.indices[mask]]
-            squared_batch_counts_sum = cp.array(batch_counts.power(2).sum(axis=0))
-            batch_counts_sum = cp.array(batch_counts.sum(axis=0))
+            seurat_v3_elementwise_kernel = cp.ElementwiseKernel(
+                "T data, S idx, raw D clip_val",
+                "raw D sq_sum, raw D sum",
+                """
+                D element = min((double)data, clip_val[idx]);
+                atomicAdd(&sq_sum[idx], element * element);
+                atomicAdd(&sum[idx], element);
+                """,
+                "seurat_v3_elementwise_kernel",
+                no_return=True,
+            )
+            squared_batch_counts_sum = cp.zeros(clip_val.shape, dtype=cp.float64)
+            batch_counts_sum = cp.zeros(clip_val.shape, dtype=cp.float64)
+            seurat_v3_elementwise_kernel(
+                batch_counts.data,
+                batch_counts.indices,
+                clip_val,
+                squared_batch_counts_sum,
+                batch_counts_sum,
+            )
         else:
+            batch_counts = batch_counts.astype(cp.float64)
             clip_val_broad = cp.repeat(clip_val, batch_counts.shape[0]).reshape(
                 batch_counts.shape
             )
