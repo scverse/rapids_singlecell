@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
 import numpy as np
@@ -15,6 +15,15 @@ from ._utils import _check_gpu_X, _check_nonnegative_integers, _get_mean_var
 if TYPE_CHECKING:
     from anndata import AnnData
 
+flavors = Literal[
+    "seurat",
+    "cell_ranger",
+    "seurat_v3",
+    "seurat_v3_paper",
+    "pearson_residuals",
+    "poisson_gene_selection",
+]
+
 
 def highly_variable_genes(
     adata: AnnData,
@@ -25,7 +34,7 @@ def highly_variable_genes(
     min_disp: float = 0.5,
     max_disp: float = np.inf,
     n_top_genes: int = None,
-    flavor: str = "seurat",
+    flavor: flavors = "seurat",
     n_bins: int = 20,
     span: float = 0.3,
     check_values: bool = True,
@@ -37,7 +46,7 @@ def highly_variable_genes(
 ) -> None:
     """\
     Annotate highly variable genes.
-    Expects logarithmized data, except when `flavor='seurat_v3','pearson_residuals','poisson_gene_selection'`, in which count data is expected.
+    Expects logarithmized data, except when `flavor='seurat_v3','seurat_v3_paper','pearson_residuals','poisson_gene_selection'`, in which count data is expected.
 
     Reimplementation of scanpy's function.
     Depending on flavor, this reproduces the R-implementations of Seurat, Cell Ranger, Seurat v3 and Pearson Residuals.
@@ -48,10 +57,18 @@ def highly_variable_genes(
     bin for mean expression of genes. This means that for each bin of mean expression,
     highly variable genes are selected.
 
-    For Seurat v3, a normalized variance for each gene is computed. First, the data
-    are standardized (i.e., z-score normalization per feature) with a regularized
-    standard deviation. Next, the normalized variance is computed as the variance
-    of each gene after the transformation. Genes are ranked by the normalized variance.
+    For `flavor='seurat_v3'`/`'seurat_v3_paper'`, a normalized variance for each gene
+    is computed. First, the data are standardized (i.e., z-score normalization
+    per feature) with a regularized standard deviation. Next, the normalized variance
+    is computed as the variance of each gene after the transformation. Genes are ranked
+    by the normalized variance.
+    Only if `batch_key` is not `None`, the two flavors differ: For `flavor='seurat_v3'`, genes are first sorted by the median (across batches) rank, with ties broken by the number of batches a gene is a HVG.
+    For `flavor='seurat_v3_paper'`, genes are first sorted by the number of batches a gene is a HVG, with ties broken by the median (across batches) rank.
+
+    The following may help when comparing to Seurat's naming:
+    If `batch_key=None` and `flavor='seurat'`, this mimics Seurat's `FindVariableFeatures(…, method='mean.var.plot')`.
+    If `batch_key=None` and `flavor='seurat_v3'`/`flavor='seurat_v3_paper'`, this mimics Seurat's `FindVariableFeatures(..., method='vst')`.
+    If `batch_key` is not `None` and `flavor='seurat_v3_paper'`, this mimics Seurat's `SelectIntegrationFeatures`.
 
     Parameters
     ----------
@@ -70,7 +87,7 @@ def highly_variable_genes(
         n_top_genes
             Number of highly-variable genes to keep.
         flavor :
-            Choose the flavor (`seurat`, `cell_ranger`, `seurat_v3`, `pearson_residuals`, `poisson_gene_selection`) for identifying highly variable genes. For the dispersion based methods
+            Choose the flavors for identifying highly variable genes. For the dispersion based methods
             in their default workflows, Seurat passes the cutoffs whereas Cell Ranger passes n_top_genes.
         n_bins
             Number of bins for binning the mean gene expression. Normalization is done with respect to each bin. If just a single gene falls into a bin, the normalized dispersion is artificially set to 1.
@@ -124,7 +141,8 @@ def highly_variable_genes(
             `highly_variable_intersection` : bool
                 If batch_key is given, this denotes the genes that are highly variable in all batches
     """
-    if flavor == "seurat_v3":
+    adata._sanitize()
+    if flavor == "seurat_v3" or flavor == "seurat_v3_paper":
         _highly_variable_genes_seurat_v3(
             adata=adata,
             layer=layer,
@@ -132,6 +150,7 @@ def highly_variable_genes(
             batch_key=batch_key,
             span=span,
             check_values=check_values,
+            flavor=flavor,
         )
     elif flavor == "pearson_residuals":
         _highly_variable_pearson_residuals(
@@ -383,6 +402,7 @@ def _highly_variable_genes_seurat_v3(
     batch_key: str | None = None,
     span: float = 0.3,
     check_values=True,
+    flavor: str = "seurat_v3",
 ):
     """\
     See `highly_variable_genes`.
@@ -494,13 +514,17 @@ def _highly_variable_genes_seurat_v3(
     df["highly_variable_nbatches"] = num_batches_high_var.get()
     df["highly_variable_rank"] = median_ranked
     df["variances_norm"] = cp.mean(norm_gene_vars, axis=0).get()
+    if flavor == "seurat_v3":
+        sort_cols = ["highly_variable_rank", "highly_variable_nbatches"]
+        sort_ascending = [True, False]
+    elif flavor == "seurat_v3_paper":
+        sort_cols = ["highly_variable_nbatches", "highly_variable_rank"]
+        sort_ascending = [False, True]
+    else:
+        raise ValueError(f"Did not recognize flavor {flavor}")
     sorted_index = (
-        df[["highly_variable_rank", "highly_variable_nbatches"]]
-        .sort_values(
-            ["highly_variable_rank", "highly_variable_nbatches"],
-            ascending=[True, False],
-            na_position="last",
-        )
+        df[sort_cols]
+        .sort_values(sort_cols, ascending=sort_ascending, na_position="last")
         .index
     )
     df["highly_variable"] = False
@@ -514,7 +538,7 @@ def _highly_variable_genes_seurat_v3(
     )
     if batch_key:
         adata.var["highly_variable_nbatches"] = df["highly_variable_nbatches"].values
-    adata.uns["hvg"] = {"flavor": "seurat_v3"}
+    adata.uns["hvg"] = {"flavor": flavor}
 
 
 def _highly_variable_pearson_residuals(
