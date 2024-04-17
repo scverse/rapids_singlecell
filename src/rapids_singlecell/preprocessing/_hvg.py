@@ -476,10 +476,10 @@ def _highly_variable_genes_seurat_v3(
                 "T data, S idx, raw D clip_val",
                 "raw D sq_sum, raw D sum",
                 """
-            D element = min((double)data, clip_val[idx]);
-            atomicAdd(&sq_sum[idx], element * element);
-            atomicAdd(&sum[idx], element);
-            """,
+                D element = min((double)data, clip_val[idx]);
+                atomicAdd(&sq_sum[idx], element * element);
+                atomicAdd(&sum[idx], element);
+                """,
                 "seurat_v3_elementwise_kernel",
                 no_return=True,
             )
