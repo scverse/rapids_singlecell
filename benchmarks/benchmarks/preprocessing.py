@@ -79,3 +79,9 @@ class PreprocessingSuite:
 
     def peakmem_scale(self, *_):
         rsc.pp.scale(self.adata, max_value=10)
+
+    def time_neighbors(self, *_):
+        rsc.pp.neighbors(self.adata, n_neighbors=15, n_pcs=100)
+
+    def peakmem_neighbors(self, *_):
+        rsc.pp.neighbors(self.adata, n_neighbors=15, n_pcs=100)
