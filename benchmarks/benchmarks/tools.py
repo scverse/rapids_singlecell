@@ -9,7 +9,7 @@ import rapids_singlecell as rsc
 import scanpy as sc
 
 class ToolsSuite:
-    _data_dict = dict(pbmc68k_reduced=sc.datasets.pbmc68k_reduced())
+    _data_dict = dict(pbmc68k_reduced=sc.datasets.pbmc68k_reduced(), )
     params = _data_dict.keys()
     param_names = ["input_data"]
 
@@ -34,3 +34,9 @@ class ToolsSuite:
 
     def peakmem_leiden(self, *_):
         rsc.tl.leiden(self.adata)
+
+    def time_embedding_denity(self, *_):
+        rsc.tl.embedding_density(self.adata, basis="X_umap")
+
+    def peakmem_embedding_denity(self, *_):
+        rsc.tl.embedding_density(self.adata, basis="X_umap")
