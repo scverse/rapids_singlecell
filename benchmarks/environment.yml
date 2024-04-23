@@ -1,0 +1,17 @@
+name: test_asv
+channels:
+  - rapidsai
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.11
+  - cuda-version=11.8
+  - cudf=24.4
+  - cuml=24.4
+  - cugraph=24.4
+  - pandas
+  - memory_profiler
+  - anndata
+  - scanpy
+  - numpy
+  - scipy
