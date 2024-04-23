@@ -5,11 +5,15 @@ API documentation: https://scanpy.readthedocs.io/en/stable/api/tools.html
 
 from __future__ import annotations
 
-import rapids_singlecell as rsc
 import scanpy as sc
 
+import rapids_singlecell as rsc
+
+
 class ToolsSuite:
-    _data_dict = dict(pbmc68k_reduced=sc.datasets.pbmc68k_reduced(), )
+    _data_dict = dict(
+        pbmc68k_reduced=sc.datasets.pbmc68k_reduced(),
+    )
     params = _data_dict.keys()
     param_names = ["input_data"]
 
