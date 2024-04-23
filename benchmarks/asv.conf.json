@@ -8,7 +8,7 @@
     "project_url": "https://rapids-singlecell.readthedocs.io/",
     // The URL or local path of the source code repository for the
     // project being benchmarked
-    "repo": "../src/rapids_singlecell",
+    "repo": "../",
     // The Python project's subdirectory in your repo.  If missing or
     // the empty string, the project is assumed to be located at the root
     // of the repository.
@@ -51,7 +51,9 @@
     // dependency packages in the specified order
     "conda_channels": [
         "conda-forge",
-        "defaults"
+        "defaults",
+        "rapidsai",
+        "nvidia"
     ],
     // The matrix of dependencies to test.  Each key is the name of a
     // package (in PyPI) and the values are version numbers.  An empty
@@ -64,14 +66,14 @@
     // followed by the pip installed packages).
     //
     "matrix": {
-        "cudf-cu12": [
+        "cudf": [
             ""
         ],
         // "scipy": ["1.2", ""],
-        "cuml-cu12": [
+        "cuml": [
             ""
         ],
-        "cugraph-cu12": [
+        "cugraph": [
             ""
         ],
         "pandas": [
