@@ -5,8 +5,10 @@ API documentation: https://scanpy.readthedocs.io/en/stable/api/preprocessing.htm
 
 from __future__ import annotations
 
-import rapids_singlecell as rsc
 import scanpy as sc
+
+import rapids_singlecell as rsc
+
 
 class PreprocessingSuite:
     _data_dict = dict(pbmc68k_reduced=sc.datasets.pbmc68k_reduced())

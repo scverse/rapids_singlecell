@@ -4,13 +4,18 @@ API documentation: https://scanpy.readthedocs.io/en/stable/api/tools.html
 """
 
 from __future__ import annotations
+
 from itertools import product
 
-import rapids_singlecell as rsc
 import scanpy as sc
 
+import rapids_singlecell as rsc
+
+
 class ToolsSuite:
-    _data_dict = dict(visium_sge=sc.datasets.visium_sge(), )
+    _data_dict = dict(
+        visium_sge=sc.datasets.visium_sge(),
+    )
     params = _data_dict.keys()
     param_names = ["input_data"]
 

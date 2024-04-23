@@ -26,9 +26,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import anndata
-from rapids_singlecell.get import anndata_to_GPU
-
 import scanpy as sc
+
+from rapids_singlecell.get import anndata_to_GPU
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -44,6 +44,7 @@ class Dataset:
 pbmc3k = Dataset(
     path=sc.settings.datasetdir / "pbmc3k_raw.h5ad", get=sc.datasets.pbmc3k
 )
+
 
 class ToGPUSuite:
     _data_dict = dict(pbmc3k=pbmc3k)
