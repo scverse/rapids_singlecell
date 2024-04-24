@@ -9,6 +9,8 @@ import scanpy as sc
 
 import rapids_singlecell as rsc
 
+import pathlib
+
 
 class ToolsSuite:
     _data_dict = dict(
@@ -18,7 +20,7 @@ class ToolsSuite:
     param_names = ["input_data"]
 
     def setup(self, input_data):
-        self.adata = self._data_dict[input_data].copy()
+        self.adata = rsc.get.anndata_to_GPU(self._data_dict[input_data].copy(), copy=True)
         assert "X_pca" in self.adata.obsm
 
     def time_umap(self, *_):
@@ -40,7 +42,7 @@ class ToolsSuite:
         rsc.tl.leiden(self.adata)
 
     def time_embedding_denity(self, *_):
-        rsc.tl.embedding_density(self.adata, basis="X_umap")
+        rsc.tl.embedding_density(self.adata, basis="umap")
 
     def peakmem_embedding_denity(self, *_):
-        rsc.tl.embedding_density(self.adata, basis="X_umap")
+        rsc.tl.embedding_density(self.adata, basis="umap")

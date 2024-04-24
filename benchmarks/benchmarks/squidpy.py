@@ -7,21 +7,21 @@ from __future__ import annotations
 
 from itertools import product
 
-import scanpy as sc
+import anndata as ad
 
 import rapids_singlecell as rsc
 
+import pathlib
 
 class ToolsSuite:
     _data_dict = dict(
-        visium_sge=sc.datasets.visium_sge(),
+        visium_sge=ad.read_h5ad("/p/project/training2406/team_scverse/gold2/rapids_singlecell/benchmarks/data/paul15.h5ad"),
     )
     params = _data_dict.keys()
     param_names = ["input_data"]
 
     def setup(self, input_data):
-        self.adata = self._data_dict[input_data].copy()
-        assert "X_pca" in self.adata.obsm
+        self.adata = rsc.get.anndata_to_GPU(self._data_dict[input_data].copy(), copy=True)
 
     def time_ligrec(self, *_):
         gene_ids = self.adata.var.index
@@ -31,8 +31,7 @@ class ToolsSuite:
             "leiden",
             interactions=interactions,
             n_perms=5,
-            use_raw=True,
-            copy=True,
+            use_raw=False,
         )
 
     def peakmem_ligrec(self, *_):
@@ -43,8 +42,7 @@ class ToolsSuite:
             "leiden",
             interactions=interactions,
             n_perms=5,
-            use_raw=True,
-            copy=True,
+            use_raw=False,
         )
 
     def time_autocorr_moran(self, *_):

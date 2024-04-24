@@ -16,7 +16,7 @@ class PreprocessingSuite:
     param_names = ["input_data"]
 
     def setup(self, input_data: str):
-        self.adata = self._data_dict[input_data].copy()
+        self.adata = rsc.get.anndata_to_GPU(self._data_dict[input_data].copy(), copy=True)
 
     def time_calculate_qc_metrics(self, *_):
         self.adata.var["mt"] = self.adata.var_names.str.startswith("MT-")
