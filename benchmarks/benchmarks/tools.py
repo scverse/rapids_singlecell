@@ -20,7 +20,9 @@ class ToolsSuite:
     param_names = ["input_data"]
 
     def setup(self, input_data):
-        self.adata = rsc.get.anndata_to_GPU(self._data_dict[input_data].copy(), copy=True)
+        self.adata = rsc.get.anndata_to_GPU(
+            self._data_dict[input_data].copy(), copy=True
+        )
 
     def time_umap(self, *_):
         rsc.tl.umap(self.adata)
@@ -49,4 +51,3 @@ class ToolsSuite:
     @track_peakmem
     def track_peakmem_embedding_denity(self, *_):
         rsc.tl.embedding_density(self.adata, basis="umap")
-

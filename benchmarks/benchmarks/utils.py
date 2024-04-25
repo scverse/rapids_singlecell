@@ -1,9 +1,11 @@
 # From https://github.com/rapidsai/benchmark/blob/570531ba4bc90c508245e943d2aaa11d68a24286/rapids_pytest_benchmark/rapids_pytest_benchmark/rmm_resource_analyzer.py#L29
+from __future__ import annotations
 
-import os
 import csv
-import rmm
+import os
 import tempfile
+
+import rmm
 
 
 class RMMResourceAnalyzer:
@@ -47,7 +49,7 @@ class RMMResourceAnalyzer:
         """
         current_mem_usage = 0
         for _, log_file in log_files.items():
-            with open(log_file, mode="r") as csv_file:
+            with open(log_file) as csv_file:
                 csv_reader = csv.DictReader(csv_file)
                 for row in csv_reader:
                     row_action = row["Action"]
@@ -62,8 +64,10 @@ class RMMResourceAnalyzer:
                         current_mem_usage -= row_size
         self.leaked_memory = current_mem_usage
 
+
 def track_peakmem(fn):
     from functools import wraps
+
     @wraps(fn)
     def wrapper(self, *args, **kwargs):
         resource_analyzer = RMMResourceAnalyzer(benchmark_name=fn.__name__)
@@ -71,4 +75,5 @@ def track_peakmem(fn):
         fn(self, *args, **kwargs)
         resource_analyzer.disable_logging()
         return resource_analyzer.max_gpu_mem_usage
+
     return wrapper

@@ -18,20 +18,18 @@ class PreprocessingSuite:
     param_names = ["input_data"]
 
     def setup(self, input_data: str):
-        self.adata = rsc.get.anndata_to_GPU(self._data_dict[input_data].copy(), copy=True)
+        self.adata = rsc.get.anndata_to_GPU(
+            self._data_dict[input_data].copy(), copy=True
+        )
 
     def time_calculate_qc_metrics(self, *_):
         self.adata.var["mt"] = self.adata.var_names.str.startswith("MT-")
-        rsc.pp.calculate_qc_metrics(
-            self.adata, qc_vars=["mt"], log1p=False
-        )
+        rsc.pp.calculate_qc_metrics(self.adata, qc_vars=["mt"], log1p=False)
 
     @track_peakmem
     def track_peakmem_calculate_qc_metrics(self, *_):
         self.adata.var["mt"] = self.adata.var_names.str.startswith("MT-")
-        rsc.pp.calculate_qc_metrics(
-            self.adata, qc_vars=["mt"], log1p=False
-        )
+        rsc.pp.calculate_qc_metrics(self.adata, qc_vars=["mt"], log1p=False)
 
     def time_filter_cells(self, *_):
         rsc.pp.filter_cells(self.adata, qc_var="n_counts", min_count=200)
@@ -39,7 +37,6 @@ class PreprocessingSuite:
     @track_peakmem
     def track_peakmem_filter_cells(self, *_):
         rsc.pp.filter_cells(self.adata, qc_var="n_counts", min_count=200)
-
 
     def time_filter_genes(self, *_):
         rsc.pp.filter_genes(self.adata, qc_var="n_counts", min_count=3)
@@ -100,4 +97,3 @@ class PreprocessingSuite:
     @track_peakmem
     def track_peakmem_neighbors(self, *_):
         rsc.pp.neighbors(self.adata, n_neighbors=15, n_pcs=50)
-

@@ -13,9 +13,10 @@ import rapids_singlecell as rsc
 
 from .utils import track_peakmem
 
+
 class ToolsSuite:
     _data_dict = dict(
-         pbmc68k_reduced=sc.datasets.pbmc68k_reduced(),
+        pbmc68k_reduced=sc.datasets.pbmc68k_reduced(),
     )
     params = _data_dict.keys()
     param_names = ["input_data"]
@@ -47,18 +48,24 @@ class ToolsSuite:
             use_raw=False,
         )
 
-
     def time_autocorr_moran(self, *_):
-        rsc.gr.spatial_autocorr(self.gpu_adata, mode="moran", connectivity_key="connectivities")
+        rsc.gr.spatial_autocorr(
+            self.gpu_adata, mode="moran", connectivity_key="connectivities"
+        )
 
     @track_peakmem
     def track_peakmem_autocorr_moran(self, *_):
-        rsc.gr.spatial_autocorr(self.gpu_adata, mode="moran", connectivity_key="connectivities")
+        rsc.gr.spatial_autocorr(
+            self.gpu_adata, mode="moran", connectivity_key="connectivities"
+        )
 
     def time_autocorr_geary(self, *_):
-        rsc.gr.spatial_autocorr(self.gpu_adata, mode="geary", connectivity_key="connectivities")
+        rsc.gr.spatial_autocorr(
+            self.gpu_adata, mode="geary", connectivity_key="connectivities"
+        )
 
     @track_peakmem
     def track_peakmem_autocorr_geary(self, *_):
-        rsc.gr.spatial_autocorr(self.gpu_adata, mode="geary", connectivity_key="connectivities")
-
+        rsc.gr.spatial_autocorr(
+            self.gpu_adata, mode="geary", connectivity_key="connectivities"
+        )

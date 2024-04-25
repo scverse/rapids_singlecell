@@ -25,7 +25,9 @@ from __future__ import annotations
 import scanpy as sc
 
 from rapids_singlecell.get import anndata_to_GPU
+
 from .utils import track_peakmem
+
 
 class ToGPUSuite:
     _data_dict = dict(obmc68k_reduced=sc.datasets.pbmc68k_reduced())
@@ -41,4 +43,3 @@ class ToGPUSuite:
     @track_peakmem
     def track_peakmem_to_gpu(self, *_):
         anndata_to_GPU(self.adata)
-
