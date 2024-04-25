@@ -6,6 +6,7 @@ from ._neighbors import neighbors
 from ._normalize import log1p, normalize_pearson_residuals, normalize_total
 from ._pca import pca
 from ._qc import calculate_qc_metrics
+from ._qc_refactored import calculate_qc_metrics_refactored
 from ._regress_out import regress_out
 from ._scale import scale
 from ._scrublet import scrublet, scrublet_simulate_doublets
