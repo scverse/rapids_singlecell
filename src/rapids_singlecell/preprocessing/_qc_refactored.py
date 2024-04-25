@@ -1,6 +1,7 @@
 from __future__ import annotations
-from functools import partial, singledispatch
+
 import math
+from functools import partial, singledispatch
 from typing import TYPE_CHECKING
 
 import cupy as cp
@@ -14,8 +15,9 @@ from rapids_singlecell._compat import DaskArray, DaskClient, _get_dask_client
 from ._utils import _check_gpu_X
 
 if TYPE_CHECKING:
-    from anndata import AnnData
     from typing import Union
+
+    from anndata import AnnData
 
 
 def calculate_qc_metrics_refactored(
@@ -114,6 +116,7 @@ def calculate_qc_metrics_refactored(
                     cp.log1p(sums_cells_sub)
                 )
 
+
 def allocate_qc_arrays(X):
     sums_cells = cp.zeros(X.shape[0], dtype=X.dtype)
     sums_genes = cp.zeros(X.shape[1], dtype=X.dtype)
@@ -121,15 +124,17 @@ def allocate_qc_arrays(X):
     gene_ex = cp.zeros(X.shape[1], dtype=cp.int32)
     return sums_cells, sums_genes, cell_ex, gene_ex
 
-@singledispatch
-def _first_pass_qc(X: Union[sparse.csr_matrix, sparse.csc_matrix], client=None, kernel=None):
 
+@singledispatch
+def _first_pass_qc(
+    X: Union[sparse.csr_matrix, sparse.csc_matrix], client=None, kernel=None
+):
     sums_cells, sums_genes, cell_ex, gene_ex = allocate_qc_arrays(X)
     formats_indexed_by_major_axis = ["csr", "csc"]
     major_axis = formats_indexed_by_major_axis.index(X.format)
     if kernel is None:
-        from ._kernels._qc_kernels import _sparse_qc_csr
-        from ._kernels._qc_kernels import _sparse_qc_csc
+        from ._kernels._qc_kernels import _sparse_qc_csc, _sparse_qc_csr
+
         kernels = [_sparse_qc_csr, _sparse_qc_csc]
         kernel = kernels[major_axis]
         kernel = kernel(X.data.dtype)
@@ -152,10 +157,12 @@ def _first_pass_qc(X: Union[sparse.csr_matrix, sparse.csc_matrix], client=None, 
     )
     return sums_cells, sums_genes, cell_ex, gene_ex
 
+
 @_first_pass_qc.register
 def _first_pass_qc_dense(X: cp.ndarray, client=None, kernel=None):
     if kernel is None:
         from ._kernels._qc_kernels import _sparse_qc_dense as kernel
+
         kernel = kernel(X.dtype)
 
     if not X.flags.c_contiguous:
@@ -165,7 +172,7 @@ def _first_pass_qc_dense(X: cp.ndarray, client=None, kernel=None):
         int(math.ceil(X.shape[0] / block[0])),
         int(math.ceil(X.shape[1] / block[1])),
     )
-    
+
     kernel(
         grid,
         block,
@@ -205,7 +212,12 @@ def _first_pass_qc_dask(X: DaskArray, client=None):
         )
 
     parts = client.sync(_extract_partitions, X)
-    futures = [client.submit(partial(_first_pass_qc, kernel=kernel, client=None), part, workers=[w]) for w, part in parts]
+    futures = [
+        client.submit(
+            partial(_first_pass_qc, kernel=kernel, client=None), part, workers=[w]
+        )
+        for w, part in parts
+    ]
     # Gather results from futures
     results = client.gather(futures)
 
@@ -224,8 +236,12 @@ def _first_pass_qc_dask(X: DaskArray, client=None):
         sums_genes_objs.append(
             dask.array.from_array(sums_genes, chunks=sums_genes.shape).reshape(-1, 1)
         )
-        cell_ex_objs.append(dask.array.from_array(cell_ex, chunks=cell_ex.shape).reshape(-1, 1))
-        gene_ex_objs.append(dask.array.from_array(gene_ex, chunks=gene_ex.shape).reshape(-1, 1))
+        cell_ex_objs.append(
+            dask.array.from_array(cell_ex, chunks=cell_ex.shape).reshape(-1, 1)
+        )
+        gene_ex_objs.append(
+            dask.array.from_array(gene_ex, chunks=gene_ex.shape).reshape(-1, 1)
+        )
     sums_cells = dask.array.concatenate(sums_cells_objs)
     sums_genes = dask.array.concatenate(sums_genes_objs, axis=1).sum(axis=1)
     cell_ex = dask.array.concatenate(cell_ex_objs)
