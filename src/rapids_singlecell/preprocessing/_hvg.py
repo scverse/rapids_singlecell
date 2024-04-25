@@ -7,8 +7,10 @@ from typing import TYPE_CHECKING, Literal
 import cupy as cp
 import numpy as np
 import pandas as pd
-from cupyx.scipy.sparse import issparse
+from cupyx.scipy.sparse import csr_matrix, issparse
 from scanpy.get import _get_obs_rep
+
+from rapids_singlecell._compat import DaskArray, DaskClient, _meta_dense, _meta_sparse
 
 from ._utils import _check_gpu_X, _check_nonnegative_integers, _get_mean_var
 
@@ -43,6 +45,7 @@ def highly_variable_genes(
     chunksize: int = 1000,
     n_samples: int = 10000,
     batch_key: str = None,
+    client: DaskClient | None = None,
 ) -> None:
     """\
     Annotate highly variable genes.
@@ -185,6 +188,7 @@ def highly_variable_genes(
                 n_top_genes=n_top_genes,
                 n_bins=n_bins,
                 flavor=flavor,
+                client=client,
             )
         else:
             adata.obs[batch_key] = adata.obs[batch_key].astype("category")
@@ -197,6 +201,13 @@ def highly_variable_genes(
                 if not isinstance(X, cp.ndarray):
                     X_batch = X[adata.obs[batch_key] == batch,].tocsc()
                     nnz_per_gene = cp.diff(X_batch.indptr).ravel()
+                elif isinstance(X, DaskArray):
+                    X_batch = X[adata.obs[batch_key] == batch,]
+                    if isinstance(X._meta, cp.ndarray):
+                        nnz_per_gene = (X > 0).sum(axis=0).compute().ravel()
+                    elif isinstance(X._meta, csr_matrix):
+                        pass
+                        # to do implement this
                 else:
                     X_batch = X[adata.obs[batch_key] == batch,].copy()
                     nnz_per_gene = cp.sum(X_batch > 0, axis=0).ravel()
@@ -216,6 +227,7 @@ def highly_variable_genes(
                     n_top_genes=n_top_genes,
                     n_bins=n_bins,
                     flavor=flavor,
+                    client=client,
                 )
                 hvg_inter["gene"] = inter_genes
                 missing_hvg = pd.DataFrame(
@@ -299,6 +311,7 @@ def _highly_variable_genes_single_batch(
     n_top_genes=None,
     flavor="seurat",
     n_bins=20,
+    client=None,
 ):
     """\
         See `highly_variable_genes`.
@@ -311,9 +324,15 @@ def _highly_variable_genes_single_batch(
     if flavor == "seurat":
         if issparse(X):
             X = X.expm1()
+        elif isinstance(X, DaskArray):
+            if isinstance(X._meta, cp.ndarray):
+                X = X.map_blocks(cp.expm1, meta=_meta_dense(X.dtype))
+            elif isinstance(X._meta, csr_matrix):
+                X = X.map_blocks(lambda X: X.expm1(), meta=_meta_sparse(X.dtype))
         else:
             X = cp.expm1(X)
-    mean, var = _get_mean_var(X, axis=0)
+
+    mean, var = _get_mean_var(X, axis=0, client=client)
     mean[mean == 0] = 1e-12
     disp = var / mean
     if flavor == "seurat":  # logarithmized mean as in Seurat
