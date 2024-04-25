@@ -22,43 +22,23 @@ Also interesting:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-import anndata
 import scanpy as sc
 
 from rapids_singlecell.get import anndata_to_GPU
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-    from pathlib import Path
-
-import pathlib
-
-sc.settings.datasetdir = pathlib.Path(__file__).parent.resolve() / "data"
-
-@dataclass
-class Dataset:
-    path: Path
-    get: Callable[[], anndata.AnnData]
-
-path="/p/project/training2406/team_scverse/gold2/rapids_singlecell/benchmarks/data/pbmc3k_raw.h5ad"
-
+from .utils import track_peakmem
 
 class ToGPUSuite:
-    _data_dict = dict(pbmc3k=anndata.read_h5ad(path))
+    _data_dict = dict(obmc68k_reduced=sc.datasets.pbmc68k_reduced())
     params = _data_dict.keys()
     param_names = ["input_data"]
 
     def setup(self, input_data: str):
-        self.data = self._data_dict[input_data]
+        self.adata = self._data_dict[input_data]
 
     def time_to_gpu(self, *_):
-        anndata_to_GPU(self.data)
+        anndata_to_GPU(self.adata)
 
-    def peakmem_to_gpu(self, *_):
-        anndata_to_GPU(self.data)
+    @track_peakmem
+    def track_peakmem_to_gpu(self, *_):
+        anndata_to_GPU(self.adata)
 
-    def mem_to_gpu(self, *_):
-        anndata_to_GPU(self.data)

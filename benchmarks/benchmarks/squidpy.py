@@ -7,52 +7,58 @@ from __future__ import annotations
 
 from itertools import product
 
-import anndata as ad
+import scanpy as sc
 
 import rapids_singlecell as rsc
 
-import pathlib
+from .utils import track_peakmem
 
 class ToolsSuite:
     _data_dict = dict(
-        visium_sge=ad.read_h5ad("/p/project/training2406/team_scverse/gold2/rapids_singlecell/benchmarks/data/paul15.h5ad"),
+         pbmc68k_reduced=sc.datasets.pbmc68k_reduced(),
     )
     params = _data_dict.keys()
     param_names = ["input_data"]
 
     def setup(self, input_data):
-        self.adata = rsc.get.anndata_to_GPU(self._data_dict[input_data].copy(), copy=True)
+        self.cpu_adata = self._data_dict[input_data].copy()
+        self.gpu_adata = rsc.get.anndata_to_GPU(self.cpu_adata, copy=True)
 
     def time_ligrec(self, *_):
-        gene_ids = self.adata.var.index
+        gene_ids = self.cpu_adata.var.index
         interactions = tuple(product(gene_ids[:5], gene_ids[:5]))
         rsc.gr.ligrec(
-            self.adata,
-            "leiden",
+            self.cpu_adata,
+            "louvain",
             interactions=interactions,
             n_perms=5,
             use_raw=False,
         )
 
-    def peakmem_ligrec(self, *_):
-        gene_ids = self.adata.var.index
+    @track_peakmem
+    def track_peakmem_ligrec(self, *_):
+        gene_ids = self.cpu_adata.var.index
         interactions = tuple(product(gene_ids[:5], gene_ids[:5]))
         rsc.gr.ligrec(
-            self.adata,
-            "leiden",
+            self.cpu_adata,
+            "louvain",
             interactions=interactions,
             n_perms=5,
             use_raw=False,
         )
+
 
     def time_autocorr_moran(self, *_):
-        rsc.gr.spatial_autocorr(self.adata, mode="moran")
+        rsc.gr.spatial_autocorr(self.gpu_adata, mode="moran", connectivity_key="connectivities")
 
-    def peakmem_autocorr_moran(self, *_):
-        rsc.gr.spatial_autocorr(self.adata, mode="moran")
+    @track_peakmem
+    def track_peakmem_autocorr_moran(self, *_):
+        rsc.gr.spatial_autocorr(self.gpu_adata, mode="moran", connectivity_key="connectivities")
 
     def time_autocorr_geary(self, *_):
-        rsc.gr.spatial_autocorr(self.adata, mode="geary")
+        rsc.gr.spatial_autocorr(self.gpu_adata, mode="geary", connectivity_key="connectivities")
 
-    def peakmem_autocorr_geary(self, *_):
-        rsc.gr.spatial_autocorr(self.adata, mode="geary")
+    @track_peakmem
+    def track_peakmem_autocorr_geary(self, *_):
+        rsc.gr.spatial_autocorr(self.gpu_adata, mode="geary", connectivity_key="connectivities")
+
