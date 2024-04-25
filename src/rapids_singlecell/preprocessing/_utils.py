@@ -5,6 +5,8 @@ import math
 import cupy as cp
 from cupyx.scipy.sparse import issparse, isspmatrix_csc, isspmatrix_csr
 
+from rapids_singlecell._compat import DaskArray
+
 
 def _mean_var_major(X, major, minor):
     from ._kernels._mean_var_kernel import _get_mean_var_major
@@ -85,15 +87,20 @@ def _check_nonnegative_integers(X):
         return True
 
 
-def _check_gpu_X(X, require_cf=False):
+def _check_gpu_X(X, require_cf=False, allow_dask=False):
     if isinstance(X, cp.ndarray):
         return True
     elif issparse(X):
-        if X.has_canonical_format or not require_cf:
+        if not require_cf:
+            return True
+        elif X.has_canonical_format:
             return True
         else:
             X.sort_indices()
             X.sum_duplicates()
+    elif allow_dask:
+        if isinstance(X, DaskArray):
+            return _check_gpu_X(X._meta)
     else:
         raise TypeError(
             "The input is not a CuPy ndarray or CuPy sparse matrix. "

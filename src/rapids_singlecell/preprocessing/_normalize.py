@@ -2,11 +2,21 @@ from __future__ import annotations
 
 import math
 import warnings
+from functools import singledispatch
 from typing import TYPE_CHECKING
 
 import cupy as cp
+from cuml.dask.common.part_utils import _extract_partitions
 from cupyx.scipy import sparse
 from scanpy.get import _get_obs_rep, _set_obs_rep
+
+from rapids_singlecell._compat import (
+    DaskArray,
+    DaskClient,
+    _get_dask_client,
+    _meta_dense,
+    _meta_sparse,
+)
 
 from ._utils import _check_gpu_X, _check_nonnegative_integers
 
@@ -21,6 +31,7 @@ def normalize_total(
     layer: int | str = None,
     inplace: bool = True,
     copy: bool = False,
+    client: DaskClient | None = None,
 ) -> AnnData | sparse.csr_matrix | cp.ndarray | None:
     """
     Normalizes rows in matrix so they sum to `target_sum`
@@ -42,6 +53,9 @@ def normalize_total(
         copy
             Whether to return a copy or update `adata`. Not compatible with inplace=False.
 
+        client
+            Dask client to use for computation. If `None`, the default client is used. Only used if `X` is a Dask array.
+
     Returns
     -------
     Returns a normalized copy or  updates `adata` with a normalized version of \
@@ -54,7 +68,7 @@ def normalize_total(
         adata = adata.copy()
     X = _get_obs_rep(adata, layer=layer)
 
-    _check_gpu_X(X)
+    _check_gpu_X(X, allow_dask=True)
 
     if not inplace:
         X = X.copy()
@@ -62,41 +76,9 @@ def normalize_total(
     if sparse.isspmatrix_csc(X):
         X = X.tocsr()
     if not target_sum:
-        if sparse.issparse(X):
-            from ._kernels._norm_kernel import _get_sparse_sum_major
+        target_sum = _get_target_sum(X, client=client)
 
-            counts_per_cell = cp.zeros(X.shape[0], dtype=X.dtype)
-            sum_kernel = _get_sparse_sum_major(X.dtype)
-            sum_kernel(
-                (X.shape[0],),
-                (64,),
-                (X.indptr, X.data, counts_per_cell, X.shape[0]),
-            )
-        else:
-            counts_per_cell = X.sum(axis=1)
-        target_sum = cp.median(counts_per_cell)
-
-    if sparse.isspmatrix_csr(X):
-        from ._kernels._norm_kernel import _mul_csr
-
-        mul_kernel = _mul_csr(X.dtype)
-        mul_kernel(
-            (math.ceil(X.shape[0] / 128),),
-            (128,),
-            (X.indptr, X.data, X.shape[0], int(target_sum)),
-        )
-
-    else:
-        from ._kernels._norm_kernel import _mul_dense
-
-        if not X.flags.c_contiguous:
-            X = cp.asarray(X, order="C")
-        mul_kernel = _mul_dense(X.dtype)
-        mul_kernel(
-            (math.ceil(X.shape[0] / 128),),
-            (128,),
-            (X, X.shape[0], X.shape[1], int(target_sum)),
-        )
+    X = _normalize_total(X, target_sum, client=client)
 
     if inplace:
         _set_obs_rep(adata, X, layer=layer)
@@ -105,6 +87,134 @@ def normalize_total(
         return adata
     elif not inplace:
         return X
+
+
+@singledispatch
+def _normalize_total(X: cp.ndarray, target_sum: int, client=None) -> cp.ndarray:
+    from ._kernels._norm_kernel import _mul_dense
+
+    if not X.flags.c_contiguous:
+        X = cp.asarray(X, order="C")
+    mul_kernel = _mul_dense(X.dtype)
+    mul_kernel(
+        (math.ceil(X.shape[0] / 128),),
+        (128,),
+        (X, X.shape[0], X.shape[1], int(target_sum)),
+    )
+    return X
+
+
+@_normalize_total.register(sparse.csr_matrix)
+def _(X: sparse.csr_matrix, target_sum: int, client=None) -> sparse.csr_matrix:
+    from ._kernels._norm_kernel import _mul_csr
+
+    mul_kernel = _mul_csr(X.dtype)
+    mul_kernel(
+        (math.ceil(X.shape[0] / 128),),
+        (128,),
+        (X.indptr, X.data, X.shape[0], int(target_sum)),
+    )
+    return X
+
+
+@_normalize_total.register(DaskArray)
+def _(X: DaskArray, target_sum: int, client=None) -> DaskArray:
+    client = _get_dask_client(client)
+    if isinstance(X._meta, sparse.csr_matrix):
+        from ._kernels._norm_kernel import _mul_csr
+
+        mul_kernel = _mul_csr(X.dtype)
+        mul_kernel.compile()
+
+        def __mul(X_part):
+            mul_kernel(
+                (math.ceil(X.shape[0] / 128),),
+                (128,),
+                (X_part.indptr, X_part.data, X_part.shape[0], int(target_sum)),
+            )
+            return X_part
+
+        X = X.map_blocks(lambda X: __mul(X), meta=_meta_sparse(X.dtype))
+    elif isinstance(X.meta, cp.ndarray):
+        from ._kernels._norm_kernel import _mul_dense
+
+        mul_kernel = _mul_dense(X.dtype)
+        mul_kernel.compile()
+
+        def __mul(X_part):
+            mul_kernel(
+                (math.ceil(X_part.shape[0] / 128),),
+                (128,),
+                (X_part, X_part.shape[0], X_part.shape[1], int(target_sum)),
+            )
+            return X_part
+
+        X = X.map_blocks(lambda X: __mul(X), meta=_meta_dense(X.dtype))
+    else:
+        raise ValueError(f"Cannot normalize {type(X)}")
+    return X
+
+
+@singledispatch
+def _get_target_sum(X: cp.ndarray, client=None) -> int:
+    return cp.median(X.sum(axis=1))
+
+
+@_get_target_sum.register(sparse.csr_matrix)
+def _(X: sparse.csr_matrix, client=None) -> int:
+    from ._kernels._norm_kernel import _get_sparse_sum_major
+
+    counts_per_cell = cp.zeros(X.shape[0], dtype=X.dtype)
+    sum_kernel = _get_sparse_sum_major(X.dtype)
+    sum_kernel(
+        (X.shape[0],),
+        (64,),
+        (X.indptr, X.data, counts_per_cell, X.shape[0]),
+    )
+
+    target_sum = cp.median(counts_per_cell)
+    return target_sum
+
+
+@_get_target_sum.register(DaskArray)
+def _(X: DaskArray, client=None) -> int:
+    import dask.array as da
+
+    client = _get_dask_client(client)
+
+    if isinstance(X._meta, sparse.csr_matrix):
+        from ._kernels._norm_kernel import _get_sparse_sum_major
+
+        sum_kernel = _get_sparse_sum_major(X.dtype)
+        sum_kernel.compile()
+
+        def __sum(X_part):
+            counts_per_cell = cp.zeros(X_part.shape[0], dtype=X_part.dtype)
+            sum_kernel(
+                (X.shape[0],),
+                (64,),
+                (X_part.indptr, X_part.data, counts_per_cell, X_part.shape[0]),
+            )
+            return counts_per_cell
+
+    elif isinstance(X._meta, cp.ndarray):
+
+        def __sum(X_part):
+            return X_part.sum(axis=1)
+    else:
+        raise ValueError(f"Cannot compute target sum for {type(X)}")
+
+    parts = client.sync(_extract_partitions, X)
+    futures = [client.submit(__sum, part, workers=[w]) for w, part in parts]
+    # Gather results from futures
+    futures = client.gather(futures)
+    objs = []
+    for i in futures:
+        objs.append(da.from_array(i, chunks=i.shape))
+
+    counts_per_cell = da.concatenate(objs).compute()
+    target_sum = cp.median(counts_per_cell)
+    return target_sum
 
 
 def log1p(
@@ -148,13 +258,20 @@ def log1p(
         adata = adata.copy()
     X = _get_obs_rep(adata, layer=layer, obsm=obsm)
 
-    _check_gpu_X(X)
+    _check_gpu_X(X, allow_dask=True)
+
+    if not inplace:
+        X = X.copy()
 
     if isinstance(X, cp.ndarray):
         X = cp.log1p(X)
-    else:
+    elif sparse.issparse(X):
         X = X.log1p()
-
+    elif isinstance(X, DaskArray):
+        if isinstance(X._meta, cp.ndarray):
+            X = X.map_blocks(cp.log1p, meta=_meta_dense(X.dtype))
+        elif isinstance(X._meta, sparse.csr_matrix):
+            X = X.map_blocks(lambda X: X.log1p(), meta=_meta_sparse(X.dtype))
     adata.uns["log1p"] = {"base": None}
     if inplace:
         _set_obs_rep(adata, X, layer=layer, obsm=obsm)
