@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 
 import cupy as cp
 import numpy as np
-from cuml.decomposition import TruncatedSVD
 from cuml.internals.input_utils import sparse_scipy_to_cp
 from cupyx.scipy.sparse import csr_matrix
 from cupyx.scipy.sparse import issparse as cpissparse
@@ -15,6 +14,8 @@ from scipy.sparse import issparse
 
 from rapids_singlecell._compat import DaskArray, DaskClient
 from rapids_singlecell.get import _get_obs_rep
+
+from ._utils import _check_gpu_X
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -136,17 +137,18 @@ def pca(
             raise ValueError(
                 "Dask arrays are not supported for chunked PCA computation."
             )
+        _check_gpu_X(X, allow_dask=True)
         if isinstance(X._meta, cp.ndarray):
             from cuml.dask.decomposition import PCA
 
             if svd_solver == "auto":
                 svd_solver = "jacobi"
-            pca_func = PCA(n_components=n_comps, svd_solver=svd_solver)
+            pca_func = PCA(n_components=n_comps, svd_solver=svd_solver, client=client)
             X_pca = pca_func.fit_transform(X)
         elif isinstance(X._meta, csr_matrix):
-            from cuml.dask.decomposition import PCA_sparse
+            from ._sparse_pca._dask_sparse_pca import PCA_sparse_dask
 
-            pca_func = PCA_sparse(n_components=n_comps)
+            pca_func = PCA_sparse_dask(n_components=n_comps, client=client)
             X_pca = pca_func.fit_transform(X)
 
     else:
@@ -179,6 +181,8 @@ def pca(
                     pca_func = PCA_sparse(n_components=n_comps)
                     X_pca = pca_func.fit_transform(X)
                 else:
+                    from cuml.decomposition import PCA
+
                     pca_func = PCA(
                         n_components=n_comps,
                         svd_solver=svd_solver,
@@ -188,6 +192,8 @@ def pca(
                     X_pca = pca_func.fit_transform(X)
 
             elif not zero_center:
+                from cuml.decomposition import TruncatedSVD
+
                 pca_func = TruncatedSVD(
                     n_components=n_comps,
                     random_state=random_state,

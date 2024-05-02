@@ -6,7 +6,6 @@ import cupy as cp
 import dask
 from cuml.dask.common.part_utils import _extract_partitions
 from cuml.internals.memory_utils import with_cupy_rmm
-from cupyx import cusparse
 
 from rapids_singlecell._compat import (
     _get_dask_client,
@@ -60,8 +59,30 @@ class PCA_sparse_dask:
         return self
 
     def transform(self, X):
+        from ._kernels._pca_sparse_kernel import denser_kernel
+
+        kernel = denser_kernel(X.dtype)
+        kernel.compile()
+
         def _transform(X_part, mean_, components_):
-            dense = cusparse.csr2dense(X_part)
+            dense = cp.zeros(X_part.shape, dtype=X.dtype)
+            max_nnz = cp.diff(X_part.indptr).max()
+            tpb = (32, 32)
+            bpg_x = math.ceil(X_part.shape[0] / tpb[0])
+            bpg_y = math.ceil(max_nnz / tpb[1])
+            bpg = (bpg_x, bpg_y)
+            kernel(
+                bpg,
+                tpb,
+                (
+                    X_part.indptr,
+                    X_part.indices,
+                    X_part.data,
+                    dense,
+                    X_part.shape[0],
+                    X_part.shape[1],
+                ),
+            )
             dense = dense - mean_
             X_pca = dense.dot(components_.T)
             return X_pca
@@ -71,13 +92,14 @@ class PCA_sparse_dask:
             mean_=self.mean_,
             components_=self.components_,
             dtype=X.dtype,
+            chunks=(X.chunks[0], self.n_components_),
             meta=_meta_dense(X.dtype),
         )
 
         self.components_ = self.components_.get()
         self.explained_variance_ = self.explained_variance_.get()
         self.explained_variance_ratio_ = self.explained_variance_ratio_.get()
-        return X_pca.persist()
+        return X_pca
 
     def fit_transform(self, X, y=None):
         return self.fit(X).transform(X)
@@ -122,7 +144,7 @@ def _cov_sparse_dask(client, x, return_gram=False, return_mean=False):
             when return_gram is True and return_mean is True
     """
 
-    from rapids_singlecell.preprocessing._kernels._pca_sparse_kernel import (
+    from ._kernels._pca_sparse_kernel import (
         _copy_kernel,
         _cov_kernel,
         _gramm_kernel_csr,
