@@ -12,8 +12,8 @@ import pandas as pd
 from cupyx.scipy.sparse import csr_matrix, issparse
 from scanpy.get import _get_obs_rep
 
-
 from rapids_singlecell._compat import DaskArray, DaskClient, _meta_dense, _meta_sparse
+
 from ._simple import calculate_qc_metrics
 from ._utils import _check_gpu_X, _check_nonnegative_integers, _get_mean_var
 
@@ -271,7 +271,6 @@ def _highly_variable_genes_single_batch(
     n_bins: int = 20,
     flavor: Literal["seurat", "cell_ranger"] = "seurat",
 ) -> pd.DataFrame:
-
     """\
     See `highly_variable_genes`.
 
