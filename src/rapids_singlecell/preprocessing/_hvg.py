@@ -9,12 +9,10 @@ from typing import TYPE_CHECKING, Literal
 import cupy as cp
 import numpy as np
 import pandas as pd
-from cupyx.scipy.sparse import csr_matrix, issparse
+from cupyx.scipy.sparse import issparse
 from scanpy.get import _get_obs_rep
 
-from rapids_singlecell._compat import DaskArray, DaskClient, _meta_dense, _meta_sparse
-
-from ._simple import calculate_qc_metrics
+from ._qc import calculate_qc_metrics
 from ._utils import _check_gpu_X, _check_nonnegative_integers, _get_mean_var
 
 if TYPE_CHECKING:
@@ -49,7 +47,6 @@ def highly_variable_genes(
     chunksize: int = 1000,
     n_samples: int = 10000,
     batch_key: str = None,
-    client: DaskClient | None = None,
 ) -> None:
     """\
     Annotate highly variable genes.
@@ -289,15 +286,9 @@ def _highly_variable_genes_single_batch(
         X = X.copy()
         if issparse(X):
             X = X.expm1()
-        elif isinstance(X, DaskArray):
-            if isinstance(X._meta, cp.ndarray):
-                X = X.map_blocks(cp.expm1, meta=_meta_dense(X.dtype))
-            elif isinstance(X._meta, csr_matrix):
-                X = X.map_blocks(lambda X: X.expm1(), meta=_meta_sparse(X.dtype))
         else:
             X = cp.expm1(X)
-
-    mean, var = _get_mean_var(X, axis=0, client=client)
+    mean, var = _get_mean_var(X, axis=0)
     mean[mean == 0] = 1e-12
     disp = var / mean
     if flavor == "seurat":  # logarithmized mean as in Seurat
