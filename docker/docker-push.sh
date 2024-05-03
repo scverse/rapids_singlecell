@@ -1,6 +1,6 @@
 #!/bin/bash
 docker_account=scverse
-rapids_version=26.04
+rapids_version=24.04
 grep -v -- '- rapids-singlecell' conda/rsc_rapids_${rapids_version}.yml > rsc_rapids.yml
 docker build -t rapids-singlecell-deps:latest -f docker/Dockerfile.deps .
 docker build -t rapids-singlecell:latest -f docker/Dockerfile .
