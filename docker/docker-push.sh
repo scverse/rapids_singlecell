@@ -1,6 +1,9 @@
 #!/bin/bash
 docker_account=scverse
-docker build -t rapids-singlecell:latest .
+rapids_version=26.04
+grep -v -- '- rapids-singlecell' conda/rsc_rapids_${rapids_version}.yml > rsc_rapids.yml
+docker build -t rapids-singlecell-deps:latest -f docker/Dockerfile.deps .
+docker build -t rapids-singlecell:latest -f docker/Dockerfile .
 latest_id=$( docker images |grep -e "rapids-singlecell[ \t]*latest"|head -n1|awk '{print $3}' )
 #docker tag $latest_id $docker_account/rapids-singlecell:latest
 #docker push $docker_account/rapids-singlecell:latest

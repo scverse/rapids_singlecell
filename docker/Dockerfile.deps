@@ -1,0 +1,31 @@
+ARG CUDA_VER=11.8.0
+ARG PYTHON_VER=3.11
+ARG LINUX_VER=ubuntu22.04
+ARG GIT_ID=main
+
+FROM nvidia/cuda:${CUDA_VER}-base-${LINUX_VER}
+
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
+
+ENV PATH=/opt/conda/bin:$PATH
+ENV PYTHON_VERSION=${PYTHON_VER}
+
+COPY --from=condaforge/miniforge3:24.3.0-0 /opt/conda /opt/conda
+
+COPY rsc_rapids.yml rsc_rapids.yml
+
+RUN <<EOF
+set -x
+apt-get update
+apt-get dist-upgrade -y
+apt-get autoremove -y
+apt-get clean
+mamba env update -y -n base -f rsc_rapids.yml
+mamba install -y -n base pytest -c conda-forge
+mamba clean -afy
+/opt/conda/bin/python -m pip install -y --no-cache-dir git+https://github.com/scverse/rapids_singlecell.git@${GIT_IDENTIFIER}
+/opt/conda/bin/python -m pip uninstall -y --no-cache-dir rapids-singlecell
+/opt/conda/bin/python -m pip cache purge -y
+EOF
+
+ENTRYPOINT ["/opt/conda/bin/ipython"]

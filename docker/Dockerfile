@@ -1,16 +1,20 @@
-FROM condaforge/miniforge3
-SHELL ["/bin/bash", "-c"]
-COPY ../conda/rsc_rapids_24.04.yml rsc_rapids_24.04.yml
-RUN set -x \
-    && apt update \
-    && apt -y dist-upgrade \
-    && apt -y autoremove \
-    && apt -y clean \
-    && mamba env create -p /rsc -f rsc_rapids_24.04.yml \
-    && /rsc/bin/python -c "import rapids_singlecell as rsc" \
-    && mamba install -p /rsc pytest -c conda-forge \
-    && mamba clean -ay
+ARG GIT_IDENTIFIER=main
 
-WORKDIR /rsc/bin
+FROM rapids-singlecell-deps
 
-ENTRYPOINT ["/rsc/bin/python"]
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
+
+ENV PATH=/opt/conda/bin:$PATH
+
+RUN <<EOF
+# install rapids_singlecell from source
+set -x
+mkdir /src
+cd /src
+git clone https://github.com/scverse/rapids_singlecell.git
+cd rapids_singlecell
+git checkout ${GIT_IDENTIFIER}
+/opt/conda/bin/python -m pip install --no-cache-dir -e .
+EOF
+
+ENTRYPOINT ["/opt/conda/bin/ipython"]
