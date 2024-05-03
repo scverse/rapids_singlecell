@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import cupy as cp
 import numpy as np
 from cuml.internals.input_utils import sparse_scipy_to_cp
-from cupyx.scipy.sparse import csr_matrix
+from cupyx.scipy.sparse import csr_matrix, isspmatrix_csr
 from cupyx.scipy.sparse import issparse as cpissparse
 from scanpy._utils import Empty, _empty
 from scanpy.preprocessing._pca import _handle_mask_var
@@ -175,9 +175,10 @@ def pca(
                 if cpissparse(X) or issparse(X):
                     if issparse(X):
                         X = sparse_scipy_to_cp(X, dtype=X.dtype)
-                        X = csr_matrix(X)
                     from ._sparse_pca._sparse_pca import PCA_sparse
 
+                    if not isspmatrix_csr(X):
+                        X = X.tocsr()
                     pca_func = PCA_sparse(n_components=n_comps)
                     X_pca = pca_func.fit_transform(X)
                 else:

@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 
 import cupy as cp
-from cupyx.scipy.sparse import isspmatrix_csr
 
 
 class PCA_sparse:
@@ -18,8 +17,6 @@ class PCA_sparse:
         else:
             self.n_components_ = self.n_components
 
-        if not isspmatrix_csr(x):
-            x = x.tocsr()
         _check_matrix_for_zero_genes(x)
         self.n_samples_ = x.shape[0]
         self.n_features_in_ = x.shape[1] if x.ndim == 2 else 1
@@ -54,24 +51,25 @@ class PCA_sparse:
         return self
 
     def transform(self, X):
-        """ "
         from ._kernels._pca_sparse_kernel import denser_kernel
+
         dense_kernel = denser_kernel(X.dtype)
 
-        dense = cp.zeros(X.shape,dtype=X.dtype)
+        dense = cp.zeros(X.shape, dtype=X.dtype)
         max_nnz = cp.diff(X.indptr).max()
         tpb = (32, 32)
         bpg_x = math.ceil(X.shape[0] / tpb[0])
         bpg_y = math.ceil(max_nnz / tpb[1])
         bpg = (bpg_x, bpg_y)
-        dense_kernel(bpg,
-                tpb,
-                (X.indptr,X.indices,  X.data, dense,X.shape[0],X.shape[1]),)
+        dense_kernel(
+            bpg,
+            tpb,
+            (X.indptr, X.indices, X.data, dense, X.shape[0], X.shape[1]),
+        )
         dense = dense - self.mean_
         X_transformed = dense.dot(self.components_.T)
-        """
-        X = X - self.mean_
-        X_transformed = X.dot(self.components_.T)
+        # X = X - self.mean_
+        # X_transformed = X.dot(self.components_.T)
         self.components_ = self.components_.get()
         self.explained_variance_ = self.explained_variance_.get()
         self.explained_variance_ratio_ = self.explained_variance_ratio_.get()
