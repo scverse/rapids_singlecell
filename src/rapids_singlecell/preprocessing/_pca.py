@@ -143,13 +143,17 @@ def pca(
 
             if svd_solver == "auto":
                 svd_solver = "jacobi"
-            pca_func = PCA(n_components=n_comps, svd_solver=svd_solver, client=client)
+            pca_func = PCA(
+                n_components=n_comps, svd_solver=svd_solver, whiten=False, client=client
+            )
             X_pca = pca_func.fit_transform(X)
+            X_pca = X_pca.compute_chunk_sizes()
         elif isinstance(X._meta, csr_matrix):
             from ._sparse_pca._dask_sparse_pca import PCA_sparse_dask
 
             pca_func = PCA_sparse_dask(n_components=n_comps, client=client)
-            X_pca = pca_func.fit_transform(X)
+            pca_func = pca_func.fit(X)
+            X_pca = pca_func.transform(X)
 
     else:
         if chunked:
@@ -213,16 +217,23 @@ def pca(
             "use_highly_variable": mask_var_param == "highly_variable",
             "mask_var": mask_var_param,
         },
-        "variance": pca_func.explained_variance_,
-        "variance_ratio": pca_func.explained_variance_ratio_,
+        "variance": _as_numpy(pca_func.explained_variance_),
+        "variance_ratio": _as_numpy(pca_func.explained_variance_ratio_),
     }
     adata.uns["pca"] = uns_entry
     if layer is not None:
         adata.uns["pca"]["params"]["layer"] = layer
     if mask_var is not None:
         adata.varm["PCs"] = np.zeros(shape=(adata.n_vars, n_comps))
-        adata.varm["PCs"][mask_var] = pca_func.components_.T
+        adata.varm["PCs"][mask_var] = _as_numpy(pca_func.components_.T)
     else:
-        adata.varm["PCs"] = pca_func.components_.T
+        adata.varm["PCs"] = _as_numpy(pca_func.components_.T)
     if copy:
         return adata
+
+
+def _as_numpy(X):
+    if isinstance(X, cp.ndarray):
+        return X.get()
+    else:
+        return X

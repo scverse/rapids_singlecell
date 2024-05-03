@@ -223,8 +223,8 @@ def _first_pass_qc_dask(X, client=None):
     elif isinstance(X._meta, cp.ndarray):
         from ._kernels._qc_kernels import _sparse_qc_dense
 
-        _sparse_qc_dense = _sparse_qc_dense(X.dtype)
-        _sparse_qc_dense.compile()
+        sparse_qc_dense = _sparse_qc_dense(X.dtype)
+        sparse_qc_dense.compile()
 
         def __qc_calc(X_part):
             sums_cells = cp.zeros(X_part.shape[0], dtype=X_part.dtype)
@@ -238,7 +238,6 @@ def _first_pass_qc_dask(X, client=None):
                 int(math.ceil(X_part.shape[0] / block[0])),
                 int(math.ceil(X_part.shape[1] / block[1])),
             )
-            sparse_qc_dense = _sparse_qc_dense(X.dtype)
             sparse_qc_dense(
                 grid,
                 block,
@@ -364,10 +363,10 @@ def _second_pass_qc_dask(X, mask, client=None):
             return sums_cells_sub
 
     elif isinstance(X._meta, cp.ndarray):
-        from ._kernels._qc_kernels import _sparse_qc_dense
+        from ._kernels._qc_kernels import _sparse_qc_dense_sub
 
-        _sparse_qc_dense = _sparse_qc_dense(X.dtype)
-        _sparse_qc_dense.compile()
+        sparse_qc_dense = _sparse_qc_dense_sub(X.dtype)
+        sparse_qc_dense.compile()
 
         def __qc_calc(X_part):
             sums_cells_sub = cp.zeros((X_part.shape[0]), dtype=X_part.dtype)
@@ -378,7 +377,6 @@ def _second_pass_qc_dask(X, mask, client=None):
                 int(math.ceil(X_part.shape[0] / block[0])),
                 int(math.ceil(X_part.shape[1] / block[1])),
             )
-            sparse_qc_dense = _sparse_qc_dense(X.dtype)
             sparse_qc_dense(
                 grid,
                 block,

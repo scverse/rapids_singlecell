@@ -291,13 +291,12 @@ def _highly_variable_genes_single_batch(
     X = _get_obs_rep(adata, layer=layer)
     _check_gpu_X(X, allow_dask=True)
     if hasattr(X, "_view_args"):  # AnnData array view
-        # For compatibility with anndata<0.9
-        X = X.copy()  # Doesn't actually copy memory, just removes View class wrapper
+        X = X.copy()
 
     if flavor == "seurat":
         if isinstance(X, DaskArray):
             if isinstance(X._meta, cp.ndarray):
-                X = X.map_blocks(cp.expm1, meta=_meta_dense(X.dtype))
+                X = X.map_blocks(lambda X: cp.expm1(X), meta=_meta_dense(X.dtype))
             elif isinstance(X._meta, csr_matrix):
                 X = X.map_blocks(lambda X: X.expm1(), meta=_meta_sparse(X.dtype))
         else:
@@ -433,11 +432,11 @@ def _highly_variable_genes_batched(
     dfs = []
     gene_list = adata.var_names
     for batch in batches:
-        adata_subset = adata[adata.obs[batch_key] == batch]
+        adata_subset = adata[adata.obs[batch_key] == batch].copy()
 
         calculate_qc_metrics(adata_subset, layer=layer, client=client)
         filt = adata_subset.var["n_cells_by_counts"].to_numpy() > 0
-        adata_subset = adata_subset[:, filt]
+        adata_subset = adata_subset[:, filt].copy()
 
         hvg = _highly_variable_genes_single_batch(
             adata_subset,

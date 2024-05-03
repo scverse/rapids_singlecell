@@ -156,6 +156,53 @@ def _mean_var_major_dask(X, major, minor, client=None):
     return mean, var
 
 
+@with_cupy_rmm
+def _mean_var_dense_dask(X, axis, client=None):
+    """
+    Implements sum operation for dask array when the backend is cupy sparse csr matrix
+    """
+    import dask.array as da
+
+    client = _get_dask_client(client)
+
+    def __mean_var(X_part, axis):
+        mean = X_part.sum(axis=axis)
+        var = (X_part**2).sum(axis=axis)
+        if axis == 0:
+            mean = mean.reshape(-1, 1)
+            var = var.reshape(-1, 1)
+        return mean, var
+
+    parts = client.sync(_extract_partitions, X)
+    futures = [client.submit(__mean_var, part, axis, workers=[w]) for w, part in parts]
+    # Gather results from futures
+    results = client.gather(futures)
+
+    # Initialize lists to hold the Dask arrays
+    means_objs = []
+    var_objs = []
+
+    # Process each result
+    for means, vars_ in results:
+        # Append the arrays to their respective lists as Dask arrays
+        means_objs.append(da.from_array(means, chunks=means.shape))
+        var_objs.append(da.from_array(vars_, chunks=vars_.shape))
+    if axis == 0:
+        mean = da.concatenate(means_objs, axis=1).sum(axis=1)
+        var = da.concatenate(var_objs, axis=1).sum(axis=1)
+    else:
+        mean = da.concatenate(means_objs)
+        var = da.concatenate(var_objs)
+
+    mean, var = da.compute(mean, var)
+    mean, var = mean.ravel(), var.ravel()
+    mean = mean / X.shape[axis]
+    var = var / X.shape[axis]
+    var -= cp.power(mean, 2)
+    var *= X.shape[axis] / (X.shape[axis] - 1)
+    return mean, var
+
+
 def _get_mean_var(X, axis=0, client=None):
     if issparse(X):
         if axis == 0:
@@ -191,7 +238,8 @@ def _get_mean_var(X, axis=0, client=None):
                 major = X.shape[0]
                 minor = X.shape[1]
                 mean, var = _mean_var_major_dask(X, major, minor, client)
-
+        elif isinstance(X._meta, cp.ndarray):
+            mean, var = _mean_var_dense_dask(X, axis, client)
     else:
         mean = X.mean(axis=axis)
         var = X.var(axis=axis)
@@ -215,7 +263,16 @@ def _check_nonnegative_integers(X):
 
 
 def _check_gpu_X(X, require_cf=False, allow_dask=False):
-    if isinstance(X, cp.ndarray):
+    if isinstance(X, DaskArray):
+        if allow_dask:
+            return _check_gpu_X(X._meta)
+        else:
+            raise TypeError(
+                "The input is a DaskArray. "
+                "Rapids-singlecell doesn't support DaskArray in this function, "
+                "so your input must be a CuPy ndarray or a CuPy sparse matrix. "
+            )
+    elif isinstance(X, cp.ndarray):
         return True
     elif issparse(X):
         if not require_cf:
@@ -225,9 +282,6 @@ def _check_gpu_X(X, require_cf=False, allow_dask=False):
         else:
             X.sort_indices()
             X.sum_duplicates()
-    elif allow_dask:
-        if isinstance(X, DaskArray):
-            return _check_gpu_X(X._meta)
     else:
         raise TypeError(
             "The input is not a CuPy ndarray or CuPy sparse matrix. "
