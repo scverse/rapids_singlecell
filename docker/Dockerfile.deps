@@ -19,6 +19,10 @@ ARG GIT_ID=main
 RUN <<EOF
 # install conda environment
 set -x
+apt-get update
+apt-get dist-upgrade -y
+apt-get install -y git
+apt-get clean -y
 mamba env update -n base -f rsc_rapids.yml
 mamba install -y -n base pytest -c conda-forge
 mamba clean -afy
@@ -27,9 +31,6 @@ EOF
 RUN <<EOF
 # install rapids_singlecell dependencies
 set -x
-apt-get update
-apt-get install -y git
-apt-get clean -y
 /opt/conda/bin/python -m pip install --no-cache-dir git+https://github.com/scverse/rapids_singlecell.git@${GIT_ID}
 /opt/conda/bin/python -m pip uninstall -y --no-cache-dir rapids-singlecell
 /opt/conda/bin/python -m pip cache purge
