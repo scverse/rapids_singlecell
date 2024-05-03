@@ -1,6 +1,6 @@
-ARG GIT_IDENTIFIER=main
-
 FROM rapids-singlecell-deps
+
+ARG GIT_ID=main
 
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 
@@ -13,7 +13,7 @@ mkdir /src
 cd /src
 git clone https://github.com/scverse/rapids_singlecell.git
 cd rapids_singlecell
-git checkout ${GIT_IDENTIFIER}
+git checkout ${GIT_ID}
 /opt/conda/bin/python -m pip install --no-cache-dir -e .
 EOF
 
