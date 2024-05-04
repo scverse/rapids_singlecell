@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import math
 import warnings
-from functools import singledispatch
+
+# from functools import singledispatch
 from typing import TYPE_CHECKING
 
 import cupy as cp
@@ -89,23 +90,26 @@ def normalize_total(
         return X
 
 
-@singledispatch
-def _normalize_total(X: cp.ndarray, target_sum: int, client=None) -> cp.ndarray:
-    from ._kernels._norm_kernel import _mul_dense
+def _normalize_total(X: cp.ndarray, target_sum: int, client=None):
+    if isinstance(X, sparse.csr_matrix):
+        return _normalize_total_csr(X, target_sum)
+    elif isinstance(X, DaskArray):
+        return _normalize_total_dask(X, target_sum, client=client)
+    else:
+        from ._kernels._norm_kernel import _mul_dense
 
-    if not X.flags.c_contiguous:
-        X = cp.asarray(X, order="C")
-    mul_kernel = _mul_dense(X.dtype)
-    mul_kernel(
-        (math.ceil(X.shape[0] / 128),),
-        (128,),
-        (X, X.shape[0], X.shape[1], int(target_sum)),
-    )
-    return X
+        if not X.flags.c_contiguous:
+            X = cp.asarray(X, order="C")
+        mul_kernel = _mul_dense(X.dtype)
+        mul_kernel(
+            (math.ceil(X.shape[0] / 128),),
+            (128,),
+            (X, X.shape[0], X.shape[1], int(target_sum)),
+        )
+        return X
 
 
-@_normalize_total.register(sparse.csr_matrix)
-def _(X: sparse.csr_matrix, target_sum: int, client=None) -> sparse.csr_matrix:
+def _normalize_total_csr(X: sparse.csr_matrix, target_sum: int) -> sparse.csr_matrix:
     from ._kernels._norm_kernel import _mul_csr
 
     mul_kernel = _mul_csr(X.dtype)
@@ -117,8 +121,7 @@ def _(X: sparse.csr_matrix, target_sum: int, client=None) -> sparse.csr_matrix:
     return X
 
 
-@_normalize_total.register(DaskArray)
-def _(X: DaskArray, target_sum: int, client=None) -> DaskArray:
+def _normalize_total_dask(X: DaskArray, target_sum: int, client=None) -> DaskArray:
     client = _get_dask_client(client)
     if isinstance(X._meta, sparse.csr_matrix):
         from ._kernels._norm_kernel import _mul_csr
@@ -155,13 +158,16 @@ def _(X: DaskArray, target_sum: int, client=None) -> DaskArray:
     return X
 
 
-@singledispatch
-def _get_target_sum(X: cp.ndarray, client=None) -> int:
-    return cp.median(X.sum(axis=1))
+def _get_target_sum(X, client=None) -> int:
+    if isinstance(X, sparse.csr_matrix):
+        return _get_target_sum_csr(X, client=client)
+    elif isinstance(X, DaskArray):
+        return _get_target_sum_dask(X, client=client)
+    else:
+        return cp.median(X.sum(axis=1))
 
 
-@_get_target_sum.register(sparse.csr_matrix)
-def _(X: sparse.csr_matrix, client=None) -> int:
+def _get_target_sum_csr(X: sparse.csr_matrix) -> int:
     from ._kernels._norm_kernel import _get_sparse_sum_major
 
     counts_per_cell = cp.zeros(X.shape[0], dtype=X.dtype)
@@ -176,8 +182,7 @@ def _(X: sparse.csr_matrix, client=None) -> int:
     return target_sum
 
 
-@_get_target_sum.register(DaskArray)
-def _(X: DaskArray, client=None) -> int:
+def _get_target_sum_dask(X: DaskArray, client=None) -> int:
     import dask.array as da
 
     client = _get_dask_client(client)
