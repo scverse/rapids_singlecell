@@ -160,7 +160,7 @@ def _normalize_total_dask(X: DaskArray, target_sum: int, client=None) -> DaskArr
 
 def _get_target_sum(X, client=None) -> int:
     if isinstance(X, sparse.csr_matrix):
-        return _get_target_sum_csr(X, client=client)
+        return _get_target_sum_csr(X)
     elif isinstance(X, DaskArray):
         return _get_target_sum_dask(X, client=client)
     else:
