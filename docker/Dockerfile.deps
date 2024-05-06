@@ -19,10 +19,10 @@ ARG GIT_ID=main
 RUN <<EOF
 # install conda environment
 set -x
-apt-get update
-apt-get dist-upgrade -y
-apt-get install -y git
-apt-get clean -y
+apt-get -qq update
+apt-get -q dist-upgrade -y
+apt-get -q install -y git
+apt-get -q clean -y
 mamba env update -n base -f rsc_rapids.yml
 mamba install -y -n base pytest -c conda-forge
 mamba clean -afy
