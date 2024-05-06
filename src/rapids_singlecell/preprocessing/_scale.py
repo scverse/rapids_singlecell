@@ -1,19 +1,15 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
 
 import cupy as cp
+import numpy as np
 from anndata import AnnData
 from cupyx.scipy import sparse
 from scanpy._utils import view_to_actual
 
 from rapids_singlecell.get import _check_mask, _get_obs_rep, _set_obs_rep
-
-from ._utils import _check_gpu_X, _get_mean_var
-
-if TYPE_CHECKING:
-    import numpy as np
+from rapids_singlecell.preprocessing._utils import _check_gpu_X, _get_mean_var
 
 
 def scale(
@@ -86,15 +82,23 @@ def scale(
         mask_obs = _check_mask(adata, mask_obs, "obs")
 
     if isinstance(X, cp.ndarray):
-        X, means, std = scale_array(
+        X, means, std = _scale_array(
             X,
             mask_obs=mask_obs,
             zero_center=zero_center,
             inplace=inplace,
             max_value=max_value,
         )
-    else:
-        X, means, std = scale_sparse(
+    elif isinstance(X, sparse.csr_matrix):
+        X, means, std = _scale_sparse_csr(
+            X,
+            mask_obs=mask_obs,
+            zero_center=zero_center,
+            inplace=inplace,
+            max_value=max_value,
+        )
+    elif isinstance(X, sparse.csc_matrix):
+        X, means, std = _scale_sparse_csc(
             X,
             mask_obs=mask_obs,
             zero_center=zero_center,
@@ -113,35 +117,69 @@ def scale(
         return X
 
 
-def scale_array(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None):
+def _scale_array(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None):
     if not inplace:
         X = X.copy()
-    if mask_obs is not None:
-        scale_rv = scale_array(X[mask_obs, :], zero_center=zero_center, inplace=True)
-        X[mask_obs, :], mean, std = scale_rv
-        return X, mean, std
+    if mask_obs is None:
+        mean, var = _get_mean_var(X)
+        mask_array = cp.ones(X.shape[0], dtype=cp.int32)
 
+    else:
+        mean, var = _get_mean_var(X[mask_obs, :])
+        mask_array = cp.array(mask_obs).astype(cp.int32)
     X = cp.ascontiguousarray(X)
-    mean, var = _get_mean_var(X)
+
     std = cp.sqrt(var)
     std[std == 0] = 1
+    max_value = _get_max_value(max_value, X.dtype)
     if zero_center:
-        X -= mean
-    X /= std
-    if max_value:
-        if zero_center:
-            X = cp.clip(X, a_min=-max_value, a_max=max_value)
-        else:
-            X = cp.clip(X, a_min=None, a_max=max_value)
+        from ._kernels._scale_kernel import _dense_center_scale_kernel
+
+        scale_kernel_center = _dense_center_scale_kernel(X.dtype)
+
+        scale_kernel_center(
+            (math.ceil(X.shape[0] / 32), math.ceil(X.shape[1] / 32)),
+            (32, 32),
+            (
+                X,
+                mean.astype(X.dtype),
+                std.astype(X.dtype),
+                mask_array,
+                max_value,
+                X.shape[0],
+                X.shape[1],
+            ),
+        )
+    else:
+        from ._kernels._scale_kernel import _dense_scale_kernel
+
+        scale_kernel = _dense_scale_kernel(X.dtype)
+
+        scale_kernel(
+            (math.ceil(X.shape[0] / 32), math.ceil(X.shape[1] / 32)),
+            (32, 32),
+            (X, std.astype(X.dtype), mask_array, max_value, X.shape[0], X.shape[1]),
+        )
 
     return X, mean, std
 
 
-def scale_sparse(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None):
+def _scale_sparse_csc(
+    X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None
+):
     if zero_center:
         X = X.toarray()
         # inplace is True because we copied with `toarray`
-        return scale_array(
+        return _scale_array(
+            X,
+            mask_obs=mask_obs,
+            zero_center=zero_center,
+            inplace=True,
+            max_value=max_value,
+        )
+    elif mask_obs is not None:
+        X = X.tocsr()
+        return _scale_sparse_csr(
             X,
             mask_obs=mask_obs,
             zero_center=zero_center,
@@ -149,72 +187,70 @@ def scale_sparse(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=
             max_value=max_value,
         )
     else:
-        if mask_obs is not None:
-            # checking inplace because we are going to update the matrix
-            # `tocsr` copies the matrix
-            if sparse.isspmatrix_csc(X):
-                X = X.tocsr()
-            elif not inplace:
-                X = X.copy()
-
-            scale_rv = scale_sparse(
-                X[mask_obs, :],
-                zero_center=zero_center,
-                inplace=True,
-                max_value=max_value,
-            )
-            X_sub, mean, std = scale_rv
-            mask_array = cp.where(cp.array(mask_obs))[0].astype(cp.int32)
-
-            from ._kernels._scale_kernel import _csr_update
-
-            update_inplace = _csr_update(X.dtype)
-            update_inplace(
-                (math.ceil(X.shape[0] / 64),),
-                (64,),
-                (
-                    X.indptr,
-                    X.data,
-                    X_sub.indptr,
-                    X_sub.data,
-                    mask_array,
-                    X_sub.shape[0],
-                ),
-            )
-            return X, mean, std
+        if not inplace:
+            X = X.copy()
 
         mean, var = _get_mean_var(X)
         std = cp.sqrt(var)
         std[std == 0] = 1
-        if not inplace:
-            X = X.copy()
+        from ._kernels._scale_kernel import _csc_scale_diff
 
-        if sparse.isspmatrix_csr(X):
-            # Elementwise kernel does X.data /= std[X.indices]
-            # This saves memory by not creating a new array
-            elementwise_kernel = cp.ElementwiseKernel(
-                "T x, S idx, raw R std",
-                "T z",
-                """
-                z = x / std[idx];
-                """,
-                "elementwise_division_kernel",
-            )
-            elementwise_kernel(X.data, X.indices, std, X.data)
-
-        elif sparse.isspmatrix_csc(X):
-            from ._kernels._scale_kernel import _csc_scale_diff
-
-            scale_csc = _csc_scale_diff(X.dtype)
-            scale_csc(
-                (X.shape[1],),
-                (64,),
-                (X.indptr, X.data, std, X.shape[1]),
-            )
-        else:
-            raise ValueError("The sparse matrix must be a CSR or CSC matrix")
-
+        scale_csc = _csc_scale_diff(X.dtype)
+        scale_csc(
+            (X.shape[1],),
+            (64,),
+            (X.indptr, X.data, std, X.shape[1]),
+        )
         if max_value:
             X.data = cp.clip(X.data, a_min=None, a_max=max_value)
 
         return X, mean, std
+
+
+def _scale_sparse_csr(
+    X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None
+):
+    if zero_center:
+        X = X.toarray()
+        # inplace is True because we copied with `toarray`
+        return _scale_array(
+            X,
+            mask_obs=mask_obs,
+            zero_center=zero_center,
+            inplace=True,
+            max_value=max_value,
+        )
+    else:
+        if not inplace:
+            X = X.copy()
+        if mask_obs is None:
+            mean, var = _get_mean_var(X)
+            mask_array = cp.ones(X.shape[0], dtype=cp.int32)
+
+        else:
+            mean, var = _get_mean_var(X[mask_obs, :])
+            mask_array = cp.array(mask_obs).astype(cp.int32)
+        std = cp.sqrt(var)
+        std[std == 0] = 1
+
+        max_value = _get_max_value(max_value, X.dtype)
+        from ._kernels._scale_kernel import _csr_scale_kernel
+
+        scale_csr = _csr_scale_kernel(X.dtype)
+        scale_csr(
+            (X.shape[0],),
+            (64,),
+            (X.indptr, X.indices, X.data, std, mask_array, max_value, X.shape[0]),
+        )
+
+        return X, mean, std
+
+
+def _get_max_value(val, dtype):
+    if val is None:
+        val = np.inf
+    if dtype == cp.float32:
+        val = cp.float32(val)
+    else:
+        val = cp.float64(val)
+    return val

@@ -19,22 +19,50 @@ _csc_scale_diff_kernel = r"""
     }
 """
 
-_csr_update_kernel = r"""
-(const int *indptr, {0} *data, const int * sub_indptr, const {0} *sub_data, const int * subset_mask, int sub_nrows) {
-    int row = blockIdx.x*blockDim.x + threadIdx.x;
-    if(row >= sub_nrows){
-        return;
+_csr_scale_diff_kernel = r"""
+(const int *indptr, const int *indices, {0} *data, const double * std, const int *mask, {0} clipper,int nrows) {
+        int row = blockIdx.x;
+
+        if(row >= nrows){
+            return;
+        }
+        if(mask[row]){
+            int start_idx = indptr[row];
+            int stop_idx = indptr[row+1];
+            for(int i = start_idx+ threadIdx.x; i < stop_idx; i+=blockDim.x){
+                int idx = indices[i];
+                {0} res = data[i]/std[idx];
+                data[i] = min(clipper,res);
+        }
     }
-    int sub_start_idx = sub_indptr[row];
-    int sub_stop_idx = sub_indptr[row+1];
-    int sub_idx = subset_mask[row];
+}
+"""
 
-    int start_idx = indptr[sub_idx];
-    int stop_idx = indptr[sub_idx+1];
+_dense_scale_center_diff_kernel = r"""
+({0} *data, const {0}  *mean, const {0}  *std, const int *mask, {0} clipper,int nrows,int ncols)
+{
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+    int col = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if(sub_stop_idx -sub_start_idx == stop_idx-start_idx){
-        for(int i = 0; i < sub_stop_idx -sub_start_idx ; i++){
-            data[start_idx+i] = sub_data[sub_start_idx+i];
+    if (row < nrows && col < ncols) {
+        if (mask[row]){
+            {0} res = data[row * ncols + col] - mean[col];
+            res /= std[col];
+            data[row * ncols + col] = max(-clipper,min(clipper,res));
+        }
+    }
+}
+"""
+
+_dense_scale_diff_kernel = r"""
+({0} *data, const {0} *std,const int *mask,const {0} clipper,long long int nrows,long long int ncols){
+    long long int row = blockIdx.x * blockDim.x + threadIdx.x;
+    long long int col = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (row < nrows && col < ncols) {
+        if (mask[row]){
+            {0} res = data[row * ncols + col] / std[col];
+            data[row * ncols + col] = min(clipper,res);
         }
     }
 }
@@ -47,5 +75,19 @@ def _csc_scale_diff(dtype):
     )
 
 
-def _csr_update(dtype):
-    return cuda_kernel_factory(_csr_update_kernel, (dtype,), "_csr_update_kernel")
+def _csr_scale_kernel(dtype):
+    return cuda_kernel_factory(
+        _csr_scale_diff_kernel, (dtype,), "_csr_scale_diff_kernel"
+    )
+
+
+def _dense_center_scale_kernel(dtype):
+    return cuda_kernel_factory(
+        _dense_scale_center_diff_kernel, (dtype,), "_dense_scale_center_diff_kernel"
+    )
+
+
+def _dense_scale_kernel(dtype):
+    return cuda_kernel_factory(
+        _dense_scale_diff_kernel, (dtype,), "_dense_scale_diff_kernel"
+    )
