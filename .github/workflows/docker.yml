@@ -2,7 +2,6 @@
 # - a base image with the dependencies
 # - a main image with the application code
 
-
 name: Docker
 
 on:
@@ -77,7 +76,7 @@ jobs:
           tags: ${{ steps.meta-base.outputs.tags }}
           labels: ${{ steps.meta-base.outputs.labels }}
           cache-from: type=registry,ref=user/app:latest
-      
+
       - name: Generate artifact attestation for base image
         uses: actions/attest-build-provenance@v1
         with:
