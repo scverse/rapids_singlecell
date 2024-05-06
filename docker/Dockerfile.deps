@@ -15,12 +15,13 @@ COPY --from=condaforge/miniforge3:24.3.0-0 /opt/conda /opt/conda
 COPY rsc_rapids.yml rsc_rapids.yml
 
 ARG GIT_ID=main
+ARG DEBIAN_FRONTEND=noninteractive
 
 RUN <<EOF
 # install conda environment
 set -x
 apt-get -qq update
-apt-get -q dist-upgrade -o=Dpkg::Use-Pty=0 -y
+apt-get -q -y dist-upgrade
 apt-get -q install -y git
 apt-get -q clean -y
 mamba env update -n base -f rsc_rapids.yml
