@@ -20,7 +20,7 @@ RUN <<EOF
 # install conda environment
 set -x
 apt-get -qq update
-apt-get -q dist-upgrade -y
+apt-get -q dist-upgrade -o=Dpkg::Use-Pty=0 -y
 apt-get -q install -y git
 apt-get -q clean -y
 mamba env update -n base -f rsc_rapids.yml
