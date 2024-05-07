@@ -76,7 +76,7 @@ jobs:
           push: true
           tags: ${{ steps.meta-base.outputs.tags }}
           labels: ${{ steps.meta-base.outputs.labels }}
-          cache-from: type=registry,ref=user/app:latest
+          cache-from: type=registry,ref=${{ github.repository }}-deps:latest
 
       - name: Generate artifact attestation for base image
         uses: actions/attest-build-provenance@v1
