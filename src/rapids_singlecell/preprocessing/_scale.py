@@ -8,8 +8,20 @@ from anndata import AnnData
 from cupyx.scipy import sparse
 from scanpy._utils import view_to_actual
 
+from rapids_singlecell._compat import (
+    DaskArray,
+    DaskClient,
+    _get_dask_client,
+    _meta_dense,
+    _meta_sparse,
+)
 from rapids_singlecell.get import _check_mask, _get_obs_rep, _set_obs_rep
 from rapids_singlecell.preprocessing._utils import _check_gpu_X, _get_mean_var
+
+try:
+    import dask.array as da
+except ImportError:
+    pass
 
 
 def scale(
@@ -22,6 +34,7 @@ def scale(
     obsm: str | None = None,
     mask_obs: np.ndarray | str | None = None,
     inplace: bool = True,
+    client: DaskClient | None = None,
 ) -> None | cp.ndarray:
     """
     Scales matrix to unit variance and clips values
@@ -56,6 +69,9 @@ def scale(
         inplace
             If True, update AnnData with results. Otherwise, return results. See below for details of what is returned.
 
+        client
+            Dask client to use for computation. If `None`, the default client is used. Only used if `X` is a Dask array.
+
     Returns
     -------
     Returns a scaled copy or updates `adata` with a scaled version of the original `adata.X` and `adata.layers['layer']`, \
@@ -71,7 +87,7 @@ def scale(
         view_to_actual(adata)
 
     X = _get_obs_rep(adata, layer=layer, obsm=obsm)
-    _check_gpu_X(X)
+    _check_gpu_X(X, allow_dask=True)
 
     str_mean_std = ("mean", "std")
     if mask_obs is not None:
@@ -81,7 +97,19 @@ def scale(
             str_mean_std = ("mean with mask", "std with mask")
         mask_obs = _check_mask(adata, mask_obs, "obs")
 
-    if isinstance(X, cp.ndarray):
+    if isinstance(X, DaskArray):
+        if client is None:
+            client = _get_dask_client(client=client)
+        X, means, std = _scale_dask(
+            X,
+            mask_obs=mask_obs,
+            zero_center=zero_center,
+            inplace=inplace,
+            max_value=max_value,
+            client=client,
+        )
+
+    elif isinstance(X, cp.ndarray):
         X, means, std = _scale_array(
             X,
             mask_obs=mask_obs,
@@ -240,10 +268,193 @@ def _scale_sparse_csr(
         scale_csr(
             (X.shape[0],),
             (64,),
-            (X.indptr, X.indices, X.data, std, mask_array, max_value, X.shape[0]),
+            (
+                X.indptr,
+                X.indices,
+                X.data,
+                std.astype(X.dtype),
+                mask_array,
+                max_value,
+                X.shape[0],
+            ),
         )
 
         return X, mean, std
+
+
+def _scale_dask(
+    X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None, client=None
+):
+    if not inplace:
+        X = X.copy()
+    if mask_obs is None:
+        mean, var = _get_mean_var(X, client=client)
+        mask_array = cp.ones(X.shape[0], dtype=cp.int32)
+
+    else:
+        mean, var = _get_mean_var(X[mask_obs, :], client=client)
+        mask_array = cp.array(mask_obs).astype(cp.int32)
+    std = cp.sqrt(var)
+    std[std == 0] = 1
+    max_value = _get_max_value(max_value, X.dtype)
+
+    mask_array = da.from_array(
+        mask_array, chunks=(X.chunks[0],), meta=_meta_dense(mask_array.dtype)
+    )
+
+    if isinstance(X._meta, sparse.csr_matrix) and zero_center:
+        from ._sparse_pca._kernels._pca_sparse_kernel import denser_kernel
+
+        kernel = denser_kernel(X.dtype)
+        kernel.compile()
+
+        def __dense(X_part):
+            dense = cp.zeros(X_part.shape, dtype=X.dtype)
+            max_nnz = cp.diff(X_part.indptr).max()
+            tpb = (32, 32)
+            bpg_x = math.ceil(X_part.shape[0] / tpb[0])
+            bpg_y = math.ceil(max_nnz / tpb[1])
+            bpg = (bpg_x, bpg_y)
+            kernel(
+                bpg,
+                tpb,
+                (
+                    X_part.indptr,
+                    X_part.indices,
+                    X_part.data,
+                    dense,
+                    X_part.shape[0],
+                    X_part.shape[1],
+                ),
+            )
+            return dense
+
+        X = X.map_blocks(
+            lambda x: __dense(x),
+            dtype=X.dtype,
+            meta=_meta_dense(X.dtype),
+        )
+        return _scale_dask_array_zc(
+            X, mask_array=mask_array, mean=mean, std=std, max_value=max_value
+        )
+
+    elif isinstance(X._meta, sparse.csr_matrix) and not zero_center:
+        return _scale_sparse_csr_dask(
+            X, mask_array=mask_array, mean=mean, std=std, max_value=max_value
+        )
+
+    elif isinstance(X._meta, cp.ndarray) and zero_center:
+        return _scale_dask_array_zc(
+            X, mask_array=mask_array, mean=mean, std=std, max_value=max_value
+        )
+
+    elif isinstance(X._meta, cp.ndarray) and not zero_center:
+        return _scale_dask_array_nzc(
+            X, mask_array=mask_array, mean=mean, std=std, max_value=max_value
+        )
+
+
+def _scale_dask_array_zc(X, *, mask_array, mean, std, max_value):
+    from ._kernels._scale_kernel import _dense_center_scale_kernel
+
+    scale_kernel_center = _dense_center_scale_kernel(X.dtype)
+    scale_kernel_center.compile()
+
+    mean_ = mean.astype(X.dtype)
+    std_ = std.astype(X.dtype)
+
+    def __scale_kernel_center(X_part, mask_part):
+        scale_kernel_center(
+            (math.ceil(X_part.shape[0] / 32), math.ceil(X_part.shape[1] / 32)),
+            (32, 32),
+            (
+                X_part,
+                mean_,
+                std_,
+                mask_part,
+                max_value,
+                X_part.shape[0],
+                X_part.shape[1],
+            ),
+        )
+        return X_part
+
+    X = da.blockwise(
+        __scale_kernel_center,
+        "ij",
+        X,
+        "ij",
+        mask_array,
+        "i",
+        meta=_meta_dense(X.dtype),
+        dtype=X.dtype,
+    )
+    return X, mean, std
+
+
+def _scale_dask_array_nzc(X, *, mask_array, mean, std, max_value):
+    from ._kernels._scale_kernel import _dense_scale_kernel
+
+    scale_kernel = _dense_scale_kernel(X.dtype)
+    scale_kernel.compile()
+    std_ = std.astype(X.dtype)
+
+    def __scale_kernel(X_part, mask_part):
+        scale_kernel(
+            (math.ceil(X_part.shape[0] / 32), math.ceil(X_part.shape[1] / 32)),
+            (32, 32),
+            (X_part, std_, mask_part, max_value, X_part.shape[0], X_part.shape[1]),
+        )
+
+        return X_part
+
+    X = da.blockwise(
+        __scale_kernel,
+        "ij",
+        X,
+        "ij",
+        mask_array,
+        "i",
+        meta=_meta_dense(X.dtype),
+        dtype=X.dtype,
+    )
+    return X, mean, std
+
+
+def _scale_sparse_csr_dask(X, *, mask_array, mean, std, max_value):
+    from ._kernels._scale_kernel import _csr_scale_kernel
+
+    scale_kernel_csr = _csr_scale_kernel(X.dtype)
+    scale_kernel_csr.compile()
+    std_ = std.astype(X.dtype)
+
+    def __scale_kernel_csr(X_part, mask_part):
+        scale_kernel_csr(
+            (X_part.shape[0],),
+            (64,),
+            (
+                X_part.indptr,
+                X_part.indices,
+                X_part.data,
+                std_,
+                mask_part,
+                max_value,
+                X_part.shape[0],
+            ),
+        )
+        return X_part
+
+    X = da.blockwise(
+        __scale_kernel_csr,
+        "ij",
+        X,
+        "ij",
+        mask_array,
+        "i",
+        meta=_meta_sparse(X.dtype),
+        dtype=X.dtype,
+    )
+    return X, mean, std
 
 
 def _get_max_value(val, dtype):

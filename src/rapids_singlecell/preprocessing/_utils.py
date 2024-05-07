@@ -165,6 +165,7 @@ def _mean_var_dense_dask(X, axis, client=None):
 
     client = _get_dask_client(client)
 
+    # ToDo: get a 64bit version working without copying the data
     def __mean_var(X_part, axis):
         mean = X_part.sum(axis=axis)
         var = (X_part**2).sum(axis=axis)

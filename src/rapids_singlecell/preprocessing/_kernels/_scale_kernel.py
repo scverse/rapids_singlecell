@@ -20,7 +20,7 @@ _csc_scale_diff_kernel = r"""
 """
 
 _csr_scale_diff_kernel = r"""
-(const int *indptr, const int *indices, {0} *data, const double * std, const int *mask, {0} clipper,int nrows) {
+(const int *indptr, const int *indices, {0} *data, const {0} * std, const int *mask, {0} clipper,int nrows) {
         int row = blockIdx.x;
 
         if(row >= nrows){
