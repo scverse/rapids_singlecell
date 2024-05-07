@@ -31,7 +31,7 @@ jobs:
     name: Build Docker images
     runs-on: ubuntu-latest
     permissions:
-      packages: write
+      packages: admin
       contents: read
       attestations: write
     steps:
