@@ -93,6 +93,11 @@ jobs:
           images: |
             ghcr.io/${{ github.repository }}
 
+      - name: list docker images
+        run: |
+          docker image ls -a
+        shell: bash
+
       - name: Build and push main Docker images
         id: push
         uses: docker/build-push-action@v5
