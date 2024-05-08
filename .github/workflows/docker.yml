@@ -73,12 +73,13 @@ jobs:
         with:
           context: ./docker/
           file: ./docker/Dockerfile.deps
-          push: true
+          push: ${{ github.event_name == 'release' }}
           tags: ${{ steps.meta-base.outputs.tags }}
           labels: ${{ steps.meta-base.outputs.labels }}
-          cache-from: type=registry,ref=${{ github.repository }}-deps:latest
+          #cache-from: type=registry,ref=${{ github.repository }}-deps:latest
 
       - name: Generate artifact attestation for base image
+        if: github.event_name == 'release'
         uses: actions/attest-build-provenance@v1
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
@@ -98,14 +99,15 @@ jobs:
         with:
           context: ./docker/
           file: ./docker/Dockerfile
-          push: true
+          push: ${{ github.event_name == 'release' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=user/app:latest
+          #cache-from: type=registry,ref=${{ github.repository }}-deps:latest
           build-contexts: |
-            rapids-singlecell-deps=ghcr.io/${{ github.repository }}-deps
+            rapids-singlecell-deps=${{ github.repository }}-deps
 
       - name: Generate artifact attestation for main image
+        if: github.event_name == 'release'
         uses: actions/attest-build-provenance@v1
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
