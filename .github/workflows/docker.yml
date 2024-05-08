@@ -76,7 +76,7 @@ jobs:
           push: ${{ github.event_name == 'release' }}
           tags: ${{ steps.meta-base.outputs.tags }}
           labels: ${{ steps.meta-base.outputs.labels }}
-          #cache-from: type=registry,ref=${{ github.repository }}-deps:latest
+          #cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-deps
 
       - name: Generate artifact attestation for base image
         if: github.event_name == 'release'
@@ -102,9 +102,9 @@ jobs:
           push: ${{ github.event_name == 'release' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          #cache-from: type=registry,ref=${{ github.repository }}-deps:latest
+          #cache-from: type=registry,ref=ghcr.io/${{ github.repository }}
           build-contexts: |
-            rapids-singlecell-deps=${{ steps.push-base.outputs.digest }}
+            rapids-singlecell-deps=${{ steps.meta-base.outputs.tags }}
 
       - name: Generate artifact attestation for main image
         if: github.event_name == 'release'
