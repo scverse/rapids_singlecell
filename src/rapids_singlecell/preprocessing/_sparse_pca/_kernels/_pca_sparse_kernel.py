@@ -76,7 +76,8 @@ denser = r"""
             return;
         }
         int idx = index[start + col];
-        out[row*minor+idx] = data[start + col];}
+        long long int res_index = static_cast<long long int>(row)*minor+idx;
+        out[res_index] = data[start + col];}
 """
 
 _zero_genes_kernel = cp.RawKernel(check_zero_genes, "check_zero_genes")

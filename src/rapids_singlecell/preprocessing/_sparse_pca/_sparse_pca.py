@@ -66,7 +66,7 @@ class PCA_sparse:
             tpb,
             (X.indptr, X.indices, X.data, dense, X.shape[0], X.shape[1]),
         )
-        dense = dense - self.mean_
+        dense -= self.mean_
         X_transformed = dense.dot(self.components_.T)
         # X = X - self.mean_
         # X_transformed = X.dot(self.components_.T)
