@@ -104,7 +104,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           #cache-from: type=registry,ref=${{ github.repository }}-deps:latest
           build-contexts: |
-            rapids-singlecell-deps=steps.push-base.outputs.digest
+            rapids-singlecell-deps=${{ steps.push-base.outputs.digest }}
 
       - name: Generate artifact attestation for main image
         if: github.event_name == 'release'
