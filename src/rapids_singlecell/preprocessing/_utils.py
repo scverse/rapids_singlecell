@@ -197,6 +197,7 @@ def _mean_var_dense_dask(X, axis, client=None):
 
     mean, var = da.compute(mean, var)
     mean, var = mean.ravel(), var.ravel()
+    return mean, var
 
 
 def _mean_var_dense(X, axis):
