@@ -23,6 +23,7 @@ dependencies = [
     "matplotlib>=3.4",
     "tqdm",
     "statsmodels>=0.12.0",
+    "scikit-image",
 ]
 
 [project.optional-dependencies]
