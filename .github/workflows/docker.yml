@@ -73,7 +73,7 @@ jobs:
         with:
           context: ./docker/
           file: ./docker/Dockerfile.deps
-          push: true #${{ github.event_name == 'release' }}
+          push: ${{ github.event_name == 'pull' }}
           tags: ${{ steps.meta-base.outputs.tags }}
           labels: ${{ steps.meta-base.outputs.labels }}
           #cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-deps
@@ -99,7 +99,7 @@ jobs:
         with:
           context: ./docker/
           file: ./docker/Dockerfile
-          push: true #${{ github.event_name == 'release' }}
+          push: ${{ github.event_name == 'pull' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           #cache-from: type=registry,ref=ghcr.io/${{ github.repository }}
