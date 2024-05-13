@@ -197,6 +197,10 @@ def _mean_var_dense_dask(X, axis, client=None):
 
     mean, var = da.compute(mean, var)
     mean, var = mean.ravel(), var.ravel()
+    mean = mean / X.shape[axis]
+    var = var / X.shape[axis]
+    var -= cp.power(mean, 2)
+    var *= X.shape[axis] / (X.shape[axis] - 1)
     return mean, var
 
 
