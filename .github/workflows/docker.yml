@@ -9,14 +9,14 @@ on:
     branches: [main]
     paths:
       - 'docker/**'
-      - '.github/workflows/docker-base.yml'
+      - '.github/workflows/docker.yml'
       - 'conda/*.yml'
       - 'pyproject.toml'
   pull_request:
     branches: [main]
     paths:
       - 'docker/**'
-      - '.github/workflows/docker-base.yml'
+      - '.github/workflows/docker.yml'
       - 'conda/*.yml'
       - 'pyproject.toml'
   release:
