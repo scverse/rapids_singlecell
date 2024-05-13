@@ -47,6 +47,7 @@ def _mean_var_dense(X, axis):
     var = var / X.shape[axis]
     var -= cp.power(mean, 2)
     var *= X.shape[axis] / (X.shape[axis] - 1)
+    return mean, var
 
 
 def _get_mean_var(X, axis=0):
