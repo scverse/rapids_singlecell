@@ -73,7 +73,7 @@ jobs:
         with:
           context: ./docker/
           file: ./docker/Dockerfile.deps
-          push: true#${{ github.event_name == 'release' }}
+          push: true #${{ github.event_name == 'release' }}
           tags: ${{ steps.meta-base.outputs.tags }}
           labels: ${{ steps.meta-base.outputs.labels }}
           #cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-deps
