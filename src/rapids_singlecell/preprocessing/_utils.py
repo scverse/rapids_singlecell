@@ -42,6 +42,7 @@ def _mean_var_minor(X, major, minor):
     return mean, var
 
 
+
 @with_cupy_rmm
 def _mean_var_minor_dask(X, major, minor, client=None):
     """
@@ -197,11 +198,18 @@ def _mean_var_dense_dask(X, axis, client=None):
 
     mean, var = da.compute(mean, var)
     mean, var = mean.ravel(), var.ravel()
+
+def _mean_var_dense(X, axis):
+    from ._kernels._mean_var_kernel import mean_sum, sq_sum
+
+    var = sq_sum(X, axis=axis)
+    mean = mean_sum(X, axis=axis)
     mean = mean / X.shape[axis]
     var = var / X.shape[axis]
     var -= cp.power(mean, 2)
     var *= X.shape[axis] / (X.shape[axis] - 1)
     return mean, var
+
 
 
 def _get_mean_var(X, axis=0, client=None):
@@ -242,9 +250,7 @@ def _get_mean_var(X, axis=0, client=None):
         elif isinstance(X._meta, cp.ndarray):
             mean, var = _mean_var_dense_dask(X, axis, client)
     else:
-        mean = X.mean(axis=axis)
-        var = X.var(axis=axis)
-        var *= X.shape[axis] / (X.shape[axis] - 1)
+        mean, var = _mean_var_dense(X, axis)
     return mean, var
 
 
