@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import cupy as cp
 from cuml.common.kernel_utils import cuda_kernel_factory
 
 _get_mean_var_major_kernel = r"""
@@ -56,6 +57,27 @@ _get_mean_var_minor_kernel = r"""
        atomicAdd(&vars[minor_pos], value*value/major);
         }
     """
+
+
+sq_sum = cp.ReductionKernel(
+    "T x",  # input params
+    "float64 y",  # output params
+    "x * x",  # map
+    "a + b",  # reduce
+    "y = a",  # post-reduction map
+    "0",  # identity value
+    "sqsum64",  # kernel name
+)
+
+mean_sum = cp.ReductionKernel(
+    "T x",  # input params
+    "float64 y",  # output params
+    "x",  # map
+    "a + b",  # reduce
+    "y = a",  # post-reduction map
+    "0",  # identity value
+    "sum64",  # kernel name
+)
 
 
 def _get_mean_var_major(dtype):
