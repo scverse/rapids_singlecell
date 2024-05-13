@@ -38,6 +38,17 @@ def _mean_var_minor(X, major, minor):
     return mean, var
 
 
+def _mean_var_dense(X, axis):
+    from ._kernels._mean_var_kernel import mean_sum, sq_sum
+
+    var = sq_sum(X, axis=axis)
+    mean = mean_sum(X, axis=axis)
+    mean = mean / X.shape[axis]
+    var = var / X.shape[axis]
+    var -= cp.power(mean, 2)
+    var *= X.shape[axis] / (X.shape[axis] - 1)
+
+
 def _get_mean_var(X, axis=0):
     if issparse(X):
         if axis == 0:
@@ -64,9 +75,7 @@ def _get_mean_var(X, axis=0):
                 minor = X.shape[0]
                 mean, var = _mean_var_minor(X, major, minor)
     else:
-        mean = X.mean(axis=axis)
-        var = X.var(axis=axis)
-        var *= X.shape[axis] / (X.shape[axis] - 1)
+        mean, var = _mean_var_dense(X, axis)
     return mean, var
 
 
