@@ -9,14 +9,14 @@ on:
     branches: [main]
     paths:
       - 'docker/**'
-      - '.github/workflows/docker-base.yml'
+      - '.github/workflows/docker.yml'
       - 'conda/*.yml'
       - 'pyproject.toml'
   pull_request:
     branches: [main]
     paths:
       - 'docker/**'
-      - '.github/workflows/docker-base.yml'
+      - '.github/workflows/docker.yml'
       - 'conda/*.yml'
       - 'pyproject.toml'
   release:
@@ -31,6 +31,7 @@ jobs:
     name: Build Docker images
     runs-on: ubuntu-latest
     permissions:
+      id-token: write
       packages: write
       contents: read
       attestations: write
@@ -82,7 +83,7 @@ jobs:
         if: github.event_name == 'release'
         uses: actions/attest-build-provenance@v1
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
+          subject-name: ghcr.io/${{ github.repository }}-deps
           subject-digest: ${{ steps.push-base.outputs.digest }}
           push-to-registry: true
 
@@ -110,7 +111,7 @@ jobs:
         if: github.event_name == 'release'
         uses: actions/attest-build-provenance@v1
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
+          subject-name: ghcr.io/${{ github.repository }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
