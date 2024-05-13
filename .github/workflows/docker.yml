@@ -105,7 +105,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           #cache-from: type=registry,ref=ghcr.io/${{ github.repository }}
           build-contexts: |
-            rapids-singlecell-deps=docker-image://${{ steps.meta-base.outputs.tags }}
+            rapids-singlecell-deps=docker-image://${{ fromJSON(steps.meta-base.outputs.json).tags[0] }}
 
       - name: Generate artifact attestation for main image
         if: github.event_name == 'release'
