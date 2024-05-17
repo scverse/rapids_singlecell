@@ -72,7 +72,7 @@ def umap(
     init_pos
         How to initialize the low dimensional embedding. Called `init` in the
         original UMAP. Options are:
-        * 'auto': chooses 'spectral' for `'n_samples' > 1000000`, 'random' otherwise.
+        * 'auto': chooses 'spectral' for `'n_samples' < 1000000`, 'random' otherwise.
         * 'spectral': use a spectral embedding of the graph.
         * 'random': assign initial embedding positions at random.
     random_state
@@ -153,7 +153,7 @@ def umap(
         pre_knn = None
 
     if init_pos == "auto":
-        init_pos = "spectral" if n_obs > 1000000 else "random"
+        init_pos = "spectral" if n_obs < 1000000 else "random"
 
     umap = UMAP(
         n_neighbors=n_neighbors,
