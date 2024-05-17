@@ -15,7 +15,7 @@ from ._utils import _choose_representation
 if TYPE_CHECKING:
     from anndata import AnnData
 
-_InitPos = Literal["spectral", "random"]
+_InitPos = Literal["auto", "spectral", "random"]
 
 
 def umap(
@@ -27,7 +27,7 @@ def umap(
     maxiter: int | None = None,
     alpha: float = 1.0,
     negative_sample_rate: int = 5,
-    init_pos: _InitPos = "spectral",
+    init_pos: _InitPos = "auto",
     random_state=0,
     a: float | None = None,
     b: float | None = None,
@@ -72,6 +72,7 @@ def umap(
     init_pos
         How to initialize the low dimensional embedding. Called `init` in the
         original UMAP. Options are:
+        * 'auto': chooses 'spectral' for `'n_samples' > 1000000`, 'random' otherwise.
         * 'spectral': use a spectral embedding of the graph.
         * 'random': assign initial embedding positions at random.
     random_state
@@ -150,6 +151,10 @@ def umap(
         pre_knn = (knn_indices, knn_dist)
     else:
         pre_knn = None
+
+    if init_pos == "auto":
+        init_pos = "spectral" if n_obs > 1000000 else "random"
+
     umap = UMAP(
         n_neighbors=n_neighbors,
         n_components=n_components,
