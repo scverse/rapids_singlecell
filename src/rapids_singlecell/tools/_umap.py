@@ -77,6 +77,7 @@ def umap(
         * 'random': assign initial embedding positions at random.
         .. note::
             If your embedding looks odd it's recommended setting `init_pos` to 'random'.
+s
     random_state
         `int`, `random_state` is the seed used by the random number generator
     a
