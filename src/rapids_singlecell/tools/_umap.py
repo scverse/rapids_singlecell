@@ -101,9 +101,8 @@ def umap(
         **X_umap** : `adata.obsm` field
             UMAP coordinates of data.
 
-    Notes
-    -----
-    If your embedding looks odd it's recommended setting `init_pos` to 'random'.
+    .. note::
+        If your embedding looks odd it's recommended setting `init_pos` to 'random'.
     """
     adata = adata.copy() if copy else adata
 
