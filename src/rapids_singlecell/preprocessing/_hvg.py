@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal
 import cupy as cp
 import numpy as np
 import pandas as pd
-from cupyx.scipy.sparse import issparse
+from cupyx.scipy.sparse import issparse, isspmatrix_csc
 from scanpy.get import _get_obs_rep
 
 from ._simple import calculate_qc_metrics
@@ -525,9 +525,10 @@ def _highly_variable_genes_seurat_v3(
         batch_info = pd.Categorical(np.zeros(adata.shape[0], dtype=int))
     else:
         batch_info = adata.obs[batch_key].values
+        if isspmatrix_csc(X):
+            X = X.tocsr()
 
     norm_gene_vars = []
-
     for b in np.unique(batch_info):
         X_batch = X[batch_info == b]
         mean, var = _get_mean_var(X_batch, axis=0)
@@ -556,6 +557,8 @@ def _highly_variable_genes_seurat_v3(
                 "seurat_v3_elementwise_kernel",
                 no_return=True,
             )
+            if isspmatrix_csc(batch_counts):
+                batch_counts = batch_counts.tocsr()
             squared_batch_counts_sum = cp.zeros(clip_val.shape, dtype=cp.float64)
             batch_counts_sum = cp.zeros(clip_val.shape, dtype=cp.float64)
             seurat_v3_elementwise_kernel(
