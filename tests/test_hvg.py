@@ -207,13 +207,15 @@ def test_compare_to_seurat_v3():
 
 
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
-@pytest.mark.parametrize("sparse", [True, False])
+@pytest.mark.parametrize("sparse", ["csr", "csc", "dense"])
 def test_seurat_v3_mean_var_output_with_batchkey(dtype, sparse):
     pbmc = sc.datasets.pbmc3k()
     pbmc.var_names_make_unique()
-    if sparse:
+    if sparse == "csr":
         pbmc.X = cpx.scipy.sparse.csr_matrix(pbmc.X, dtype=dtype)
-    else:
+    elif sparse == "csc":
+        pbmc.X = cpx.scipy.sparse.csr_matrix(pbmc.X, dtype=dtype).tocsc()
+    elif sparse == "dense":
         pbmc.X = cpx.scipy.sparse.csr_matrix(pbmc.X, dtype=dtype).toarray()
     n_cells = pbmc.shape[0]
     batch = np.zeros((n_cells), dtype=int)
@@ -221,7 +223,7 @@ def test_seurat_v3_mean_var_output_with_batchkey(dtype, sparse):
     pbmc.obs["batch"] = batch
 
     # true_mean, true_var = _get_mean_var(pbmc.X)
-    if sparse:
+    if sparse == "csr" or sparse == "csc":
         X = pbmc.X.toarray().astype(cp.float64)
     else:
         X = pbmc.X.copy().astype(cp.float64)
