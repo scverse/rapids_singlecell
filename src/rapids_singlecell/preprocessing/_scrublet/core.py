@@ -9,7 +9,7 @@ import pandas as pd
 from anndata import AnnData, concat
 from cuml.neighbors import NearestNeighbors
 from cupyx.scipy import sparse
-from scanpy._utils import AnyRandom, get_random_state
+from scanpy._utils import get_random_state
 from scanpy.preprocessing._utils import sample_comb
 
 from .sparse_utils import subsample_counts
@@ -17,6 +17,8 @@ from .sparse_utils import subsample_counts
 if TYPE_CHECKING:
     from numpy.random import RandomState
     from numpy.typing import NDArray
+
+    from rapids_singlecell._utils import AnyRandom
 
 __all__ = ["Scrublet"]
 

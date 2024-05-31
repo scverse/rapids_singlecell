@@ -17,8 +17,7 @@ from . import pipeline
 from .core import Scrublet
 
 if TYPE_CHECKING:
-    from scanpy._utils import AnyRandom
-
+    from rapids_singlecell._utils import AnyRandom
     from rapids_singlecell.preprocessing._neighbors import _Metrics
 
 
