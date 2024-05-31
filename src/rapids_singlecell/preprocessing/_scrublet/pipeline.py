@@ -11,7 +11,7 @@ from rapids_singlecell.preprocessing._utils import _get_mean_var
 from .sparse_utils import sparse_multiply, sparse_zscore
 
 if TYPE_CHECKING:
-    from scanpy._utils import AnyRandom
+    from rapids_singlecell._utils import AnyRandom
 
     from .core import Scrublet
 
