@@ -21,7 +21,32 @@ pip install 'rapids-singlecell[rapids12]' --extra-index-url=https://pypi.nvidia.
 ```
 It is important to ensure that the CUDA environment is set up correctly so that RAPIDS and Cupy can locate the necessary libraries.
 
-To view a full guide how to set up a fully functioned single cell GPU accelerated conda environment visit [GPU_SingleCell_Setup](https://github.com/Intron7/GPU_SingleCell_Setup)
+## Docker
+
+We also offer a Docker container for `rapids-singlecell`. This container includes all the necessary dependencies, making it even easier to get started with `rapids-singlecell`.
+
+To use the Docker container, first, ensure that you have Docker installed on your system and that Docker supports the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/index.html). Then, you can pull our Docker image using the following command:
+
+```
+docker pull ghcr.io/scverse/rapids_singlecell:latest
+```
+
+To run the Docker container, use the following command:
+
+```
+docker run --rm --gpus all ghcr.io/scverse/rapids_singlecell:latest
+```
+
+The docker containers also work with apptainer (or singularity) on an HPC system.
+
+First pull the container and wrap it in a `.sif` file:
+```
+apptainer pull rsc.sif ghcr.io/scverse/rapids_singlecell:latest
+```
+Then run the following command to execute the container:
+```
+apptainer run --nv rsc.sif
+```
 
 
 # GPU-Memory and System Requirements

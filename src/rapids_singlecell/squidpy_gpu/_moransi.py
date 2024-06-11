@@ -152,10 +152,10 @@ def _morans_I_cupy_dense(data, adj_matrix_cupy, n_permutations=100):
     # Calculate p-values using permutation tests
     if n_permutations:
         morans_I_permutations = cp.zeros((n_permutations, n_features), dtype=cp.float32)
+        num_permuted = cp.zeros(n_features, dtype=cp.float32)
         for p in range(n_permutations):
             idx_shuffle = cp.random.permutation(adj_matrix_cupy.shape[0])
             adj_matrix_permuted = adj_matrix_cupy[idx_shuffle, :]
-            num_permuted = cp.zeros(n_features, dtype=cp.float32)
             num_kernel(
                 grid_size,
                 (block_size, block_size, 1),
@@ -170,6 +170,7 @@ def _morans_I_cupy_dense(data, adj_matrix_cupy, n_permutations=100):
                 ),
             )
             morans_I_permutations[p, :] = num_permuted / den
+            num_permuted[:] = 0
             cp.cuda.Stream.null.synchronize()
     else:
         morans_I_permutations = None
@@ -220,6 +221,8 @@ def _morans_I_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
 
     if n_permutations:
         morans_I_permutations = cp.zeros((n_permutations, n_features), dtype=cp.float32)
+        num_permuted = cp.zeros(n_features, dtype=cp.float32)
+
         for p in range(n_permutations):
             idx_shuffle = cp.random.permutation(adj_matrix_cupy.shape[0])
             adj_matrix_permuted = adj_matrix_cupy[idx_shuffle, :]
@@ -242,6 +245,7 @@ def _morans_I_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
             )
 
             morans_I_permutations[p, :] = num_permuted / den
+            num_permuted[:] = 0
             cp.cuda.Stream.null.synchronize()
     else:
         morans_I_permutations = None

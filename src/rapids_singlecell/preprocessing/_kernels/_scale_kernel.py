@@ -39,10 +39,10 @@ _csr_scale_diff_kernel = r"""
 """
 
 _dense_scale_center_diff_kernel = r"""
-({0} *data, const {0}  *mean, const {0}  *std, const int *mask, {0} clipper,int nrows,int ncols)
+({0} *data, const {0}  *mean, const {0}  *std, const int *mask, {0} clipper,long long int nrows,long long int ncols)
 {
-    int row = blockIdx.x * blockDim.x + threadIdx.x;
-    int col = blockIdx.y * blockDim.y + threadIdx.y;
+    long long int row = blockIdx.x * blockDim.x + threadIdx.x;
+    long long int col = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (row < nrows && col < ncols) {
         if (mask[row]){
