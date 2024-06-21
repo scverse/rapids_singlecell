@@ -175,6 +175,7 @@ def _cov_sparse_dask(client, x, return_gram=False, return_mean=False):
     blocks = x.to_delayed().ravel()
     gram_chunk_matrices = dask.array.map_blocks(
         __gram_block,
+        x,
         meta=cp.array((1.0,), dtype=x.dtype),
         dtype=x.dtype,
         chunks=((x.shape[1],) * len(blocks), (x.shape[1],)),
