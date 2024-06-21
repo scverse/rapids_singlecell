@@ -153,8 +153,9 @@ def _cov_sparse_dask(client, x, return_gram=False, return_mean=False):
     compute_mean_cov.compile()
 
     @dask.delayed
-    def __gram_block(x_part, n_cols):
-        gram_matrix = cp.zeros((n_cols, n_cols), dtype=x.dtype)
+    def __gram_block(x_part):
+        n_cols = x_part.shape[1]
+        gram_matrix = cp.zeros(n_cols, dtype=x.dtype)
 
         block = (128,)
         grid = (x_part.shape[0],)
