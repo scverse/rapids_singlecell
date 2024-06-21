@@ -153,6 +153,7 @@ def _cov_sparse_dask(client, x, return_gram=False, return_mean=False):
     compute_mean_cov = _gramm_kernel_csr(x.dtype)
     compute_mean_cov.compile()
 
+    @dask.delayed
     def __gram_block(x_part, n_cols):
         gram_matrix = cp.zeros((n_cols, n_cols), dtype=x.dtype)
 
@@ -172,18 +173,13 @@ def _cov_sparse_dask(client, x, return_gram=False, return_mean=False):
         )
         return gram_matrix
 
-    parts = client.sync(_extract_partitions, x)
-    futures = [
-        client.submit(__gram_block, part, x.shape[1], workers=[w]) for w, part in parts
+    blocks = x.to_delayed().ravel()
+    gram_chunk_matrices = [
+        dask.array.from_delayed(
+            __gram_block(block, x.shape[1]), shape=(x.shape[1], x.shape[1]), dtype=x.dtype, meta=cp.array([])
+        ) for block in blocks
     ]
-    # Gather results from futures
-    objs = []
-    for i in range(len(futures)):
-        obj = dask.array.from_delayed(
-            futures[i], shape=(x.shape[1], x.shape[1]), dtype=x.dtype
-        )
-        objs.append(obj)
-    gram_matrix = dask.array.stack(objs).sum(axis=0).compute()
+    gram_matrix = dask.array.stack(gram_chunk_matrices).sum(axis=0).compute()
     mean_x, _ = _get_mean_var(x, client=client)
     mean_x = mean_x.astype(x.dtype)
     copy_gram = _copy_kernel(x.dtype)
