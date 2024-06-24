@@ -135,6 +135,10 @@ html_static_path = ["_static"]
 html_css_files = ["_static/css/override.css"]
 html_title = "rapids-singlecell"
 
+qualname_overrides = {
+    "numpy.bool_": "numpy.bool",  # Since numpy 2, numpy.bool is the canonical dtype
+}
+
 nitpick_ignore = [
     ("py:class", "scipy.sparse.base.spmatrix"),
     ("py:meth", "pandas.DataFrame.iloc"),
