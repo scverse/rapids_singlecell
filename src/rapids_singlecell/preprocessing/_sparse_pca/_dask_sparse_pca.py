@@ -179,8 +179,8 @@ def _cov_sparse_dask(client, x, return_gram=False, return_mean=False):
         chunks=((1,) * num_blocks, (x.shape[1],), (x.shape[1],)),
         new_axis=1,
     )
-    gram_matrix = gram_chunk_matrices.sum(axis=0).compute()
-    print(gram_matrix)
+    # TODO: calling .sum(axis=0) for some reason returns a `numpy` array immediately?
+    gram_matrix = cp.sum(gram_chunk_matrices, axis=0).compute()
     mean_x, _ = _get_mean_var(x, client=client)
     mean_x = mean_x.astype(x.dtype)
     copy_gram = _copy_kernel(x.dtype)
