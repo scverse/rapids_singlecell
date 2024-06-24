@@ -182,8 +182,6 @@ def _get_target_sum_csr(X: sparse.csr_matrix) -> int:
 
 
 def _get_target_sum_dask(X: DaskArray, client=None) -> int:
-    import dask.array as da
-
     client = _get_dask_client(client)
 
     if isinstance(X._meta, sparse.csr_matrix):
@@ -208,7 +206,7 @@ def _get_target_sum_dask(X: DaskArray, client=None) -> int:
     else:
         raise ValueError(f"Cannot compute target sum for {type(X)}")
     num_blocks = len(X.to_delayed().ravel())
-    target_sum_chunk_matrices = da.map_blocks(
+    target_sum_chunk_matrices = X.map_blocks(
         __sum,
         meta=cp.array((1.0,), dtype=X.dtype),
         dtype=X.dtype,
