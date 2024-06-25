@@ -66,7 +66,7 @@ def wsum(mat, net, times, batch_size, seed, verbose):
         for i in tqdm(range(n_batches), disable=not verbose):
             # Subset batch
             srt, end = i * batch_size, i * batch_size + batch_size
-            tmp = mat[srt:end].A
+            tmp = mat[srt:end].toarray()
 
             # Run WSUM
 
