@@ -151,9 +151,10 @@ def _cov_sparse_dask(client, x, return_gram=False, return_mean=False):
 
     compute_mean_cov = _gramm_kernel_csr(x.dtype)
     compute_mean_cov.compile()
+    n_cols = x.shape[1]
 
     @dask.delayed
-    def __gram_block(x_part, n_cols):
+    def __gram_block(x_part):
         gram_matrix = cp.zeros((n_cols, n_cols), dtype=x.dtype)
 
         block = (128,)
@@ -175,8 +176,8 @@ def _cov_sparse_dask(client, x, return_gram=False, return_mean=False):
     blocks = x.to_delayed().ravel()
     gram_chunk_matrices = [
         dask.array.from_delayed(
-            __gram_block(block, x.shape[1]),
-            shape=(x.shape[1], x.shape[1]),
+            __gram_block(block),
+            shape=(n_cols, n_cols),
             dtype=x.dtype,
             meta=cp.array([]),
         )
@@ -187,11 +188,11 @@ def _cov_sparse_dask(client, x, return_gram=False, return_mean=False):
     mean_x = mean_x.astype(x.dtype)
     copy_gram = _copy_kernel(x.dtype)
     block = (32, 32)
-    grid = (math.ceil(x.shape[1] / block[0]), math.ceil(x.shape[1] / block[1]))
+    grid = (math.ceil(n_cols / block[0]), math.ceil(n_cols / block[1]))
     copy_gram(
         grid,
         block,
-        (gram_matrix, x.shape[1]),
+        (gram_matrix, n_cols),
     )
 
     gram_matrix *= 1 / x.shape[0]
