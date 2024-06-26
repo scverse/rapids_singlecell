@@ -210,6 +210,7 @@ def _get_target_sum_dask(X: DaskArray, client=None) -> int:
         meta=cp.array((1.0,), dtype=X.dtype),
         dtype=X.dtype,
         chunks=(X.chunksize[0],),
+        drop_axis=1,
     )
     counts_per_cell = target_sum_chunk_matrices.compute()
     target_sum = cp.median(counts_per_cell)
