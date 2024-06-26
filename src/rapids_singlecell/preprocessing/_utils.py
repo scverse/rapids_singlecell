@@ -208,7 +208,7 @@ def _get_mean_var(X, axis=0, client=None):
             if axis == 0:
                 major = X.shape[0]
                 minor = X.shape[1]
-                mean, var = _mean_var_minor_dask(X, major, minor, client)
+                mean, var = _mean_var_minor_dask(X, major, minor)
             if axis == 1:
                 major = X.shape[0]
                 minor = X.shape[1]
