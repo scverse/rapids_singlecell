@@ -4,10 +4,9 @@ from cupyx.scipy import sparse as cusparse
 import pytest
 import rapids_singlecell as rsc
 from anndata import AnnData
-from scanpy.datasets import pbmc3k_processed
+from scanpy.datasets import pbmc3k_processed, pbmc3k
 from scipy import sparse
 import scanpy as sc
-from scanpy.testing._helpers.data import pbmc3k_normalized
 
 A_list = [
     [0, 0, 7, 0, 0],
@@ -40,6 +39,15 @@ A_svd = np.array(
     ]
 )
 
+
+def _pbmc3k_normalized() -> AnnData:
+    pbmc = pbmc3k()
+    pbmc.X = pbmc.X.astype("float64")  # For better accuracy
+    sc.pp.filter_genes(pbmc, min_counts=1)
+    sc.pp.log1p(pbmc)
+    sc.pp.normalize_total(pbmc)
+    sc.pp.highly_variable_genes(pbmc)
+    return pbmc
 
 def test_pca_transform():
     A = np.array(A_list).astype("float32")
@@ -211,7 +219,7 @@ def test_pca_layer():
     """
     Tests that layers works the same way as .X
     """
-    X_adata = pbmc3k_normalized()
+    X_adata = _pbmc3k_normalized()
     X_adata.X = X_adata.X.astype(np.float64)
 
     layer_adata = X_adata.copy()
