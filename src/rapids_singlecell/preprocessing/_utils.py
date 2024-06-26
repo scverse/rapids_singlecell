@@ -43,7 +43,7 @@ def _mean_var_minor(X, major, minor):
 
 
 @with_cupy_rmm
-def _mean_var_minor_dask(X, major, minor, client=None):
+def _mean_var_minor_dask(X, major, minor):
     """
     Implements sum operation for dask array when the backend is cupy sparse csr matrix
     """
@@ -53,14 +53,12 @@ def _mean_var_minor_dask(X, major, minor, client=None):
         _get_mean_var_minor,
     )
 
-    client = _get_dask_client(client)
-
     get_mean_var_minor = _get_mean_var_minor(X.dtype)
     get_mean_var_minor.compile()
 
     def __mean_var(X_part, minor, major):
-        mean = cp.zeros((minor, 1), dtype=cp.float64)
-        var = cp.zeros((minor, 1), dtype=cp.float64)
+        mean = cp.zeros(minor, dtype=cp.float64)
+        var = cp.zeros(minor, dtype=cp.float64)
         block = (32,)
         grid = (int(math.ceil(X_part.nnz / block[0])),)
         get_mean_var_minor(
@@ -68,26 +66,8 @@ def _mean_var_minor_dask(X, major, minor, client=None):
         )
         return mean, var
 
-    parts = client.sync(_extract_partitions, X)
-    futures = [
-        client.submit(__mean_var, part, minor, major, workers=[w]) for w, part in parts
-    ]
-    # Gather results from futures
-    results = client.gather(futures)
-
-    # Initialize lists to hold the Dask arrays
-    means_objs = []
-    var_objs = []
-
-    # Process each result
-    for means, vars in results:
-        # Append the arrays to their respective lists as Dask arrays
-        means_objs.append(da.from_array(means, chunks=means.shape))
-        var_objs.append(da.from_array(vars, chunks=vars.shape))
-    mean = da.concatenate(means_objs, axis=1).sum(axis=1)
-    var = da.concatenate(var_objs, axis=1).sum(axis=1)
+    mean, var = da.apply_gufunc(__mean_var, "(i)->(),()", X, minor, major)
     mean, var = da.compute(mean, var)
-    mean, var = mean.ravel(), var.ravel()
     var = (var - mean**2) * (major / (major - 1))
     return mean, var
 
@@ -129,26 +109,8 @@ def _mean_var_major_dask(X, major, minor, client=None):
         )
         return mean, var
 
-    parts = client.sync(_extract_partitions, X)
-    futures = [
-        client.submit(__mean_var, part, minor, major, workers=[w]) for w, part in parts
-    ]
-    # Gather results from futures
-    results = client.gather(futures)
-
-    # Initialize lists to hold the Dask arrays
-    means_objs = []
-    var_objs = []
-
-    # Process each result
-    for means, vars_ in results:
-        # Append the arrays to their respective lists as Dask arrays
-        means_objs.append(da.from_array(means, chunks=means.shape))
-        var_objs.append(da.from_array(vars_, chunks=vars_.shape))
-    mean = da.concatenate(means_objs)
-    var = da.concatenate(var_objs)
+    mean, var = da.apply_gufunc(__mean_var, "(i)->(),()", X, minor, major)
     mean, var = da.compute(mean, var)
-    mean, var = mean.ravel(), var.ravel()
     mean = mean / minor
     var = var / minor
     var -= cp.power(mean, 2)
