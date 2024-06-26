@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 
 import cupy as cp
+import dask
 from cuml.internals.memory_utils import with_cupy_rmm
 
 from rapids_singlecell._compat import (
@@ -151,8 +152,8 @@ def _cov_sparse_dask(client, x, return_gram=False, return_mean=False):
     compute_mean_cov = _gramm_kernel_csr(x.dtype)
     compute_mean_cov.compile()
 
-    def __gram_block(x_part):
-        n_cols = x_part.shape[1]
+    @dask.delayed
+    def __gram_block(x_part, n_cols):
         gram_matrix = cp.zeros((n_cols, n_cols), dtype=x.dtype)
 
         block = (128,)
@@ -171,16 +172,17 @@ def _cov_sparse_dask(client, x, return_gram=False, return_mean=False):
         )
         return gram_matrix
 
-    num_blocks = len(x.to_delayed().ravel())
-    gram_chunk_matrices = x.map_blocks(
-        __gram_block,
-        meta=cp.array((1.0,), dtype=x.dtype),
-        dtype=x.dtype,
-        chunks=((1,) * num_blocks, (x.shape[1],), (x.shape[1],)),
-        new_axis=1,
-    )
-    # TODO: calling .sum(axis=0) for some reason returns a `numpy` array immediately?
-    gram_matrix = cp.sum(gram_chunk_matrices, axis=0).compute()
+    blocks = x.to_delayed().ravel()
+    gram_chunk_matrices = [
+        dask.array.from_delayed(
+            __gram_block(block, x.shape[1]),
+            shape=(x.shape[1], x.shape[1]),
+            dtype=x.dtype,
+            meta=cp.array([]),
+        )
+        for block in blocks
+    ]
+    gram_matrix = dask.array.stack(gram_chunk_matrices).sum(axis=0).compute()
     mean_x, _ = _get_mean_var(x, client=client)
     mean_x = mean_x.astype(x.dtype)
     copy_gram = _copy_kernel(x.dtype)
