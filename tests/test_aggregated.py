@@ -10,9 +10,9 @@ from scipy.sparse import csr_matrix
 
 import scanpy as sc
 from scanpy._utils import _resolve_axis
-from scanpy.testing._helpers import assert_equal
-from scanpy.testing._helpers.data import pbmc3k_processed
-from scanpy.testing._pytest.params import ARRAY_TYPES_MEM
+from anndata.tests.helpers import assert_equal
+from scanpy.datasets import pbmc3k_processed
+from _helpers import ARRAY_TYPES_MEM
 
 import rapids_singlecell as rsc
 
