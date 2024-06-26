@@ -4,7 +4,6 @@ import math
 
 import cupy as cp
 import dask
-from cuml.dask.common.part_utils import _extract_partitions
 from cuml.internals.memory_utils import with_cupy_rmm
 
 from rapids_singlecell._compat import (
@@ -152,8 +151,10 @@ def _cov_sparse_dask(client, x, return_gram=False, return_mean=False):
 
     compute_mean_cov = _gramm_kernel_csr(x.dtype)
     compute_mean_cov.compile()
+    n_cols = x.shape[1]
 
-    def __gram_block(x_part, n_cols):
+    @dask.delayed
+    def __gram_block(x_part):
         gram_matrix = cp.zeros((n_cols, n_cols), dtype=x.dtype)
 
         block = (128,)
@@ -172,27 +173,26 @@ def _cov_sparse_dask(client, x, return_gram=False, return_mean=False):
         )
         return gram_matrix
 
-    parts = client.sync(_extract_partitions, x)
-    futures = [
-        client.submit(__gram_block, part, x.shape[1], workers=[w]) for w, part in parts
-    ]
-    # Gather results from futures
-    objs = []
-    for i in range(len(futures)):
-        obj = dask.array.from_delayed(
-            futures[i], shape=(x.shape[1], x.shape[1]), dtype=x.dtype
+    blocks = x.to_delayed().ravel()
+    gram_chunk_matrices = [
+        dask.array.from_delayed(
+            __gram_block(block),
+            shape=(n_cols, n_cols),
+            dtype=x.dtype,
+            meta=cp.array([]),
         )
-        objs.append(obj)
-    gram_matrix = dask.array.stack(objs).sum(axis=0).compute()
+        for block in blocks
+    ]
+    gram_matrix = dask.array.stack(gram_chunk_matrices).sum(axis=0).compute()
     mean_x, _ = _get_mean_var(x, client=client)
     mean_x = mean_x.astype(x.dtype)
     copy_gram = _copy_kernel(x.dtype)
     block = (32, 32)
-    grid = (math.ceil(x.shape[1] / block[0]), math.ceil(x.shape[1] / block[1]))
+    grid = (math.ceil(n_cols / block[0]), math.ceil(n_cols / block[1]))
     copy_gram(
         grid,
         block,
-        (gram_matrix, x.shape[1]),
+        (gram_matrix, n_cols),
     )
 
     gram_matrix *= 1 / x.shape[0]
