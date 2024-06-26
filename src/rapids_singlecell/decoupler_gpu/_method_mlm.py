@@ -50,7 +50,7 @@ def mlm(mat, net, batch_size=10000, verbose=False):
         for i in tqdm(range(n_batches), disable=not verbose):
             # Subset batch
             srt, end = i * batch_size, i * batch_size + batch_size
-            y = mat[srt:end].A.T
+            y = mat[srt:end].toarray().T
 
             # Compute MLM for batch
             es[srt:end] = fit_mlm(net, cp.array(y), inv, df)[:, 1:]
