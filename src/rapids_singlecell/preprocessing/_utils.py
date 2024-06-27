@@ -56,7 +56,7 @@ def _mean_var_minor_dask(X, major, minor):
     get_mean_var_minor = _get_mean_var_minor(X.dtype)
     get_mean_var_minor.compile()
 
-    def __mean_var(X_part, minor, major):
+    def __mean_var(X_part):
         mean = cp.zeros(minor, dtype=cp.float64)
         var = cp.zeros(minor, dtype=cp.float64)
         block = (32,)
@@ -71,7 +71,7 @@ def _mean_var_minor_dask(X, major, minor):
         signature="(i)->(),()",
         meta=(cp.array((1.0), dtype=X.dtype),) * 2,
     )
-    mean, var = mean_var_gufunc(X, minor, major)
+    mean, var = mean_var_gufunc(X)
     mean, var = da.compute(mean, var)
     var = (var - mean**2) * (major / (major - 1))
     return mean, var
@@ -94,7 +94,7 @@ def _mean_var_major_dask(X, major, minor, client=None):
     get_mean_var_major = _get_mean_var_major(X.dtype)
     get_mean_var_major.compile()
 
-    def __mean_var(X_part, minor, major):
+    def __mean_var(X_part):
         mean = cp.zeros(X_part.shape[0], dtype=cp.float64)
         var = cp.zeros(X_part.shape[0], dtype=cp.float64)
         block = (64,)
@@ -119,7 +119,7 @@ def _mean_var_major_dask(X, major, minor, client=None):
         signature="(i)->(),()",
         meta=(cp.array((1.0), dtype=X.dtype),) * 2,
     )
-    mean, var = mean_var_gufunc(X, minor, major)
+    mean, var = mean_var_gufunc(X)
     mean, var = da.compute(mean, var)
     mean = mean / minor
     var = var / minor
