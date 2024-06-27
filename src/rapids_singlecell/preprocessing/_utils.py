@@ -70,7 +70,6 @@ def _mean_var_minor_dask(X, major, minor):
         __mean_var,
         signature="(i)->(),()",
         meta=(cp.array((1.0), dtype=X.dtype),) * 2,
-        output_dtypes=(X.dtype,) * 2,
     )
     mean, var = mean_var_gufunc(X, minor, major)
     mean, var = da.compute(mean, var)
@@ -119,7 +118,6 @@ def _mean_var_major_dask(X, major, minor, client=None):
         __mean_var,
         signature="(i)->(),()",
         meta=(cp.array((1.0), dtype=X.dtype),) * 2,
-        output_dtypes=(X.dtype,) * 2,
     )
     mean, var = mean_var_gufunc(X, minor, major)
     mean, var = da.compute(mean, var)
