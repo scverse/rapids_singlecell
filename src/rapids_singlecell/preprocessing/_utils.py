@@ -68,9 +68,10 @@ def _mean_var_minor_dask(X, major, minor):
 
     mean, var = da.apply_gufunc(
         __mean_var,
-        "(m,n)->(n),(n)",
+        "(m,n)->(m),(m)",
         X,
         meta=(cp.array((1.0), dtype=X.dtype),) * 2,
+        allow_rechunk=True,
     )
     mean, var = da.compute(mean, var)
     var = (var - mean**2) * (major / (major - 1))
@@ -119,6 +120,7 @@ def _mean_var_major_dask(X, major, minor, client=None):
         "(m,n)->(n),(n)",
         X,
         meta=(cp.array((1.0), dtype=X.dtype),) * 2,
+        allow_rechunk=True,
     )
     mean, var = da.compute(mean, var)
     mean = mean / minor
