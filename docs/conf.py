@@ -62,7 +62,7 @@ extensions = [
 
 autosummary_generate = True
 autodoc_member_order = "bysource"
-autodoc_mock_imports = ["cudf", "cuml", "cugraph", "cupy", "cupyx", "pylibraft"]
+autodoc_mock_imports = ["cudf", "cuml", "cugraph", "cupy", "cupyx", "pylibraft", "dask"]
 default_role = "literal"
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
@@ -108,6 +108,7 @@ intersphinx_mapping = {
     "rmm": ("https://docs.rapids.ai/api/rmm/stable/", None),
     "statsmodels": ("https://www.statsmodels.org/stable/", None),
     "omnipath": ("https://omnipath.readthedocs.io/en/latest/", None),
+    "dask": ("https://docs.dask.org/en/stable/", None),
 }
 
 # List of patterns, relative to source directory, that match files and
