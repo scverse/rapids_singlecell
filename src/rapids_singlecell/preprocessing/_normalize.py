@@ -7,7 +7,6 @@ import warnings
 from typing import TYPE_CHECKING
 
 import cupy as cp
-from cuml.dask.common.part_utils import _extract_partitions
 from cupyx.scipy import sparse
 from scanpy.get import _get_obs_rep, _set_obs_rep
 
@@ -183,8 +182,6 @@ def _get_target_sum_csr(X: sparse.csr_matrix) -> int:
 
 
 def _get_target_sum_dask(X: DaskArray, client=None) -> int:
-    import dask.array as da
-
     client = _get_dask_client(client)
 
     if isinstance(X._meta, sparse.csr_matrix):
@@ -208,16 +205,13 @@ def _get_target_sum_dask(X: DaskArray, client=None) -> int:
             return X_part.sum(axis=1)
     else:
         raise ValueError(f"Cannot compute target sum for {type(X)}")
-
-    parts = client.sync(_extract_partitions, X)
-    futures = [client.submit(__sum, part, workers=[w]) for w, part in parts]
-    # Gather results from futures
-    futures = client.gather(futures)
-    objs = []
-    for i in futures:
-        objs.append(da.from_array(i, chunks=i.shape))
-
-    counts_per_cell = da.concatenate(objs).compute()
+    target_sum_chunk_matrices = X.map_blocks(
+        __sum,
+        meta=cp.array((1.0,), dtype=X.dtype),
+        dtype=X.dtype,
+        chunks=(X.chunksize[0],),
+    )
+    counts_per_cell = target_sum_chunk_matrices.compute()
     target_sum = cp.median(counts_per_cell)
     return target_sum
 
