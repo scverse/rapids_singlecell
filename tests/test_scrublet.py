@@ -19,15 +19,13 @@ if TYPE_CHECKING:
 
 
 def pbmc200() -> AnnData:
-    from scanpy.testing._helpers.data import _pbmc3k
-
-    return _pbmc3k()[200:400].copy()
+    from scanpy.datasets import pbmc3k
+    return pbmc3k()[200:400].copy()
 
 
 def paul500() -> AnnData:
-    from scanpy.testing._helpers.data import _paul15
-
-    return _paul15()[:500].copy()
+    from scanpy.datasets import paul15
+    return paul15()[:500].copy()
 
 
 @pytest.mark.parametrize(

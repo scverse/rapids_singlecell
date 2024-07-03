@@ -23,11 +23,12 @@ dependencies = [
     "matplotlib>=3.4",
     "tqdm",
     "statsmodels>=0.12.0",
+    "scikit-image",
 ]
 
 [project.optional-dependencies]
-rapids11 = ["cudf-cu11==24.4.*", "cuml-cu11==24.4.*", "cugraph-cu11==24.4.*"]
-rapids12 = ["cudf-cu12==24.4.*", "cuml-cu12==24.4.*", "cugraph-cu12==24.4.*"]
+rapids11 = ["cudf-cu11==24.6.*", "cuml-cu11==24.6.*", "cugraph-cu11==24.6.*"]
+rapids12 = ["cudf-cu12==24.6.*", "cuml-cu12==24.6.*", "cugraph-cu12==24.6.*"]
 doc = [
     "sphinx>=4.5.0",
     "sphinx-copybutton",

@@ -1,0 +1,121 @@
+# This workflow will build two Docker image and push then to GitHub Packages Container registry:
+# - a base image with the dependencies
+# - a main image with the application code
+
+name: Docker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docker/**'
+      - '.github/workflows/docker.yml'
+      - 'conda/*.yml'
+      - 'pyproject.toml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docker/**'
+      - '.github/workflows/docker.yml'
+      - 'conda/*.yml'
+      - 'pyproject.toml'
+  release:
+    types: [published]
+
+jobs:
+  build_docker_images:
+    strategy:
+      matrix:
+        RAPIDS_VER:
+          - 24.06
+    name: Build Docker images
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      packages: write
+      contents: read
+      attestations: write
+    steps:
+      - name: Maximize build disk space
+        uses: easimon/maximize-build-space@v10
+        with:
+          remove-dotnet: true
+          remove-android: true
+          remove-haskell: true
+          remove-codeql: true
+          root-reserve-mb: 35840
+          swap-size-mb: 1048
+
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker base image
+        id: meta-base
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ github.repository }}-deps
+
+      - name: create yaml file for conda environment
+        run: |
+          grep -v -- '- rapids-singlecell' conda/rsc_rapids_${{ matrix.RAPIDS_VER }}.yml > docker/rsc_rapids.yml
+        shell: bash
+
+      - name: Build and push Docker base images
+        id: push-base
+        uses: docker/build-push-action@v5
+        with:
+          context: ./docker/
+          file: ./docker/Dockerfile.deps
+          push: ${{ github.event_name == 'release' }}
+          tags: ${{ steps.meta-base.outputs.tags }}
+          labels: ${{ steps.meta-base.outputs.labels }}
+          #cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-deps
+
+      - name: Generate artifact attestation for base image
+        if: github.event_name == 'release'
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ghcr.io/${{ github.repository }}-deps
+          subject-digest: ${{ steps.push-base.outputs.digest }}
+          push-to-registry: true
+
+      - name: Extract metadata (tags, labels) for main Docker image
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ github.repository }}
+
+      - name: Build and push main Docker images
+        id: push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./docker/
+          file: ./docker/Dockerfile
+          push: ${{ github.event_name == 'release' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          #cache-from: type=registry,ref=ghcr.io/${{ github.repository }}
+          build-contexts: |
+            rapids-singlecell-deps=docker-image://${{ fromJSON(steps.meta-base.outputs.json).tags[0] }}
+
+      - name: Generate artifact attestation for main image
+        if: github.event_name == 'release'
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: list docker images
+        run: |
+          docker image ls -a
+        shell: bash

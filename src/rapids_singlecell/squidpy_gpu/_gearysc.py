@@ -136,10 +136,11 @@ def _gearys_C_cupy_dense(data, adj_matrix_cupy, n_permutations=100):
     # Calculate p-values using permutation tests
     if n_permutations:
         gearys_C_permutations = cp.zeros((n_permutations, n_features), dtype=cp.float32)
+        num_permuted = cp.zeros(n_features, dtype=data.dtype)
+
         for p in range(n_permutations):
             idx_shuffle = cp.random.permutation(adj_matrix_cupy.shape[0])
             adj_matrix_permuted = adj_matrix_cupy[idx_shuffle, :]
-            num_permuted = cp.zeros(n_features, dtype=data.dtype)
             num_kernel(
                 grid_size,
                 (block_size, block_size, 1),
@@ -154,6 +155,7 @@ def _gearys_C_cupy_dense(data, adj_matrix_cupy, n_permutations=100):
                 ),
             )
             gearys_C_permutations[p, :] = (n_samples - 1) * num_permuted / den
+            num_permuted[:] = 0
             cp.cuda.Stream.null.synchronize()
     else:
         gearys_C_permutations = None
@@ -204,10 +206,10 @@ def _gearys_C_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
     # Calculate p-values using permutation tests
     if n_permutations:
         gearys_C_permutations = cp.zeros((n_permutations, n_features), dtype=cp.float32)
+        num_permuted = cp.zeros(n_features, dtype=data.dtype)
         for p in range(n_permutations):
             idx_shuffle = cp.random.permutation(adj_matrix_cupy.shape[0])
             adj_matrix_permuted = adj_matrix_cupy[idx_shuffle, :]
-            num_permuted = cp.zeros(n_features, dtype=data.dtype)
             num_kernel(
                 (sg,),
                 (1024,),
@@ -224,6 +226,7 @@ def _gearys_C_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
                 ),
             )
             gearys_C_permutations[p, :] = (n_samples - 1) * num_permuted / den
+            num_permuted[:] = 0
             cp.cuda.Stream.null.synchronize()
     else:
         gearys_C_permutations = None
