@@ -215,7 +215,7 @@ def _scale_sparse_csr(
     X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None
 ):
     if zero_center:
-        X = X.toarray()
+        X = _sparse_to_dense(X, order="C")
         # inplace is True because we copied with `toarray`
         return _scale_array(
             X,
