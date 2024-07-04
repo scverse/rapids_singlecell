@@ -8,6 +8,8 @@ from cupyx.scipy.sparse import issparse, isspmatrix_csc, isspmatrix_csr, spmatri
 
 
 def _sparse_to_dense(X: spmatrix, order: Literal["C", "F"] | None = None) -> cp.ndarray:
+    if order is None:
+        order = "C"
     from ._kernels._sparse2dense import _sparse2densekernel
 
     if isspmatrix_csr(X):
