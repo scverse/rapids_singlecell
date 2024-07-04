@@ -14,6 +14,7 @@ from scanpy.preprocessing._pca import _handle_mask_var
 from scipy.sparse import issparse
 
 from rapids_singlecell.get import _get_obs_rep
+from rapids_singlecell.preprocessing._utils import _sparse_to_dense
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -244,7 +245,7 @@ class PCA_sparse:
         return self
 
     def transform(self, X):
-        X = X - self.mean_
+        X = _sparse_to_dense(X) - self.mean_
         X_transformed = X.dot(self.components_.T)
         self.components_ = self.components_.get()
         self.explained_variance_ = self.explained_variance_.get()

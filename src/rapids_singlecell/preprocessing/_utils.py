@@ -1,9 +1,40 @@
 from __future__ import annotations
 
 import math
+from typing import Literal
 
 import cupy as cp
-from cupyx.scipy.sparse import issparse, isspmatrix_csc, isspmatrix_csr
+from cupyx.scipy.sparse import issparse, isspmatrix_csc, isspmatrix_csr, spmatrix
+
+
+def _sparse_to_dense(X: spmatrix, order: Literal["C", "F"] | None = None) -> cp.ndarray:
+    if order is None:
+        order = "C"
+    from ._kernels._sparse2dense import _sparse2densekernel
+
+    if isspmatrix_csr(X):
+        major, minor = X.shape[0], X.shape[1]
+        switcher = 1 if order == "C" else 0
+    elif isspmatrix_csc(X):
+        major, minor = X.shape[1], X.shape[0]
+        switcher = 0 if order == "C" else 1
+    else:
+        raise ValueError("Input matrix must be a sparse `csc` or `csr` matrix")
+    sparse2dense = _sparse2densekernel(X.dtype)
+
+    dense = cp.zeros(X.shape, order=order, dtype=X.dtype)
+    max_nnz = cp.diff(X.indptr).max()
+    tpb = (32, 32)
+    bpg_x = math.ceil(major / tpb[0])
+    bpg_y = math.ceil(max_nnz / tpb[1])
+    bpg = (bpg_x, bpg_y)
+
+    sparse2dense(
+        bpg,
+        tpb,
+        (X.indptr, X.indices, X.data, dense, major, minor, switcher),
+    )
+    return dense
 
 
 def _mean_var_major(X, major, minor):
