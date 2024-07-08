@@ -68,7 +68,7 @@ def _mean_var_minor_dask(X, major, minor, client=None):
         get_mean_var_minor(
             grid, block, (X_part.indices, X_part.data, mean, var, major, X_part.nnz)
         )
-        return cp.concatenate([mean, var], axis=1)
+        return cp.vstack([mean, var])
 
     blocks = X.to_delayed().ravel()
     mean_var_blocks = [
@@ -80,7 +80,7 @@ def _mean_var_minor_dask(X, major, minor, client=None):
         )
         for block in blocks
     ]
-    mean, var = da.stack(mean_var_blocks).compute()
+    mean, var = da.stack(mean_var_blocks, axis=1).compute()
     var = (var - mean**2) * (major / (major - 1))
     return mean, var
 
