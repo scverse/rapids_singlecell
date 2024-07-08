@@ -68,12 +68,12 @@ def _mean_var_minor_dask(X, major, minor, client=None):
         )
         return cp.concatenate([mean, var], axis=1)
 
-    blocks = x.to_delayed().ravel()
+    blocks = X.to_delayed().ravel()
     mean_var_blocks = [
         dask.array.from_delayed(
             __mean_var(block, major, minor),
-            shape=(x.shape[0], 2),
-            dtype=x.dtype,
+            shape=(X.shape[0], 2),
+            dtype=X.dtype,
             meta=cp.array([]),
         )
         for block in blocks
