@@ -4,10 +4,14 @@ import cupy as cp
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
+from cupyx.scipy.special import betainc
 from decoupler.pre import extract, filt_min_n, get_net_mat, match, rename_net
 from scipy import stats
 from scipy.sparse import csr_matrix
 from tqdm import tqdm
+
+from rapids_singlecell.preprocessing._utils import _sparse_to_dense
 
 
 def fit_mlm(X, y, inv, df):
@@ -27,10 +31,16 @@ def fit_mlm(X, y, inv, df):
     inv = cp.reshape(inv, (1, inv.shape[0]))
     se = cp.sqrt(sse * inv)
     t = coef.T / se
-    return t.astype(np.float32).get()
+    return t.astype(np.float32)
 
 
-def mlm(mat, net, batch_size=10000, verbose=False):
+def __stdtr(df, t):
+    x = df / (t**2 + df)
+    tail = betainc(df / 2, 0.5, x) / 2
+    return cp.where(t < 0, tail, 1 - tail)
+
+
+def mlm(mat, net, batch_size=10000, verbose=False, pre_load=False):
     # Get number of batches
     n_samples = mat.shape[0]
     n_features, n_fsets = net.shape
@@ -46,20 +56,35 @@ def mlm(mat, net, batch_size=10000, verbose=False):
     if isinstance(mat, csr_matrix):
         # Init empty acts
         n_batches = int(np.ceil(n_samples / batch_size))
-        es = np.zeros((n_samples, n_fsets), dtype=np.float32)
-        for i in tqdm(range(n_batches), disable=not verbose):
-            # Subset batch
-            srt, end = i * batch_size, i * batch_size + batch_size
-            y = mat[srt:end].toarray().T
 
-            # Compute MLM for batch
-            es[srt:end] = fit_mlm(net, cp.array(y), inv, df)[:, 1:]
+        if pre_load:
+            es = cp.zeros((n_samples, n_fsets), dtype=np.float32)
+            mat = cp_csr_matrix(mat)
+            for i in tqdm(range(n_batches), disable=not verbose):
+                srt, end = i * batch_size, i * batch_size + batch_size
+                y = _sparse_to_dense(mat[srt:end]).T
+
+                # Compute MLM for batch
+                es[srt:end] = fit_mlm(net, y, inv, df)[:, 1:]
+        else:
+            es = np.zeros((n_samples, n_fsets), dtype=np.float32)
+            for i in tqdm(range(n_batches), disable=not verbose):
+                # Subset batch
+                srt, end = i * batch_size, i * batch_size + batch_size
+                y = mat[srt:end].toarray().T
+
+                # Compute MLM for batch
+                es[srt:end] = fit_mlm(net, cp.array(y), inv, df)[:, 1:].get()
     else:
         # Compute MLM for all
         es = fit_mlm(net, cp.array(mat.T), inv, df)[:, 1:]
 
     # Get p-values
-    pvals = 2 * (1 - stats.t.cdf(np.abs(es), df))
+    if isinstance(es, cp.ndarray):
+        pvals = (2 * (1 - __stdtr(df, cp.abs(es)))).get()
+        es = es.get()
+    else:
+        pvals = 2 * (1 - stats.t.cdf(np.abs(es), df))
 
     return es, pvals
 
@@ -75,6 +100,7 @@ def run_mlm(
     min_n: int = 5,
     verbose: bool = False,
     use_raw: bool = True,
+    pre_load: bool | None = False,
 ) -> tuple | None:
     """
     Multivariate Linear Model (MLM).
@@ -102,6 +128,8 @@ def run_mlm(
             Whether to show progress.
         use_raw
             Use raw attribute of mat if present.
+        pre_load
+            Whether to pre-load the data into memory. This can be faster for small datasets.
 
     Returns
     -------
@@ -129,7 +157,9 @@ def run_mlm(
         )
 
     # Run MLM
-    estimate, pvals = mlm(m, net, batch_size=batch_size, verbose=verbose)
+    estimate, pvals = mlm(
+        m, net, batch_size=batch_size, verbose=verbose, pre_load=pre_load
+    )
 
     # Transform to df
     estimate = pd.DataFrame(estimate, index=r, columns=sources)

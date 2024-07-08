@@ -46,7 +46,7 @@ def run_perm(mat, net, idxs, times, seed):
     return estimate_return, norm_return, corr_return, pvals_return
 
 
-def wsum(mat, net, times, batch_size, seed, verbose):
+def wsum(mat, net, times, batch_size, seed, verbose, pre_load):
     # Get dims
     n_samples = mat.shape[0]
     n_features, n_fsets = net.shape
@@ -102,6 +102,7 @@ def run_wsum(
     seed: int = 42,
     verbose: bool = False,
     use_raw: bool = True,
+    pre_load: bool | None = False,
 ) -> tuple | None:
     """
     Weighted sum (WSUM).
@@ -134,6 +135,8 @@ def run_wsum(
             Whether to show progress.
         use_raw
             Use raw attribute of mat if present.
+        pre_load
+            Whether to pre-load the data into memory. This can be faster for small datasets.
 
     Returns
     -------
@@ -164,7 +167,9 @@ def run_wsum(
         )
 
     # Run WSUM
-    estimate, norm, corr, pvals = wsum(m, net, times, batch_size, seed, verbose)
+    estimate, norm, corr, pvals = wsum(
+        m, net, times, batch_size, seed, verbose, pre_load
+    )
 
     # Transform to df
     estimate = pd.DataFrame(estimate, index=r, columns=sources)
