@@ -47,8 +47,8 @@ def _mean_var_minor_dask(X, major, minor, client=None):
     """
     Implements sum operation for dask array when the backend is cupy sparse csr matrix
     """
-    import dask.array as da
     import dask
+    import dask.array as da
 
     from rapids_singlecell.preprocessing._kernels._mean_var_kernel import (
         _get_mean_var_minor,
