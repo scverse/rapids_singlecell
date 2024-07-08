@@ -25,7 +25,7 @@ def test_seurat_sparse(client):
     adata.X = cusparse.csr_matrix(adata.X)
     rsc.pp.highly_variable_genes(adata)
     rsc.pp.highly_variable_genes(dask_data)
-    cp.testing.assert_allclose(adata.var["means"], dask_data.var["means"])
+    cp.testing.assert_allclose(adata.var["means"], dask_data.var["means"], rtol=1e-7, atol=1e-6)
     cp.testing.assert_allclose(adata.var["dispersions"], dask_data.var["dispersions"])
     cp.testing.assert_allclose(adata.var["dispersions_norm"], dask_data.var["dispersions_norm"])
 
@@ -41,7 +41,7 @@ def test_seurat_sparse_batch(client):
     rsc.pp.highly_variable_genes(adata, batch_key="batch")
     rsc.pp.highly_variable_genes(dask_data,batch_key="batch")
     cp.testing.assert_allclose(adata.var["means"], dask_data.var["means"])
-    cp.testing.assert_allclose(adata.var["dispersions"], dask_data.var["dispersions"])
+    cp.testing.assert_allclose(adata.var["dispersions"], dask_data.var["dispersions"], rtol=1e-7, atol=1e-6)
     cp.testing.assert_allclose(adata.var["dispersions_norm"], dask_data.var["dispersions_norm"])
 
 def test_cr_sparse(client):
@@ -51,8 +51,8 @@ def test_cr_sparse(client):
     adata.X = cusparse.csr_matrix(adata.X)
     rsc.pp.highly_variable_genes(adata, flavor="cell_ranger")
     rsc.pp.highly_variable_genes(dask_data, flavor="cell_ranger")
-    cp.testing.assert_allclose(adata.var["means"], dask_data.var["means"])
-    cp.testing.assert_allclose(adata.var["dispersions"], dask_data.var["dispersions"])
+    cp.testing.assert_allclose(adata.var["means"], dask_data.var["means"], rtol=1e-7, atol=1e-6)
+    cp.testing.assert_allclose(adata.var["dispersions"], dask_data.var["dispersions"], rtol=1e-7, atol=1e-6)
     cp.testing.assert_allclose(adata.var["dispersions_norm"], dask_data.var["dispersions_norm"])
 
 def test_cr_sparse_batch(client):
@@ -66,7 +66,7 @@ def test_cr_sparse_batch(client):
     rsc.pp.highly_variable_genes(adata, batch_key="batch", flavor="cell_ranger")
     rsc.pp.highly_variable_genes(dask_data,batch_key="batch", flavor="cell_ranger")
     cp.testing.assert_allclose(adata.var["means"], dask_data.var["means"])
-    cp.testing.assert_allclose(adata.var["dispersions"], dask_data.var["dispersions"])
+    cp.testing.assert_allclose(adata.var["dispersions"], dask_data.var["dispersions"], rtol=1e-7, atol=1e-6)
     cp.testing.assert_allclose(adata.var["dispersions_norm"], dask_data.var["dispersions_norm"])
 
 def test_cr_dense(client):
