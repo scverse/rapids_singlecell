@@ -59,35 +59,27 @@ def _mean_var_minor_dask(X, major, minor, client=None):
     get_mean_var_minor.compile()
 
     def __mean_var(X_part, minor, major):
-        mean = cp.zeros((minor, 1), dtype=cp.float64)
-        var = cp.zeros((minor, 1), dtype=cp.float64)
+        mean = cp.zeros((minor, ), dtype=cp.float64)
+        var = cp.zeros((minor, ), dtype=cp.float64)
         block = (32,)
         grid = (int(math.ceil(X_part.nnz / block[0])),)
         get_mean_var_minor(
             grid, block, (X_part.indices, X_part.data, mean, var, major, X_part.nnz)
         )
-        return mean, var
+        return cp.concatenate([mean, var], axis=1)
 
-    parts = client.sync(_extract_partitions, X)
-    futures = [
-        client.submit(__mean_var, part, minor, major, workers=[w]) for w, part in parts
+
+    blocks = x.to_delayed().ravel()
+    mean_var_blocks = [
+        dask.array.from_delayed(
+            __mean_var(block, major, minor),
+            shape=(x.shape[0], 2),
+            dtype=x.dtype,
+            meta=cp.array([]),
+        )
+        for block in blocks
     ]
-    # Gather results from futures
-    results = client.gather(futures)
-
-    # Initialize lists to hold the Dask arrays
-    means_objs = []
-    var_objs = []
-
-    # Process each result
-    for means, vars in results:
-        # Append the arrays to their respective lists as Dask arrays
-        means_objs.append(da.from_array(means, chunks=means.shape))
-        var_objs.append(da.from_array(vars, chunks=vars.shape))
-    mean = da.concatenate(means_objs, axis=1).sum(axis=1)
-    var = da.concatenate(var_objs, axis=1).sum(axis=1)
-    mean, var = da.compute(mean, var)
-    mean, var = mean.ravel(), var.ravel()
+    mean, var = da.array.stack(mean_var_blocks).compute()
     var = (var - mean**2) * (major / (major - 1))
     return mean, var
 
