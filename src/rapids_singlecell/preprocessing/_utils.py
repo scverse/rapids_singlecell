@@ -54,8 +54,6 @@ def _mean_var_minor_dask(X, major, minor, client=None):
         _get_mean_var_minor,
     )
 
-    client = _get_dask_client(client)
-
     get_mean_var_minor = _get_mean_var_minor(X.dtype)
     get_mean_var_minor.compile()
 
@@ -98,11 +96,10 @@ def _mean_var_major_dask(X, major, minor, client=None):
         _get_mean_var_major,
     )
 
-    client = _get_dask_client(client)
-
     get_mean_var_major = _get_mean_var_major(X.dtype)
     get_mean_var_major.compile()
 
+    @dask.delayed
     def __mean_var(X_part, minor, major):
         mean = cp.zeros(X_part.shape[0], dtype=cp.float64)
         var = cp.zeros(X_part.shape[0], dtype=cp.float64)
@@ -123,26 +120,19 @@ def _mean_var_major_dask(X, major, minor, client=None):
         )
         return mean, var
 
-    parts = client.sync(_extract_partitions, X)
-    futures = [
-        client.submit(__mean_var, part, minor, major, workers=[w]) for w, part in parts
+    blocks = X.to_delayed().ravel()
+    mean_var_blocks = [
+        da.from_delayed(
+            __mean_var(block, minor, major),
+            shape=(2, X.chunks[0][ind]),
+            dtype=X.dtype,
+            meta=cp.array([]),
+        )
+        for ind, block in enumerate(blocks)
     ]
-    # Gather results from futures
-    results = client.gather(futures)
 
-    # Initialize lists to hold the Dask arrays
-    means_objs = []
-    var_objs = []
+    mean, var = da.hstack(mean_var_blocks).compute()
 
-    # Process each result
-    for means, vars_ in results:
-        # Append the arrays to their respective lists as Dask arrays
-        means_objs.append(da.from_array(means, chunks=means.shape))
-        var_objs.append(da.from_array(vars_, chunks=vars_.shape))
-    mean = da.concatenate(means_objs)
-    var = da.concatenate(var_objs)
-    mean, var = da.compute(mean, var)
-    mean, var = mean.ravel(), var.ravel()
     mean = mean / minor
     var = var / minor
     var -= cp.power(mean, 2)
