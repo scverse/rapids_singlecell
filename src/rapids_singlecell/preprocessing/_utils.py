@@ -70,7 +70,7 @@ def _mean_var_minor_dask(X, major, minor, client=None):
 
     blocks = X.to_delayed().ravel()
     mean_var_blocks = [
-        dask.array.from_delayed(
+        da.from_delayed(
             __mean_var(block, major, minor),
             shape=(X.shape[0], 2),
             dtype=X.dtype,
@@ -78,7 +78,7 @@ def _mean_var_minor_dask(X, major, minor, client=None):
         )
         for block in blocks
     ]
-    mean, var = da.array.stack(mean_var_blocks).compute()
+    mean, var = da.stack(mean_var_blocks).compute()
     var = (var - mean**2) * (major / (major - 1))
     return mean, var
 
