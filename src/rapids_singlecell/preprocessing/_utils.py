@@ -81,6 +81,7 @@ def _mean_var_minor_dask(X, major, minor, client=None):
         for block in blocks
     ]
     mean, var = da.stack(mean_var_blocks, axis=1).compute()
+    mean, var = mean.ravel(), var.ravel()
     var = (var - mean**2) * (major / (major - 1))
     return mean, var
 
