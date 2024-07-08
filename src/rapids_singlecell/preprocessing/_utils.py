@@ -59,15 +59,14 @@ def _mean_var_minor_dask(X, major, minor, client=None):
     get_mean_var_minor.compile()
 
     def __mean_var(X_part, minor, major):
-        mean = cp.zeros((minor, ), dtype=cp.float64)
-        var = cp.zeros((minor, ), dtype=cp.float64)
+        mean = cp.zeros((minor,), dtype=cp.float64)
+        var = cp.zeros((minor,), dtype=cp.float64)
         block = (32,)
         grid = (int(math.ceil(X_part.nnz / block[0])),)
         get_mean_var_minor(
             grid, block, (X_part.indices, X_part.data, mean, var, major, X_part.nnz)
         )
         return cp.concatenate([mean, var], axis=1)
-
 
     blocks = x.to_delayed().ravel()
     mean_var_blocks = [
