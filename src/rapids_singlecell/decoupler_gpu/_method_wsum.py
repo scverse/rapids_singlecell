@@ -4,15 +4,17 @@ import cupy as cp
 import numpy as np
 import pandas as pd
 from anndata import AnnData
-from decoupler.pre import extract, filt_min_n, get_net_mat, match, rename_net
+from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
+from decoupler.pre import filt_min_n, get_net_mat, rename_net
 from scipy.sparse import csr_matrix
-from tqdm import tqdm
+from tqdm.notebook import tqdm
+
+from rapids_singlecell.preprocessing._utils import _sparse_to_dense
+
+from ._pre import extract, match
 
 
 def run_perm(mat, net, idxs, times, seed):
-    mat = cp.array(mat)
-    mat = cp.ascontiguousarray(mat)
-    net = cp.array(net)
     estimate = mat.dot(net)
     cp.random.seed(seed)
     # Init null distribution
@@ -60,31 +62,50 @@ def wsum(mat, net, times, batch_size, seed, verbose, pre_load):
         idxs = cp.arange(n_features, dtype=np.int64)
     else:
         norm, corr, pvals = None, None, None
-
+    net = cp.array(net)
     if isinstance(mat, csr_matrix):
         n_batches = int(np.ceil(n_samples / batch_size))
-        for i in tqdm(range(n_batches), disable=not verbose):
-            # Subset batch
-            srt, end = i * batch_size, i * batch_size + batch_size
-            tmp = mat[srt:end].toarray()
+        if pre_load:
+            mat = cp_csr_matrix(mat)
+            for i in tqdm(range(n_batches), disable=not verbose):
+                # Subset batch
+                srt, end = i * batch_size, i * batch_size + batch_size
+                tmp = _sparse_to_dense(mat[srt:end])
+                # Run WSUM
+                if times > 1:
+                    (
+                        estimate[srt:end],
+                        norm[srt:end],
+                        corr[srt:end],
+                        pvals[srt:end],
+                    ) = run_perm(tmp, net, idxs, times, seed)
+                else:
+                    estimate[srt:end] = tmp.dot(net)
+        else:
+            for i in tqdm(range(n_batches), disable=not verbose):
+                # Subset batch
+                srt, end = i * batch_size, i * batch_size + batch_size
+                tmp = cp.array(mat[srt:end].toarray())
 
-            # Run WSUM
+                # Run WSUM
 
-            if times > 1:
-                (
-                    estimate[srt:end],
-                    norm[srt:end],
-                    corr[srt:end],
-                    pvals[srt:end],
-                ) = run_perm(tmp, net, idxs, times, seed)
-            else:
-                estimate[srt:end] = tmp.dot(net)
+                if times > 1:
+                    (
+                        estimate[srt:end],
+                        norm[srt:end],
+                        corr[srt:end],
+                        pvals[srt:end],
+                    ) = run_perm(tmp, net, idxs, times, seed)
+                else:
+                    estimate[srt:end] = tmp.dot(net)
     else:
         estimate = mat.dot(net)
         if times > 1:
-            estimate, norm, corr, pvals = run_perm(mat, net, idxs, times, seed)
+            estimate, norm, corr, pvals = run_perm(
+                cp.array(mat, order="C"), net, idxs, times, seed
+            )
         else:
-            estimate = mat.dot(net)
+            estimate = cp.array(mat).dot(net)
 
     return estimate, norm, corr, pvals
 

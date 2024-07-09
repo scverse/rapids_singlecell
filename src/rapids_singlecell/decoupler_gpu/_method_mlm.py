@@ -6,12 +6,14 @@ import pandas as pd
 from anndata import AnnData
 from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
 from cupyx.scipy.special import betainc
-from decoupler.pre import extract, filt_min_n, get_net_mat, match, rename_net
+from decoupler.pre import filt_min_n, get_net_mat, rename_net
 from scipy import stats
 from scipy.sparse import csr_matrix
-from tqdm import tqdm
+from tqdm.notebook import tqdm
 
 from rapids_singlecell.preprocessing._utils import _sparse_to_dense
+
+from ._pre import extract, match
 
 
 def fit_mlm(X, y, inv, df):
@@ -142,15 +144,12 @@ def run_mlm(
     """
     # Extract sparse matrix and array of genes
     m, r, c = extract(mat, use_raw=use_raw, verbose=verbose)
-
     # Transform net
     net = rename_net(net, source=source, target=target, weight=weight)
     net = filt_min_n(c, net, min_n=min_n)
     sources, targets, net = get_net_mat(net)
-
     # Match arrays
     net = match(c, targets, net)
-
     if verbose:
         print(
             f"Running mlm on mat with {m.shape[0]} samples and {len(c)} targets for {net.shape[1]} sources."
