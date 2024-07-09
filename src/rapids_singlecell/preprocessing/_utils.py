@@ -118,7 +118,7 @@ def _mean_var_major_dask(X, major, minor, client=None):
                 minor,
             ),
         )
-        return mean, var
+        return cp.vstack([mean, var])
 
     blocks = X.to_delayed().ravel()
     mean_var_blocks = [
