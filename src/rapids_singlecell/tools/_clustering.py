@@ -251,10 +251,12 @@ def louvain(
 
     g = _create_graph(adjacency, use_weights)
 
+    # Cluster
     louvain_parts, _ = culouvain(
         g,
         resolution=resolution,
-        max_iter=n_iterations,
+        max_level=n_iterations,
+        threshold=threshold,
     )
 
     # Format output
