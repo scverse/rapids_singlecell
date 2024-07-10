@@ -5,13 +5,12 @@ import numpy as np
 import pandas as pd
 from anndata import AnnData
 from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
-from decoupler.pre import filt_min_n, get_net_mat, rename_net
 from scipy.sparse import csr_matrix
 from tqdm.notebook import tqdm
 
 from rapids_singlecell.preprocessing._utils import _sparse_to_dense
 
-from ._pre import extract, match
+from ._pre import extract, filt_min_n, get_net_mat, match, rename_net
 
 
 def run_perm(mat, net, idxs, times, seed):
@@ -48,7 +47,7 @@ def run_perm(mat, net, idxs, times, seed):
     return estimate_return, norm_return, corr_return, pvals_return
 
 
-def wsum(mat, net, times, batch_size, seed, verbose, pre_load):
+def wsum(mat, net, times, batch_size, seed, verbose):
     # Get dims
     n_samples = mat.shape[0]
     n_features, n_fsets = net.shape
@@ -63,46 +62,30 @@ def wsum(mat, net, times, batch_size, seed, verbose, pre_load):
     else:
         norm, corr, pvals = None, None, None
     net = cp.array(net)
-    if isinstance(mat, csr_matrix):
+    if isinstance(mat, csr_matrix) or isinstance(mat, cp_csr_matrix):
         n_batches = int(np.ceil(n_samples / batch_size))
-        if pre_load:
-            mat = cp_csr_matrix(mat)
-            for i in tqdm(range(n_batches), disable=not verbose):
-                # Subset batch
-                srt, end = i * batch_size, i * batch_size + batch_size
-                tmp = _sparse_to_dense(mat[srt:end])
-                # Run WSUM
-                if times > 1:
-                    (
-                        estimate[srt:end],
-                        norm[srt:end],
-                        corr[srt:end],
-                        pvals[srt:end],
-                    ) = run_perm(tmp, net, idxs, times, seed)
-                else:
-                    estimate[srt:end] = tmp.dot(net)
-        else:
-            for i in tqdm(range(n_batches), disable=not verbose):
-                # Subset batch
-                srt, end = i * batch_size, i * batch_size + batch_size
+        for i in tqdm(range(n_batches), disable=not verbose):
+            # Subset batch
+            srt, end = i * batch_size, i * batch_size + batch_size
+            if isinstance(mat, csr_matrix):
                 tmp = cp.array(mat[srt:end].toarray())
-
-                # Run WSUM
-
-                if times > 1:
-                    (
-                        estimate[srt:end],
-                        norm[srt:end],
-                        corr[srt:end],
-                        pvals[srt:end],
-                    ) = run_perm(tmp, net, idxs, times, seed)
-                else:
-                    estimate[srt:end] = tmp.dot(net)
+            else:
+                tmp = _sparse_to_dense(mat[srt:end])
+            # Run WSUM
+            if times > 1:
+                (
+                    estimate[srt:end],
+                    norm[srt:end],
+                    corr[srt:end],
+                    pvals[srt:end],
+                ) = run_perm(tmp, net, idxs, times, seed)
+            else:
+                estimate[srt:end] = tmp.dot(net)
     else:
         estimate = mat.dot(net)
         if times > 1:
             estimate, norm, corr, pvals = run_perm(
-                cp.array(mat, order="C"), net, idxs, times, seed
+                cp.ascontiguousarray(mat), net, idxs, times, seed
             )
         else:
             estimate = cp.array(mat).dot(net)
@@ -173,7 +156,7 @@ def run_wsum(
                 Obtained p-values. Stored in `.obsm['wsum_pvals']` if `mat` is AnnData.
     """
     # Extract sparse matrix and array of genes
-    m, r, c = extract(mat, use_raw=use_raw, verbose=verbose)
+    m, r, c = extract(mat, use_raw=use_raw, verbose=verbose, pre_load=pre_load)
     # Transform net
     net = rename_net(net, source=source, target=target, weight=weight)
     net = filt_min_n(c, net, min_n=min_n)
@@ -188,9 +171,7 @@ def run_wsum(
         )
 
     # Run WSUM
-    estimate, norm, corr, pvals = wsum(
-        m, net, times, batch_size, seed, verbose, pre_load
-    )
+    estimate, norm, corr, pvals = wsum(m, net, times, batch_size, seed, verbose)
 
     # Transform to df
     estimate = pd.DataFrame(estimate, index=r, columns=sources)

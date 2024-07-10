@@ -4,16 +4,15 @@ import cupy as cp
 import numpy as np
 import pandas as pd
 from anndata import AnnData
-from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
+from cupyx.scipy.sparse import issparse as cp_issparse
 from cupyx.scipy.special import betainc
-from decoupler.pre import filt_min_n, get_net_mat, rename_net
 from scipy import stats
-from scipy.sparse import csr_matrix
+from scipy.sparse import issparse
 from tqdm.notebook import tqdm
 
 from rapids_singlecell.preprocessing._utils import _sparse_to_dense
 
-from ._pre import extract, match
+from ._pre import extract, filt_min_n, get_net_mat, match, rename_net
 
 
 def fit_mlm(X, y, inv, df):
@@ -42,7 +41,7 @@ def __stdtr(df, t):
     return cp.where(t < 0, tail, 1 - tail)
 
 
-def mlm(mat, net, batch_size=10000, verbose=False, pre_load=False):
+def mlm(mat, net, batch_size=10000, verbose=False):
     # Get number of batches
     n_samples = mat.shape[0]
     n_features, n_fsets = net.shape
@@ -55,31 +54,22 @@ def mlm(mat, net, batch_size=10000, verbose=False, pre_load=False):
     inv = cp.linalg.inv(cp.dot(net.T, net))
     df = n_features - n_fsets - 1
 
-    if isinstance(mat, csr_matrix):
+    if issparse(mat) or cp_issparse(mat):
         # Init empty acts
         n_batches = int(np.ceil(n_samples / batch_size))
-
-        if pre_load:
-            es = cp.zeros((n_samples, n_fsets), dtype=np.float32)
-            mat = cp_csr_matrix(mat)
-            for i in tqdm(range(n_batches), disable=not verbose):
-                srt, end = i * batch_size, i * batch_size + batch_size
+        es = cp.zeros((n_samples, n_fsets), dtype=np.float32)
+        for i in tqdm(range(n_batches), disable=not verbose):
+            srt, end = i * batch_size, i * batch_size + batch_size
+            if cp_issparse(mat):
                 y = _sparse_to_dense(mat[srt:end]).T
-
-                # Compute MLM for batch
-                es[srt:end] = fit_mlm(net, y, inv, df)[:, 1:]
-        else:
-            es = np.zeros((n_samples, n_fsets), dtype=np.float32)
-            for i in tqdm(range(n_batches), disable=not verbose):
-                # Subset batch
-                srt, end = i * batch_size, i * batch_size + batch_size
+            else:
                 y = mat[srt:end].toarray().T
+            # Compute MLM for batch
+            es[srt:end] = fit_mlm(net, y, inv, df)[:, 1:]
 
-                # Compute MLM for batch
-                es[srt:end] = fit_mlm(net, cp.array(y), inv, df)[:, 1:].get()
     else:
         # Compute MLM for all
-        es = fit_mlm(net, cp.array(mat.T), inv, df)[:, 1:]
+        es = fit_mlm(net, mat.T, inv, df)[:, 1:]
 
     # Get p-values
     if isinstance(es, cp.ndarray):
@@ -143,7 +133,7 @@ def run_mlm(
                 Obtained p-values. Stored in `.obsm['mlm_pvals']` if `mat` is AnnData.
     """
     # Extract sparse matrix and array of genes
-    m, r, c = extract(mat, use_raw=use_raw, verbose=verbose)
+    m, r, c = extract(mat, use_raw=use_raw, verbose=verbose, pre_load=pre_load)
     # Transform net
     net = rename_net(net, source=source, target=target, weight=weight)
     net = filt_min_n(c, net, min_n=min_n)
@@ -156,9 +146,7 @@ def run_mlm(
         )
 
     # Run MLM
-    estimate, pvals = mlm(
-        m, net, batch_size=batch_size, verbose=verbose, pre_load=pre_load
-    )
+    estimate, pvals = mlm(m, net, batch_size=batch_size, verbose=verbose)
 
     # Transform to df
     estimate = pd.DataFrame(estimate, index=r, columns=sources)
