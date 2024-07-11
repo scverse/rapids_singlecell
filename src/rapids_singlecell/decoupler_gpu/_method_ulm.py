@@ -86,21 +86,21 @@ def run_ulm(
 
     Parameters
     ----------
-    mat : list, DataFrame or AnnData
+    mat
         List of [features, matrix], dataframe (samples x features) or an AnnData instance.
-    net : DataFrame
+    net
         Network in long format.
-    source : str
+    source
         Column name in net with source nodes.
-    target : str
+    target
         Column name in net with target nodes.
-    weight : str
+    weight
         Column name in net with weights.
-    batch_size : int
+    batch_size
         Size of the samples to use for each batch. Increasing this will consume more memory but it will run faster.
-    min_n : int
+    min_n
         Minimum of targets per source. If less, sources are removed.
-    verbose : bool
+    verbose
         Whether to show progress.
     use_raw
         Use raw attribute of mat.
