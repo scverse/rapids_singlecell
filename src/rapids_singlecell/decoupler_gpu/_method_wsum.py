@@ -146,6 +146,8 @@ def run_wsum(
             Whether to show progress.
         use_raw
             Use raw attribute of mat.
+        layer
+            Layer to use in AnnData object.
         pre_load
             Whether to pre-load the data into memory. This can be faster for small datasets.
 
