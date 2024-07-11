@@ -9,7 +9,7 @@ from rapids_singlecell.decoupler_gpu._method_ulm import ulm, mat_cov, mat_cor, t
 from scipy.sparse import csr_matrix
 from numpy.testing import assert_almost_equal
 
-# Test run_ulm
+# Test run_mlm
 def test_mlm():
     m = csr_matrix(np.array([[7., 1., 1., 1.], [4., 2., 1., 2.], [1., 2., 5., 1.], [1., 1., 6., 2.]], dtype=np.float32))
     net = np.array([[1., 0.], [2, 0.], [0., -3.], [0., 4.]], dtype=np.float32)
