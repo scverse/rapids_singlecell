@@ -55,7 +55,7 @@ def mlm(mat, net, batch_size=10000, verbose=False):
             if cp_issparse(mat):
                 y = _sparse_to_dense(mat[srt:end]).T
             else:
-                y = mat[srt:end].toarray().T
+                y = cp.array(mat[srt:end].toarray()).T
             # Compute MLM for batch
             es[srt:end] = fit_mlm(net, y, inv, df)[:, 1:]
 
