@@ -5,14 +5,12 @@ import numpy as np
 import pandas as pd
 from anndata import AnnData
 from cupyx.scipy.sparse import issparse as cp_issparse
-from cupyx.scipy.special import betainc
-from scipy import stats
 from scipy.sparse import issparse
 from tqdm.notebook import tqdm
 
 from rapids_singlecell.preprocessing._utils import _sparse_to_dense
 
-from ._pre import extract, filt_min_n, get_net_mat, match, rename_net
+from ._pre import __stdtr, extract, filt_min_n, get_net_mat, match, rename_net
 
 
 def fit_mlm(X, y, inv, df):
@@ -33,12 +31,6 @@ def fit_mlm(X, y, inv, df):
     se = cp.sqrt(sse * inv)
     t = coef.T / se
     return t.astype(np.float32)
-
-
-def __stdtr(df, t):
-    x = df / (t**2 + df)
-    tail = betainc(df / 2, 0.5, x) / 2
-    return cp.where(t < 0, tail, 1 - tail)
 
 
 def mlm(mat, net, batch_size=10000, verbose=False):
@@ -72,11 +64,9 @@ def mlm(mat, net, batch_size=10000, verbose=False):
         es = fit_mlm(net, mat.T, inv, df)[:, 1:]
 
     # Get p-values
-    if isinstance(es, cp.ndarray):
-        pvals = (2 * (1 - __stdtr(df, cp.abs(es)))).get()
-        es = es.get()
-    else:
-        pvals = 2 * (1 - stats.t.cdf(np.abs(es), df))
+
+    pvals = (2 * (1 - __stdtr(df, cp.abs(es)))).get()
+    es = es.get()
 
     return es, pvals
 
