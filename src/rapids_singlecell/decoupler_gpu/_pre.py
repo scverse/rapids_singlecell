@@ -8,6 +8,7 @@ import pandas as pd
 from anndata import AnnData
 from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
 from cupyx.scipy.sparse import issparse as cp_issparse
+from scanpy.get import _get_obs_rep
 from scipy.sparse import csr_matrix, issparse
 
 getnnz_0 = cp.ElementwiseKernel(
@@ -18,6 +19,19 @@ getnnz_0 = cp.ElementwiseKernel(
                 """,
     "get_nnz_0",
 )
+
+
+def _check_use_raw(adata: AnnData, use_raw: None | bool, layer: str | None) -> bool:
+    """
+    Normalize checking `use_raw`.
+
+    My intentention here is to also provide a single place to throw a deprecation warning from in future.
+    """
+    if use_raw is not None:
+        return use_raw
+    if layer is not None:
+        return False
+    return adata.raw is not None
 
 
 def check_mat(m, r, c, verbose=False):
@@ -87,7 +101,9 @@ def check_mat(m, r, c, verbose=False):
     return m, r, c
 
 
-def extract(mat, use_raw=True, verbose=False, dtype=np.float32, pre_load=False):
+def extract(
+    mat, *, use_raw=None, layer=None, verbose=False, dtype=np.float32, pre_load=False
+):
     """
     Processes different input types so that they can be used downstream.
 
@@ -120,14 +136,13 @@ def extract(mat, use_raw=True, verbose=False, dtype=np.float32, pre_load=False):
         r = mat.index.values.astype("U")
         c = mat.columns.values.astype("U")
     elif type(mat) is AnnData:
-        if use_raw:
-            if mat.raw is None:
-                raise ValueError("Received `use_raw=True`, but `mat.raw` is empty.")
-            m = mat.raw.X.astype(dtype)
-            c = mat.raw.var.index.values.astype("U")
-        else:
-            m = mat.X.astype(dtype)
-            c = mat.var.index.values.astype("U")
+        use_raw = _check_use_raw(mat, use_raw, layer)
+        m = _get_obs_rep(mat, layer=layer, use_raw=use_raw)
+        c = (
+            mat.raw.var.index.values.astype("U")
+            if use_raw
+            else mat.var.index.values.astype("U")
+        )
         r = mat.obs.index.values.astype("U")
 
     else:

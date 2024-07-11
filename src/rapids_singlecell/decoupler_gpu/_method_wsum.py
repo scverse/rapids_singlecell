@@ -105,7 +105,8 @@ def run_wsum(
     min_n: int = 5,
     seed: int = 42,
     verbose: bool = False,
-    use_raw: bool = True,
+    use_raw: bool | None = None,
+    layer: str | None = None,
     pre_load: bool | None = False,
 ) -> tuple | None:
     """
@@ -138,7 +139,7 @@ def run_wsum(
         verbose
             Whether to show progress.
         use_raw
-            Use raw attribute of mat if present.
+            Use raw attribute of mat.
         pre_load
             Whether to pre-load the data into memory. This can be faster for small datasets.
 
@@ -156,7 +157,9 @@ def run_wsum(
                 Obtained p-values. Stored in `.obsm['wsum_pvals']` if `mat` is AnnData.
     """
     # Extract sparse matrix and array of genes
-    m, r, c = extract(mat, use_raw=use_raw, verbose=verbose, pre_load=pre_load)
+    m, r, c = extract(
+        mat, use_raw=use_raw, layer=layer, verbose=verbose, pre_load=pre_load
+    )
     # Transform net
     net = rename_net(net, source=source, target=target, weight=weight)
     net = filt_min_n(c, net, min_n=min_n)
