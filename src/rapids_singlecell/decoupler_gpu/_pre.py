@@ -15,8 +15,8 @@ getnnz_0 = cp.ElementwiseKernel(
     "int32 idx",
     "raw int32 sum",
     """
-                atomicAdd(&sum[idx], 1);
-                """,
+    atomicAdd(&sum[idx], 1);
+    """,
     "get_nnz_0",
 )
 
