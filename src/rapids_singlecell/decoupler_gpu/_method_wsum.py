@@ -17,14 +17,17 @@ def run_perm(mat, net, idxs, times, seed):
     estimate = mat.dot(net)
     cp.random.seed(seed)
     # Init null distribution
-    null_dst = cp.zeros((mat.shape[0], net.shape[1], times), dtype=np.float32)
     pvals = cp.zeros((mat.shape[0], net.shape[1]), dtype=np.float32)
-
+    abs_estimate = cp.abs(estimate)
+    sum_permuted = cp.zeros((mat.shape[0], net.shape[1]), dtype=cp.float32)
+    sum_squares_permuted = cp.zeros((mat.shape[0], net.shape[1]), dtype=cp.float32)
     # Permute
     for i in range(times):
         cp.random.shuffle(idxs)
-        null_dst[:, :, i] = mat.dot(net[idxs])
-        pvals += cp.abs(null_dst[:, :, i]) > cp.abs(estimate)
+        permuted = mat.dot(net[idxs])
+        pvals += cp.abs(permuted) > abs_estimate
+        sum_permuted += permuted
+        sum_squares_permuted += permuted**2
 
     # Compute empirical p-value
     pvals = cp.where(pvals == 0.0, 1.0, pvals).astype(np.float32)
@@ -34,8 +37,12 @@ def run_perm(mat, net, idxs, times, seed):
     pvals = pvals * 2
 
     # Compute z-score
-    norm = (estimate - null_dst.mean(axis=2)) / null_dst.std(ddof=1, axis=2)
-
+    mean_permuted = sum_permuted / times
+    variance_permuted = (sum_squares_permuted / times) - (mean_permuted**2) * times / (
+        times - 1
+    )
+    std_permuted = cp.sqrt(variance_permuted)
+    norm = (estimate - mean_permuted) / std_permuted
     # Compute corr score
     corr = (estimate * -cp.log10(pvals)).astype(np.float32)
 
@@ -43,7 +50,6 @@ def run_perm(mat, net, idxs, times, seed):
     norm_return = norm.get()
     corr_return = corr.get()
     pvals_return = pvals.get()
-    del estimate, norm, corr, pvals, mat, null_dst
     return estimate_return, norm_return, corr_return, pvals_return
 
 
