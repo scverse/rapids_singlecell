@@ -6,7 +6,7 @@ import pandas as pd
 from anndata import AnnData
 from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
 from scipy.sparse import csr_matrix
-from tqdm.notebook import tqdm
+from tqdm.auto import tqdm
 
 from rapids_singlecell.preprocessing._utils import _sparse_to_dense
 

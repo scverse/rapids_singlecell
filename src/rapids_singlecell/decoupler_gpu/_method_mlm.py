@@ -6,7 +6,7 @@ import pandas as pd
 from anndata import AnnData
 from cupyx.scipy.sparse import issparse as cp_issparse
 from scipy.sparse import issparse
-from tqdm.notebook import tqdm
+from tqdm.auto import tqdm
 
 from rapids_singlecell.preprocessing._utils import _sparse_to_dense
 
