@@ -39,8 +39,6 @@ doc = [
 ]
 test = [
     "pytest",
-    "omnipath",
-    "decoupler>=1.3.2",
     "profimp",
     "scanpy[test]>=1.10.0"
 ]
