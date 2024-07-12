@@ -64,6 +64,8 @@ def regress_out(
 
     _check_gpu_X(X)
 
+    if not sparse.issparse(X) and inplace is False:
+        X = cp.array(X)
     # Create regressors
     dim_regressor = 2
     if isinstance(keys, list):
@@ -90,19 +92,18 @@ def regress_out(
     # Do reggression
     if batchsize == "all":
         if sparse.issparse(X):
-            outputs = _sparse_to_dense(X, order="C")
+            X = _sparse_to_dense(X, order="C")
         else:
-            outputs = cp.ascontiguousarray(X)
+            X = cp.ascontiguousarray(X)
         inv_gram_matrix = cp.linalg.inv(regressors.T @ regressors)
-        coeff = inv_gram_matrix @ (regressors.T @ outputs)
-        outputs -= regressors @ coeff
+        coeff = inv_gram_matrix @ (regressors.T @ X)
+        X -= regressors @ coeff
 
     else:
         if sparse.issparse(X):
             X = _sparse_to_dense(X, order="F")
         else:
             X = cp.asfortranarray(X)
-        outputs = cp.empty(X.shape, dtype=X.dtype, order="F")
         n_batches = math.ceil(X.shape[1] / batchsize)
         for batch in range(n_batches):
             start_idx = batch * batchsize
@@ -113,10 +114,10 @@ def regress_out(
                 fit_intercept=False, output_type="cupy", algorithm="svd"
             )
             lr.fit(regressors, arr_batch, convert_dtype=True)
-            outputs[:, start_idx:stop_idx] = arr_batch - lr.predict(regressors)
-        outputs = cp.ascontiguousarray(outputs)
+            X[:, start_idx:stop_idx] = arr_batch - lr.predict(regressors)
 
+    X = cp.ascontiguousarray(X)
     if inplace:
-        _set_obs_rep(adata, outputs, layer=layer)
+        _set_obs_rep(adata, X, layer=layer)
     else:
-        return outputs
+        return X
