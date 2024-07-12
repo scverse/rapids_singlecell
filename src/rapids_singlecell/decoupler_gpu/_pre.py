@@ -140,8 +140,8 @@ def extract(
         c = np.array(c, dtype="U")
     elif isinstance(mat, pd.DataFrame) or isinstance(mat, cudf.DataFrame):
         m = mat.values.astype(dtype)
-        r = mat.index.values.astype("U")
-        c = mat.columns.values.astype("U")
+        r = mat.index.to_numpy(dtype="U")
+        c = mat.columns.to_numpy(dtype="U")
     elif type(mat) is AnnData:
         use_raw = _check_use_raw(mat, use_raw, layer)
         m = _get_obs_rep(mat, layer=layer, use_raw=use_raw)

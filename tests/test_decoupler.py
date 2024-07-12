@@ -1,11 +1,14 @@
 import cupy as cp
 import numpy as np
 import pandas as pd
+import cudf
 from anndata import AnnData
 from rapids_singlecell.dcg import run_mlm, run_wsum, run_ulm
 from rapids_singlecell.decoupler_gpu._method_mlm import mlm
 from rapids_singlecell.decoupler_gpu._method_wsum import wsum
 from rapids_singlecell.decoupler_gpu._method_ulm import ulm, mat_cov, mat_cor, t_val
+from rapids_singlecell.decoupler_gpu._pre import extract
+import pytest
 from scipy.sparse import csr_matrix
 from numpy.testing import assert_almost_equal
 
@@ -158,3 +161,23 @@ def test_t_val():
 
     t = t_val(r=-0.05, df=99)
     assert_almost_equal(-0.49811675, t)
+
+def test_extract():
+    m = np.array([[1, 0, 2], [1, 0, 3], [0, 0, 0]])
+    r = np.array(['S1', 'S2', 'S3'])
+    c = np.array(['G1', 'G2', 'G3'])
+    df = pd.DataFrame(m, index=r, columns=c)
+    cdf = cudf.DataFrame(m, index=r, columns=c)
+
+    adata = AnnData(df.astype(np.float32))
+    adata_raw = adata.copy()
+    adata_raw.raw = adata_raw
+    extract([m, r, c])
+    extract(df)
+    extract(cdf)
+    extract(adata, use_raw=False)
+    extract(adata_raw, use_raw=True)
+    with pytest.raises(ValueError):
+        extract('asdfg')
+    with pytest.raises(AttributeError):
+        extract(adata, use_raw=True)
