@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 
 import cupy as cp
-from cuml.dask.common.part_utils import _extract_partitions
 from cuml.internals.memory_utils import with_cupy_rmm
 from cupyx.scipy.sparse import issparse, isspmatrix_csc, isspmatrix_csr
 
@@ -146,8 +145,9 @@ def _mean_var_dense_dask(X, axis, client=None):
     """
     Implements sum operation for dask array when the backend is cupy sparse csr matrix
     """
-    import dask.array as da
     import dask
+    import dask.array as da
+
     client = _get_dask_client(client)
 
     # ToDo: get a 64bit version working without copying the data
@@ -159,6 +159,7 @@ def _mean_var_dense_dask(X, axis, client=None):
             mean = mean.reshape(-1, 1)
             var = var.reshape(-1, 1)
         return cp.vstack([mean.ravel(), var.ravel()])
+
     blocks = X.to_delayed().ravel()
     mean_var_blocks = [
         da.from_delayed(
