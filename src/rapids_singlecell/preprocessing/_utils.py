@@ -59,8 +59,8 @@ def _mean_var_minor_dask(X, major, minor, client=None):
 
     @dask.delayed
     def __mean_var(X_part, minor, major):
-        mean = cp.zeros((minor,), dtype=cp.float64)
-        var = cp.zeros((minor,), dtype=cp.float64)
+        mean = cp.zeros(minor, dtype=cp.float64)
+        var = cp.zeros(minor, dtype=cp.float64)
         block = (32,)
         grid = (int(math.ceil(X_part.nnz / block[0])),)
         get_mean_var_minor(
