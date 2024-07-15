@@ -38,7 +38,7 @@ def test_nzc_sparse(client):
     adata.X = cusparse.csr_matrix(adata.X)
     rsc.pp.scale(adata, zero_center = False, mask_obs = mask, max_value = 10)
     rsc.pp.scale(dask_data,zero_center = False, mask_obs = mask, max_value = 10)
-    cp.testing.assert_allclose(adata.X.toarray(), dask_data.X.compute().toarray(), rtol=1e-6, atol=1e-6)
+    cp.testing.assert_allclose(adata.X.toarray(), dask_data.X.compute().toarray())
 
 def test_zc_dense(client):
     adata = _get_anndata()
