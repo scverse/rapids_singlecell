@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 
 import cupy as cp
-from cuml.dask.common.part_utils import _extract_partitions
 from cuml.internals.memory_utils import with_cupy_rmm
 from cupyx.scipy.sparse import issparse, isspmatrix_csc, isspmatrix_csr
 
@@ -47,47 +46,39 @@ def _mean_var_minor_dask(X, major, minor, client=None):
     """
     Implements sum operation for dask array when the backend is cupy sparse csr matrix
     """
+    import dask
     import dask.array as da
 
     from rapids_singlecell.preprocessing._kernels._mean_var_kernel import (
         _get_mean_var_minor,
     )
 
-    client = _get_dask_client(client)
-
     get_mean_var_minor = _get_mean_var_minor(X.dtype)
     get_mean_var_minor.compile()
 
+    @dask.delayed
     def __mean_var(X_part, minor, major):
-        mean = cp.zeros((minor, 1), dtype=cp.float64)
-        var = cp.zeros((minor, 1), dtype=cp.float64)
+        mean = cp.zeros(minor, dtype=cp.float64)
+        var = cp.zeros(minor, dtype=cp.float64)
         block = (32,)
         grid = (int(math.ceil(X_part.nnz / block[0])),)
         get_mean_var_minor(
             grid, block, (X_part.indices, X_part.data, mean, var, major, X_part.nnz)
         )
-        return mean, var
+        return cp.vstack([mean, var])
 
-    parts = client.sync(_extract_partitions, X)
-    futures = [
-        client.submit(__mean_var, part, minor, major, workers=[w]) for w, part in parts
+    blocks = X.to_delayed().ravel()
+    mean_var_blocks = [
+        da.from_delayed(
+            __mean_var(block, minor, major),
+            shape=(2, minor),
+            dtype=cp.float64,
+            meta=cp.array([]),
+        )
+        for block in blocks
     ]
-    # Gather results from futures
-    results = client.gather(futures)
 
-    # Initialize lists to hold the Dask arrays
-    means_objs = []
-    var_objs = []
-
-    # Process each result
-    for means, vars in results:
-        # Append the arrays to their respective lists as Dask arrays
-        means_objs.append(da.from_array(means, chunks=means.shape))
-        var_objs.append(da.from_array(vars, chunks=vars.shape))
-    mean = da.concatenate(means_objs, axis=1).sum(axis=1)
-    var = da.concatenate(var_objs, axis=1).sum(axis=1)
-    mean, var = da.compute(mean, var)
-    mean, var = mean.ravel(), var.ravel()
+    mean, var = da.stack(mean_var_blocks, axis=1).sum(axis=1).compute()
     var = (var - mean**2) * (major / (major - 1))
     return mean, var
 
@@ -98,17 +89,17 @@ def _mean_var_major_dask(X, major, minor, client=None):
     """
     Implements sum operation for dask array when the backend is cupy sparse csr matrix
     """
+    import dask
     import dask.array as da
 
     from rapids_singlecell.preprocessing._kernels._mean_var_kernel import (
         _get_mean_var_major,
     )
 
-    client = _get_dask_client(client)
-
     get_mean_var_major = _get_mean_var_major(X.dtype)
     get_mean_var_major.compile()
 
+    @dask.delayed
     def __mean_var(X_part, minor, major):
         mean = cp.zeros(X_part.shape[0], dtype=cp.float64)
         var = cp.zeros(X_part.shape[0], dtype=cp.float64)
@@ -127,28 +118,21 @@ def _mean_var_major_dask(X, major, minor, client=None):
                 minor,
             ),
         )
-        return mean, var
+        return cp.vstack([mean, var])
 
-    parts = client.sync(_extract_partitions, X)
-    futures = [
-        client.submit(__mean_var, part, minor, major, workers=[w]) for w, part in parts
+    blocks = X.to_delayed().ravel()
+    mean_var_blocks = [
+        da.from_delayed(
+            __mean_var(block, minor, major),
+            shape=(2, X.chunks[0][ind]),
+            dtype=cp.float64,
+            meta=cp.array([]),
+        )
+        for ind, block in enumerate(blocks)
     ]
-    # Gather results from futures
-    results = client.gather(futures)
 
-    # Initialize lists to hold the Dask arrays
-    means_objs = []
-    var_objs = []
+    mean, var = da.hstack(mean_var_blocks).compute()
 
-    # Process each result
-    for means, vars_ in results:
-        # Append the arrays to their respective lists as Dask arrays
-        means_objs.append(da.from_array(means, chunks=means.shape))
-        var_objs.append(da.from_array(vars_, chunks=vars_.shape))
-    mean = da.concatenate(means_objs)
-    var = da.concatenate(var_objs)
-    mean, var = da.compute(mean, var)
-    mean, var = mean.ravel(), var.ravel()
     mean = mean / minor
     var = var / minor
     var -= cp.power(mean, 2)
@@ -161,42 +145,36 @@ def _mean_var_dense_dask(X, axis, client=None):
     """
     Implements sum operation for dask array when the backend is cupy sparse csr matrix
     """
+    import dask
     import dask.array as da
 
     client = _get_dask_client(client)
 
     # ToDo: get a 64bit version working without copying the data
+    @dask.delayed
     def __mean_var(X_part, axis):
         mean = X_part.sum(axis=axis)
         var = (X_part**2).sum(axis=axis)
         if axis == 0:
             mean = mean.reshape(-1, 1)
             var = var.reshape(-1, 1)
-        return mean, var
+        return cp.vstack([mean.ravel(), var.ravel()])
 
-    parts = client.sync(_extract_partitions, X)
-    futures = [client.submit(__mean_var, part, axis, workers=[w]) for w, part in parts]
-    # Gather results from futures
-    results = client.gather(futures)
-
-    # Initialize lists to hold the Dask arrays
-    means_objs = []
-    var_objs = []
-
-    # Process each result
-    for means, vars_ in results:
-        # Append the arrays to their respective lists as Dask arrays
-        means_objs.append(da.from_array(means, chunks=means.shape))
-        var_objs.append(da.from_array(vars_, chunks=vars_.shape))
+    blocks = X.to_delayed().ravel()
+    mean_var_blocks = [
+        da.from_delayed(
+            __mean_var(block, axis=axis),
+            shape=(2, X.chunks[0][ind]) if axis else (2, X.shape[1]),
+            dtype=cp.float64,
+            meta=cp.array([]),
+        )
+        for ind, block in enumerate(blocks)
+    ]
     if axis == 0:
-        mean = da.concatenate(means_objs, axis=1).sum(axis=1)
-        var = da.concatenate(var_objs, axis=1).sum(axis=1)
+        mean, var = da.stack(mean_var_blocks, axis=1).sum(axis=1).compute()
     else:
-        mean = da.concatenate(means_objs)
-        var = da.concatenate(var_objs)
+        mean, var = da.hstack(mean_var_blocks).compute()
 
-    mean, var = da.compute(mean, var)
-    mean, var = mean.ravel(), var.ravel()
     mean = mean / X.shape[axis]
     var = var / X.shape[axis]
     var -= cp.power(mean, 2)
