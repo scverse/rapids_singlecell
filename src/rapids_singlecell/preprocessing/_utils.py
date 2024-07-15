@@ -73,13 +73,13 @@ def _mean_var_minor_dask(X, major, minor, client=None):
         da.from_delayed(
             __mean_var(block, minor, major),
             shape=(2, minor),
-            dtype=X.dtype,
+            dtype=cp.float64,
             meta=cp.array([]),
         )
         for block in blocks
     ]
 
-    mean, var = da.stack(mean_var_blocks, axis=1).sum(axis=1).compute()
+    mean, var = da.stack(mean_var_blocks, axis=1).sum(axis=1, dtype=cp.float64).compute()
     var = (var - mean**2) * (major / (major - 1))
     return mean, var
 
@@ -125,7 +125,7 @@ def _mean_var_major_dask(X, major, minor, client=None):
         da.from_delayed(
             __mean_var(block, minor, major),
             shape=(2, X.chunks[0][ind]),
-            dtype=X.dtype,
+            dtype=cp.float64,
             meta=cp.array([]),
         )
         for ind, block in enumerate(blocks)
