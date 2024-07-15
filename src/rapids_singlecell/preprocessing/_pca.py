@@ -151,7 +151,7 @@ def pca(
         elif isinstance(X._meta, csr_matrix):
             from ._sparse_pca._dask_sparse_pca import PCA_sparse_dask
 
-            pca_func = PCA_sparse_dask(n_components=n_comps, client=client)
+            pca_func = PCA_sparse_dask(n_components=n_comps)
             pca_func = pca_func.fit(X)
             X_pca = pca_func.transform(X)
 

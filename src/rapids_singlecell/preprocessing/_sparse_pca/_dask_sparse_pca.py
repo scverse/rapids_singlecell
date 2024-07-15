@@ -7,16 +7,14 @@ import dask
 from cuml.internals.memory_utils import with_cupy_rmm
 
 from rapids_singlecell._compat import (
-    _get_dask_client,
     _meta_dense,
 )
 from rapids_singlecell.preprocessing._utils import _get_mean_var
 
 
 class PCA_sparse_dask:
-    def __init__(self, n_components, client) -> None:
+    def __init__(self, n_components) -> None:
         self.n_components = n_components
-        self.client = _get_dask_client(client)
 
     def fit(self, x):
         if self.n_components is None:
@@ -29,7 +27,7 @@ class PCA_sparse_dask:
         self.n_samples_ = x.shape[0]
         self.n_features_in_ = x.shape[1] if x.ndim == 2 else 1
         self.dtype = x.dtype
-        covariance, self.mean_, _ = _cov_sparse_dask(self.client, x=x, return_mean=True)
+        covariance, self.mean_, _ = _cov_sparse_dask(x=x, return_mean=True)
         self.explained_variance_, self.components_ = cp.linalg.eigh(
             covariance, UPLO="U"
         )
@@ -105,7 +103,7 @@ class PCA_sparse_dask:
 
 
 @with_cupy_rmm
-def _cov_sparse_dask(client, x, return_gram=False, return_mean=False):
+def _cov_sparse_dask(x, return_gram=False, return_mean=False):
     """
     Computes the mean and the covariance of matrix X of
     the form Cov(X, X) = E(XX) - E(X)E(X)
@@ -184,7 +182,7 @@ def _cov_sparse_dask(client, x, return_gram=False, return_mean=False):
         for block in blocks
     ]
     gram_matrix = dask.array.stack(gram_chunk_matrices).sum(axis=0).compute()
-    mean_x, _ = _get_mean_var(x, client=client)
+    mean_x, _ = _get_mean_var(x)
     mean_x = mean_x.astype(x.dtype)
     copy_gram = _copy_kernel(x.dtype)
     block = (32, 32)
