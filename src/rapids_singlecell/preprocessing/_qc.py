@@ -187,7 +187,6 @@ def _first_pass_qc(X, client=None):
 @with_cupy_rmm
 def _first_pass_qc_dask(X, client=None):
     import dask
-    from cuml.dask.common.part_utils import _extract_partitions
 
     client = _get_dask_client(client)
 
@@ -334,8 +333,6 @@ def _second_pass_qc(X, mask, client=None):
 
 @with_cupy_rmm
 def _second_pass_qc_dask(X, mask, client=None):
-    import dask
-
     client = _get_dask_client(client)
 
     if isinstance(X._meta, sparse.csr_matrix):
@@ -345,7 +342,7 @@ def _second_pass_qc_dask(X, mask, client=None):
         sparse_qc_csr.compile()
 
         def __qc_calc(X_part):
-            sums_cells_sub = cp.zeros((X_part.shape[0]), dtype=X_part.dtype)
+            sums_cells_sub = cp.zeros(X_part.shape[0], dtype=X_part.dtype)
             block = (32,)
             grid = (int(math.ceil(X_part.shape[0] / block[0])),)
             sparse_qc_csr(
@@ -369,7 +366,7 @@ def _second_pass_qc_dask(X, mask, client=None):
         sparse_qc_dense.compile()
 
         def __qc_calc(X_part):
-            sums_cells_sub = cp.zeros((X_part.shape[0]), dtype=X_part.dtype)
+            sums_cells_sub = cp.zeros(X_part.shape[0], dtype=X_part.dtype)
             if not X_part.flags.c_contiguous:
                 X_part = cp.asarray(X_part, order="C")
             block = (16, 16)
@@ -384,13 +381,7 @@ def _second_pass_qc_dask(X, mask, client=None):
             )
             return sums_cells_sub
 
-    parts = client.sync(_extract_partitions, X)
-    futures = [client.submit(__qc_calc, part, workers=[w]) for w, part in parts]
-    # Gather results from futures
-    futures = client.gather(futures)
-    objs = []
-    for i in futures:
-        objs.append(dask.array.from_array(i, chunks=i.shape))
-
-    sums_cells_sub = dask.array.concatenate(objs).compute()
+    sums_cells_sub = X.map_blocks(
+        __qc_calc, dtype=X.dtype, meta=cp.array([]), drop_axis=1
+    ).compute()
     return sums_cells_sub.ravel()
