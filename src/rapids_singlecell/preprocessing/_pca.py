@@ -92,7 +92,7 @@ def pca(
             Required if `chunked=True` was passed.
 
         client
-            Dask client to use for computation. If `None`, the default client is used. Only used if `X` is a Dask array.
+            Dask client to use for computation. If `None`, the default client is used. Only used if `X` is a dense Dask array.
 
     Returns
     -------
