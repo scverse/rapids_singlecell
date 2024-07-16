@@ -4,12 +4,11 @@ import math
 from typing import TYPE_CHECKING
 
 import cupy as cp
-from cuml.dask.common.part_utils import _extract_partitions
 from cuml.internals.memory_utils import with_cupy_rmm
 from cupyx.scipy import sparse
 from scanpy.get import _get_obs_rep
 
-from rapids_singlecell._compat import DaskArray, DaskClient, _get_dask_client
+from rapids_singlecell._compat import DaskArray
 
 from ._utils import _check_gpu_X
 
@@ -25,7 +24,6 @@ def calculate_qc_metrics(
     qc_vars: str | list = None,
     log1p: bool = True,
     layer: str = None,
-    client: DaskClient | None = None,
 ) -> None:
     """\
     Calculates basic qc Parameters. Calculates number of genes per cell (n_genes) and number of counts per cell (n_counts).
@@ -46,8 +44,6 @@ def calculate_qc_metrics(
             Set to `False` to skip computing `log1p` transformed annotations.
         layer
             If provided, use :attr:`~anndata.AnnData.layers` for expression values instead of :attr:`~anndata.AnnData.X`.
-        client
-            Dask client to use for computation. If `None`, the default client is used. Only used if `X` is a Dask array.
 
     Returns
     -------
@@ -78,7 +74,7 @@ def calculate_qc_metrics(
 
     _check_gpu_X(X, allow_dask=True)
 
-    sums_cells, sums_genes, cell_ex, gene_ex = _first_pass_qc(X, client=client)
+    sums_cells, sums_genes, cell_ex, gene_ex = _first_pass_qc(X)
     # .var
     adata.var[f"n_cells_by_{expr_type}"] = cp.asnumpy(gene_ex)
     adata.var[f"total_{expr_type}"] = cp.asnumpy(sums_genes)
@@ -102,7 +98,7 @@ def calculate_qc_metrics(
             qc_vars = [qc_vars]
         for qc_var in qc_vars:
             mask = cp.array(adata.var[qc_var], dtype=cp.bool_)
-            sums_cells_sub = _second_pass_qc(X, mask, client=client)
+            sums_cells_sub = _second_pass_qc(X, mask)
 
             adata.obs[f"total_{expr_type}_{qc_var}"] = cp.asnumpy(sums_cells_sub)
             adata.obs[f"pct_{expr_type}_{qc_var}"] = cp.asnumpy(
@@ -114,9 +110,9 @@ def calculate_qc_metrics(
                 )
 
 
-def _first_pass_qc(X, client=None):
+def _first_pass_qc(X):
     if isinstance(X, DaskArray):
-        return _first_pass_qc_dask(X, client=client)
+        return _first_pass_qc_dask(X)
 
     sums_cells = cp.zeros(X.shape[0], dtype=X.dtype)
     sums_genes = cp.zeros(X.shape[1], dtype=X.dtype)
@@ -185,25 +181,27 @@ def _first_pass_qc(X, client=None):
 
 
 @with_cupy_rmm
-def _first_pass_qc_dask(X, client=None):
+def _first_pass_qc_dask(X):
     import dask
-
-    client = _get_dask_client(client)
+    import dask.array as da
 
     if isinstance(X._meta, sparse.csr_matrix):
-        from ._kernels._qc_kernels import _sparse_qc_csr
+        from ._kernels._qc_kernels_dask import (
+            _sparse_qc_csr_dask_cells,
+            _sparse_qc_csr_dask_genes,
+        )
 
-        sparse_qc_csr = _sparse_qc_csr(X.dtype)
-        sparse_qc_csr.compile()
+        sparse_qc_csr_cells = _sparse_qc_csr_dask_cells(X.dtype)
+        sparse_qc_csr_cells.compile()
 
-        def __qc_calc(X_part):
+        @dask.delayed
+        def __qc_calc_1(X_part):
             sums_cells = cp.zeros(X_part.shape[0], dtype=X_part.dtype)
-            sums_genes = cp.zeros((X_part.shape[1], 1), dtype=X_part.dtype)
             cell_ex = cp.zeros(X_part.shape[0], dtype=cp.int32)
-            gene_ex = cp.zeros((X_part.shape[1], 1), dtype=cp.int32)
             block = (32,)
             grid = (int(math.ceil(X_part.shape[0] / block[0])),)
-            sparse_qc_csr(
+
+            sparse_qc_csr_cells(
                 grid,
                 block,
                 (
@@ -211,25 +209,47 @@ def _first_pass_qc_dask(X, client=None):
                     X_part.indices,
                     X_part.data,
                     sums_cells,
-                    sums_genes,
                     cell_ex,
-                    gene_ex,
                     X_part.shape[0],
                 ),
             )
-            return sums_cells, sums_genes, cell_ex, gene_ex
+            return cp.vstack([sums_cells, cell_ex.astype(X_part.dtype)])
+
+        sparse_qc_csr_genes = _sparse_qc_csr_dask_genes(X.dtype)
+        sparse_qc_csr_genes.compile()
+
+        @dask.delayed
+        def __qc_calc_2(X_part):
+            sums_genes = cp.zeros(X_part.shape[1], dtype=X_part.dtype)
+            gene_ex = cp.zeros(X_part.shape[1], dtype=cp.int32)
+            block = (32,)
+            grid = (int(math.ceil(X_part.nnz / block[0])),)
+            sparse_qc_csr_genes(
+                grid,
+                block,
+                (
+                    X_part.indices,
+                    X_part.data,
+                    sums_genes,
+                    gene_ex,
+                    X_part.nnz,
+                ),
+            )
+            return cp.vstack([sums_genes, gene_ex.astype(X_part.dtype)])
 
     elif isinstance(X._meta, cp.ndarray):
-        from ._kernels._qc_kernels import _sparse_qc_dense
+        from ._kernels._qc_kernels_dask import (
+            _sparse_qc_dense_cells,
+            _sparse_qc_dense_genes,
+        )
 
-        sparse_qc_dense = _sparse_qc_dense(X.dtype)
-        sparse_qc_dense.compile()
+        sparse_qc_dense_cells = _sparse_qc_dense_cells(X.dtype)
+        sparse_qc_dense_cells.compile()
 
-        def __qc_calc(X_part):
+        @dask.delayed
+        def __qc_calc_1(X_part):
             sums_cells = cp.zeros(X_part.shape[0], dtype=X_part.dtype)
-            sums_genes = cp.zeros((X_part.shape[1], 1), dtype=X_part.dtype)
             cell_ex = cp.zeros(X_part.shape[0], dtype=cp.int32)
-            gene_ex = cp.zeros((X_part.shape[1], 1), dtype=cp.int32)
             if not X_part.flags.c_contiguous:
                 X_part = cp.asarray(X_part, order="C")
             block = (16, 16)
@@ -237,60 +257,85 @@ def _first_pass_qc_dask(X, client=None):
                 int(math.ceil(X_part.shape[0] / block[0])),
                 int(math.ceil(X_part.shape[1] / block[1])),
             )
-            sparse_qc_dense(
+            sparse_qc_dense_cells(
                 grid,
                 block,
                 (
                     X_part,
                     sums_cells,
-                    sums_genes,
                     cell_ex,
+                    X_part.shape[0],
+                    X_part.shape[1],
+                ),
+            )
+            return cp.vstack([sums_cells, cell_ex.astype(X_part.dtype)])
+
+        sparse_qc_dense_genes = _sparse_qc_dense_genes(X.dtype)
+        sparse_qc_dense_genes.compile()
+
+        @dask.delayed
+        def __qc_calc_2(X_part):
+            sums_genes = cp.zeros((X_part.shape[1]), dtype=X_part.dtype)
+            gene_ex = cp.zeros((X_part.shape[1]), dtype=cp.int32)
+            if not X_part.flags.c_contiguous:
+                X_part = cp.asarray(X_part, order="C")
+            block = (16, 16)
+            grid = (
+                int(math.ceil(X_part.shape[0] / block[0])),
+                int(math.ceil(X_part.shape[1] / block[1])),
+            )
+            sparse_qc_dense_genes(
+                grid,
+                block,
+                (
+                    X_part,
+                    sums_genes,
                     gene_ex,
                     X_part.shape[0],
                     X_part.shape[1],
                 ),
             )
-            return sums_cells, sums_genes, cell_ex, gene_ex
+            return cp.vstack([sums_genes, gene_ex.astype(X_part.dtype)])
     else:
         raise ValueError(
             "Please use a cupy csr_matrix or cp.ndarray. csc_matrix are not supported with dask."
         )
 
-    parts = client.sync(_extract_partitions, X)
-    futures = [client.submit(__qc_calc, part, workers=[w]) for w, part in parts]
-    # Gather results from futures
-    results = client.gather(futures)
-
-    # Initialize lists to hold the Dask arrays
-    sums_cells_objs = []
-    sums_genes_objs = []
-    cell_ex_objs = []
-    gene_ex_objs = []
-
-    # Process each result
-    for sums_cells, sums_genes, cell_ex, gene_ex in results:
-        # Append the arrays to their respective lists as Dask arrays
-        sums_cells_objs.append(
-            dask.array.from_array(sums_cells, chunks=sums_cells.shape)
+    blocks = X.to_delayed().ravel()
+    cell_blocks = [
+        da.from_delayed(
+            __qc_calc_1(block),
+            shape=(2, X.chunks[0][ind]),
+            dtype=X.dtype,
+            meta=cp.array([]),
         )
-        sums_genes_objs.append(
-            dask.array.from_array(sums_genes, chunks=sums_genes.shape)
+        for ind, block in enumerate(blocks)
+    ]
+
+    blocks = X.to_delayed().ravel()
+    gene_blocks = [
+        da.from_delayed(
+            __qc_calc_2(block),
+            shape=(2, X.shape[0]),
+            dtype=X.dtype,
+            meta=cp.array([]),
         )
-        cell_ex_objs.append(dask.array.from_array(cell_ex, chunks=cell_ex.shape))
-        gene_ex_objs.append(dask.array.from_array(gene_ex, chunks=gene_ex.shape))
-    sums_cells = dask.array.concatenate(sums_cells_objs)
-    sums_genes = dask.array.concatenate(sums_genes_objs, axis=1).sum(axis=1)
-    cell_ex = dask.array.concatenate(cell_ex_objs)
-    gene_ex = dask.array.concatenate(gene_ex_objs, axis=1).sum(axis=1)
-    sums_cells, sums_genes, cell_ex, gene_ex = dask.compute(
-        sums_cells, sums_genes, cell_ex, gene_ex
+        for ind, block in enumerate(blocks)
+    ]
+    sums_cells, cell_ex = da.hstack(cell_blocks).compute()
+    sums_genes, gene_ex = da.stack(gene_blocks, axis=1).sum(axis=1).compute()
+
+    return (
+        sums_cells.ravel(),
+        sums_genes.ravel(),
+        cell_ex.ravel().astype(cp.int32),
+        gene_ex.ravel().astype(cp.int32),
     )
-    return sums_cells.ravel(), sums_genes.ravel(), cell_ex.ravel(), gene_ex.ravel()
 
 
-def _second_pass_qc(X, mask, client=None):
+def _second_pass_qc(X, mask):
     if isinstance(X, DaskArray):
-        return _second_pass_qc_dask(X, mask, client=client)
+        return _second_pass_qc_dask(X, mask)
     sums_cells_sub = cp.zeros(X.shape[0], dtype=X.dtype)
     if sparse.issparse(X):
         if sparse.isspmatrix_csr(X):
@@ -332,8 +377,7 @@ def _second_pass_qc(X, mask, client=None):
 
 
 @with_cupy_rmm
-def _second_pass_qc_dask(X, mask, client=None):
-    client = _get_dask_client(client)
+def _second_pass_qc_dask(X, mask):
 
     if isinstance(X._meta, sparse.csr_matrix):
         from ._kernels._qc_kernels import _sparse_qc_csr_sub

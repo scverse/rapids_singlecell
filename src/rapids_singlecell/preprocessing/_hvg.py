@@ -12,7 +12,7 @@ import pandas as pd
 from cupyx.scipy.sparse import csr_matrix, issparse, isspmatrix_csc
 from scanpy.get import _get_obs_rep
 
-from rapids_singlecell._compat import DaskArray, DaskClient, _meta_dense, _meta_sparse
+from rapids_singlecell._compat import DaskArray, _meta_dense, _meta_sparse
 
 from ._qc import calculate_qc_metrics
 from ._utils import _check_gpu_X, _check_nonnegative_integers, _get_mean_var
@@ -49,7 +49,6 @@ def highly_variable_genes(
     chunksize: int = 1000,
     n_samples: int = 10000,
     batch_key: str = None,
-    client: DaskClient | None = None,
 ) -> None:
     """\
     Annotate highly variable genes.
@@ -119,8 +118,6 @@ def highly_variable_genes(
             of enrichment of zeros for each gene (only for `flavor='poisson_gene_selection'`).
         batch_key
             If specified, highly-variable genes are selected within each batch separately and merged.
-        client
-            Dask client to use for computation. If `None`, the default client is used. Only used if `X` is a Dask array.
 
     Returns
     -------
@@ -198,7 +195,6 @@ def highly_variable_genes(
                 cutoff=cutoff,
                 n_bins=n_bins,
                 flavor=flavor,
-                client=client,
             )
         else:
             df = _highly_variable_genes_batched(
@@ -208,7 +204,6 @@ def highly_variable_genes(
                 cutoff=cutoff,
                 n_bins=n_bins,
                 flavor=flavor,
-                client=client,
             )
 
         adata.uns["hvg"] = {"flavor": flavor}
@@ -278,7 +273,6 @@ def _highly_variable_genes_single_batch(
     cutoff: _Cutoffs | int,
     n_bins: int = 20,
     flavor: Literal["seurat", "cell_ranger"] = "seurat",
-    client: DaskClient | None = None,
 ) -> pd.DataFrame:
     """\
     See `highly_variable_genes`.
@@ -425,7 +419,6 @@ def _highly_variable_genes_batched(
     n_bins: int,
     flavor: Literal["seurat", "cell_ranger"],
     cutoff: _Cutoffs | int,
-    client: DaskClient | None = None,
 ) -> pd.DataFrame:
     adata._sanitize()
     batches = adata.obs[batch_key].cat.categories
@@ -434,7 +427,7 @@ def _highly_variable_genes_batched(
     for batch in batches:
         adata_subset = adata[adata.obs[batch_key] == batch].copy()
 
-        calculate_qc_metrics(adata_subset, layer=layer, client=client)
+        calculate_qc_metrics(adata_subset, layer=layer)
         filt = adata_subset.var["n_cells_by_counts"].to_numpy() > 0
         adata_subset = adata_subset[:, filt].copy()
 
@@ -444,7 +437,6 @@ def _highly_variable_genes_batched(
             cutoff=cutoff,
             n_bins=n_bins,
             flavor=flavor,
-            client=client,
         )
         hvg.reset_index(drop=False, inplace=True, names=["gene"])
 

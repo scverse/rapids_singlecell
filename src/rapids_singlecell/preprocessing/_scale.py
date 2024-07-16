@@ -10,12 +10,15 @@ from scanpy._utils import view_to_actual
 
 from rapids_singlecell._compat import (
     DaskArray,
-    DaskClient,
     _meta_dense,
     _meta_sparse,
 )
 from rapids_singlecell.get import _check_mask, _get_obs_rep, _set_obs_rep
-from rapids_singlecell.preprocessing._utils import _check_gpu_X, _get_mean_var
+from rapids_singlecell.preprocessing._utils import (
+    _check_gpu_X,
+    _get_mean_var,
+    _sparse_to_dense,
+)
 
 try:
     import dask.array as da
@@ -33,7 +36,6 @@ def scale(
     obsm: str | None = None,
     mask_obs: np.ndarray | str | None = None,
     inplace: bool = True,
-    client: DaskClient | None = None,
 ) -> None | cp.ndarray:
     """
     Scales matrix to unit variance and clips values
@@ -68,8 +70,6 @@ def scale(
         inplace
             If True, update AnnData with results. Otherwise, return results. See below for details of what is returned.
 
-        client
-            Dask client to use for computation. If `None`, the default client is used. Only used if `X` is a Dask array.
 
     Returns
     -------
@@ -192,7 +192,7 @@ def _scale_sparse_csc(
     X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None
 ):
     if zero_center:
-        X = X.toarray()
+        X = _sparse_to_dense(X, order="C")
         # inplace is True because we copied with `toarray`
         return _scale_array(
             X,
@@ -235,7 +235,7 @@ def _scale_sparse_csr(
     X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None
 ):
     if zero_center:
-        X = X.toarray()
+        X = _sparse_to_dense(X, order="C")
         # inplace is True because we copied with `toarray`
         return _scale_array(
             X,
