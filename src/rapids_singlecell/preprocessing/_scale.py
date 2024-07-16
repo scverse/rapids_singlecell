@@ -11,7 +11,6 @@ from scanpy._utils import view_to_actual
 from rapids_singlecell._compat import (
     DaskArray,
     DaskClient,
-    _get_dask_client,
     _meta_dense,
     _meta_sparse,
 )
@@ -98,15 +97,12 @@ def scale(
         mask_obs = _check_mask(adata, mask_obs, "obs")
 
     if isinstance(X, DaskArray):
-        if client is None:
-            client = _get_dask_client(client=client)
         X, means, std = _scale_dask(
             X,
             mask_obs=mask_obs,
             zero_center=zero_center,
             inplace=inplace,
             max_value=max_value,
-            client=client,
         )
 
     elif isinstance(X, cp.ndarray):
@@ -282,9 +278,7 @@ def _scale_sparse_csr(
         return X, mean, std
 
 
-def _scale_dask(
-    X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None, client=None
-):
+def _scale_dask(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None):
     if not inplace:
         X = X.copy()
     if mask_obs is None:

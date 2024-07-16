@@ -42,7 +42,7 @@ def _mean_var_minor(X, major, minor):
 
 
 @with_cupy_rmm
-def _mean_var_minor_dask(X, major, minor, client=None):
+def _mean_var_minor_dask(X, major, minor):
     """
     Implements sum operation for dask array when the backend is cupy sparse csr matrix
     """
@@ -85,7 +85,7 @@ def _mean_var_minor_dask(X, major, minor, client=None):
 
 # todo: Implement this dynamically for csc matrix as well
 @with_cupy_rmm
-def _mean_var_major_dask(X, major, minor, client=None):
+def _mean_var_major_dask(X, major, minor):
     """
     Implements sum operation for dask array when the backend is cupy sparse csr matrix
     """
@@ -141,7 +141,7 @@ def _mean_var_major_dask(X, major, minor, client=None):
 
 
 @with_cupy_rmm
-def _mean_var_dense_dask(X, axis, client=None):
+def _mean_var_dense_dask(X, axis):
     """
     Implements sum operation for dask array when the backend is cupy sparse csr matrix
     """
