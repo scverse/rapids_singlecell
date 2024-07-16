@@ -62,27 +62,10 @@ class PCA_sparse_dask:
         kernel.compile()
 
         def _transform(X_part, mean_, components_):
-            dense = cp.zeros(X_part.shape, dtype=X.dtype)
-            max_nnz = cp.diff(X_part.indptr).max()
-            tpb = (32, 32)
-            bpg_x = math.ceil(X_part.shape[0] / tpb[0])
-            bpg_y = math.ceil(max_nnz / tpb[1])
-            bpg = (bpg_x, bpg_y)
-            kernel(
-                bpg,
-                tpb,
-                (
-                    X_part.indptr,
-                    X_part.indices,
-                    X_part.data,
-                    dense,
-                    X_part.shape[0],
-                    X_part.shape[1],
-                ),
-            )
-            dense = dense - mean_
-            X_pca = dense.dot(components_.T)
-            return X_pca
+            pre_mean = mean_ @ components_.T
+            mean_impact = cp.ones((X_part.shape[0], 1)) @ pre_mean.reshape(1, -1)
+            X_transformed = X_part.dot(components_.T) - mean_impact
+            return X_transformed
 
         X_pca = X.map_blocks(
             _transform,

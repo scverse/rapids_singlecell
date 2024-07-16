@@ -51,23 +51,9 @@ class PCA_sparse:
         return self
 
     def transform(self, X):
-        from ._kernels._pca_sparse_kernel import denser_kernel
-
-        dense_kernel = denser_kernel(X.dtype)
-
-        dense = cp.zeros(X.shape, dtype=X.dtype)
-        max_nnz = cp.diff(X.indptr).max()
-        tpb = (32, 32)
-        bpg_x = math.ceil(X.shape[0] / tpb[0])
-        bpg_y = math.ceil(max_nnz / tpb[1])
-        bpg = (bpg_x, bpg_y)
-        dense_kernel(
-            bpg,
-            tpb,
-            (X.indptr, X.indices, X.data, dense, X.shape[0], X.shape[1]),
-        )
-        dense -= self.mean_
-        X_transformed = dense.dot(self.components_.T)
+        precomputed_mean_impact = self.mean_ @ self.components_.T
+        mean_impact = cp.ones((X.shape[0], 1)) @ precomputed_mean_impact.reshape(1, -1)
+        X_transformed = X.dot(self.components_.T) - mean_impact
         # X = X - self.mean_
         # X_transformed = X.dot(self.components_.T)
         self.components_ = self.components_.get()
