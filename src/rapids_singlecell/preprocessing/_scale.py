@@ -10,7 +10,6 @@ from scanpy._utils import view_to_actual
 
 from rapids_singlecell._compat import (
     DaskArray,
-    DaskClient,
     _meta_dense,
     _meta_sparse,
 )
@@ -37,7 +36,6 @@ def scale(
     obsm: str | None = None,
     mask_obs: np.ndarray | str | None = None,
     inplace: bool = True,
-    client: DaskClient | None = None,
 ) -> None | cp.ndarray:
     """
     Scales matrix to unit variance and clips values
@@ -72,8 +70,6 @@ def scale(
         inplace
             If True, update AnnData with results. Otherwise, return results. See below for details of what is returned.
 
-        client
-            Dask client to use for computation. If `None`, the default client is used. Only used if `X` is a Dask array.
 
     Returns
     -------
