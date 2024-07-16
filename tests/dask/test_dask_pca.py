@@ -9,7 +9,7 @@ import rapids_singlecell as rsc
 
 from scanpy.datasets import pbmc3k_processed
 
-def test_pca_sparse_dask():
+def test_pca_sparse_dask(client):
     sparse_ad = pbmc3k_processed()
     default = pbmc3k_processed()
     sparse_ad.X = sparse.csr_matrix(sparse_ad.X.astype(np.float64))

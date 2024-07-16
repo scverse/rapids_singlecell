@@ -10,17 +10,7 @@ import scanpy as sc
 
 from scanpy.datasets import pbmc3k
 
-
-def _get_anndata():
-    adata = pbmc3k()
-    sc.pp.filter_cells(adata, min_genes=100)
-    sc.pp.filter_genes(adata, min_cells=3)
-    sc.pp.normalize_total(adata)
-    sc.pp.log1p(adata)
-    sc.pp.highly_variable_genes(adata, n_top_genes=1000, subset=True)
-    return adata.copy()
-
-def test_zc_sparse():
+def test_zc_sparse(client):
     adata = _get_anndata()
     mask = np.random.randint(0,2,adata.shape[0],dtype = np.bool_)
     dask_data = adata.copy()
@@ -30,7 +20,7 @@ def test_zc_sparse():
     rsc.pp.scale(dask_data, mask_obs = mask, max_value = 10)
     cp.testing.assert_allclose(adata.X, dask_data.X.compute())
 
-def test_nzc_sparse():
+def test_nzc_sparse(client):
     adata = _get_anndata()
     mask = np.random.randint(0,2,adata.shape[0],dtype = np.bool_)
     dask_data = adata.copy()
@@ -40,7 +30,7 @@ def test_nzc_sparse():
     rsc.pp.scale(dask_data,zero_center = False, mask_obs = mask, max_value = 10)
     cp.testing.assert_allclose(adata.X.toarray(), dask_data.X.compute().toarray())
 
-def test_zc_dense():
+def test_zc_dense(client):
     adata = _get_anndata()
     mask = np.random.randint(0,2,adata.shape[0],dtype = np.bool_)
     dask_data = adata.copy()
@@ -50,7 +40,7 @@ def test_zc_dense():
     rsc.pp.scale(dask_data, mask_obs = mask, max_value = 10)
     cp.testing.assert_allclose(adata.X, dask_data.X.compute())
 
-def test_nzc_dense():
+def test_nzc_dense(client):
     adata = _get_anndata()
     mask = np.random.randint(0,2,adata.shape[0],dtype = np.bool_)
     dask_data = adata.copy()
