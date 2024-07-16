@@ -10,6 +10,16 @@ import scanpy as sc
 
 from scanpy.datasets import pbmc3k
 
+
+def _get_anndata(client):
+    adata = pbmc3k()
+    sc.pp.filter_cells(adata, min_genes=100)
+    sc.pp.filter_genes(adata, min_cells=3)
+    sc.pp.normalize_total(adata)
+    sc.pp.log1p(adata)
+    sc.pp.highly_variable_genes(adata, n_top_genes=1000, subset=True)
+    return adata.copy()
+
 def test_zc_sparse(client):
     adata = _get_anndata()
     mask = np.random.randint(0,2,adata.shape[0],dtype = np.bool_)
