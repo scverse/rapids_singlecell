@@ -6,7 +6,7 @@ import cupy as cp
 from cuml.internals.memory_utils import with_cupy_rmm
 from cupyx.scipy.sparse import issparse, isspmatrix_csc, isspmatrix_csr
 
-from rapids_singlecell._compat import DaskArray, _get_dask_client
+from rapids_singlecell._compat import DaskArray
 
 
 def _mean_var_major(X, major, minor):
@@ -42,7 +42,7 @@ def _mean_var_minor(X, major, minor):
 
 
 @with_cupy_rmm
-def _mean_var_minor_dask(X, major, minor, client=None):
+def _mean_var_minor_dask(X, major, minor):
     """
     Implements sum operation for dask array when the backend is cupy sparse csr matrix
     """
@@ -85,7 +85,7 @@ def _mean_var_minor_dask(X, major, minor, client=None):
 
 # todo: Implement this dynamically for csc matrix as well
 @with_cupy_rmm
-def _mean_var_major_dask(X, major, minor, client=None):
+def _mean_var_major_dask(X, major, minor):
     """
     Implements sum operation for dask array when the backend is cupy sparse csr matrix
     """
@@ -141,14 +141,12 @@ def _mean_var_major_dask(X, major, minor, client=None):
 
 
 @with_cupy_rmm
-def _mean_var_dense_dask(X, axis, client=None):
+def _mean_var_dense_dask(X, axis):
     """
     Implements sum operation for dask array when the backend is cupy sparse csr matrix
     """
     import dask
     import dask.array as da
-
-    client = _get_dask_client(client)
 
     # ToDo: get a 64bit version working without copying the data
     @dask.delayed
@@ -194,7 +192,7 @@ def _mean_var_dense(X, axis):
     return mean, var
 
 
-def _get_mean_var(X, axis=0, client=None):
+def _get_mean_var(X, axis=0):
     if issparse(X):
         if axis == 0:
             if isspmatrix_csr(X):
@@ -224,13 +222,13 @@ def _get_mean_var(X, axis=0, client=None):
             if axis == 0:
                 major = X.shape[0]
                 minor = X.shape[1]
-                mean, var = _mean_var_minor_dask(X, major, minor, client)
+                mean, var = _mean_var_minor_dask(X, major, minor)
             if axis == 1:
                 major = X.shape[0]
                 minor = X.shape[1]
-                mean, var = _mean_var_major_dask(X, major, minor, client)
+                mean, var = _mean_var_major_dask(X, major, minor)
         elif isinstance(X._meta, cp.ndarray):
-            mean, var = _mean_var_dense_dask(X, axis, client)
+            mean, var = _mean_var_dense_dask(X, axis)
     else:
         mean, var = _mean_var_dense(X, axis)
     return mean, var

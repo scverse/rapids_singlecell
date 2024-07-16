@@ -92,7 +92,7 @@ def pca(
             Required if `chunked=True` was passed.
 
         client
-            Dask client to use for computation. If `None`, the default client is used. Only used if `X` is a Dask array.
+            Dask client to use for computation. If `None`, the default client is used. Only used if `X` is a dense Dask array.
 
     Returns
     -------
@@ -151,7 +151,7 @@ def pca(
         elif isinstance(X._meta, csr_matrix):
             from ._sparse_pca._dask_sparse_pca import PCA_sparse_dask
 
-            pca_func = PCA_sparse_dask(n_components=n_comps, client=client)
+            pca_func = PCA_sparse_dask(n_components=n_comps)
             pca_func = pca_func.fit(X)
             X_pca = pca_func.transform(X)
 

@@ -306,7 +306,7 @@ def _highly_variable_genes_single_batch(
             else:
                 X = cp.expm1(X)
 
-    mean, var = _get_mean_var(X, axis=0, client=client)
+    mean, var = _get_mean_var(X, axis=0)
     mean[mean == 0] = 1e-12
     disp = var / mean
     if flavor == "seurat":  # logarithmized mean as in Seurat

@@ -12,8 +12,6 @@ from scanpy.get import _get_obs_rep, _set_obs_rep
 
 from rapids_singlecell._compat import (
     DaskArray,
-    DaskClient,
-    _get_dask_client,
     _meta_dense,
     _meta_sparse,
 )
@@ -31,7 +29,6 @@ def normalize_total(
     layer: int | str = None,
     inplace: bool = True,
     copy: bool = False,
-    client: DaskClient | None = None,
 ) -> AnnData | sparse.csr_matrix | cp.ndarray | None:
     """
     Normalizes rows in matrix so they sum to `target_sum`
@@ -52,10 +49,6 @@ def normalize_total(
 
         copy
             Whether to return a copy or update `adata`. Not compatible with inplace=False.
-
-        client
-            Dask client to use for computation. If `None`, the default client is used. Only used if `X` is a Dask array.
-
     Returns
     -------
     Returns a normalized copy or  updates `adata` with a normalized version of \
@@ -76,9 +69,9 @@ def normalize_total(
     if sparse.isspmatrix_csc(X):
         X = X.tocsr()
     if not target_sum:
-        target_sum = _get_target_sum(X, client=client)
+        target_sum = _get_target_sum(X)
 
-    X = _normalize_total(X, target_sum, client=client)
+    X = _normalize_total(X, target_sum)
 
     if inplace:
         _set_obs_rep(adata, X, layer=layer)
@@ -89,11 +82,11 @@ def normalize_total(
         return X
 
 
-def _normalize_total(X: cp.ndarray, target_sum: int, client=None):
+def _normalize_total(X: cp.ndarray, target_sum: int):
     if isinstance(X, sparse.csr_matrix):
         return _normalize_total_csr(X, target_sum)
     elif isinstance(X, DaskArray):
-        return _normalize_total_dask(X, target_sum, client=client)
+        return _normalize_total_dask(X, target_sum)
     else:
         from ._kernels._norm_kernel import _mul_dense
 
@@ -120,8 +113,7 @@ def _normalize_total_csr(X: sparse.csr_matrix, target_sum: int) -> sparse.csr_ma
     return X
 
 
-def _normalize_total_dask(X: DaskArray, target_sum: int, client=None) -> DaskArray:
-    client = _get_dask_client(client)
+def _normalize_total_dask(X: DaskArray, target_sum: int) -> DaskArray:
     if isinstance(X._meta, sparse.csr_matrix):
         from ._kernels._norm_kernel import _mul_csr
 
@@ -157,11 +149,11 @@ def _normalize_total_dask(X: DaskArray, target_sum: int, client=None) -> DaskArr
     return X
 
 
-def _get_target_sum(X, client=None) -> int:
+def _get_target_sum(X) -> int:
     if isinstance(X, sparse.csr_matrix):
         return _get_target_sum_csr(X)
     elif isinstance(X, DaskArray):
-        return _get_target_sum_dask(X, client=client)
+        return _get_target_sum_dask(X)
     else:
         return cp.median(X.sum(axis=1))
 
@@ -181,9 +173,7 @@ def _get_target_sum_csr(X: sparse.csr_matrix) -> int:
     return target_sum
 
 
-def _get_target_sum_dask(X: DaskArray, client=None) -> int:
-    client = _get_dask_client(client)
-
+def _get_target_sum_dask(X: DaskArray) -> int:
     if isinstance(X._meta, sparse.csr_matrix):
         from ._kernels._norm_kernel import _get_sparse_sum_major
 

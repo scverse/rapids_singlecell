@@ -9,7 +9,7 @@ import rapids_singlecell as rsc
 
 from scanpy.datasets import pbmc3k
 
-def test_normalize_sparse(client):
+def test_normalize_sparse():
     adata = pbmc3k()
     sc.pp.filter_cells(adata, min_genes=100)
     sc.pp.filter_genes(adata, min_cells=3)
@@ -20,7 +20,7 @@ def test_normalize_sparse(client):
     rsc.pp.normalize_total(dask_data)
     cp.testing.assert_allclose(adata.X.toarray(), dask_data.X.compute().toarray())
 
-def test_normalize_dense(client):
+def test_normalize_dense():
     adata = pbmc3k()
     sc.pp.filter_cells(adata, min_genes=100)
     sc.pp.filter_genes(adata, min_cells=3)
@@ -31,7 +31,7 @@ def test_normalize_dense(client):
     rsc.pp.normalize_total(dask_data)
     cp.testing.assert_allclose(adata.X, dask_data.X.compute())
 
-def test_log1p_sparse(client):
+def test_log1p_sparse():
     adata = pbmc3k()
     sc.pp.filter_cells(adata, min_genes=100)
     sc.pp.filter_genes(adata, min_cells=3)
@@ -43,7 +43,7 @@ def test_log1p_sparse(client):
     rsc.pp.log1p(dask_data)
     cp.testing.assert_allclose(adata.X.toarray(), dask_data.X.compute().toarray())
 
-def test_log1p_dense(client):
+def test_log1p_dense():
     adata = pbmc3k()
     sc.pp.filter_cells(adata, min_genes=100)
     sc.pp.filter_genes(adata, min_cells=3)
