@@ -7,6 +7,8 @@ import cupy as cp
 from cuml.internals.memory_utils import with_cupy_rmm
 from cupyx.scipy.sparse import issparse, isspmatrix_csc, isspmatrix_csr, spmatrix
 
+from rapids_singlecell._compat import DaskArray
+
 
 def _sparse_to_dense(X: spmatrix, order: Literal["C", "F"] | None = None) -> cp.ndarray:
     if order is None:
@@ -36,9 +38,6 @@ def _sparse_to_dense(X: spmatrix, order: Literal["C", "F"] | None = None) -> cp.
         (X.indptr, X.indices, X.data, dense, major, minor, switcher),
     )
     return dense
-
-
-from rapids_singlecell._compat import DaskArray
 
 
 def _mean_var_major(X, major, minor):
