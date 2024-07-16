@@ -79,8 +79,8 @@ def test_pca_sparse_dask_full_pipeline(client):
     sparse_ad.X = cusparse.csr_matrix(sparse.csr_matrix(sparse_ad.X.astype(np.float64)))
     default.X = as_sparse_cupy_dask_array(default.X.astype(np.float64))
 
-    rsc.pp.filter_genes(sparse_ad,min_count=1e4)
-    rsc.pp.filter_genes(default,min_count=1e4)
+    rsc.pp.filter_genes(sparse_ad,min_count=100)
+    rsc.pp.filter_genes(default,min_count=100)
 
     rsc.pp.normalize_total(sparse_ad,  target_sum=1e4)
     rsc.pp.normalize_total(default,target_sum=1e4)
