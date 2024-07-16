@@ -40,7 +40,6 @@ def _sparse_to_dense(X: spmatrix, order: Literal["C", "F"] | None = None) -> cp.
     return dense
 
 
-
 def _mean_var_major(X, major, minor):
     from ._kernels._mean_var_kernel import _get_mean_var_major
 

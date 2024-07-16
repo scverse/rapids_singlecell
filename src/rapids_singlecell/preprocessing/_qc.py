@@ -378,7 +378,6 @@ def _second_pass_qc(X, mask):
 
 @with_cupy_rmm
 def _second_pass_qc_dask(X, mask):
-
     if isinstance(X._meta, sparse.csr_matrix):
         from ._kernels._qc_kernels import _sparse_qc_csr_sub
 
