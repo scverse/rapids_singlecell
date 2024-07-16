@@ -288,11 +288,11 @@ def _scale_dask(
     if not inplace:
         X = X.copy()
     if mask_obs is None:
-        mean, var = _get_mean_var(X, client=client)
+        mean, var = _get_mean_var(X)
         mask_array = cp.ones(X.shape[0], dtype=cp.int32)
 
     else:
-        mean, var = _get_mean_var(X[mask_obs, :], client=client)
+        mean, var = _get_mean_var(X[mask_obs, :])
         mask_array = cp.array(mask_obs).astype(cp.int32)
     std = cp.sqrt(var)
     std[std == 0] = 1
