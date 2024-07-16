@@ -11,7 +11,7 @@ import scanpy as sc
 from scanpy.datasets import pbmc3k
 
 
-def _get_anndata(client):
+def _get_anndata():
     adata = pbmc3k()
     sc.pp.filter_cells(adata, min_genes=100)
     sc.pp.filter_genes(adata, min_cells=3)
