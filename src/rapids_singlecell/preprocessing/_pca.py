@@ -232,6 +232,7 @@ def pca(
         return adata
 
 
+
 def _as_numpy(X):
     if isinstance(X, cp.ndarray):
         return X.get()

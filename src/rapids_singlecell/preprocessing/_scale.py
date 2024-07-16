@@ -15,7 +15,11 @@ from rapids_singlecell._compat import (
     _meta_sparse,
 )
 from rapids_singlecell.get import _check_mask, _get_obs_rep, _set_obs_rep
-from rapids_singlecell.preprocessing._utils import _check_gpu_X, _get_mean_var
+from rapids_singlecell.preprocessing._utils import (
+    _check_gpu_X,
+    _get_mean_var,
+    _sparse_to_dense,
+)
 
 try:
     import dask.array as da
@@ -192,7 +196,7 @@ def _scale_sparse_csc(
     X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None
 ):
     if zero_center:
-        X = X.toarray()
+        X = _sparse_to_dense(X, order="C")
         # inplace is True because we copied with `toarray`
         return _scale_array(
             X,
@@ -235,7 +239,7 @@ def _scale_sparse_csr(
     X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None
 ):
     if zero_center:
-        X = X.toarray()
+        X = _sparse_to_dense(X, order="C")
         # inplace is True because we copied with `toarray`
         return _scale_array(
             X,

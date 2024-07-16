@@ -7,7 +7,6 @@ import cudf
 import numpy as np
 import pandas as pd
 from natsort import natsorted
-from packaging import version
 from scanpy.tools._utils import _choose_graph
 from scanpy.tools._utils_clustering import rename_groups, restrict_adjacency
 
@@ -236,7 +235,6 @@ def louvain(
 
     """
     # Adjacency graph
-    from cugraph import __version__ as cuv
     from cugraph import louvain as culouvain
 
     adata = adata.copy() if copy else adata
@@ -254,19 +252,12 @@ def louvain(
     g = _create_graph(adjacency, use_weights)
 
     # Cluster
-    if version.parse(cuv) >= version.parse("23.08.00"):
-        louvain_parts, _ = culouvain(
-            g,
-            resolution=resolution,
-            max_level=n_iterations,
-            threshold=threshold,
-        )
-    else:
-        louvain_parts, _ = culouvain(
-            g,
-            resolution=resolution,
-            max_iter=n_iterations,
-        )
+    louvain_parts, _ = culouvain(
+        g,
+        resolution=resolution,
+        max_level=n_iterations,
+        threshold=threshold,
+    )
 
     # Format output
     groups = (
