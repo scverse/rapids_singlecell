@@ -7,14 +7,11 @@ import warnings
 from typing import TYPE_CHECKING
 
 import cupy as cp
-from cuml.dask.common.part_utils import _extract_partitions
 from cupyx.scipy import sparse
 from scanpy.get import _get_obs_rep, _set_obs_rep
 
 from rapids_singlecell._compat import (
     DaskArray,
-    DaskClient,
-    _get_dask_client,
     _meta_dense,
     _meta_sparse,
 )
@@ -32,7 +29,6 @@ def normalize_total(
     layer: int | str = None,
     inplace: bool = True,
     copy: bool = False,
-    client: DaskClient | None = None,
 ) -> AnnData | sparse.csr_matrix | cp.ndarray | None:
     """
     Normalizes rows in matrix so they sum to `target_sum`
@@ -53,10 +49,6 @@ def normalize_total(
 
         copy
             Whether to return a copy or update `adata`. Not compatible with inplace=False.
-
-        client
-            Dask client to use for computation. If `None`, the default client is used. Only used if `X` is a Dask array.
-
     Returns
     -------
     Returns a normalized copy or  updates `adata` with a normalized version of \
@@ -77,9 +69,9 @@ def normalize_total(
     if sparse.isspmatrix_csc(X):
         X = X.tocsr()
     if not target_sum:
-        target_sum = _get_target_sum(X, client=client)
+        target_sum = _get_target_sum(X)
 
-    X = _normalize_total(X, target_sum, client=client)
+    X = _normalize_total(X, target_sum)
 
     if inplace:
         _set_obs_rep(adata, X, layer=layer)
@@ -90,11 +82,11 @@ def normalize_total(
         return X
 
 
-def _normalize_total(X: cp.ndarray, target_sum: int, client=None):
+def _normalize_total(X: cp.ndarray, target_sum: int):
     if isinstance(X, sparse.csr_matrix):
         return _normalize_total_csr(X, target_sum)
     elif isinstance(X, DaskArray):
-        return _normalize_total_dask(X, target_sum, client=client)
+        return _normalize_total_dask(X, target_sum)
     else:
         from ._kernels._norm_kernel import _mul_dense
 
@@ -121,8 +113,7 @@ def _normalize_total_csr(X: sparse.csr_matrix, target_sum: int) -> sparse.csr_ma
     return X
 
 
-def _normalize_total_dask(X: DaskArray, target_sum: int, client=None) -> DaskArray:
-    client = _get_dask_client(client)
+def _normalize_total_dask(X: DaskArray, target_sum: int) -> DaskArray:
     if isinstance(X._meta, sparse.csr_matrix):
         from ._kernels._norm_kernel import _mul_csr
 
@@ -158,11 +149,11 @@ def _normalize_total_dask(X: DaskArray, target_sum: int, client=None) -> DaskArr
     return X
 
 
-def _get_target_sum(X, client=None) -> int:
+def _get_target_sum(X) -> int:
     if isinstance(X, sparse.csr_matrix):
         return _get_target_sum_csr(X)
     elif isinstance(X, DaskArray):
-        return _get_target_sum_dask(X, client=client)
+        return _get_target_sum_dask(X)
     else:
         return cp.median(X.sum(axis=1))
 
@@ -182,11 +173,7 @@ def _get_target_sum_csr(X: sparse.csr_matrix) -> int:
     return target_sum
 
 
-def _get_target_sum_dask(X: DaskArray, client=None) -> int:
-    import dask.array as da
-
-    client = _get_dask_client(client)
-
+def _get_target_sum_dask(X: DaskArray) -> int:
     if isinstance(X._meta, sparse.csr_matrix):
         from ._kernels._norm_kernel import _get_sparse_sum_major
 
@@ -208,16 +195,14 @@ def _get_target_sum_dask(X: DaskArray, client=None) -> int:
             return X_part.sum(axis=1)
     else:
         raise ValueError(f"Cannot compute target sum for {type(X)}")
-
-    parts = client.sync(_extract_partitions, X)
-    futures = [client.submit(__sum, part, workers=[w]) for w, part in parts]
-    # Gather results from futures
-    futures = client.gather(futures)
-    objs = []
-    for i in futures:
-        objs.append(da.from_array(i, chunks=i.shape))
-
-    counts_per_cell = da.concatenate(objs).compute()
+    target_sum_chunk_matrices = X.map_blocks(
+        __sum,
+        meta=cp.array((1.0,), dtype=X.dtype),
+        dtype=X.dtype,
+        chunks=(X.chunksize[0],),
+        drop_axis=1,
+    )
+    counts_per_cell = target_sum_chunk_matrices.compute()
     target_sum = cp.median(counts_per_cell)
     return target_sum
 
