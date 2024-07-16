@@ -44,8 +44,6 @@ def test_pca_dense_dask_full_pipeline(client):
     rsc.pp.filter_genes(dense,min_count=500)
     rsc.pp.filter_genes(default,min_count=500)
 
-    default.X = as_dense_cupy_dask_array(default.X.compute())
-
     rsc.pp.normalize_total(dense,  target_sum=1e4)
     rsc.pp.normalize_total(default,target_sum=1e4)
 

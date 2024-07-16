@@ -160,7 +160,7 @@ def _cov_sparse_dask(x, return_gram=False, return_mean=False):
             __gram_block(block),
             shape=(n_cols, n_cols),
             dtype=x.dtype,
-            meta=cp.array([]),
+            meta=_meta_dense(x.dtype),
         )
         for block in blocks
     ]

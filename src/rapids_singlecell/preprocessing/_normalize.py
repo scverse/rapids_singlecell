@@ -122,13 +122,13 @@ def _normalize_total_dask(X: DaskArray, target_sum: int) -> DaskArray:
 
         def __mul(X_part):
             mul_kernel(
-                (math.ceil(X.shape[0] / 128),),
-                (128,),
+                (math.ceil(X_part.shape[0] / 32),),
+                (32,),
                 (X_part.indptr, X_part.data, X_part.shape[0], int(target_sum)),
             )
             return X_part
 
-        X = X.map_blocks(lambda X: __mul(X), meta=_meta_sparse(X.dtype))
+        X = X.map_blocks(__mul, meta=_meta_sparse(X.dtype))
     elif isinstance(X._meta, cp.ndarray):
         from ._kernels._norm_kernel import _mul_dense
 
@@ -143,7 +143,7 @@ def _normalize_total_dask(X: DaskArray, target_sum: int) -> DaskArray:
             )
             return X_part
 
-        X = X.map_blocks(lambda X: __mul(X), meta=_meta_dense(X.dtype))
+        X = X.map_blocks(__mul, meta=_meta_dense(X.dtype))
     else:
         raise ValueError(f"Cannot normalize {type(X)}")
     return X
@@ -261,7 +261,11 @@ def log1p(
         if isinstance(X._meta, cp.ndarray):
             X = X.map_blocks(lambda X: cp.log1p(X), meta=_meta_dense(X.dtype))
         elif isinstance(X._meta, sparse.csr_matrix):
-            X = X.map_blocks(lambda X: X.log1p(), meta=_meta_sparse(X.dtype))
+
+            def __log1p(X_part):
+                return X_part.log1p()
+
+            X = X.map_blocks(__log1p, meta=_meta_sparse(X.dtype))
     adata.uns["log1p"] = {"base": None}
     if inplace:
         _set_obs_rep(adata, X, layer=layer, obsm=obsm)
