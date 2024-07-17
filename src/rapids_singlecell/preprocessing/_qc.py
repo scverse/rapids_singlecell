@@ -316,7 +316,7 @@ def _first_pass_qc_dask(X):
     gene_blocks = [
         da.from_delayed(
             __qc_calc_2(block),
-            shape=(2, X.shape[0]),
+            shape=(2, X.shape[1]),
             dtype=X.dtype,
             meta=cp.array([]),
         )
