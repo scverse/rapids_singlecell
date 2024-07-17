@@ -117,7 +117,6 @@ def _mean_var_major_dask(X, major, minor):
     """
     Implements sum operation for dask array when the backend is cupy sparse csr matrix
     """
-    import dask
 
     from rapids_singlecell.preprocessing._kernels._mean_var_kernel import (
         _get_mean_var_major,
@@ -126,7 +125,6 @@ def _mean_var_major_dask(X, major, minor):
     get_mean_var_major = _get_mean_var_major(X.dtype)
     get_mean_var_major.compile()
 
-    @dask.delayed
     def __mean_var(X_part):
         mean = cp.zeros(X_part.shape[0], dtype=cp.float64)
         var = cp.zeros(X_part.shape[0], dtype=cp.float64)
@@ -147,11 +145,9 @@ def _mean_var_major_dask(X, major, minor):
         )
         return cp.vstack([mean, var])
 
-    n_blocks = len(X.to_delayed().ravel())
     mean, var = X.map_blocks(
         __mean_var,
-        new_axis=(1,),
-        chunks=((1,) * n_blocks, (2,), X.chunks[0]),
+        chunks=((2,), X.chunks[0]),
         dtype=cp.float64,
         meta=cp.array([]),
     ).compute()
@@ -176,13 +172,15 @@ def _mean_var_dense_dask(X, axis):
         if axis == 0:
             mean = mean.reshape(-1, 1)
             var = var.reshape(-1, 1)
-        return cp.vstack([mean.ravel(), var.ravel()])[None, ...]
+        return cp.vstack([mean.ravel(), var.ravel()])[
+            None if 1 - axis else slice(None, None), ...
+        ]
 
     n_blocks = len(X.to_delayed().ravel())
     mean_var = X.map_blocks(
         __mean_var,
-        new_axis=(1,),
-        chunks=((1,) * n_blocks, (2,), X.chunks[0] if axis else (X.shape[1],)),
+        new_axis=(1,) if axis - 1 else None,
+        chunks=((2,), X.chunks[0]) if axis else ((1,) * n_blocks, (2,), (X.shape[1],)),
         dtype=cp.float64,
         meta=cp.array([]),
     )
