@@ -168,17 +168,15 @@ def _mean_var_dense_dask(X, axis):
     """
     Implements sum operation for dask array when the backend is cupy sparse csr matrix
     """
-    import dask
 
     # ToDo: get a 64bit version working without copying the data
-    @dask.delayed
     def __mean_var(X_part):
         mean = X_part.sum(axis=axis)
         var = (X_part**2).sum(axis=axis)
         if axis == 0:
             mean = mean.reshape(-1, 1)
             var = var.reshape(-1, 1)
-        return cp.vstack([mean.ravel(), var.ravel()])
+        return cp.vstack([mean.ravel(), var.ravel()])[None, ...]
 
     n_blocks = len(X.to_delayed().ravel())
     mean_var = X.map_blocks(
