@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 
 import cupy as cp
-import dask
 from cuml.internals.memory_utils import with_cupy_rmm
 
 from rapids_singlecell._compat import (
@@ -134,7 +133,6 @@ def _cov_sparse_dask(x, return_gram=False, return_mean=False):
     compute_mean_cov.compile()
     n_cols = x.shape[1]
 
-    @dask.delayed
     def __gram_block(x_part):
         gram_matrix = cp.zeros((n_cols, n_cols), dtype=x.dtype)
 
@@ -152,19 +150,20 @@ def _cov_sparse_dask(x, return_gram=False, return_mean=False):
                 gram_matrix,
             ),
         )
-        return gram_matrix
+        return gram_matrix[None, ...]  # need new axis for summing
 
-    blocks = x.to_delayed().ravel()
-    gram_chunk_matrices = [
-        dask.array.from_delayed(
-            __gram_block(block),
-            shape=(n_cols, n_cols),
+    n_blocks = len(x.to_delayed().ravel())
+    gram_matrix = (
+        x.map_blocks(
+            __gram_block,
+            new_axis=(1,),
+            chunks=((1,) * n_blocks, (x.shape[1],), (x.shape[1],)),
+            meta=cp.array([]),
             dtype=x.dtype,
-            meta=_meta_dense(x.dtype),
         )
-        for block in blocks
-    ]
-    gram_matrix = dask.array.stack(gram_chunk_matrices).sum(axis=0).compute()
+        .sum(axis=0)
+        .compute()
+    )
     mean_x, _ = _get_mean_var(x)
     mean_x = mean_x.astype(x.dtype)
     copy_gram = _copy_kernel(x.dtype)
