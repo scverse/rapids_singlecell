@@ -12,7 +12,7 @@ from scanpy._utils import Empty, _empty
 from scanpy.preprocessing._pca import _handle_mask_var
 from scipy.sparse import issparse
 
-from rapids_singlecell._compat import DaskArray, DaskClient
+from rapids_singlecell._compat import DaskArray
 from rapids_singlecell.get import _get_obs_rep
 
 from ._utils import _check_gpu_X
@@ -36,7 +36,6 @@ def pca(
     copy: bool = False,
     chunked: bool = False,
     chunk_size: int = None,
-    client: DaskClient | None = None,
 ) -> None | AnnData:
     """
     Performs PCA using the cuml decomposition function.
@@ -91,9 +90,6 @@ def pca(
             Number of observations to include in each chunk. \
             Required if `chunked=True` was passed.
 
-        client
-            Dask client to use for computation. If `None`, the default client is used. Only used if `X` is a dense Dask array.
-
     Returns
     -------
         adds fields to `adata`:
@@ -143,9 +139,7 @@ def pca(
 
             if svd_solver == "auto":
                 svd_solver = "jacobi"
-            pca_func = PCA(
-                n_components=n_comps, svd_solver=svd_solver, whiten=False, client=client
-            )
+            pca_func = PCA(n_components=n_comps, svd_solver=svd_solver, whiten=False)
             X_pca = pca_func.fit_transform(X)
             X_pca = X_pca.compute_chunk_sizes()
         elif isinstance(X._meta, csr_matrix):

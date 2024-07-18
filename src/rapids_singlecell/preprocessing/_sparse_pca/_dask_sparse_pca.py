@@ -55,11 +55,6 @@ class PCA_sparse_dask:
         return self
 
     def transform(self, X):
-        from ._kernels._pca_sparse_kernel import denser_kernel
-
-        kernel = denser_kernel(X.dtype)
-        kernel.compile()
-
         def _transform(X_part, mean_, components_):
             pre_mean = mean_ @ components_.T
             mean_impact = cp.ones((X_part.shape[0], 1)) @ pre_mean.reshape(1, -1)
