@@ -261,11 +261,7 @@ def log1p(
         if isinstance(X._meta, cp.ndarray):
             X = X.map_blocks(lambda X: cp.log1p(X), meta=_meta_dense(X.dtype))
         elif isinstance(X._meta, sparse.csr_matrix):
-
-            def __log1p(X_part):
-                return X_part.log1p()
-
-            X = X.map_blocks(__log1p, meta=_meta_sparse(X.dtype))
+            X = X.map_blocks(lambda x: x.log1p(), meta=_meta_sparse(X.dtype))
     adata.uns["log1p"] = {"base": None}
     if inplace:
         _set_obs_rep(adata, X, layer=layer, obsm=obsm)
