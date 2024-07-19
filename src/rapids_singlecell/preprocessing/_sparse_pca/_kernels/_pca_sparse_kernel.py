@@ -62,24 +62,6 @@ extern "C" __global__ void check_zero_genes(const int* indices, int* genes, int 
 }
 """
 
-denser = r"""
-(const int* indptr,const int *index,const {0} *data,
-            {0}* out, int major, int minor) {
-        int row = blockIdx.x*blockDim.x+threadIdx.x ;
-        int col = blockIdx.y*blockDim.y+threadIdx.y ;
-        if(row >= major){
-            return;
-        }
-        int start = indptr[row];
-        int stop = indptr[row+1];
-        if (col>= (stop - start)){
-            return;
-        }
-        int idx = index[start + col];
-        long long int res_index = static_cast<long long int>(row)*minor+idx;
-        out[res_index] = data[start + col];}
-"""
-
 _zero_genes_kernel = cp.RawKernel(check_zero_genes, "check_zero_genes")
 
 
@@ -93,7 +75,3 @@ def _gramm_kernel_csr(dtype):
 
 def _copy_kernel(dtype):
     return cuda_kernel_factory(copy_kernel, (dtype,), "copy_kernel")
-
-
-def denser_kernel(dtype):
-    return cuda_kernel_factory(denser, (dtype,), "denser")
