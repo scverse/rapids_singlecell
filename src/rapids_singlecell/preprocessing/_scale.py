@@ -297,29 +297,24 @@ def _scale_dask(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=N
     )
 
     if isinstance(X._meta, sparse.csr_matrix) and zero_center:
-        from ._sparse_pca._kernels._pca_sparse_kernel import denser_kernel
+        from ._kernels._sparse2dense import _sparse2densekernel
 
-        kernel = denser_kernel(X.dtype)
+        kernel = _sparse2densekernel(X.dtype)
         kernel.compile()
 
         def __dense(X_part):
-            dense = cp.zeros(X_part.shape, dtype=X.dtype)
+            major, minor = X_part.shape
+            dense = cp.zeros(X_part.shape, order="C", dtype=X_part.dtype)
             max_nnz = cp.diff(X_part.indptr).max()
             tpb = (32, 32)
-            bpg_x = math.ceil(X_part.shape[0] / tpb[0])
+            bpg_x = math.ceil(major / tpb[0])
             bpg_y = math.ceil(max_nnz / tpb[1])
             bpg = (bpg_x, bpg_y)
+
             kernel(
                 bpg,
                 tpb,
-                (
-                    X_part.indptr,
-                    X_part.indices,
-                    X_part.data,
-                    dense,
-                    X_part.shape[0],
-                    X_part.shape[1],
-                ),
+                (X_part.indptr, X_part.indices, X_part.data, dense, major, minor, 1),
             )
             return dense
 
