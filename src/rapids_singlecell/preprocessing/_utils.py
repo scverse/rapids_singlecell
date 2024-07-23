@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import math
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
 from cupyx.scipy.sparse import issparse, isspmatrix_csc, isspmatrix_csr, spmatrix
+
+if TYPE_CHECKING:
+    from anndata import AnnData
 
 
 def _sparse_to_dense(X: spmatrix, order: Literal["C", "F"] | None = None) -> cp.ndarray:
@@ -143,3 +146,16 @@ def _check_gpu_X(X, require_cf=False):
             "Please checkout `rapids_singlecell.get.anndata_to_GPU` to convert your data to GPU. "
             "If you're working with CPU-based matrices, please consider using Scanpy instead."
         )
+
+
+def _check_use_raw(adata: AnnData, use_raw: None | bool, layer: str | None) -> bool:
+    """
+    Normalize checking `use_raw`.
+
+    My intentention here is to also provide a single place to throw a deprecation warning from in future.
+    """
+    if use_raw is not None:
+        return use_raw
+    if layer is not None:
+        return False
+    return adata.raw is not None

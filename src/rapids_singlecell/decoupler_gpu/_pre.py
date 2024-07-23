@@ -12,6 +12,8 @@ from cupyx.scipy.special import betainc
 from scanpy.get import _get_obs_rep
 from scipy.sparse import csr_matrix, issparse
 
+from rapids_singlecell.preprocessing._utils import _check_use_raw
+
 getnnz_0 = cp.ElementwiseKernel(
     "int32 idx",
     "raw int32 sum",
@@ -26,19 +28,6 @@ def __stdtr(df, t):
     x = df / (t**2 + df)
     tail = betainc(df / 2, 0.5, x) / 2
     return cp.where(t < 0, tail, 1 - tail)
-
-
-def _check_use_raw(adata: AnnData, use_raw: None | bool, layer: str | None) -> bool:
-    """
-    Normalize checking `use_raw`.
-
-    My intentention here is to also provide a single place to throw a deprecation warning from in future.
-    """
-    if use_raw is not None:
-        return use_raw
-    if layer is not None:
-        return False
-    return adata.raw is not None
 
 
 def check_mat(m, r, c, verbose=False):
