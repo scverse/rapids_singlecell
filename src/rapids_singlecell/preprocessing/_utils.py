@@ -95,11 +95,6 @@ def _get_mean_var(X, axis=0):
                 major = X.shape[1]
                 minor = X.shape[0]
                 mean, var = _mean_var_major(X, major, minor)
-            else:
-                mean = X.mean(axis=0)
-                var = X.var(axis=0)
-                major = X.shape[1]
-                var = (var - mean**2) * (major / (major - 1))
         elif axis == 1:
             if isspmatrix_csr(X):
                 major = X.shape[0]

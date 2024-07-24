@@ -3,14 +3,13 @@ from __future__ import annotations
 import warnings as Warning
 from typing import TYPE_CHECKING, Sequence
 
-import cupy as cp
 import numpy as np
 import pandas as pd
-from cupyx.scipy.sparse import csc_matrix, csr_matrix
-from scipy.sparse import issparse
 
-from rapids_singlecell.get import _get_obs_rep
+from rapids_singlecell.get import X_to_GPU, _get_obs_rep
 from rapids_singlecell.preprocessing._utils import _check_gpu_X, _check_use_raw
+
+from ._utils import _nan_mean
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -77,17 +76,8 @@ def score_genes(
     adata = adata.copy() if copy else adata
     use_raw = _check_use_raw(adata, use_raw, layer=layer)
     X = _get_obs_rep(adata, layer=layer, use_raw=use_raw)
-    if use_raw:
-        if issparse(X):
-            if X.format == "csc":
-                X = csc_matrix(X)
-            elif X.format == "csr":
-                X = csr_matrix(X)
-            else:
-                raise ValueError("X is not in a valid sparse format")
-        else:
-            X = cp.array(X)
-    X = _check_gpu_X(X)
+    X = X_to_GPU(X)
+    _check_gpu_X(X)
 
     if random_state is not None:
         np.random.seed(random_state)
@@ -109,7 +99,10 @@ def score_genes(
         raise ValueError("No valid genes were passed for reference set.")
 
     # average expression of genes
-    obs_avg = pd.Series(_nan_means((gene_pool), axis=0), index=gene_pool)
+    idx = gene_pool.isin(var_names)
+    nanmeans = _nan_mean(X, axis=0, mask=idx, n_features=len(gene_pool))[idx].get()
+
+    obs_avg = pd.Series(nanmeans, index=gene_pool)
     # Sometimes (and I don’t know how) missing data may be there, with NaNs for missing entries
     obs_avg = obs_avg[np.isfinite(obs_avg)]
 
@@ -141,18 +134,17 @@ def score_genes(
             msg += " Try setting `ctrl_as_ref=False`."
         raise RuntimeError(msg)
 
-    means_list, means_control = (
-        _nan_means((genes), axis=1, dtype="float64")
-        for genes in (gene_list, control_genes)
+    means_list = _nan_mean(
+        X, axis=1, mask=gene_list.isin(var_names), n_features=len(gene_list)
     )
+    means_control = _nan_mean(
+        X, axis=1, mask=control_genes.isin(var_names), n_features=len(control_genes)
+    )
+
     score = means_list - means_control
 
     adata.obs[score_name] = pd.Series(
-        np.array(score).ravel(), index=adata.obs_names, dtype="float64"
+        score.get().ravel(), index=adata.obs_names, dtype="float64"
     )
 
     return adata if copy else None
-
-
-def _nan_means(X, axis, dtype="float32"):
-    pass

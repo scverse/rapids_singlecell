@@ -51,10 +51,10 @@ _get_mean_var_minor_kernel = r"""
         if(idx >= nnz){
             return;
         }
-       double value = (double) data[idx];
-       int minor_pos = index[idx];
-       atomicAdd(&means[minor_pos], value/major);
-       atomicAdd(&vars[minor_pos], value*value/major);
+        double value = (double) data[idx];
+        int minor_pos = index[idx];
+        atomicAdd(&means[minor_pos], value/major);
+        atomicAdd(&vars[minor_pos], value*value/major);
         }
     """
 
