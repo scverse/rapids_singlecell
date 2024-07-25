@@ -4,7 +4,7 @@ from cuml.common.kernel_utils import cuda_kernel_factory
 
 _get_nan_mean_major_kernel = r"""
         (const int *indptr,const int *index,const {0} *data,
-            double* means,int* nans,
+            double* means,int* nans, bool* mask,
             int major, int minor) {
         int major_idx = blockIdx.x;
         if(major_idx >= major){
@@ -21,12 +21,15 @@ _get_nan_mean_major_kernel = r"""
         __syncthreads();
 
         for(int minor_idx = start_idx+threadIdx.x; minor_idx < stop_idx; minor_idx+= blockDim.x){
-            if(isnan(data[minor_idx])){
-                nan_place[threadIdx.x] += 1;
-            }
-            else{
-                double value = (double) data[minor_idx];
-                mean_place[threadIdx.x] += value;
+            int gene_number = index[minor_idx];
+            if (mask[gene_number]==true){
+                if(isnan(data[minor_idx])){
+                    nan_place[threadIdx.x] += 1;
+                }
+                else{
+                    double value = (double) data[minor_idx];
+                    mean_place[threadIdx.x] += value;
+                }
             }
         }
         __syncthreads();
@@ -48,12 +51,16 @@ _get_nan_mean_major_kernel = r"""
 
 _get_nan_mean_minor_kernel = r"""
         (const int *index,const {0} *data,
-            double* means, int* nans, int nnz) {
-        int idx = blockDim.x * blockIdx.x + threadIdx.x;
-        if(idx >= nnz){
+            double* means, int* nans, bool* mask, int nnz) {
+        int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+        int minor_pos = index[idx];
+        if (minor_pos >= nnz) {
             return;
         }
-        int minor_pos = index[idx];
+        if (mask[minor_pos] == false) {
+            return;
+        }
         if(isnan(data[idx])){
             atomicAdd(&nans[minor_pos], 1);
             }

@@ -3,6 +3,7 @@ from __future__ import annotations
 import warnings as Warning
 from typing import TYPE_CHECKING, Sequence
 
+import cupy as cp
 import numpy as np
 import pandas as pd
 
@@ -99,8 +100,8 @@ def score_genes(
         raise ValueError("No valid genes were passed for reference set.")
 
     # average expression of genes
-    idx = gene_pool.isin(var_names)
-    nanmeans = _nan_mean(X, axis=0, mask=idx, n_features=len(gene_pool))[idx].get()
+    idx = cp.array(var_names.isin(gene_pool), dtype=cp.bool_)
+    nanmeans = _nan_mean(X, axis=0, mask=idx, n_features=len(gene_pool)).get()
 
     obs_avg = pd.Series(nanmeans, index=gene_pool)
     # Sometimes (and I don’t know how) missing data may be there, with NaNs for missing entries
@@ -134,11 +135,11 @@ def score_genes(
             msg += " Try setting `ctrl_as_ref=False`."
         raise RuntimeError(msg)
 
-    means_list = _nan_mean(
-        X, axis=1, mask=gene_list.isin(var_names), n_features=len(gene_list)
-    )
+    gene_array = cp.array(var_names.isin(gene_list), dtype=cp.bool_)
+    control_array = cp.array(var_names.isin(control_genes), dtype=cp.bool_)
+    means_list = _nan_mean(X, axis=1, mask=gene_array, n_features=len(gene_list))
     means_control = _nan_mean(
-        X, axis=1, mask=control_genes.isin(var_names), n_features=len(control_genes)
+        X, axis=1, mask=control_array, n_features=len(control_genes)
     )
 
     score = means_list - means_control

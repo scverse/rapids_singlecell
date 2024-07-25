@@ -48,20 +48,34 @@ def _choose_representation(adata, use_rep=None, n_pcs=None):
 
 
 def _nan_mean_minor(X, major, minor, *, mask=None, n_features=None):
+    if mask is None:
+        mask = cp.ones(major, dtype=cp.bool_)
+
+    if n_features is None:
+        n_features = major
+
     from ._kernels._nan_mean_kernels import _get_nan_mean_minor
 
     mean = cp.zeros(minor, dtype=cp.float64)
     nans = cp.zeros(minor, dtype=cp.int32)
-    block = (32,)
-    grid = (int(math.ceil(X.nnz / block[0])),)
+    tpb = (128,)
+    bpg_x = math.ceil(X.nnz / 128)
+
+    bpg = (bpg_x,)
     get_mean_var_minor = _get_nan_mean_minor(X.data.dtype)
-    get_mean_var_minor(grid, block, (X.indices, X.data, mean, nans, X.nnz))
+    get_mean_var_minor(bpg, tpb, (X.indices, X.data, mean, nans, mask, X.nnz))
 
     mean /= major - nans
     return mean
 
 
 def _nan_mean_major(X, major, minor, *, mask=None, n_features=None):
+    if mask is None:
+        mask = cp.ones(minor, dtype=cp.bool_)
+
+    if n_features is None:
+        n_features = minor
+
     from ._kernels._nan_mean_kernels import _get_nan_mean_major
 
     mean = cp.zeros(major, dtype=cp.float64)
@@ -70,9 +84,9 @@ def _nan_mean_major(X, major, minor, *, mask=None, n_features=None):
     grid = (major,)
     get_mean_var_major = _get_nan_mean_major(X.data.dtype)
     get_mean_var_major(
-        grid, block, (X.indptr, X.indices, X.data, mean, nans, major, minor)
+        grid, block, (X.indptr, X.indices, X.data, mean, nans, mask, major, minor)
     )
-    mean /= minor - nans
+    mean /= n_features - nans
 
     return mean
 
@@ -83,20 +97,26 @@ def _nan_mean(X, axis=0, *, mask=None, n_features=None):
             if isspmatrix_csr(X):
                 major = X.shape[0]
                 minor = X.shape[1]
-                mean = _nan_mean_minor(X, major, minor, mask, n_features)
+                mean = _nan_mean_minor(
+                    X, major, minor, mask=mask, n_features=n_features
+                )
             elif isspmatrix_csc(X):
+                X = X[:, mask]
                 major = X.shape[1]
                 minor = X.shape[0]
-                mean = _nan_mean_major(X, major, minor)
+                mean = _nan_mean_major(X, major, minor, mask=None, n_features=None)
         elif axis == 1:
             if isspmatrix_csr(X):
                 major = X.shape[0]
                 minor = X.shape[1]
-                mean = _nan_mean_major(X, major, minor)
+                mean = _nan_mean_major(
+                    X, major, minor, mask=mask, n_features=n_features
+                )
             elif isspmatrix_csc(X):
+                X = X[:, mask]
                 major = X.shape[1]
                 minor = X.shape[0]
-                mean = _nan_mean_minor(X, major, minor)
+                mean = _nan_mean_minor(X, major, minor, mask=None, n_features=None)
     else:
-        mean = cp.nanmean(X, axis, dtype=cp.float64)
+        mean = cp.nanmean(X[:, mask], axis, dtype=cp.float64)
     return mean
