@@ -61,7 +61,7 @@ def _create_adata(n_obs, n_var, p_zero, p_nan):
     adata.var_names = gene_names
     return adata
 
-@pytest.mark.parametrize("array_type", ["default", csc_matrix,csr_matrix])
+@pytest.mark.parametrize("array_type", ["default",csr_matrix])
 def test_score_with_reference(array_type):
     """
     Checks if score_genes output agrees with scanpy

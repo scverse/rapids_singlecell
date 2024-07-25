@@ -96,7 +96,7 @@ def _nan_mean(X, axis=0, *, mask=None, n_features=None):
                     X, major, minor, mask=mask, n_features=n_features
                 )
             elif isspmatrix_csc(X):
-                X = X[:, mask].copy()
+                X = X[:, mask]
                 major = X.shape[1]
                 minor = X.shape[0]
                 n_features = minor
@@ -112,7 +112,7 @@ def _nan_mean(X, axis=0, *, mask=None, n_features=None):
                     X, major, minor, mask=mask, n_features=n_features
                 )
             elif isspmatrix_csc(X):
-                X = X[:, mask].copy()
+                X = X[:, mask]
                 major = X.shape[1]
                 minor = X.shape[0]
                 n_features = major
@@ -120,5 +120,7 @@ def _nan_mean(X, axis=0, *, mask=None, n_features=None):
                     X, major, minor, mask=None, n_features=n_features
                 )
     else:
+        if mask is None:
+            mask = cp.ones(X.shape[1], dtype=cp.bool_)
         mean = cp.nanmean(X[:, mask], axis=axis, dtype=cp.float64)
     return mean
