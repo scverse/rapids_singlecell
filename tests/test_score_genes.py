@@ -61,7 +61,7 @@ def _create_adata(n_obs, n_var, p_zero, p_nan):
     adata.var_names = gene_names
     return adata
 
-@pytest.mark.parametrize("array_type", ["default",csr_matrix])
+@pytest.mark.parametrize("array_type", ["default","csr","csc"])
 def test_score_with_reference(array_type):
     """
     Checks if score_genes output agrees with scanpy
@@ -70,7 +70,10 @@ def test_score_with_reference(array_type):
     adata = paul15()
     sc.pp.normalize_per_cell(adata, counts_per_cell_after=10000)
     if array_type != "default":
-        adata.X = array_type(adata.X)
+        if array_type == "csr":
+            adata.X = csr_matrix(adata.X)
+        elif array_type == "csc":
+            adata.X = csc_matrix(adata.X)
     adata.X = adata.X.astype(np.float64)
     rsc.tl.score_genes(adata, gene_list=adata.var_names[:100], score_name="Test_gpu")
     sc.tl.score_genes(adata, gene_list=adata.var_names[:100], score_name="Test_cpu")
@@ -81,7 +84,6 @@ def test_add_score():
     check the dtype of the scores
     check that non-existing genes get ignored
     """
-    # TODO: write a test that costs less resources and is more meaningful
     adata = _create_adata(100, 1000, p_zero=0, p_nan=0)
 
     sc.pp.normalize_per_cell(adata, counts_per_cell_after=1e4)
@@ -102,6 +104,17 @@ def test_sparse_nanmean():
 
     R, C = 60, 50
 
+    # sparse matrix with nan
+    S = _create_sparse_nan_matrix(R, C, percent_zero=0.3, percent_nan=0.3)
+    S = rsc.get.X_to_GPU(S)
+    S = S.astype("float64")
+    cp.testing.assert_allclose(
+        cp.nanmean(S.toarray(), 1), (_nan_mean(S, 1)).flatten()
+    )
+    cp.testing.assert_allclose(
+        cp.nanmean(S.toarray(), 0), (_nan_mean(S, 0)).flatten()
+    )
+
     # sparse matrix, no NaN
     S = _create_sparse_nan_matrix(R, C, percent_zero=0.3, percent_nan=0)
     S = rsc.get.X_to_GPU(S)
@@ -114,24 +127,6 @@ def test_sparse_nanmean():
     cp.testing.assert_allclose(
         S.toarray().mean(1), (_nan_mean(S, 1)).flatten()
     )
-
-    # sparse matrix with nan
-    S = _create_sparse_nan_matrix(R, C, percent_zero=0.3, percent_nan=0.3)
-    S = rsc.get.X_to_GPU(S)
-    S = S.astype("float64")
-    cp.testing.assert_allclose(
-        cp.nanmean(S.toarray(), 1), (_nan_mean(S, 1)).flatten()
-    )
-    cp.testing.assert_allclose(
-        cp.nanmean(S.toarray(), 0), (_nan_mean(S, 0)).flatten()
-    )
-    """
-    # edge case of only NaNs per row
-    A = np.full((10, 1), np.nan)
-
-    meanA = np.array(_sparse_nanmean(csr_matrix(A), 0)).flatten()
-    np.testing.assert_allclose(np.nanmean(A, 0), meanA)
-    """
 
 
 

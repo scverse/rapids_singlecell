@@ -96,7 +96,8 @@ def _nan_mean(X, axis=0, *, mask=None, n_features=None):
                     X, major, minor, mask=mask, n_features=n_features
                 )
             elif isspmatrix_csc(X):
-                X = X[:, mask]
+                if mask is not None:
+                    X = X[:, mask]
                 major = X.shape[1]
                 minor = X.shape[0]
                 n_features = minor
@@ -112,7 +113,8 @@ def _nan_mean(X, axis=0, *, mask=None, n_features=None):
                     X, major, minor, mask=mask, n_features=n_features
                 )
             elif isspmatrix_csc(X):
-                X = X[:, mask]
+                if mask is not None:
+                    X = X[:, mask]
                 major = X.shape[1]
                 minor = X.shape[0]
                 n_features = major
