@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import warnings as Warning
+import warnings
 from typing import TYPE_CHECKING, Sequence
 
 import cupy as cp
@@ -88,7 +88,7 @@ def score_genes(
     genes_to_ignore = gene_list.difference(var_names, sort=False)  # first get missing
     gene_list = gene_list.intersection(var_names)  # then restrict to present
     if len(genes_to_ignore) > 0:
-        Warning.warning(f"genes are not in var_names and ignored: {genes_to_ignore}")
+        warnings.warn(f"genes are not in var_names and ignored: {genes_to_ignore}")
     if len(gene_list) == 0:
         raise ValueError("No valid genes were passed for scoring.")
 
@@ -115,14 +115,14 @@ def score_genes(
     control_genes = pd.Index([], dtype="string")
     for cut in np.unique(obs_cut.loc[gene_list]):
         r_genes: pd.Index[str] = obs_cut[(obs_cut == cut) & ~keep_ctrl_in_obs_cut].index
-        """
+
         if len(r_genes) == 0:
             msg = (
                 f"No control genes for {cut=}. You might want to increase "
                 f"gene_pool size (current size: {len(gene_pool)})"
             )
-            logg.warning(msg)
-        """
+            warnings.warn(msg)
+
         if ctrl_size < len(r_genes):
             r_genes = r_genes.to_series().sample(ctrl_size).index
         if ctrl_as_ref:  # otherwise `r_genes` is already filtered
@@ -148,4 +148,68 @@ def score_genes(
         score.get().ravel(), index=adata.obs_names, dtype="float64"
     )
 
+    return adata if copy else None
+
+
+def score_genes_cell_cycle(
+    adata: AnnData,
+    *,
+    s_genes: Sequence[str],
+    g2m_genes: Sequence[str],
+    copy: bool = False,
+    **kwargs,
+) -> AnnData | None:
+    """\
+    Score cell cycle genes :cite:p:`Satija2015`.
+
+    Given two lists of genes associated to S phase and G2M phase, calculates
+    scores and assigns a cell cycle phase (G1, S or G2M). See
+    :func:`~rapids_singlecell.tl.score_genes` for more explanation.
+
+    Parameters
+    ----------
+    adata
+        The annotated data matrix.
+    s_genes
+        List of genes associated with S phase.
+    g2m_genes
+        List of genes associated with G2M phase.
+    copy
+        Copy `adata` or modify it inplace.
+    **kwargs
+        Are passed to :func:`~rapids_singlecell.tl.score_genes`. `ctrl_size` is not
+        possible, as it's set as `min(len(s_genes), len(g2m_genes))`.
+
+    Returns
+    -------
+    Returns `None` if `copy=False`, else returns an `AnnData` object. Sets the following fields:
+
+    `adata.obs['S_score']` : :class:`pandas.Series` (dtype `object`)
+        The score for S phase for each cell.
+    `adata.obs['G2M_score']` : :class:`pandas.Series` (dtype `object`)
+        The score for G2M phase for each cell.
+    `adata.obs['phase']` : :class:`pandas.Series` (dtype `object`)
+        The cell cycle phase (`S`, `G2M` or `G1`) for each cell.
+
+    See also
+    --------
+    score_genes
+    """
+
+    adata = adata.copy() if copy else adata
+    ctrl_size = min(len(s_genes), len(g2m_genes))
+    for genes, name in [(s_genes, "S_score"), (g2m_genes, "G2M_score")]:
+        score_genes(adata, genes, score_name=name, ctrl_size=ctrl_size, **kwargs)
+    scores = adata.obs[["S_score", "G2M_score"]]
+
+    # default phase is S
+    phase = pd.Series("S", index=scores.index)
+
+    # if G2M is higher than S, it's G2M
+    phase[scores["G2M_score"] > scores["S_score"]] = "G2M"
+
+    # if all scores are negative, it's G1...
+    phase[np.all(scores < 0, axis=1)] = "G1"
+
+    adata.obs["phase"] = phase
     return adata if copy else None
