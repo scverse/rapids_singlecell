@@ -31,14 +31,11 @@ def score_genes(
     layer: str | None = None,
 ) -> AnnData | None:
     """\
-    Score a set of genes :cite:p:`Satija2015`.
+    Score a set of genes
 
     The score is the average expression of a set of genes subtracted with the
     average expression of a reference set of genes. The reference set is
     randomly sampled from the `gene_pool` for each binned expression value.
-
-    This reproduces the approach in Seurat :cite:p:`Satija2015` and has been implemented
-    for Scanpy by Davide Cittaro.
 
     Parameters
     ----------
@@ -160,7 +157,7 @@ def score_genes_cell_cycle(
     **kwargs,
 ) -> AnnData | None:
     """\
-    Score cell cycle genes :cite:p:`Satija2015`.
+    Score cell cycle genes
 
     Given two lists of genes associated to S phase and G2M phase, calculates
     scores and assigns a cell cycle phase (G1, S or G2M). See
