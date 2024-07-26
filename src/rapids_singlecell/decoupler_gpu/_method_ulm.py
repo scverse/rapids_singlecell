@@ -42,7 +42,7 @@ def ulm(mat, net, batch_size=10000, verbose=False):
             if isinstance(mat, cp_csr_matrix):
                 batch = _sparse_to_dense(mat[srt:end], order="F").T
             else:
-                batch = cp.array(mat[srt:end].toarray(order="F")).T
+                batch = _sparse_to_dense(cp_csr_matrix(mat[srt:end]), order="F").T
 
             # Compute R for batch
             r = mat_cor(net, batch)
