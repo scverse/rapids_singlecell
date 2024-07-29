@@ -17,7 +17,7 @@ _get_nan_mean_major_kernel = r"""
         __shared__ int nan_place[64];
 
         mean_place[threadIdx.x] = 0.0;
-        nan_place[threadIdx.x] = 0.0;
+        nan_place[threadIdx.x] = 0;
         __syncthreads();
 
         for(int minor_idx = start_idx+threadIdx.x; minor_idx < stop_idx; minor_idx+= blockDim.x){
@@ -54,10 +54,10 @@ _get_nan_mean_minor_kernel = r"""
             double* means, int* nans, bool* mask, int nnz) {
         int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-        int minor_pos = index[idx];
-        if (minor_pos >= nnz) {
+        if (idx >= nnz) {
             return;
         }
+        int minor_pos = index[idx];
         if (mask[minor_pos] == false) {
             return;
         }

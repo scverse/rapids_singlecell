@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 import cupy as cp
 import numpy as np
@@ -14,7 +14,7 @@ from scipy.sparse import isspmatrix_csr as isspmatrix_csr_cpu
 if TYPE_CHECKING:
     from anndata import AnnData
 
-GPU_ARRAY_TYPE = (cp.ndarray, csr_matrix_gpu, csc_matrix_gpu)
+GPU_ARRAY_TYPE = Union[cp.ndarray, csr_matrix_gpu, csc_matrix_gpu]
 
 
 def anndata_to_GPU(
