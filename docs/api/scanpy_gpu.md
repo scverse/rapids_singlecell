@@ -89,6 +89,15 @@ Any transformation of the data matrix that is not a tool. Other than `tools`, pr
     tl.leiden
 ```
 
+### Gene scores, Cell cycle
+
+```{eval-rst}
+.. autosummary::
+   :toctree: generated/
+
+    tl.score_genes
+```
+
 ### Marker genes
 
 ```{eval-rst}

@@ -12,4 +12,6 @@ These functions offer convineant ways to move arrays and matrices from and to th
     get.aggregate
     get.anndata_to_GPU
     get.anndata_to_CPU
+    get.X_to_GPU
+    get.X_to_CPU
 ```
