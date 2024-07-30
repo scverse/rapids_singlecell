@@ -191,9 +191,7 @@ def run_aucell(
     m, r, c = extract(
         mat, use_raw=use_raw, layer=layer, verbose=verbose, pre_load=pre_load
     )
-    # msk = np.argsort(c)
-    # c = c[msk].astype("U")
-    # m = m[:, msk]
+
     # Set n_up
     if n_up is None:
         n_up = int(np.ceil(0.05 * len(c)))
@@ -205,11 +203,6 @@ def run_aucell(
     # Transform net
     net = rename_net(net, source=source, target=target, weight=None)
     net = filt_min_n(c, net, min_n=min_n)
-
-    # rng = np.random.default_rng(seed=seed)
-    # idx = np.arange(m.shape[1])
-    # rng.shuffle(idx)
-    # m, c = m[:, idx], c[idx]
 
     # Transform targets to indxs
     table = {name: i for i, name in enumerate(c)}
