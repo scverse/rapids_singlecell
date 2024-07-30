@@ -87,7 +87,7 @@ def nb_aucell(
     return es.get()
 
 
-def aucell(mat, net, n_up, verbose, batch_size=None):
+def aucell(mat, net, n_up, verbose, batch_size=5000):
     # Get dims
     n_samples = mat.shape[0]
     n_fsets = net.shape[0]
