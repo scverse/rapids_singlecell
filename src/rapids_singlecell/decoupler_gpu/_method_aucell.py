@@ -63,6 +63,10 @@ def nb_aucell(
     # Empty acts
     es = cp.zeros((row.shape[0], n_fsets), dtype=cp.float32)
     es_inter = cp.zeros(row.shape[0], dtype=cp.int32)
+
+    threads_per_block = 32
+    blocks_per_grid = math.ceil(row.shape[0] / threads_per_block)
+
     for j in range(n_fsets):
         # Extract feature set
         srt = starts[j]
@@ -70,10 +74,8 @@ def nb_aucell(
         fset = net[srt:off]
         # Compute AUC
         x = row[:, fset]
-        x = cp.sort(x, axis=1)
+        x.sort(axis=1)
 
-        threads_per_block = 32
-        blocks_per_grid = math.ceil(x.shape[0] / threads_per_block)
         reduce_sum_2D_kernel(
             (blocks_per_grid,),
             (threads_per_block,),
