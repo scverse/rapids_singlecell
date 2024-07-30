@@ -12,4 +12,5 @@
     dcg.run_mlm
     dcg.run_ulm
     dcg.run_wsum
+    dcg.run_aucell
 ```

@@ -74,7 +74,7 @@ def wsum(mat, net, times, batch_size, seed, verbose):
             # Subset batch
             srt, end = i * batch_size, i * batch_size + batch_size
             if isinstance(mat, csr_matrix):
-                tmp = cp.array(mat[srt:end].toarray())
+                tmp = _sparse_to_dense(cp_csr_matrix(mat[srt:end]))
             else:
                 tmp = _sparse_to_dense(mat[srt:end])
             # Run WSUM
