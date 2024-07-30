@@ -21,18 +21,18 @@ from rapids_singlecell.preprocessing._utils import _sparse_to_dense
 reduce_sum_2D_kernel = cp.RawKernel(
     r"""
     extern "C" __global__
-    void aucell_reduce(const long long* input, long long* output, long long R, long long C, long long max) {
-        long long row = blockIdx.x *blockDim.x+ threadIdx.x ;
+    void aucell_reduce(const int* input, int* output, int R, int C, int max) {
+        int row = blockIdx.x *blockDim.x+ threadIdx.x ;
         if (row>=R){
             return;
         }
-        long long sum = 0;
-        long long prev = input[row*C+0];
+        int sum = 0;
+        int prev = input[row*C+0];
         int switcher = 1;
         if (prev < max){
             switcher = 0;
             for(int i  = 1; i<C; i++){
-                long long data = input[row*C+i];
+                int data = input[row*C+i];
                 if(data<max) {
                     sum+= i *(data-prev);
                     prev = data;
@@ -46,10 +46,7 @@ reduce_sum_2D_kernel = cp.RawKernel(
         }
         if (switcher == 0){
             sum += C *(max-prev);
-
         }
-
-
         output[row] = sum;
     }
     """,
@@ -57,22 +54,20 @@ reduce_sum_2D_kernel = cp.RawKernel(
 )
 
 
-def nb_aucell(row, net, *, starts=None, offsets=None, n_up=None, n_fsets=None):
+def nb_aucell(
+    row, net, *, starts=None, offsets=None, n_up=None, n_fsets=None, max_aucs=None
+):
     # Rank row
     row = cp.argsort(cp.argsort(-row), axis=1) + 1
-
+    row = row.astype(cp.int32)
     # Empty acts
     es = cp.zeros((row.shape[0], n_fsets), dtype=cp.float32)
+    es_inter = cp.zeros(row.shape[0], dtype=cp.int32)
     for j in range(n_fsets):
-        es_inter = cp.zeros(row.shape[0], dtype=cp.int64)
         # Extract feature set
         srt = starts[j]
         off = offsets[j] + srt
         fset = net[srt:off]
-
-        # Compute max AUC for fset
-        k = min(fset.shape[0], n_up - 1)
-        max_auc = int(k * (k - 1) / 2 + (n_up - k) * k)
         # Compute AUC
         x = row[:, fset]
         x = cp.sort(x, axis=1)
@@ -84,14 +79,13 @@ def nb_aucell(row, net, *, starts=None, offsets=None, n_up=None, n_fsets=None):
             (threads_per_block,),
             (x, es_inter, x.shape[0], x.shape[1], n_up),
         )
-
         # Update acts matrix
-        out = es_inter / max_auc
-        es[:, j] = out.astype(cp.float32)
+        es[:, j] = (es_inter / max_aucs[j]).astype(cp.float32)
+        es_inter[:] = 0
     return es.get()
 
 
-def aucell(mat, net, n_up, verbose):
+def aucell(mat, net, n_up, verbose, batch_size=None):
     # Get dims
     n_samples = mat.shape[0]
     n_fsets = net.shape[0]
@@ -103,23 +97,32 @@ def aucell(mat, net, n_up, verbose):
     starts = np.zeros(n_fsets, dtype=np.int64)
     starts[1:] = np.cumsum(offsets)[:-1]
     es = np.zeros((n_samples, n_fsets), dtype=np.float32)
-    offsets = cp.array(offsets)
-    starts = cp.array(starts)
-    net = cp.array(net)
+    offsets = cp.array(offsets, dtype=cp.int32)
+    starts = cp.array(starts, dtype=cp.int32)
+    net = cp.array(net, dtype=cp.int32)
+    k = cp.minimum(offsets, n_up - 1)
+    max_aucs = (k * (k - 1) / 2 + (n_up - k) * k).astype(cp.int32)
     n_samples = mat.shape[0]
-    batch_size = 5000
     n_batches = int(np.ceil(n_samples / batch_size))
     for i in tqdm(range(n_batches), disable=not verbose):
         # Subset batch
         srt, end = i * batch_size, i * batch_size + batch_size
         if isinstance(mat, csr_matrix):
-            row = cp.array(mat[srt:end].toarray())
+            row = _sparse_to_dense(cp_csr_matrix(mat[srt:end]))
         elif isinstance(mat, cp_csr_matrix):
             row = _sparse_to_dense(mat[srt:end])
+        elif isinstance(mat, cp.ndarray):
+            row = mat[srt:end]
         else:
             row = cp.array(mat[srt:end])
         es[srt:end] = nb_aucell(
-            row, net, starts=starts, offsets=offsets, n_up=n_up, n_fsets=n_fsets
+            row,
+            net,
+            starts=starts,
+            offsets=offsets,
+            n_up=n_up,
+            n_fsets=n_fsets,
+            max_aucs=max_aucs,
         )
     return es
 
@@ -130,11 +133,12 @@ def run_aucell(
     *,
     source="source",
     target="target",
+    batch_size: int = 5000,
     n_up=None,
     min_n=5,
     seed=42,
     verbose=False,
-    use_raw=True,
+    use_raw=None,
     layer: str | None = None,
     pre_load: bool | None = None,
 ):
@@ -158,6 +162,8 @@ def run_aucell(
         Column name in net with source nodes.
     target
         Column name in net with target nodes.
+    batch_size
+        Size of the samples to use for each batch. Increasing this will consume more memory but it will run faster.
     n_up
         Number of top ranked features to select as observed features. If not specified it will be equal to the 5% of the number of features.
     min_n
@@ -183,9 +189,9 @@ def run_aucell(
     m, r, c = extract(
         mat, use_raw=use_raw, layer=layer, verbose=verbose, pre_load=pre_load
     )
-    msk = np.argsort(c)
-    c = c[msk].astype("U")
-    m = m[:, msk]
+    # msk = np.argsort(c)
+    # c = c[msk].astype("U")
+    # m = m[:, msk]
     # Set n_up
     if n_up is None:
         n_up = int(np.ceil(0.05 * len(c)))
@@ -194,15 +200,14 @@ def run_aucell(
         n_up = np.min([n_up, c.size])  # Limit n_up to max features
     if not 0 < n_up:
         raise ValueError("n_up needs to be a value higher than 0.")
-    print(n_up)
     # Transform net
     net = rename_net(net, source=source, target=target, weight=None)
     net = filt_min_n(c, net, min_n=min_n)
 
-    rng = np.random.default_rng(seed=seed)
-    idx = np.arange(m.shape[1])
-    rng.shuffle(idx)
-    m, c = m[:, idx], c[idx]
+    # rng = np.random.default_rng(seed=seed)
+    # idx = np.arange(m.shape[1])
+    # rng.shuffle(idx)
+    # m, c = m[:, idx], c[idx]
 
     # Transform targets to indxs
     table = {name: i for i, name in enumerate(c)}
@@ -216,7 +221,7 @@ def run_aucell(
         )
 
     # Run AUCell
-    estimate = aucell(m, net, n_up, verbose)
+    estimate = aucell(m, net, n_up, verbose, batch_size)
     estimate = pd.DataFrame(estimate, index=r, columns=net.index)
     estimate.name = "aucell_estimate"
 
