@@ -13,7 +13,16 @@ from rapids_singlecell.preprocessing._utils import _check_gpu_X, _check_use_raw
 from ._utils import _nan_mean
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Generator, Sequence
+
     from anndata import AnnData
+    from scipy.sparse import csc_matrix, csr_matrix
+
+    try:
+        _StrIdx = pd.Index[str]
+    except TypeError:  # Sphinx
+        _StrIdx = pd.Index
+    _GetSubset = Callable[[_StrIdx], np.ndarray | csr_matrix | csc_matrix]
 
 
 def score_genes(
@@ -81,6 +90,50 @@ def score_genes(
         np.random.seed(random_state)
 
     var_names = adata.raw.var_names if use_raw else adata.var_names
+    gene_list, gene_pool = _check_score_genes_args(var_names, gene_list, gene_pool)
+
+    control_genes = pd.Index([], dtype="string")
+    for r_genes in _score_genes_bins(
+        X,
+        gene_list,
+        gene_pool,
+        var_names=var_names,
+        ctrl_as_ref=ctrl_as_ref,
+        ctrl_size=ctrl_size,
+        n_bins=n_bins,
+    ):
+        control_genes = control_genes.union(r_genes)
+
+    if len(control_genes) == 0:
+        msg = "No control genes found in any cut."
+        if ctrl_as_ref:
+            msg += " Try setting `ctrl_as_ref=False`."
+        raise RuntimeError(msg)
+    gene_array = cp.array(var_names.isin(gene_list), dtype=cp.bool_)
+    control_array = cp.array(var_names.isin(control_genes), dtype=cp.bool_)
+    means_list = _nan_mean(X, axis=1, mask=gene_array, n_features=len(gene_list))
+    means_control = _nan_mean(
+        X, axis=1, mask=control_array, n_features=len(control_genes)
+    )
+
+    score = means_list - means_control
+
+    adata.obs[score_name] = pd.Series(
+        score.get().ravel(), index=adata.obs_names, dtype="float64"
+    )
+
+    return adata if copy else None
+
+
+def _check_score_genes_args(
+    var_names: pd.Index[str],
+    gene_list: pd.Index[str] | Sequence[str],
+    gene_pool: pd.Index[str] | Sequence[str] | None,
+) -> tuple[pd.Index[str], pd.Index[str]]:
+    """Restrict `gene_list` and `gene_pool` to present genes in `adata`.
+
+    Also returns a function to get subset of `adata.X` based on a set of genes passed.
+    """
     gene_list = pd.Index([gene_list] if isinstance(gene_list, str) else gene_list)
     genes_to_ignore = gene_list.difference(var_names, sort=False)  # first get missing
     gene_list = gene_list.intersection(var_names)  # then restrict to present
@@ -96,10 +149,23 @@ def score_genes(
     if len(gene_pool) == 0:
         raise ValueError("No valid genes were passed for reference set.")
 
+    return gene_list, gene_pool
+
+
+def _score_genes_bins(
+    X,
+    gene_list: pd.Index[str],
+    gene_pool: pd.Index[str],
+    *,
+    var_names: pd.Index[str],
+    ctrl_as_ref: bool,
+    ctrl_size: int,
+    n_bins: int,
+) -> Generator[pd.Index[str], None, None]:
+    # average expression of genes
     # average expression of genes
     idx = cp.array(var_names.isin(gene_pool), dtype=cp.bool_)
     nanmeans = _nan_mean(X, axis=0, mask=idx, n_features=len(gene_pool)).get()
-
     obs_avg = pd.Series(nanmeans, index=gene_pool)
     # Sometimes (and I don’t know how) missing data may be there, with NaNs for missing entries
     obs_avg = obs_avg[np.isfinite(obs_avg)]
@@ -109,43 +175,19 @@ def score_genes(
     keep_ctrl_in_obs_cut = False if ctrl_as_ref else obs_cut.index.isin(gene_list)
 
     # now pick `ctrl_size` genes from every cut
-    control_genes = pd.Index([], dtype="string")
     for cut in np.unique(obs_cut.loc[gene_list]):
         r_genes: pd.Index[str] = obs_cut[(obs_cut == cut) & ~keep_ctrl_in_obs_cut].index
-
         if len(r_genes) == 0:
             msg = (
                 f"No control genes for {cut=}. You might want to increase "
                 f"gene_pool size (current size: {len(gene_pool)})"
             )
             warnings.warn(msg)
-
         if ctrl_size < len(r_genes):
             r_genes = r_genes.to_series().sample(ctrl_size).index
         if ctrl_as_ref:  # otherwise `r_genes` is already filtered
             r_genes = r_genes.difference(gene_list)
-        control_genes = control_genes.union(r_genes)
-
-    if len(control_genes) == 0:
-        msg = "No control genes found in any cut."
-        if ctrl_as_ref:
-            msg += " Try setting `ctrl_as_ref=False`."
-        raise RuntimeError(msg)
-
-    gene_array = cp.array(var_names.isin(gene_list), dtype=cp.bool_)
-    control_array = cp.array(var_names.isin(control_genes), dtype=cp.bool_)
-    means_list = _nan_mean(X, axis=1, mask=gene_array, n_features=len(gene_list))
-    means_control = _nan_mean(
-        X, axis=1, mask=control_array, n_features=len(control_genes)
-    )
-
-    score = means_list - means_control
-
-    adata.obs[score_name] = pd.Series(
-        score.get().ravel(), index=adata.obs_names, dtype="float64"
-    )
-
-    return adata if copy else None
+        yield r_genes
 
 
 def score_genes_cell_cycle(
