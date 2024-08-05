@@ -4,6 +4,7 @@ import cupy as cp
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
 from cupyx.scipy.sparse import issparse as cp_issparse
 from scipy.sparse import issparse
 from tqdm.auto import tqdm
@@ -55,7 +56,7 @@ def mlm(mat, net, batch_size=10000, verbose=False):
             if cp_issparse(mat):
                 y = _sparse_to_dense(mat[srt:end]).T
             else:
-                y = cp.array(mat[srt:end].toarray()).T
+                y = _sparse_to_dense(cp_csr_matrix(mat[srt:end])).T
             # Compute MLM for batch
             es[srt:end] = fit_mlm(net, y, inv, df)[:, 1:]
 
