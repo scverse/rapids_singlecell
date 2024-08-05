@@ -13,7 +13,6 @@ if TYPE_CHECKING:
     from anndata import AnnData
 
 
-
 def _sparse_to_dense(X: spmatrix, order: Literal["C", "F"] | None = None) -> cp.ndarray:
     if order is None:
         order = "C"
