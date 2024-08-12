@@ -27,16 +27,16 @@ def normalize_total(
 
     Parameters
     ----------
-        adata
-            AnnData object
-        target_sum
-            If `None`, after normalization, each observation (cell) has a total count equal to the median of total counts for observations (cells) before normalization.
-        layer
-            Layer to normalize instead of `X`. If `None`, `X` is normalized.
-        inplace
-            Whether to update `adata` or return the matrix.
-        copy
-            Whether to return a copy or update `adata`. Not compatible with inplace=False.
+    adata
+        AnnData object
+    target_sum
+        If `None`, after normalization, each observation (cell) has a total count equal to the median of total counts for observations (cells) before normalization.
+    layer
+        Layer to normalize instead of `X`. If `None`, `X` is normalized.
+    inplace
+        Whether to update `adata` or return the matrix.
+    copy
+        Whether to return a copy or update `adata`. Not compatible with inplace=False.
 
     Returns
     -------
@@ -116,22 +116,22 @@ def log1p(
 
     Parameters
     ----------
-        adata:
-            AnnData object
-        layer
-            Layer to normalize instead of `X`. If `None`, `X` is normalized.
-        obsm
-            Entry of obsm to transform.
-        inplace
-            Whether to update `adata` or return the matrix.
-        copy
-            Whether to return a copy or update `adata`. Not compatible with inplace=False.
+    adata:
+        AnnData object
+    layer
+        Layer to normalize instead of `X`. If `None`, `X` is normalized.
+    obsm
+        Entry of obsm to transform.
+    inplace
+        Whether to update `adata` or return the matrix.
+    copy
+        Whether to return a copy or update `adata`. Not compatible with inplace=False.
 
     Returns
     -------
-            The resulting sparse matrix after applying the natural logarithm of one plus the input matrix. \
-            If `copy` is set to True, returns the new sparse matrix. Otherwise, updates the `adata` object \
-            in-place and returns None.
+    The resulting sparse matrix after applying the natural logarithm of one plus the input matrix. \
+    If `copy` is set to True, returns the new sparse matrix. Otherwise, updates the `adata` object \
+    in-place and returns None.
 
     """
     if copy:
@@ -174,27 +174,27 @@ def normalize_pearson_residuals(
 
     Parameters
     ----------
-        adata:
-            AnnData object
-        theta
-            The negative binomial overdispersion parameter theta for Pearson residuals.
-            Higher values correspond to less overdispersion (var = mean + mean^2/theta), and theta=np.Inf corresponds to a Poisson model.
-        clip
-            Determines if and how residuals are clipped:
-            If None, residuals are clipped to the interval [-sqrt(n_obs), sqrt(n_obs)], where n_obs is the number of cells in the dataset (default behavior).
-            If any scalar c, residuals are clipped to the interval [-c, c]. Set clip=np.Inf for no clipping.
-        check_values
-            If True, checks if counts in selected layer are integers as expected by this function,
-            and return a warning if non-integers are found. Otherwise, proceed without checking. Setting this to False can speed up code for large datasets.
-        layer
-            Layer to use as input instead of X. If None, X is used.
-        inplace
-            If True, update AnnData with results. Otherwise, return results. See below for details of what is returned.
+    adata:
+        AnnData object
+    theta
+        The negative binomial overdispersion parameter theta for Pearson residuals.
+        Higher values correspond to less overdispersion (var = mean + mean^2/theta), and theta=np.Inf corresponds to a Poisson model.
+    clip
+        Determines if and how residuals are clipped:
+        If None, residuals are clipped to the interval [-sqrt(n_obs), sqrt(n_obs)], where n_obs is the number of cells in the dataset (default behavior).
+        If any scalar c, residuals are clipped to the interval [-c, c]. Set clip=np.Inf for no clipping.
+    check_values
+        If True, checks if counts in selected layer are integers as expected by this function,
+        and return a warning if non-integers are found. Otherwise, proceed without checking. Setting this to False can speed up code for large datasets.
+    layer
+        Layer to use as input instead of X. If None, X is used.
+    inplace
+        If True, update AnnData with results. Otherwise, return results. See below for details of what is returned.
 
     Returns
     -------
-        If `inplace=True`, `adata.X` or the selected layer in `adata.layers` is updated with the normalized values. \
-        If `inplace=False` the normalized matrix is returned.
+    If `inplace=True`, `adata.X` or the selected layer in `adata.layers` is updated with the normalized values. \
+    If `inplace=False` the normalized matrix is returned.
 
     """
     X = _get_obs_rep(adata, layer=layer)
