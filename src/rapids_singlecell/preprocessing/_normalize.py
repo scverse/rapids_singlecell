@@ -12,6 +12,7 @@ from ._utils import _check_gpu_X, _check_nonnegative_integers
 
 if TYPE_CHECKING:
     from anndata import AnnData
+    from cupyx.scipy.sparse import csr_matrix, spmatrix
 
 
 def normalize_total(
@@ -21,7 +22,7 @@ def normalize_total(
     layer: int | str = None,
     inplace: bool = True,
     copy: bool = False,
-) -> AnnData | sparse.csr_matrix | cp.ndarray | None:
+) -> AnnData | csr_matrix | cp.ndarray | None:
     """\
     Normalizes rows in matrix so they sum to `target_sum`
 
@@ -109,7 +110,7 @@ def log1p(
     obsm: str | None = None,
     inplace: bool = True,
     copy: bool = False,
-) -> AnnData | sparse.spmatrix | cp.ndarray | None:
+) -> AnnData | spmatrix | cp.ndarray | None:
     """\
     Calculated the natural logarithm of one plus the sparse matrix.
 
