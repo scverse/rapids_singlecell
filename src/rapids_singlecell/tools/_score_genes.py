@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING, Union
 
 import cupy as cp
 import numpy as np
@@ -13,25 +13,19 @@ from rapids_singlecell.preprocessing._utils import _check_gpu_X, _check_use_raw
 from ._utils import _nan_mean
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Sequence
+    from collections.abc import Callable, Generator
+    from typing import Sequence
 
     from anndata import AnnData
     from scipy.sparse import csc_matrix, csr_matrix
 
-    try:
-        _StrIdx = pd.Index[str]
-    except TypeError:  # Sphinx
-        _StrIdx = pd.Index
-    _GetSubset = Callable[[_StrIdx], np.ndarray | csr_matrix | csc_matrix]
-
-
 def score_genes(
     adata: AnnData,
-    gene_list: Sequence[str] | pd.Index[str],
+    gene_list: Sequence[str] | pd.Index,
     *,
     ctrl_as_ref: bool = True,
     ctrl_size: int = 50,
-    gene_pool: Sequence[str] | pd.Index[str] | None = None,
+    gene_pool: Sequence[str] |pd.Index| None = None,
     n_bins: int = 25,
     score_name: str = "score",
     random_state: int | None = 0,

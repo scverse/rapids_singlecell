@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 import cupy as cp
 from cupyx.scipy import sparse
@@ -15,6 +15,8 @@ if TYPE_CHECKING:
     from cupyx.scipy.sparse import csr_matrix, spmatrix
 
 
+
+
 def normalize_total(
     adata: AnnData,
     *,
@@ -22,20 +24,25 @@ def normalize_total(
     layer: int | str = None,
     inplace: bool = True,
     copy: bool = False,
-) -> AnnData | csr_matrix | cp.ndarray | None:
+)-> Union[AnnData, csr_matrix, cp.ndarray, None]:
     """\
-    Normalizes rows in matrix so they sum to `target_sum`
+    Normalizes rows in matrix so they sum to `target_sum`.
 
     Parameters
     ----------
         adata
             AnnData object
+
         target_sum
-            If `None`, after normalization, each observation (cell) has a total count equal to the median of total counts for observations (cells) before normalization.
+            If `None`, after normalization, each observation (cell) has a total count
+            equal to the median of total counts for observations (cells) before normalization.
+
         layer
             Layer to normalize instead of `X`. If `None`, `X` is normalized.
+
         inplace
             Whether to update `adata` or return the matrix.
+
         copy
             Whether to return a copy or update `adata`. Not compatible with inplace=False.
 
@@ -110,9 +117,11 @@ def log1p(
     obsm: str | None = None,
     inplace: bool = True,
     copy: bool = False,
-) -> AnnData | spmatrix | cp.ndarray | None:
+) -> Union[AnnData, spmatrix, cp.ndarray, None]:
     """\
     Calculated the natural logarithm of one plus the sparse matrix.
+
+    äksadj
 
     Parameters
     ----------
@@ -121,11 +130,11 @@ def log1p(
         layer
             Layer to normalize instead of `X`. If `None`, `X` is normalized.
         obsm
-            Entry of obsm to transform.
+            Entry of `.obsm` to transform.
         inplace
             Whether to update `adata` or return the matrix.
         copy
-            Whether to return a copy or update `adata`. Not compatible with inplace=False.
+            Whether to return a copy or update `adata`. Not compatible with `inplace=False`.
 
     Returns
     -------
@@ -165,7 +174,7 @@ def normalize_pearson_residuals(
     check_values: bool = True,
     layer: str | None = None,
     inplace: bool = True,
-) -> cp.ndarray | None:
+) -> Union[cp.ndarray, None]:
     """\
     Applies analytic Pearson residual normalization, based on Lause21.
     The residuals are based on a negative binomial offset model with overdispersion
@@ -178,22 +187,22 @@ def normalize_pearson_residuals(
             AnnData object
         theta
             The negative binomial overdispersion parameter theta for Pearson residuals.
-            Higher values correspond to less overdispersion (var = mean + mean^2/theta), and theta=np.Inf corresponds to a Poisson model.
+            Higher values correspond to less overdispersion `(var = mean + mean^2/theta)`, and `theta=np.Inf` corresponds to a Poisson model.
         clip
             Determines if and how residuals are clipped:
             If None, residuals are clipped to the interval [-sqrt(n_obs), sqrt(n_obs)], where n_obs is the number of cells in the dataset (default behavior).
-            If any scalar c, residuals are clipped to the interval [-c, c]. Set clip=np.Inf for no clipping.
+            If any scalar c, residuals are clipped to the interval `[-c, c]`. Set `clip=np.Inf` for no clipping.
         check_values
             If True, checks if counts in selected layer are integers as expected by this function,
             and return a warning if non-integers are found. Otherwise, proceed without checking. Setting this to False can speed up code for large datasets.
         layer
-            Layer to use as input instead of X. If None, X is used.
+            Layer to use as input instead of :attr:`~anndata.AnnData.X`. If None, :attr:`~anndata.AnnData.X` is used.
         inplace
             If True, update AnnData with results. Otherwise, return results. See below for details of what is returned.
 
     Returns
     -------
-        If `inplace=True`, `adata.X` or the selected layer in `adata.layers` is updated with the normalized values. \
+        If `inplace=True`, :attr:`~anndata.AnnData.X` or the selected layer in :attr:`~anndata.AnnData.layers` is updated with the normalized values. \
         If `inplace=False` the normalized matrix is returned.
 
     """
