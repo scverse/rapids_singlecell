@@ -22,7 +22,7 @@ def normalize_total(
     inplace: bool = True,
     copy: bool = False,
 ) -> AnnData | sparse.csr_matrix | cp.ndarray | None:
-    """
+    """\
     Normalizes rows in matrix so they sum to `target_sum`
 
     Parameters
@@ -115,7 +115,7 @@ def log1p(
     inplace: bool = True,
     copy: bool = False,
 ) -> AnnData | sparse.spmatrix | cp.ndarray | None:
-    """
+    """\
     Calculated the natural logarithm of one plus the sparse matrix.
 
     Parameters
@@ -174,7 +174,7 @@ def normalize_pearson_residuals(
     layer: str | None = None,
     inplace: bool = True,
 ) -> cp.ndarray | None:
-    """
+    """\
     Applies analytic Pearson residual normalization, based on Lause21.
     The residuals are based on a negative binomial offset model with overdispersion
     `theta` shared across genes. By default, residuals are clipped to `sqrt(n_obs)`
