@@ -15,8 +15,6 @@ if TYPE_CHECKING:
     from cupyx.scipy.sparse import csr_matrix, spmatrix
 
 
-
-
 def normalize_total(
     adata: AnnData,
     *,
@@ -24,7 +22,7 @@ def normalize_total(
     layer: int | str = None,
     inplace: bool = True,
     copy: bool = False,
-)-> Union[AnnData, csr_matrix, cp.ndarray, None]:
+) -> Union[AnnData, csr_matrix, cp.ndarray, None]:
     """\
     Normalizes rows in matrix so they sum to `target_sum`.
 

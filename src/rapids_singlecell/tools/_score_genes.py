@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import cupy as cp
 import numpy as np
@@ -13,11 +13,11 @@ from rapids_singlecell.preprocessing._utils import _check_gpu_X, _check_use_raw
 from ._utils import _nan_mean
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
+    from collections.abc import Generator
     from typing import Sequence
 
     from anndata import AnnData
-    from scipy.sparse import csc_matrix, csr_matrix
+
 
 def score_genes(
     adata: AnnData,
@@ -25,7 +25,7 @@ def score_genes(
     *,
     ctrl_as_ref: bool = True,
     ctrl_size: int = 50,
-    gene_pool: Sequence[str] |pd.Index| None = None,
+    gene_pool: Sequence[str] | pd.Index | None = None,
     n_bins: int = 25,
     score_name: str = "score",
     random_state: int | None = 0,
