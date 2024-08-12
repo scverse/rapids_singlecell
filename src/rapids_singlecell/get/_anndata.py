@@ -8,6 +8,8 @@ import numpy as np
 from cupyx.scipy.sparse import csc_matrix as csc_matrix_gpu
 from cupyx.scipy.sparse import csr_matrix as csr_matrix_gpu
 from scanpy.get import _get_obs_rep, _set_obs_rep
+from scipy.sparse import csc_matrix as csc_matrix_cpu
+from scipy.sparse import csr_matrix as csr_matrix_cpu
 from scipy.sparse import isspmatrix_csc as isspmatrix_csc_cpu
 from scipy.sparse import isspmatrix_csr as isspmatrix_csr_cpu
 
@@ -15,6 +17,7 @@ if TYPE_CHECKING:
     from anndata import AnnData
 
 GPU_ARRAY_TYPE = Union[cp.ndarray, csr_matrix_gpu, csc_matrix_gpu]
+CPU_ARRAY_TYPE = Union[np.ndarray, csr_matrix_cpu, csc_matrix_cpu]
 
 
 def anndata_to_GPU(
@@ -63,7 +66,7 @@ def anndata_to_GPU(
         return adata
 
 
-def X_to_GPU(X, warning: str = "X") -> GPU_ARRAY_TYPE:
+def X_to_GPU(X: CPU_ARRAY_TYPE, warning: str = "X") -> GPU_ARRAY_TYPE:
     """
     Transfers matrices and arrays to the GPU
 
@@ -134,7 +137,7 @@ def anndata_to_CPU(
         return adata
 
 
-def X_to_CPU(X):
+def X_to_CPU(X: GPU_ARRAY_TYPE) -> CPU_ARRAY_TYPE:
     """
     Transfers matrices and arrays from the GPU
 
