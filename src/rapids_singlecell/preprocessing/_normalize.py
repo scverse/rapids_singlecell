@@ -29,16 +29,12 @@ def normalize_total(
     ----------
         adata
             AnnData object
-
         target_sum
             If `None`, after normalization, each observation (cell) has a total count equal to the median of total counts for observations (cells) before normalization.
-
         layer
             Layer to normalize instead of `X`. If `None`, `X` is normalized.
-
         inplace
             Whether to update `adata` or return the matrix.
-
         copy
             Whether to return a copy or update `adata`. Not compatible with inplace=False.
 
@@ -122,16 +118,12 @@ def log1p(
     ----------
         adata:
             AnnData object
-
         layer
             Layer to normalize instead of `X`. If `None`, `X` is normalized.
-
         obsm
             Entry of obsm to transform.
-
         inplace
             Whether to update `adata` or return the matrix.
-
         copy
             Whether to return a copy or update `adata`. Not compatible with inplace=False.
 
