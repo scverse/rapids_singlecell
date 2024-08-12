@@ -40,9 +40,8 @@ def normalize_total(
 
     Returns
     -------
-        Returns a normalized copy or  updates `adata` with a normalized version of \
+        Returns a normalized copy or  updates `adata` with a normalized version of
         the original `adata.X` and `adata.layers['layer']`, depending on `inplace`.
-
     """
     if copy:
         if not inplace:
