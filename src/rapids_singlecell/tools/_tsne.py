@@ -20,6 +20,7 @@ def tsne(
     learning_rate: int = 200,
     method: str = "barnes_hut",
     metric: str = "euclidean",
+    key_added: str | None = None,
     copy: bool = False,
 ) -> AnnData | None:
     """
@@ -58,6 +59,13 @@ def tsne(
         metric
             Distance metric to use. Supported distances are ['l1, 'cityblock', 'manhattan', 'euclidean',
             'l2', 'sqeuclidean', 'minkowski', 'chebyshev', 'cosine', 'correlation']
+        key_added
+            If not specified, the embedding is stored as
+            :attr:`~anndata.AnnData.obsm`\\ `['X_tsne']` and the the parameters in
+            :attr:`~anndata.AnnData.uns`\\ `['tsne']`.
+            If specified, the embedding is stored as
+            :attr:`~anndata.AnnData.obsm`\\ ``[key_added]`` and the the parameters in
+            :attr:`~anndata.AnnData.uns`\\ ``[key_added]``.
         copy
             Return a copy instead of writing to adata.
 
@@ -65,22 +73,26 @@ def tsne(
     -------
         Depending on `copy`, returns or updates `adata` with the following fields.
 
-            **X_tsne** : `np.ndarray` (`adata.obsm`, dtype `float`)
+            `adata.obsm['X_tsne' | key_added]` : :class:`~numpy.ndarray` (dtype `float`)
                 tSNE coordinates of data.
+            `adata.uns['tsne' | key_added]['params']` : :class:`dict`
+                tSNE parameters `perplexity`, `early_exaggeration`,
+                `learning_rate`, `method`, `metric`, and `use_rep`.
     """
 
     adata = adata.copy() if copy else adata
 
     X = _choose_representation(adata, use_rep=use_rep, n_pcs=n_pcs)
 
-    adata.obsm["X_tsne"] = TSNE(
+    key_uns, key_obsm = ("tsne", "X_tsne") if key_added is None else [key_added] * 2
+    adata.obsm[key_obsm] = TSNE(
         perplexity=perplexity,
         early_exaggeration=early_exaggeration,
         learning_rate=learning_rate,
         method=method,
         metric=metric,
     ).fit_transform(X)
-    adata.uns["tsne"] = {
+    adata.uns[key_uns] = {
         "params": {
             k: v
             for k, v in {
