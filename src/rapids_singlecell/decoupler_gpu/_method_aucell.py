@@ -130,17 +130,17 @@ def aucell(mat, net, n_up, verbose, batch_size=5000):
 
 
 def run_aucell(
-    mat,
-    net,
+    mat: AnnData | pd.DataFrame | list,
+    net: pd.DataFrame,
     *,
-    source="source",
-    target="target",
+    source: str = "source",
+    target: str = "target",
     batch_size: int = 5000,
-    n_up=None,
-    min_n=5,
-    seed=42,
-    verbose=False,
-    use_raw=None,
+    n_up: int | None = None,
+    min_n: int = 5,
+    seed: int = 42,
+    verbose: bool = False,
+    use_raw: bool | None = None,
     layer: str | None = None,
     pre_load: bool | None = None,
 ):
