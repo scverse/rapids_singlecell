@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import math
 import warnings
-
 from typing import TYPE_CHECKING, Union
-
 
 import cupy as cp
 from cupyx.scipy import sparse
