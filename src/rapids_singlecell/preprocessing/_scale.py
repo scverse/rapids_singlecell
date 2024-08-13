@@ -280,6 +280,8 @@ def _scale_sparse_csr(
 
 
 def _scale_dask(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None):
+    import dask
+
     if not inplace:
         X = X.copy()
     if mask_obs is None:
@@ -289,6 +291,7 @@ def _scale_dask(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=N
     else:
         mean, var = _get_mean_var(X[mask_obs, :])
         mask_array = cp.array(mask_obs).astype(cp.int32)
+    mean, var = dask.compute(mean, var)
     std = cp.sqrt(var)
     std[std == 0] = 1
     max_value = _get_max_value(max_value, X.dtype)

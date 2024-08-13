@@ -153,7 +153,7 @@ def _mean_var_major_dask(X, major, minor):
         chunks=((2,), X.chunks[0]),
         dtype=cp.float64,
         meta=cp.array([]),
-    ).compute()
+    )
 
     mean = mean / minor
     var = var / minor

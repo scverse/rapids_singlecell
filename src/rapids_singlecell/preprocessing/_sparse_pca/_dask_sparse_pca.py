@@ -117,6 +117,7 @@ def _cov_sparse_dask(x, return_gram=False, return_mean=False):
             cov(X, X), gram(X, X), mean(X), mean(X)
             when return_gram is True and return_mean is True
     """
+    import dask
 
     from ._kernels._pca_sparse_kernel import (
         _copy_kernel,
@@ -148,18 +149,15 @@ def _cov_sparse_dask(x, return_gram=False, return_mean=False):
         return gram_matrix[None, ...]  # need new axis for summing
 
     n_blocks = len(x.to_delayed().ravel())
-    gram_matrix = (
-        x.map_blocks(
-            __gram_block,
-            new_axis=(1,),
-            chunks=((1,) * n_blocks, (x.shape[1],), (x.shape[1],)),
-            meta=cp.array([]),
-            dtype=x.dtype,
-        )
-        .sum(axis=0)
-        .compute()
-    )
+    gram_matrix = x.map_blocks(
+        __gram_block,
+        new_axis=(1,),
+        chunks=((1,) * n_blocks, (x.shape[1],), (x.shape[1],)),
+        meta=cp.array([]),
+        dtype=x.dtype,
+    ).sum(axis=0)
     mean_x, _ = _get_mean_var(x)
+    gram_matrix, mean_x = dask.compute(gram_matrix, mean_x)
     mean_x = mean_x.astype(x.dtype)
     copy_gram = _copy_kernel(x.dtype)
     block = (32, 32)
