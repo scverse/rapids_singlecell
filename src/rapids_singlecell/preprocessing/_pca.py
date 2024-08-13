@@ -26,14 +26,15 @@ def pca(
     *,
     layer: str = None,
     zero_center: bool = True,
-    svd_solver: str = None,
+    svd_solver: str | None = None,
     random_state: int | None = 0,
     mask_var: NDArray[np.bool_] | str | None | Empty = _empty,
     use_highly_variable: bool | None = None,
     dtype: str = "float32",
-    copy: bool = False,
     chunked: bool = False,
     chunk_size: int = None,
+    key_added: str | None = None,
+    copy: bool = False,
 ) -> None | AnnData:
     """
     Performs PCA using the cuml decomposition function.
@@ -76,9 +77,6 @@ def pca(
         dtype
             Numpy data type string to which to convert the result.
 
-        copy
-            Whether to return a copy or update `adata`.
-
         chunked
             If `True`, perform an incremental PCA on segments of `chunk_size`. \
             The incremental PCA automatically zero centers and ignores settings of \
@@ -88,17 +86,30 @@ def pca(
             Number of observations to include in each chunk. \
             Required if `chunked=True` was passed.
 
+        key_added
+            If not specified, the embedding is stored as
+            :attr:`~anndata.AnnData.obsm`\\ `['X_pca']`, the loadings as
+            :attr:`~anndata.AnnData.varm`\\ `['PCs']`, and the the parameters in
+            :attr:`~anndata.AnnData.uns`\\ `['pca']`.
+            If specified, the embedding is stored as
+            :attr:`~anndata.AnnData.obsm`\\ ``[key_added]``, the loadings as
+            :attr:`~anndata.AnnData.varm`\\ ``[key_added]``, and the the parameters in
+            :attr:`~anndata.AnnData.uns`\\ ``[key_added]``.
+
+        copy
+            Whether to return a copy or update `adata`.
+
     Returns
     -------
         adds fields to `adata`:
 
-            `.obsm['X_pca']`
+            `.obsm['X_pca' | key_added]`
                 PCA representation of data.
-            `.varm['PCs']`
+            `.varm['PCs' | key_added]`
                 The principal components containing the loadings.
-            `.uns['pca']['variance_ratio']`
+            `.uns['pca' | key_added]['variance_ratio']`
                 Ratio of explained variance.
-            `.uns['pca']['variance']`
+            `.uns['pca' | key_added]['variance']`
                 Explained variance, equivalent to the eigenvalues of the \
                 covariance matrix.
     """
@@ -174,24 +185,25 @@ def pca(
     if X_pca.dtype.descr != np.dtype(dtype).descr:
         X_pca = X_pca.astype(dtype)
 
-    adata.obsm["X_pca"] = X_pca
-    uns_entry = {
+    key_obsm, key_varm, key_uns = (
+        ("X_pca", "PCs", "pca") if key_added is None else [key_added] * 3
+    )
+    adata.obsm[key_obsm] = X_pca
+    adata.uns[key_uns] = {
         "params": {
             "zero_center": zero_center,
             "use_highly_variable": mask_var_param == "highly_variable",
             "mask_var": mask_var_param,
+            **({"layer": layer} if layer is not None else {}),
         },
         "variance": pca_func.explained_variance_,
         "variance_ratio": pca_func.explained_variance_ratio_,
     }
-    adata.uns["pca"] = uns_entry
-    if layer is not None:
-        adata.uns["pca"]["params"]["layer"] = layer
     if mask_var is not None:
-        adata.varm["PCs"] = np.zeros(shape=(adata.n_vars, n_comps))
-        adata.varm["PCs"][mask_var] = pca_func.components_.T
+        adata.varm[key_varm] = np.zeros(shape=(adata.n_vars, n_comps))
+        adata.varm[key_varm][mask_var] = pca_func.components_.T
     else:
-        adata.varm["PCs"] = pca_func.components_.T
+        adata.varm[key_varm] = pca_func.components_.T
     if copy:
         return adata
 
