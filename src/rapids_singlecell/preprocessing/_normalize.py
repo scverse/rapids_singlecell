@@ -22,7 +22,7 @@ def normalize_total(
     layer: int | str = None,
     inplace: bool = True,
     copy: bool = False,
-) -> Union[AnnData, csr_matrix, cp.ndarray, None]:
+) -> Union[AnnData, csr_matrix, cp.ndarray, None]:# noqa: UP007
     """\
     Normalizes rows in matrix so they sum to `target_sum`.
 
@@ -115,7 +115,7 @@ def log1p(
     obsm: str | None = None,
     inplace: bool = True,
     copy: bool = False,
-) -> Union[AnnData, spmatrix, cp.ndarray, None]:
+) -> Union[AnnData, spmatrix, cp.ndarray, None]:# noqa: UP007
     """\
     Calculated the natural logarithm of one plus the sparse matrix.
 
@@ -172,7 +172,7 @@ def normalize_pearson_residuals(
     check_values: bool = True,
     layer: str | None = None,
     inplace: bool = True,
-) -> Union[cp.ndarray, None]:
+) -> Union[cp.ndarray, None]:# noqa: UP007
     """\
     Applies analytic Pearson residual normalization, based on Lause21.
     The residuals are based on a negative binomial offset model with overdispersion
