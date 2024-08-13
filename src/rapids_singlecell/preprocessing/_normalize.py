@@ -119,7 +119,6 @@ def log1p(
     """\
     Calculated the natural logarithm of one plus the sparse matrix.
 
-    äksadj
 
     Parameters
     ----------
