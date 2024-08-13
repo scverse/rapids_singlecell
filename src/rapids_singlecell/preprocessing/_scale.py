@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from typing import Union
 
 import cupy as cp
 import numpy as np
@@ -26,7 +27,7 @@ def scale(
     obsm: str | None = None,
     mask_obs: np.ndarray | str | None = None,
     inplace: bool = True,
-) -> None | cp.ndarray:
+) -> Union[sparse.spmatrix, cp.ndarray, None]:  # noqa: UP007
     """
     Scales matrix to unit variance and clips values
 
@@ -62,7 +63,7 @@ def scale(
 
     Returns
     -------
-    Returns a scaled copy or updates `adata` with a scaled version of the original `adata.X` and `adata.layers['layer']`, \
+    Returns a scaled copy or updates `adata` with a scaled version of the original :attr:`~anndata.AnnData.X` and `adata.layers['layer']`, \
     depending on `inplace`.
 
     """

@@ -96,6 +96,7 @@ Any transformation of the data matrix that is not a tool. Other than `tools`, pr
    :toctree: generated/
 
     tl.score_genes
+    tl.score_genes_cell_cycle
 ```
 
 ### Marker genes

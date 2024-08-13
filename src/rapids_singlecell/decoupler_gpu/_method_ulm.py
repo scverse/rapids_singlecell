@@ -64,12 +64,12 @@ def ulm(mat, net, batch_size=10000, verbose=False):
 
 
 def run_ulm(
-    mat,
-    net,
+    mat: AnnData | pd.DataFrame | list,
+    net: pd.DataFrame,
     *,
-    source="source",
-    target="target",
-    weight="weight",
+    source: str = "source",
+    target: str = "target",
+    weight: str = "weight",
     batch_size: int = 10000,
     min_n: int = 5,
     verbose: bool = False,

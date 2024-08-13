@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Literal
+from typing import Literal, Union
 
 import cupy as cp
 from anndata import AnnData
@@ -21,7 +21,7 @@ def regress_out(
     inplace: bool = True,
     batchsize: int | Literal["all"] | None = None,
     verbose: bool = False,
-) -> cp.ndarray | None:
+) -> Union[cp.ndarray, None]:  # noqa: UP007
     """
     Use linear regression to adjust for the effects of unwanted noise
     and variation.
