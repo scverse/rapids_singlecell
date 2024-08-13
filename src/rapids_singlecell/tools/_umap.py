@@ -31,8 +31,9 @@ def umap(
     random_state=0,
     a: float | None = None,
     b: float | None = None,
-    copy: bool = False,
+    key_added: str | None = None,
     neighbors_key: str | None = None,
+    copy: bool = False,
 ) -> AnnData | None:
     """\
     Embed the neighborhood graph using UMAP's cuml implementation.
@@ -90,21 +91,30 @@ def umap(
         More specific parameters controlling the embedding. If `None` these
         values are set automatically as determined by `min_dist` and
         `spread`.
-    copy
-        Return a copy instead of writing to adata.
+    key_added
+        If not specified, the embedding is stored as
+        :attr:`~anndata.AnnData.obsm`\\ `['X_umap']` and the the parameters in
+        :attr:`~anndata.AnnData.uns`\\ `['umap']`.
+        If specified, the embedding is stored as
+        :attr:`~anndata.AnnData.obsm`\\ ``[key_added]`` and the the parameters in
+        :attr:`~anndata.AnnData.uns`\\ ``[key_added]``.
     neighbors_key
         If not specified, umap looks .uns['neighbors'] for neighbors settings
         and .obsp['connectivities'] for connectivities
         (default storage places for pp.neighbors).
         If specified, umap looks .uns[neighbors_key] for neighbors settings and
         .obsp[.uns[neighbors_key]['connectivities_key']] for connectivities.
+    copy
+        Return a copy instead of writing to adata.
 
     Returns
     -------
     Depending on `copy`, returns or updates `adata` with the following fields.
 
-        **X_umap** : `adata.obsm` field
+        `adata.obsm['X_umap' | key_added]` : :class:`~numpy.ndarray` (dtype `float`)
             UMAP coordinates of data.
+        `adata.uns['umap' | key_added]['params']` : :class:`dict`
+            UMAP parameters `a`, `b`, and `random_state` (if specified).
     """
     adata = adata.copy() if copy else adata
 
@@ -120,13 +130,14 @@ def umap(
 
     if a is None or b is None:
         a, b = find_ab_params(spread, min_dist)
-    else:
-        a = a
-        b = b
-    adata.uns["umap"] = {"params": {"a": a, "b": b}}
 
-    if random_state != 0:
-        adata.uns["umap"]["params"]["random_state"] = random_state
+    # store params for adata.uns
+    stored_params = {
+        "a": a,
+        "b": b,
+        **({"random_state": random_state} if random_state != 0 else {}),
+    }
+
     random_state = check_random_state(random_state)
 
     neigh_params = neighbors["params"]
@@ -177,6 +188,7 @@ def umap(
         precomputed_knn=pre_knn,
     )
 
-    X_umap = umap.fit_transform(X_contiguous)
-    adata.obsm["X_umap"] = X_umap
+    key_obsm, key_uns = ("X_umap", "umap") if key_added is None else [key_added] * 2
+    adata.obsm[key_obsm] = umap.fit_transform(X_contiguous)
+    adata.uns[key_uns] = {"params": stored_params}
     return adata if copy else None
