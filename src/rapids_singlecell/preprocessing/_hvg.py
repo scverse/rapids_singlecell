@@ -301,6 +301,10 @@ def _highly_variable_genes_single_batch(
                 X = cp.expm1(X)
 
     mean, var = _get_mean_var(X, axis=0)
+    if isinstance(X, DaskArray):
+        import dask
+
+        mean, var = dask.compute(mean, var)
     mean[mean == 0] = 1e-12
     disp = var / mean
     if flavor == "seurat":  # logarithmized mean as in Seurat

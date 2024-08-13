@@ -322,8 +322,12 @@ def _first_pass_qc_dask(X):
         )
         for ind, block in enumerate(blocks)
     ]
-    sums_cells, cell_ex = da.hstack(cell_blocks).compute()
-    sums_genes, gene_ex = da.stack(gene_blocks, axis=1).sum(axis=1).compute()
+    sums_cells, cell_ex = da.hstack(cell_blocks)
+    sums_genes, gene_ex = da.stack(gene_blocks, axis=1).sum(axis=1)
+
+    sums_cells, cell_ex, sums_genes, gene_ex = dask.compute(
+        sums_cells, cell_ex, sums_genes, gene_ex
+    )
 
     return (
         sums_cells.ravel(),
