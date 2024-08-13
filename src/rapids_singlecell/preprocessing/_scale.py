@@ -27,7 +27,7 @@ def scale(
     obsm: str | None = None,
     mask_obs: np.ndarray | str | None = None,
     inplace: bool = True,
-) -> Union[sparse.spmatrix, cp.ndarray, None]: # noqa: UP007
+) -> Union[sparse.spmatrix, cp.ndarray, None]:  # noqa: UP007
     """
     Scales matrix to unit variance and clips values
 
