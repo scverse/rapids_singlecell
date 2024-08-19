@@ -26,6 +26,8 @@ jobs:
     name: GPU Tests
     needs: check
     runs-on: "cirun-aws-gpu--${{ github.run_id }}"
+    timeout-minutes: 30
+
     defaults:
       run:
         shell: bash -el {0}
@@ -37,20 +39,21 @@ jobs:
       - name: Nvidia SMI sanity check
         run: nvidia-smi
 
-
-      - uses: mamba-org/setup-micromamba@v1
+      - name: Install Python
+        uses: actions/setup-python@v5
         with:
-          micromamba-version: "1.5.6-0"
-          environment-file: ci/rsc_test_env.yml
-          post-cleanup: 'all'
+          python-version: "3.11"
+
+      - name: Install UV
+        uses: hynek/setup-cached-uv@v2
+        with:
+          cache-dependency-path: pyproject.toml
 
       - name: Install rapids-singlecell
-        run: uv pip install -e .[test,rapids12] --extra-index-url=https://pypi.nvidia.com
+        run: uv pip install --system -e .[test,rapids12] --extra-index-url=https://pypi.nvidia.com
 
-      - name: Mamba list
-        run: |
-          micromamba list
-          pip list
+      - name: Pip list
+        run: pip list
 
       - name: Run test
         run: pytest
