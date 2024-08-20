@@ -162,9 +162,9 @@ def umap(
 
     n_obs = adata.shape[0]
     if neigh_params.get("method") == "rapids":
-        knn_dist = neighbors["distances"].data.reshape(n_obs, n_neighbors)
-        knn_indices = neighbors["distances"].indices.reshape(n_obs, n_neighbors)
-        pre_knn = (knn_indices, knn_dist)
+        pre_knn = neighbors["connectivities"]
+    elif neigh_params.get("method") == "umap":
+        pre_knn = neighbors["connectivities"]
     else:
         pre_knn = None
 
