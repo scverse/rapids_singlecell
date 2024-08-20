@@ -3,8 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
-import numpy as np
-from cuml import UMAP
+from cuml.manifold.simpl_set import simplicial_set_embedding
 from cuml.manifold.umap_utils import find_ab_params
 from cupyx.scipy import sparse
 from scanpy._utils import NeighborsView
@@ -28,7 +27,7 @@ def umap(
     alpha: float = 1.0,
     negative_sample_rate: int = 5,
     init_pos: _InitPos = "auto",
-    random_state=0,
+    random_state: int = 0,
     a: float | None = None,
     b: float | None = None,
     key_added: str | None = None,
@@ -147,48 +146,32 @@ def umap(
         neigh_params.get("n_pcs", None),
     )
 
-    n_neighbors = neighbors["params"]["n_neighbors"]
     n_epochs = (
         500 if maxiter is None else maxiter
     )  # 0 is not a valid value for rapids, unlike original umap
-    metric = neigh_params.get("metric", "euclidean")
-
-    if isinstance(X, cp.ndarray):
-        X_contiguous = cp.ascontiguousarray(X, dtype=np.float32)
-    elif isinstance(X, sparse.spmatrix):
-        X_contiguous = X
-    else:
-        X_contiguous = np.ascontiguousarray(X, dtype=np.float32)
 
     n_obs = adata.shape[0]
-    if neigh_params.get("method") == "rapids":
-        pre_knn = neighbors["connectivities"]
-    elif neigh_params.get("method") == "umap":
-        pre_knn = neighbors["connectivities"]
-    else:
-        pre_knn = None
+    pre_knn = neighbors["connectivities"]
 
     if init_pos == "auto":
         init_pos = "spectral" if n_obs < 1000000 else "random"
 
-    umap = UMAP(
-        n_neighbors=n_neighbors,
+    X_umap = simplicial_set_embedding(
+        data=cp.array(X),
+        graph=sparse.coo_matrix(pre_knn),
         n_components=n_components,
-        metric=metric,
-        n_epochs=n_epochs,
-        learning_rate=alpha,
-        init=init_pos,
-        min_dist=min_dist,
-        spread=spread,
-        negative_sample_rate=negative_sample_rate,
+        initial_alpha=alpha,
         a=a,
         b=b,
+        negative_sample_rate=negative_sample_rate,
+        n_epochs=n_epochs,
+        init=init_pos,
         random_state=random_state,
-        output_type="numpy",
-        precomputed_knn=pre_knn,
+        metric=neigh_params.get("metric", "euclidean"),
+        metric_kwds=neigh_params.get("metric_kwds", None),
     )
-
     key_obsm, key_uns = ("X_umap", "umap") if key_added is None else [key_added] * 2
-    adata.obsm[key_obsm] = umap.fit_transform(X_contiguous)
+    adata.obsm[key_obsm] = cp.asarray(X_umap).get()
+
     adata.uns[key_uns] = {"params": stored_params}
     return adata if copy else None
