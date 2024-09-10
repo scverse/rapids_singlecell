@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-import cupy as cp
-import numpy as np
-from cuml import UMAP
+from cuml.manifold.umap import UMAP
 from cuml.manifold.umap_utils import find_ab_params
-from cupyx.scipy import sparse
 from scanpy._utils import NeighborsView
 from sklearn.utils import check_random_state
 
@@ -28,7 +25,7 @@ def umap(
     alpha: float = 1.0,
     negative_sample_rate: int = 5,
     init_pos: _InitPos = "auto",
-    random_state=0,
+    random_state: int = 0,
     a: float | None = None,
     b: float | None = None,
     key_added: str | None = None,
@@ -147,20 +144,12 @@ def umap(
         neigh_params.get("n_pcs", None),
     )
 
-    n_neighbors = neighbors["params"]["n_neighbors"]
     n_epochs = (
         500 if maxiter is None else maxiter
     )  # 0 is not a valid value for rapids, unlike original umap
-    metric = neigh_params.get("metric", "euclidean")
-
-    if isinstance(X, cp.ndarray):
-        X_contiguous = cp.ascontiguousarray(X, dtype=np.float32)
-    elif isinstance(X, sparse.spmatrix):
-        X_contiguous = X
-    else:
-        X_contiguous = np.ascontiguousarray(X, dtype=np.float32)
 
     n_obs = adata.shape[0]
+    n_neighbors = neigh_params["n_neighbors"]
     if neigh_params.get("method") == "rapids":
         knn_dist = neighbors["distances"].data.reshape(n_obs, n_neighbors)
         knn_indices = neighbors["distances"].indices.reshape(n_obs, n_neighbors)
@@ -174,7 +163,8 @@ def umap(
     umap = UMAP(
         n_neighbors=n_neighbors,
         n_components=n_components,
-        metric=metric,
+        metric=neigh_params.get("metric", "euclidean"),
+        metric_kwds=neigh_params.get("metric_kwds", None),
         n_epochs=n_epochs,
         learning_rate=alpha,
         init=init_pos,
@@ -189,6 +179,7 @@ def umap(
     )
 
     key_obsm, key_uns = ("X_umap", "umap") if key_added is None else [key_added] * 2
-    adata.obsm[key_obsm] = umap.fit_transform(X_contiguous)
+    adata.obsm[key_obsm] = umap.fit_transform(X)
+
     adata.uns[key_uns] = {"params": stored_params}
     return adata if copy else None
