@@ -1,7 +1,8 @@
 import numpy as np
 from anndata import AnnData
-from rapids_singlecell.pp import neighbors
+from rapids_singlecell.pp import neighbors, bbknn
 from scanpy.datasets import pbmc68k_reduced
+import scanpy.external as sce
 import pytest
 
 # the input data
@@ -47,3 +48,17 @@ def test_neighbors_key_added():
     assert np.allclose(
         adata.obsp["distances"].toarray(), adata.obsp[dists_key].toarray()
     )
+
+def test_bbknn():
+    adata = pbmc68k_reduced()
+    sce.pp.bbknn(adata, n_pcs=15,batch_key="phase",computation="pynndescent", metric="euclidean")
+    bbknn(adata, n_pcs=15,batch_key="phase",algorithm="brute", key_added="rapids")
+    counter = 0
+    for i in range(adata.shape[0]):
+        rsc_start =adata.obsp["rapids_distances"].indptr[i]
+        rsc_stop = adata.obsp["rapids_distances"].indptr[i+1]
+        b_start=adata.obsp["distances"].indptr[i]
+        b_stop=adata.obsp["distances"].indptr[i+1]
+        counter+=len(np.intersect1d(adata.obsp["rapids_distances"].indices[rsc_start:rsc_stop],
+                        adata.obsp["distances"].indices[b_start:b_stop]))
+    assert counter/b_stop > 0.9
