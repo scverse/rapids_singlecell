@@ -388,7 +388,7 @@ def bbknn(
     ----------
     adata
         Annotated data matrix.
-    n_neighbors
+    neighbors_within_batch
         How many top neighbours to report for each batch; total number of neighbours
         in the initial k-nearest-neighbours computation will be this number times
         the number of batches. This then serves as the basis for the construction
