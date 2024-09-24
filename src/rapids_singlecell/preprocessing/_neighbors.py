@@ -57,7 +57,7 @@ _MetricsSparse = Literal[
 _Metrics = Union[_MetricsDense, _MetricsSparse]
 
 
-def _brute_knn(X, k, metric, metric_kwds):
+def _brute_knn(X, Y, k, metric, metric_kwds):
     from cuml.neighbors import NearestNeighbors
 
     nn = NearestNeighbors(
@@ -68,11 +68,11 @@ def _brute_knn(X, k, metric, metric_kwds):
         metric_params=metric_kwds,
     )
     nn.fit(X)
-    distances, neighbors = nn.kneighbors(X)
+    distances, neighbors = nn.kneighbors(Y)
     return neighbors, distances
 
 
-def _cagra_knn(X, k, metric):
+def _cagra_knn(X, Y, k, metric):
     try:
         from pylibraft.neighbors import cagra
     except ImportError:
@@ -85,29 +85,29 @@ def _cagra_knn(X, k, metric):
     build_params = cagra.IndexParams(metric="sqeuclidean", build_algo="nn_descent")
     index = cagra.build(build_params, X, handle=handle)
 
-    n_samples = X.shape[0]
+    n_samples = Y.shape[0]
     all_neighbors = cp.zeros((n_samples, k), dtype=cp.int32)
     all_distances = cp.zeros((n_samples, k), dtype=cp.float32)
 
     batchsize = 65000
-    n_batches = math.ceil(X.shape[0] / batchsize)
+    n_batches = math.ceil(Y.shape[0] / batchsize)
     for batch in range(n_batches):
         start_idx = batch * batchsize
-        stop_idx = min(batch * batchsize + batchsize, X.shape[0])
-        batch_X = X[start_idx:stop_idx, :]
+        stop_idx = min(batch * batchsize + batchsize, Y.shape[0])
+        batch_Y = Y[start_idx:stop_idx, :]
         search_params = cagra.SearchParams()
         distances, neighbors = cagra.search(
-            search_params, index, batch_X, k, handle=handle
+            search_params, index, batch_Y, k, handle=handle
         )
         all_neighbors[start_idx:stop_idx, :] = cp.asarray(neighbors)
         all_distances[start_idx:stop_idx, :] = cp.asarray(distances)
-        handle.sync()
+    handle.sync()
     if metric == "euclidean":
         all_distances = cp.sqrt(all_distances)
     return all_neighbors, all_distances
 
 
-def _ivf_flat_knn(X, k, metric):
+def _ivf_flat_knn(X, Y, k, metric):
     from pylibraft.neighbors import ivf_flat
 
     handle = DeviceResources()
@@ -119,7 +119,7 @@ def _ivf_flat_knn(X, k, metric):
     index = ivf_flat.build(index_params, X, handle=handle)
 
     distances, neighbors = ivf_flat.search(
-        ivf_flat.SearchParams(), index, X, k, handle=handle
+        ivf_flat.SearchParams(), index, Y, k, handle=handle
     )
     distances = cp.asarray(distances)
     neighbors = cp.asarray(neighbors)
@@ -127,7 +127,7 @@ def _ivf_flat_knn(X, k, metric):
     return neighbors, distances
 
 
-def _ivf_pq_knn(X, k, metric):
+def _ivf_pq_knn(X, Y, k, metric):
     from pylibraft.neighbors import ivf_pq
 
     handle = DeviceResources()
@@ -139,7 +139,7 @@ def _ivf_pq_knn(X, k, metric):
     index = ivf_pq.build(index_params, X, handle=handle)
 
     distances, neighbors = ivf_pq.search(
-        ivf_pq.SearchParams(), index, X, k, handle=handle
+        ivf_pq.SearchParams(), index, Y, k, handle=handle
     )
     distances = cp.asarray(distances)
     neighbors = cp.asarray(neighbors)
@@ -297,17 +297,194 @@ def neighbors(
     n_obs = adata.shape[0]
     if algorithm == "brute":
         knn_indices, knn_dist = _brute_knn(
-            X_contiguous, n_neighbors, metric, metric_kwds
+            X_contiguous, X_contiguous, n_neighbors, metric, metric_kwds
         )
     elif algorithm == "cagra":
-        knn_indices, knn_dist = _cagra_knn(X_contiguous, n_neighbors, metric)
+        knn_indices, knn_dist = _cagra_knn(
+            X_contiguous, X_contiguous, n_neighbors, metric
+        )
     elif algorithm == "ivfflat":
-        knn_indices, knn_dist = _ivf_flat_knn(X_contiguous, n_neighbors, metric)
+        knn_indices, knn_dist = _ivf_flat_knn(
+            X_contiguous, X_contiguous, n_neighbors, metric
+        )
     elif algorithm == "ivfpq":
-        knn_indices, knn_dist = _ivf_pq_knn(X_contiguous, n_neighbors, metric)
+        knn_indices, knn_dist = _ivf_pq_knn(
+            X_contiguous, X_contiguous, n_neighbors, metric
+        )
 
     n_nonzero = n_obs * n_neighbors
     rowptr = cp.arange(0, n_nonzero + 1, n_neighbors)
+    distances = cp_sparse.csr_matrix(
+        (cp.ravel(knn_dist), cp.ravel(knn_indices), rowptr), shape=(n_obs, n_obs)
+    )
+
+    set_op_mix_ratio = 1.0
+    local_connectivity = 1.0
+    X_conn = cp.empty((n_obs, 1), dtype=np.float32)
+    connectivities = fuzzy_simplicial_set(
+        X_conn,
+        n_neighbors,
+        random_state,
+        metric=metric,
+        knn_indices=knn_indices,
+        knn_dists=knn_dist,
+        set_op_mix_ratio=set_op_mix_ratio,
+        local_connectivity=local_connectivity,
+    )
+    connectivities = connectivities.tocsr().get()
+    distances = distances.get()
+    if key_added is None:
+        key_added = "neighbors"
+        conns_key = "connectivities"
+        dists_key = "distances"
+    else:
+        conns_key = key_added + "_connectivities"
+        dists_key = key_added + "_distances"
+    adata.uns[key_added] = {}
+
+    neighbors_dict = adata.uns[key_added]
+
+    neighbors_dict["connectivities_key"] = conns_key
+    neighbors_dict["distances_key"] = dists_key
+
+    neighbors_dict["params"] = {"n_neighbors": n_neighbors}
+    neighbors_dict["params"]["method"] = "rapids"
+    neighbors_dict["params"]["random_state"] = random_state
+    neighbors_dict["params"]["metric"] = metric
+    if metric_kwds:
+        neighbors_dict["params"]["metric_kwds"] = metric_kwds
+    if use_rep is not None:
+        neighbors_dict["params"]["use_rep"] = use_rep
+    if n_pcs is not None:
+        neighbors_dict["params"]["n_pcs"] = n_pcs
+
+    adata.obsp[dists_key] = distances
+    adata.obsp[conns_key] = connectivities
+
+    return adata if copy else None
+
+
+def bbknn(
+    adata: AnnData,
+    neighbors_within_batch: int = 3,
+    n_pcs: int | None = None,
+    *,
+    batch_key: str | None = None,
+    use_rep: str | None = None,
+    random_state: AnyRandom = 0,
+    algorithm: _Alogithms = "brute",
+    metric: _Metrics = "euclidean",
+    metric_kwds: Mapping[str, Any] = MappingProxyType({}),
+    key_added: str | None = None,
+    copy: bool = False,
+) -> AnnData | None:
+    """\
+    Compute a neighborhood graph of observations with cuml.
+
+    The neighbor search efficiency of this heavily relies on cuml,
+    which also provides a method for estimating connectivities of data points -
+    the connectivity of the manifold.
+
+    Parameters
+    ----------
+    adata
+        Annotated data matrix.
+    n_neighbors
+        How many top neighbours to report for each batch; total number of neighbours
+        in the initial k-nearest-neighbours computation will be this number times
+        the number of batches. This then serves as the basis for the construction
+        of a symmetrical matrix of connectivities.
+    n_pcs
+        Use this many PCs. If `n_pcs==0` use `.X` if `use_rep is None`.
+    use_rep
+        Use the indicated representation. `'X'` or any key for `.obsm` is valid.
+        If None, the representation is chosen automatically: For .n_vars < 50, .X
+        is used, otherwise `'X_pca'` is used. If `'X_pca'` is not present, it's
+        computed with default parameters or `n_pcs` if present.
+    random_state
+        A numpy random seed.
+    algorithm
+        The query algorithm to use. Valid options are:
+            * 'brute': Brute-force search that computes distances to all data points, guaranteeing exact results.
+
+            * 'ivfflat': Uses inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
+
+            * 'ivfpq': Combines inverted file indexing with product quantization to encode sub-vectors of the dataset, facilitating faster distance computation.
+
+            * 'cagra': Employs the Compressed, Accurate Graph-based search to quickly find nearest neighbors by traversing a graph structure.
+
+        Please ensure that the chosen algorithm is compatible with your dataset and the specific requirements of your search problem.
+    metric
+        A known metric's name or a callable that returns a distance.
+    metric_kwds
+        Options for the metric.
+    key_added
+        If not specified, the neighbors data is stored in .uns['neighbors'],
+        distances and connectivities are stored in .obsp['distances'] and
+        .obsp['connectivities'] respectively.
+        If specified, the neighbors data is added to .uns[key_added],
+        distances are stored in .obsp[key_added+'_distances'] and
+        connectivities in .obsp[key_added+'_connectivities'].
+    copy
+        Return a copy instead of writing to adata.
+
+    Returns
+    -------
+    Depending on `copy`, updates or returns `adata` with the following:
+
+    See `key_added` parameter description for the storage path of
+    connectivities and distances.
+
+        **connectivities** : sparse matrix of dtype `float32`.
+            Weighted adjacency matrix of the neighborhood graph of data
+            points. Weights should be interpreted as connectivities.
+        **distances** : sparse matrix of dtype `float32`.
+            Instead of decaying weights, this stores distances for each pair of
+            neighbors.
+    """
+
+    adata = adata.copy() if copy else adata
+    if adata.is_view:
+        adata._init_as_actual(adata.copy())
+    X = _choose_representation(adata, use_rep=use_rep, n_pcs=n_pcs)
+
+    X_contiguous = _check_neighbors_X(X, algorithm)
+    _check_metrics(algorithm, metric)
+
+    n_neighbors = neighbors_within_batch
+
+    if batch_key not in adata.obs:
+        raise ValueError(f"Batch key '{batch_key}' not present in `adata.obs`.")
+
+    n_obs = adata.shape[0]
+    batch_list = adata.obs[batch_key].values
+    batches = np.unique(batch_list)
+    total_neighbors = n_neighbors * len(batches)
+    knn_dist = cp.zeros((X.shape[0], total_neighbors), dtype=np.float32)
+    knn_indices = cp.zeros_like(knn_dist).astype(int)
+
+    for to_ind in range(len(batches)):
+        batch_to = batches[to_ind]
+        mask_to = batch_list == batch_to
+        X_to = X_contiguous[mask_to]
+        ind_to = cp.arange(len(batch_list))[mask_to]
+
+        if algorithm == "brute":
+            sub_ind, sub_dist = _brute_knn(
+                X_to, X_contiguous, n_neighbors, metric, metric_kwds
+            )
+        elif algorithm == "cagra":
+            sub_ind, sub_dist = _cagra_knn(X_to, X_contiguous, n_neighbors, metric)
+        elif algorithm == "ivfflat":
+            sub_ind, sub_dist = _ivf_flat_knn(X_to, X_contiguous, n_neighbors, metric)
+        elif algorithm == "ivfpq":
+            sub_ind, sub_dist = _ivf_pq_knn(X_to, X_contiguous, n_neighbors, metric)
+        col_range = cp.arange(to_ind * n_neighbors, (to_ind + 1) * n_neighbors)
+        knn_indices[:, col_range] = ind_to[sub_ind]
+        knn_dist[:, col_range] = sub_dist
+
+    n_nonzero = n_obs * total_neighbors
+    rowptr = cp.arange(0, n_nonzero + 1, total_neighbors)
     distances = cp_sparse.csr_matrix(
         (cp.ravel(knn_dist), cp.ravel(knn_indices), rowptr), shape=(n_obs, n_obs)
     )
