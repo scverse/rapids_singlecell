@@ -379,11 +379,10 @@ def bbknn(
     copy: bool = False,
 ) -> AnnData | None:
     """\
-    Compute a neighborhood graph of observations with cuml.
-
-    The neighbor search efficiency of this heavily relies on cuml,
-    which also provides a method for estimating connectivities of data points -
-    the connectivity of the manifold.
+	Batch balanced KNN, altering the KNN procedure to identify each cell's top neighbours in
+	each batch separately instead of the entire cell pool with no accounting for batch.
+	The nearest neighbours for each batch are then merged to create a final list of
+	neighbours for the cell.
 
     Parameters
     ----------
@@ -452,6 +451,9 @@ def bbknn(
     _check_metrics(algorithm, metric)
 
     n_neighbors = neighbors_within_batch
+
+    if batch_key is None:
+        raise ValueError("Please provide a batch key to perform batch-balanced KNN.")
 
     if batch_key not in adata.obs:
         raise ValueError(f"Batch key '{batch_key}' not present in `adata.obs`.")
