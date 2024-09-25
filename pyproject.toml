@@ -41,7 +41,7 @@ test = [
     "pytest",
     "profimp",
     "scanpy[test]>=1.10.0",
-    "bbknn"
+    "bbknn",
 ]
 
 [project.urls]
