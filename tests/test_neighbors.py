@@ -53,7 +53,7 @@ def test_neighbors_key_added():
 def test_bbknn():
     """
     Test the bbknn function against the scanpy implementation. We want more than a 90% overlap between the two.
-    This is calculated by the number of shared indices between the two sparse matrices divided by the number of indices in the scanpy implementation.
+    This is calculated by the number of shared indices between the two sparse distance matrices divided by the number of indices in the original implementation.
     """
 
     adata = pbmc68k_reduced()
