@@ -50,6 +50,10 @@ def test_neighbors_key_added():
     )
 
 def test_bbknn():
+    """
+    Test the bbknn function against the scanpy implementation. We want more than a 90% overlap between the two.
+    """
+
     adata = pbmc68k_reduced()
     sce.pp.bbknn(adata, n_pcs=15,batch_key="phase",computation="pynndescent", metric="euclidean")
     bbknn(adata, n_pcs=15,batch_key="phase",algorithm="brute", key_added="rapids")

@@ -72,7 +72,7 @@ def _brute_knn(X, Y, k, metric, metric_kwds):
     return neighbors, distances
 
 
-def _cagra_knn(X, Y, k, metric):
+def _cagra_knn(X, Y, k, metric, metric_kwds):
     try:
         from pylibraft.neighbors import cagra
     except ImportError:
@@ -107,7 +107,7 @@ def _cagra_knn(X, Y, k, metric):
     return all_neighbors, all_distances
 
 
-def _ivf_flat_knn(X, Y, k, metric):
+def _ivf_flat_knn(X, Y, k, metric, metric_kwds):
     from pylibraft.neighbors import ivf_flat
 
     handle = DeviceResources()
@@ -127,7 +127,7 @@ def _ivf_flat_knn(X, Y, k, metric):
     return neighbors, distances
 
 
-def _ivf_pq_knn(X, Y, k, metric):
+def _ivf_pq_knn(X, Y, k, metric, metric_kwds):
     from pylibraft.neighbors import ivf_pq
 
     handle = DeviceResources()
@@ -147,16 +147,26 @@ def _ivf_pq_knn(X, Y, k, metric):
     return neighbors, distances
 
 
-def _check_neighbors_X(X, algorithm):
-    """
-    Check and convert input X to the expected format based on algorithm.
+KNN_ALGORITHMS = {
+    "brute": _brute_knn,
+    "cagra": _cagra_knn,
+    "ivfflat": _ivf_flat_knn,
+    "ivfpq": _ivf_pq_knn,
+}
 
-    Parameters:
+
+def _check_neighbors_X(X, algorithm):
+    """Check and convert input X to the expected format based on algorithm.
+
+    Parameters
+    ----------
     X (array-like or sparse matrix): Input data.
     algorithm (str): The algorithm to be used.
 
-    Returns:
+    Returns
+    -------
     X_contiguous (cupy.ndarray or sparse.csr_matrix): Contiguous array or CSR matrix.
+
     """
     if cp_sparse.issparse(X) or sc_sparse.issparse(X):
         if algorithm != "brute":
@@ -179,15 +189,17 @@ def _check_neighbors_X(X, algorithm):
 
 
 def _check_metrics(algorithm, metric):
-    """
-    Check if the provided metric is compatible with the chosen algorithm.
+    """Check if the provided metric is compatible with the chosen algorithm.
 
-    Parameters:
+    Parameters
+    ----------
     algorithm (str): The algorithm to be used.
     metric (str): The metric for distance computation.
 
-    Returns:
+    Returns
+    -------
     bool: True if the metric is compatible, otherwise ValueError is raised.
+
     """
     if algorithm == "brute":
         # 'brute' support all metrics, no need to check further.
@@ -206,6 +218,25 @@ def _check_metrics(algorithm, metric):
         raise NotImplementedError(f"The {algorithm} algorithm is not implemented yet.")
 
     return True
+
+
+def _get_connectivities(
+    n_neighbors, *, n_obs, random_state, metric, knn_indices, knn_dist
+):
+    set_op_mix_ratio = 1.0
+    local_connectivity = 1.0
+    X_conn = cp.empty((n_obs, 1), dtype=np.float32)
+    connectivities = fuzzy_simplicial_set(
+        X_conn,
+        n_neighbors,
+        random_state,
+        metric=metric,
+        knn_indices=knn_indices,
+        knn_dists=knn_dist,
+        set_op_mix_ratio=set_op_mix_ratio,
+        local_connectivity=local_connectivity,
+    )
+    return connectivities
 
 
 def neighbors(
@@ -284,8 +315,8 @@ def neighbors(
         **distances** : sparse matrix of dtype `float32`.
             Instead of decaying weights, this stores distances for each pair of
             neighbors.
-    """
 
+    """
     adata = adata.copy() if copy else adata
     if adata.is_view:
         adata._init_as_actual(adata.copy())
@@ -295,22 +326,13 @@ def neighbors(
     _check_metrics(algorithm, metric)
 
     n_obs = adata.shape[0]
-    if algorithm == "brute":
-        knn_indices, knn_dist = _brute_knn(
-            X_contiguous, X_contiguous, n_neighbors, metric, metric_kwds
-        )
-    elif algorithm == "cagra":
-        knn_indices, knn_dist = _cagra_knn(
-            X_contiguous, X_contiguous, n_neighbors, metric
-        )
-    elif algorithm == "ivfflat":
-        knn_indices, knn_dist = _ivf_flat_knn(
-            X_contiguous, X_contiguous, n_neighbors, metric
-        )
-    elif algorithm == "ivfpq":
-        knn_indices, knn_dist = _ivf_pq_knn(
-            X_contiguous, X_contiguous, n_neighbors, metric
-        )
+    knn_indices, knn_dist = KNN_ALGORITHMS[algorithm](
+        X_contiguous,
+        X_contiguous,
+        k=n_neighbors,
+        metric=metric,
+        metric_kwds=metric_kwds,
+    )
 
     n_nonzero = n_obs * n_neighbors
     rowptr = cp.arange(0, n_nonzero + 1, n_neighbors)
@@ -318,18 +340,13 @@ def neighbors(
         (cp.ravel(knn_dist), cp.ravel(knn_indices), rowptr), shape=(n_obs, n_obs)
     )
 
-    set_op_mix_ratio = 1.0
-    local_connectivity = 1.0
-    X_conn = cp.empty((n_obs, 1), dtype=np.float32)
-    connectivities = fuzzy_simplicial_set(
-        X_conn,
-        n_neighbors,
-        random_state,
+    connectivities = _get_connectivities(
+        n_neighbors=n_neighbors,
+        n_obs=n_obs,
+        random_state=random_state,
         metric=metric,
         knn_indices=knn_indices,
-        knn_dists=knn_dist,
-        set_op_mix_ratio=set_op_mix_ratio,
-        local_connectivity=local_connectivity,
+        knn_dist=knn_dist,
     )
     connectivities = connectivities.tocsr().get()
     distances = distances.get()
@@ -340,23 +357,22 @@ def neighbors(
     else:
         conns_key = key_added + "_connectivities"
         dists_key = key_added + "_distances"
-    adata.uns[key_added] = {}
 
-    neighbors_dict = adata.uns[key_added]
-
-    neighbors_dict["connectivities_key"] = conns_key
-    neighbors_dict["distances_key"] = dists_key
-
-    neighbors_dict["params"] = {"n_neighbors": n_neighbors}
-    neighbors_dict["params"]["method"] = "rapids"
-    neighbors_dict["params"]["random_state"] = random_state
-    neighbors_dict["params"]["metric"] = metric
-    if metric_kwds:
-        neighbors_dict["params"]["metric_kwds"] = metric_kwds
-    if use_rep is not None:
-        neighbors_dict["params"]["use_rep"] = use_rep
-    if n_pcs is not None:
-        neighbors_dict["params"]["n_pcs"] = n_pcs
+    params = dict(
+        n_neighbors=n_neighbors,
+        method="rapids",
+        random_state=random_state,
+        metric=metric,
+        **({"metric_kwds": metric_kwds} if metric_kwds else {}),
+        **({"use_rep": use_rep} if use_rep is not None else {}),
+        **({"use_rep": n_pcs} if n_pcs is not None else {}),
+    )
+    neighbors_dict = {
+        "connectivities_key": conns_key,
+        "distances_key": dists_key,
+        "params": params,
+    }
+    adata.uns[key_added] = neighbors_dict
 
     adata.obsp[dists_key] = distances
     adata.obsp[conns_key] = connectivities
@@ -380,9 +396,9 @@ def bbknn(
 ) -> AnnData | None:
     """\
 	Batch balanced KNN, altering the KNN procedure to identify each cell's top neighbours in
-	each batch separately instead of the entire cell pool with no accounting for batch.
-	The nearest neighbours for each batch are then merged to create a final list of
-	neighbours for the cell.
+    each batch separately instead of the entire cell pool with no accounting for batch.
+    The nearest neighbours for each batch are then merged to create a final list of
+    neighbours for the cell.
 
     Parameters
     ----------
@@ -440,8 +456,8 @@ def bbknn(
         **distances** : sparse matrix of dtype `float32`.
             Instead of decaying weights, this stores distances for each pair of
             neighbors.
-    """
 
+    """
     adata = adata.copy() if copy else adata
     if adata.is_view:
         adata._init_as_actual(adata.copy())
@@ -450,8 +466,6 @@ def bbknn(
     X_contiguous = _check_neighbors_X(X, algorithm)
     _check_metrics(algorithm, metric)
 
-    n_neighbors = neighbors_within_batch
-
     if batch_key is None:
         raise ValueError("Please provide a batch key to perform batch-balanced KNN.")
 
@@ -459,29 +473,30 @@ def bbknn(
         raise ValueError(f"Batch key '{batch_key}' not present in `adata.obs`.")
 
     n_obs = adata.shape[0]
-    batch_list = adata.obs[batch_key].values
-    batches = np.unique(batch_list)
-    total_neighbors = n_neighbors * len(batches)
+    batch_array = adata.obs[batch_key].values
+    unique_batches = np.unique(batch_array)
+    total_neighbors = neighbors_within_batch * len(unique_batches)
     knn_dist = cp.zeros((X.shape[0], total_neighbors), dtype=np.float32)
     knn_indices = cp.zeros_like(knn_dist).astype(int)
 
-    for to_ind in range(len(batches)):
-        batch_to = batches[to_ind]
-        mask_to = batch_list == batch_to
-        X_to = X_contiguous[mask_to]
-        ind_to = cp.arange(len(batch_list))[mask_to]
+    index_array = cp.arange(n_obs)
 
-        if algorithm == "brute":
-            sub_ind, sub_dist = _brute_knn(
-                X_to, X_contiguous, n_neighbors, metric, metric_kwds
-            )
-        elif algorithm == "cagra":
-            sub_ind, sub_dist = _cagra_knn(X_to, X_contiguous, n_neighbors, metric)
-        elif algorithm == "ivfflat":
-            sub_ind, sub_dist = _ivf_flat_knn(X_to, X_contiguous, n_neighbors, metric)
-        elif algorithm == "ivfpq":
-            sub_ind, sub_dist = _ivf_pq_knn(X_to, X_contiguous, n_neighbors, metric)
-        col_range = cp.arange(to_ind * n_neighbors, (to_ind + 1) * n_neighbors)
+    for idx, batch in enumerate(unique_batches):
+        mask_to = batch_array == batch
+        X_to = X_contiguous[mask_to]
+        ind_to = index_array[mask_to]
+
+        sub_ind, sub_dist = KNN_ALGORITHMS[algorithm](
+            X_to,
+            X_contiguous,
+            k=neighbors_within_batch,
+            metric=metric,
+            metric_kwds=metric_kwds,
+        )
+
+        col_range = cp.arange(
+            idx * neighbors_within_batch, (idx + 1) * neighbors_within_batch
+        )
         knn_indices[:, col_range] = ind_to[sub_ind]
         knn_dist[:, col_range] = sub_dist
 
@@ -490,20 +505,15 @@ def bbknn(
     distances = cp_sparse.csr_matrix(
         (cp.ravel(knn_dist), cp.ravel(knn_indices), rowptr), shape=(n_obs, n_obs)
     )
-
-    set_op_mix_ratio = 1.0
-    local_connectivity = 1.0
-    X_conn = cp.empty((n_obs, 1), dtype=np.float32)
-    connectivities = fuzzy_simplicial_set(
-        X_conn,
-        n_neighbors,
-        random_state,
+    connectivities = _get_connectivities(
+        total_neighbors,
+        n_obs=n_obs,
+        random_state=random_state,
         metric=metric,
         knn_indices=knn_indices,
-        knn_dists=knn_dist,
-        set_op_mix_ratio=set_op_mix_ratio,
-        local_connectivity=local_connectivity,
+        knn_dist=knn_dist,
     )
+
     connectivities = connectivities.tocsr().get()
     distances = distances.get()
     if key_added is None:
@@ -513,24 +523,22 @@ def bbknn(
     else:
         conns_key = key_added + "_connectivities"
         dists_key = key_added + "_distances"
-    adata.uns[key_added] = {}
 
-    neighbors_dict = adata.uns[key_added]
-
-    neighbors_dict["connectivities_key"] = conns_key
-    neighbors_dict["distances_key"] = dists_key
-
-    neighbors_dict["params"] = {"n_neighbors": n_neighbors}
-    neighbors_dict["params"]["method"] = "rapids"
-    neighbors_dict["params"]["random_state"] = random_state
-    neighbors_dict["params"]["metric"] = metric
-    if metric_kwds:
-        neighbors_dict["params"]["metric_kwds"] = metric_kwds
-    if use_rep is not None:
-        neighbors_dict["params"]["use_rep"] = use_rep
-    if n_pcs is not None:
-        neighbors_dict["params"]["n_pcs"] = n_pcs
-
+    params = dict(
+        n_neighbors=total_neighbors,
+        method="rapids",
+        random_state=random_state,
+        metric=metric,
+        **({"metric_kwds": metric_kwds} if metric_kwds else {}),
+        **({"use_rep": use_rep} if use_rep is not None else {}),
+        **({"use_rep": n_pcs} if n_pcs is not None else {}),
+    )
+    neighbors_dict = {
+        "connectivities_key": conns_key,
+        "distances_key": dists_key,
+        "params": params,
+    }
+    adata.uns[key_added] = neighbors_dict
     adata.obsp[dists_key] = distances
     adata.obsp[conns_key] = connectivities
 
