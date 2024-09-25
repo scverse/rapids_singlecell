@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from typing import Union
 
 import cupy as cp
 import numpy as np
@@ -9,7 +10,11 @@ from cupyx.scipy import sparse
 from scanpy._utils import view_to_actual
 
 from rapids_singlecell.get import _check_mask, _get_obs_rep, _set_obs_rep
-from rapids_singlecell.preprocessing._utils import _check_gpu_X, _get_mean_var
+from rapids_singlecell.preprocessing._utils import (
+    _check_gpu_X,
+    _get_mean_var,
+    _sparse_to_dense,
+)
 
 
 def scale(
@@ -22,7 +27,7 @@ def scale(
     obsm: str | None = None,
     mask_obs: np.ndarray | str | None = None,
     inplace: bool = True,
-) -> None | cp.ndarray:
+) -> Union[sparse.spmatrix, cp.ndarray, None]:  # noqa: UP007
     """
     Scales matrix to unit variance and clips values
 
@@ -58,7 +63,7 @@ def scale(
 
     Returns
     -------
-    Returns a scaled copy or updates `adata` with a scaled version of the original `adata.X` and `adata.layers['layer']`, \
+    Returns a scaled copy or updates `adata` with a scaled version of the original :attr:`~anndata.AnnData.X` and `adata.layers['layer']`, \
     depending on `inplace`.
 
     """
@@ -168,7 +173,7 @@ def _scale_sparse_csc(
     X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None
 ):
     if zero_center:
-        X = X.toarray()
+        X = _sparse_to_dense(X, order="C")
         # inplace is True because we copied with `toarray`
         return _scale_array(
             X,
@@ -211,7 +216,7 @@ def _scale_sparse_csr(
     X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None
 ):
     if zero_center:
-        X = X.toarray()
+        X = _sparse_to_dense(X, order="C")
         # inplace is True because we copied with `toarray`
         return _scale_array(
             X,

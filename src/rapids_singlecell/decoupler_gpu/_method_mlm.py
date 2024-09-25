@@ -4,10 +4,14 @@ import cupy as cp
 import numpy as np
 import pandas as pd
 from anndata import AnnData
-from decoupler.pre import extract, filt_min_n, get_net_mat, match, rename_net
-from scipy import stats
-from scipy.sparse import csr_matrix
-from tqdm import tqdm
+from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
+from cupyx.scipy.sparse import issparse as cp_issparse
+from scipy.sparse import issparse
+from tqdm.auto import tqdm
+
+from rapids_singlecell.preprocessing._utils import _sparse_to_dense
+
+from ._pre import __stdtr, extract, filt_min_n, get_net_mat, match, rename_net
 
 
 def fit_mlm(X, y, inv, df):
@@ -27,7 +31,7 @@ def fit_mlm(X, y, inv, df):
     inv = cp.reshape(inv, (1, inv.shape[0]))
     se = cp.sqrt(sse * inv)
     t = coef.T / se
-    return t.astype(np.float32).get()
+    return t.astype(np.float32)
 
 
 def mlm(mat, net, batch_size=10000, verbose=False):
@@ -43,23 +47,27 @@ def mlm(mat, net, batch_size=10000, verbose=False):
     inv = cp.linalg.inv(cp.dot(net.T, net))
     df = n_features - n_fsets - 1
 
-    if isinstance(mat, csr_matrix):
+    if issparse(mat) or cp_issparse(mat):
         # Init empty acts
         n_batches = int(np.ceil(n_samples / batch_size))
-        es = np.zeros((n_samples, n_fsets), dtype=np.float32)
+        es = cp.zeros((n_samples, n_fsets), dtype=np.float32)
         for i in tqdm(range(n_batches), disable=not verbose):
-            # Subset batch
             srt, end = i * batch_size, i * batch_size + batch_size
-            y = mat[srt:end].A.T
-
+            if cp_issparse(mat):
+                y = _sparse_to_dense(mat[srt:end]).T
+            else:
+                y = _sparse_to_dense(cp_csr_matrix(mat[srt:end])).T
             # Compute MLM for batch
-            es[srt:end] = fit_mlm(net, cp.array(y), inv, df)[:, 1:]
+            es[srt:end] = fit_mlm(net, y, inv, df)[:, 1:]
+
     else:
         # Compute MLM for all
-        es = fit_mlm(net, cp.array(mat.T), inv, df)[:, 1:]
+        es = fit_mlm(net, mat.T, inv, df)[:, 1:]
 
     # Get p-values
-    pvals = 2 * (1 - stats.t.cdf(np.abs(es), df))
+
+    pvals = (2 * (1 - __stdtr(df, cp.abs(es)))).get()
+    es = es.get()
 
     return es, pvals
 
@@ -74,7 +82,9 @@ def run_mlm(
     batch_size: int = 10000,
     min_n: int = 5,
     verbose: bool = False,
-    use_raw: bool = True,
+    use_raw: bool | None = None,
+    layer: str | None = None,
+    pre_load: bool | None = False,
 ) -> tuple | None:
     """
     Multivariate Linear Model (MLM).
@@ -101,7 +111,11 @@ def run_mlm(
         verbose
             Whether to show progress.
         use_raw
-            Use raw attribute of mat if present.
+            Use raw attribute of mat.
+        layer
+            Layer to use in AnnData object.
+        pre_load
+            Whether to pre-load the data into memory. This can be faster for small datasets.
 
     Returns
     -------
@@ -113,16 +127,15 @@ def run_mlm(
                 Obtained p-values. Stored in `.obsm['mlm_pvals']` if `mat` is AnnData.
     """
     # Extract sparse matrix and array of genes
-    m, r, c = extract(mat, use_raw=use_raw, verbose=verbose)
-
+    m, r, c = extract(
+        mat, use_raw=use_raw, layer=layer, verbose=verbose, pre_load=pre_load
+    )
     # Transform net
     net = rename_net(net, source=source, target=target, weight=weight)
     net = filt_min_n(c, net, min_n=min_n)
     sources, targets, net = get_net_mat(net)
-
     # Match arrays
     net = match(c, targets, net)
-
     if verbose:
         print(
             f"Running mlm on mat with {m.shape[0]} samples and {len(c)} targets for {net.shape[1]} sources."

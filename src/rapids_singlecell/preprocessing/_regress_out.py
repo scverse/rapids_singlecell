@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Literal
+from typing import Literal, Union
 
 import cupy as cp
 from anndata import AnnData
@@ -10,7 +10,7 @@ from cupyx.scipy import sparse
 from scanpy._utils import view_to_actual
 from scanpy.get import _get_obs_rep, _set_obs_rep
 
-from ._utils import _check_gpu_X
+from ._utils import _check_gpu_X, _sparse_to_dense
 
 
 def regress_out(
@@ -19,9 +19,9 @@ def regress_out(
     *,
     layer: str | None = None,
     inplace: bool = True,
-    batchsize: int | Literal["all"] | None = 100,
+    batchsize: int | Literal["all"] | None = None,
     verbose: bool = False,
-) -> cp.ndarray | None:
+) -> Union[cp.ndarray, None]:  # noqa: UP007
     """
     Use linear regression to adjust for the effects of unwanted noise
     and variation.
@@ -44,7 +44,7 @@ def regress_out(
             Number of genes that should be processed together. \
             If `'all'` all genes will be processed together if `.n_obs` <100000. \
             If `None` each gene will be analysed separately. \
-            Will be ignored if cuML version < 22.12
+
 
         verbose
             Print debugging information
@@ -64,9 +64,9 @@ def regress_out(
 
     _check_gpu_X(X)
 
-    if sparse.issparse(X) and not sparse.isspmatrix_csc(X):
-        X = X.tocsc()
-
+    if not sparse.issparse(X) and inplace is False:
+        X = cp.array(X)
+    # Create regressors
     dim_regressor = 2
     if isinstance(keys, list):
         dim_regressor = len(keys) + 1
@@ -80,73 +80,44 @@ def regress_out(
         for i in range(dim_regressor - 1):
             regressors[:, i + 1] = cp.array(adata.obs[keys[i]]).ravel()
 
-    outputs = cp.empty(X.shape, dtype=X.dtype, order="F")
+    # Set default batch size based on the number of samples in X
+    if batchsize is None:
+        batchsize = 100 if X.shape[0] > 100000 else "all"
 
-    cuml_supports_multi_target = LinearRegression._get_tags()["multioutput"]
+    # Validate the choice of "all" batch size
+    if batchsize == "all":
+        if cp.linalg.det(regressors.T @ regressors) == 0:
+            batchsize = 100
 
-    if cuml_supports_multi_target and batchsize:
-        if batchsize == "all" and X.shape[0] < 100000:
-            if sparse.issparse(X):
-                X = X.todense()
+    # Do reggression
+    if batchsize == "all":
+        if sparse.issparse(X):
+            X = _sparse_to_dense(X, order="C")
+        else:
+            X = cp.ascontiguousarray(X)
+        inv_gram_matrix = cp.linalg.inv(regressors.T @ regressors)
+        coeff = inv_gram_matrix @ (regressors.T @ X)
+        X -= regressors @ coeff
+
+    else:
+        if sparse.issparse(X):
+            X = _sparse_to_dense(X, order="F")
+        else:
+            X = cp.asfortranarray(X)
+        n_batches = math.ceil(X.shape[1] / batchsize)
+        for batch in range(n_batches):
+            start_idx = batch * batchsize
+            stop_idx = min(batch * batchsize + batchsize, X.shape[1])
+
+            arr_batch = X[:, start_idx:stop_idx].copy()
             lr = LinearRegression(
                 fit_intercept=False, output_type="cupy", algorithm="svd"
             )
-            lr.fit(regressors, X, convert_dtype=True)
-            outputs[:] = X - lr.predict(regressors)
-        else:
-            if batchsize == "all":
-                batchsize = 100
-            n_batches = math.ceil(X.shape[1] / batchsize)
-            for batch in range(n_batches):
-                start_idx = batch * batchsize
-                stop_idx = min(batch * batchsize + batchsize, X.shape[1])
-                if sparse.issparse(X):
-                    arr_batch = X[:, start_idx:stop_idx].todense()
-                else:
-                    arr_batch = X[:, start_idx:stop_idx].copy()
-                lr = LinearRegression(
-                    fit_intercept=False, output_type="cupy", algorithm="svd"
-                )
-                lr.fit(regressors, arr_batch, convert_dtype=True)
-                outputs[:, start_idx:stop_idx] = arr_batch - lr.predict(regressors)
-    else:
-        if X.shape[0] < 100000 and sparse.issparse(X):
-            X = X.todense()
-        for i in range(X.shape[1]):
-            if verbose and i % 500 == 0:
-                print(f"Regressed {i} out of {X.shape[1]}")
+            lr.fit(regressors, arr_batch, convert_dtype=True)
+            X[:, start_idx:stop_idx] = arr_batch - lr.predict(regressors)
 
-            y = X[:, i]
-            outputs[:, i] = _regress_out_chunk(regressors, y)
-
+    X = cp.ascontiguousarray(X)
     if inplace:
-        _set_obs_rep(adata, outputs, layer=layer)
+        _set_obs_rep(adata, X, layer=layer)
     else:
-        return outputs
-
-
-def _regress_out_chunk(X, y):
-    """
-    Performs a data_cunk.shape[1] number of local linear regressions,
-    replacing the data in the original chunk w/ the regressed result.
-
-    Parameters
-    ----------
-    X : cupy.ndarray of shape (n_cells, 3)
-        Matrix of regressors
-    y : cupy.sparse.spmatrix of shape (n_cells,)
-        Sparse matrix containing a single column of the cellxgene matrix
-
-    Returns
-    -------
-    dense_mat : cupy.ndarray of shape (n_cells,)
-        Adjusted column
-    """
-    if sparse.issparse(y):
-        y = y.todense()
-
-    lr = LinearRegression(fit_intercept=False, output_type="cupy")
-    lr.fit(X, y, convert_dtype=True)
-    return y.reshape(
-        y.shape[0],
-    ) - lr.predict(X).reshape(y.shape[0])
+        return X

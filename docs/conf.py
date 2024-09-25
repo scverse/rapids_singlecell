@@ -78,7 +78,7 @@ myst_enable_extensions = [
     "html_image",
     "html_admonition",
 ]
-myst_url_schemes = ("http", "https", "mailto")
+myst_url_schemes = ("http", "https", "mailto", "ftp")
 nb_output_stderr = "remove"
 nb_execution_mode = "off"
 nb_merge_streams = True
@@ -134,6 +134,10 @@ html_logo = "_static/logo3.svg"
 html_static_path = ["_static"]
 html_css_files = ["_static/css/override.css"]
 html_title = "rapids-singlecell"
+
+qualname_overrides = {
+    "numpy.bool_": "numpy.bool",  # Since numpy 2, numpy.bool is the canonical dtype
+}
 
 nitpick_ignore = [
     ("py:class", "scipy.sparse.base.spmatrix"),

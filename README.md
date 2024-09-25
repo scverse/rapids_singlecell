@@ -16,30 +16,9 @@ Rapids-singlecell offers enhanced single-cell data analysis as a near drop-in re
 
 Our commitment with rapids-singlecell is to deliver a powerful, user-centric tool that significantly enhances single-cell data analysis capabilities in bioinformatics.
 
-## Installation
-### Conda
-The easiest way to install *rapids-singlecell* is to use one of the *yaml* file provided in the [conda](https://github.com/scverse/rapids_singlecell/tree/main/conda) folder. These *yaml* files install everything needed to run the example notbooks and get you started.
-```
-conda env create -f conda/rsc_rapids_24.02.yml
-# or
-mamba env create -f conda/rsc_rapids_24.04.yml
-```
-### PyPI
-```
-pip install rapids-singlecell
-```
-The default installer doesn't cover RAPIDS nor cupy. Information on how to install RAPIDS & cupy can be found [here](https://rapids.ai/start.html).
-
-If you want to use RAPIDS PyPI packages, the whole library with all dependencies can be install with:
-````
-pip install 'rapids-singlecell[rapids11]' --extra-index-url=https://pypi.nvidia.com #CUDA11.X
-pip install 'rapids-singlecell[rapids12]' --extra-index-url=https://pypi.nvidia.com #CUDA12
-````
-It is important to ensure that the CUDA environment is set up correctly so that RAPIDS and Cupy can locate the necessary libraries.
-
 ## Documentation
 
-Please have a look through the [documentation](https://rapids-singlecell.readthedocs.io/en/latest/)
+For more information please have a look through the [documentation](https://rapids-singlecell.readthedocs.io/en/latest/)
 
 
 ## Citation

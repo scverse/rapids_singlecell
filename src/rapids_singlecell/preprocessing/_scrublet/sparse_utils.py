@@ -5,12 +5,14 @@ from typing import TYPE_CHECKING
 import cupy as cp
 import numpy as np
 from cupyx.scipy import sparse
-from scanpy._utils import AnyRandom, get_random_state
+from scanpy._utils import get_random_state
 
 from rapids_singlecell.preprocessing._utils import _get_mean_var
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+
+    from rapids_singlecell._utils import AnyRandom
 
 
 def sparse_multiply(

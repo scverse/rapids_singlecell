@@ -15,7 +15,6 @@ dependencies = [
     "anndata>=0.10.0",
     "scanpy>=1.10.0",
     "numpy>=1.17.0",
-    "decoupler>=1.3.2",
     "scipy>=1.4",
     "pandas",
     "natsort",
@@ -27,8 +26,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-rapids11 = ["cudf-cu11==24.4.*", "cuml-cu11==24.4.*", "cugraph-cu11==24.4.*"]
-rapids12 = ["cudf-cu12==24.4.*", "cuml-cu12==24.4.*", "cugraph-cu12==24.4.*"]
+rapids11 = ["cupy-cuda11x","cudf-cu11==24.8.*", "cuml-cu11==24.8.*", "cugraph-cu11==24.8.*"]
+rapids12 = ["cupy-cuda12x","cudf-cu12==24.8.*", "cuml-cu12==24.8.*", "cugraph-cu12==24.8.*"]
 doc = [
     "sphinx>=4.5.0",
     "sphinx-copybutton",
@@ -40,7 +39,6 @@ doc = [
 ]
 test = [
     "pytest",
-    "omnipath",
     "profimp",
     "scanpy[test]>=1.10.0"
 ]
@@ -93,6 +91,15 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["rapids_singlecell"]
 required-imports = ["from __future__ import annotations"]
+
+[tool.hatch.envs.hatch-test]
+features = ["test", "rapids12"]
+
+[tool.hatch.envs.docs]
+installer = "uv"
+features = ["doc"]
+scripts.build = "sphinx-build -M html docs docs/_build {args}"
+scripts.clean = "git clean -fXd docs"
 
 [tool.hatch.build]
 # exclude big files that don’t need to be installed

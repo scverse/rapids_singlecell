@@ -1,6 +1,0 @@
-name: rapids_singlecell
-channels:
- - conda-forge
-dependencies:
- - python=3.11
- - uv
