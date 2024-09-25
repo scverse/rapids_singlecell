@@ -479,19 +479,20 @@ def bbknn(
             neighbors.
 
     """
-    adata = adata.copy() if copy else adata
-    if adata.is_view:
-        adata._init_as_actual(adata.copy())
-    X = _choose_representation(adata, use_rep=use_rep, n_pcs=n_pcs)
-
-    X_contiguous = _check_neighbors_X(X, algorithm)
-    _check_metrics(algorithm, metric)
 
     if batch_key is None:
         raise ValueError("Please provide a batch key to perform batch-balanced KNN.")
 
     if batch_key not in adata.obs:
         raise ValueError(f"Batch key '{batch_key}' not present in `adata.obs`.")
+
+    adata = adata.copy() if copy else adata
+    if adata.is_view:
+        adata._init_as_actual(adata.copy())
+
+    X = _choose_representation(adata, use_rep=use_rep, n_pcs=n_pcs)
+    X_contiguous = _check_neighbors_X(X, algorithm)
+    _check_metrics(algorithm, metric)
 
     n_obs = adata.shape[0]
     batch_array = adata.obs[batch_key].values
