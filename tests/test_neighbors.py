@@ -3,6 +3,7 @@ from anndata import AnnData
 from rapids_singlecell.pp import neighbors, bbknn
 from scanpy.datasets import pbmc68k_reduced
 import scanpy.external as sce
+import itertools
 import pytest
 
 # the input data
@@ -52,17 +53,15 @@ def test_neighbors_key_added():
 def test_bbknn():
     """
     Test the bbknn function against the scanpy implementation. We want more than a 90% overlap between the two.
+    This is calculated by the number of shared indices between the two sparse matrices divided by the number of indices in the scanpy implementation.
     """
 
     adata = pbmc68k_reduced()
     sce.pp.bbknn(adata, n_pcs=15,batch_key="phase",computation="pynndescent", metric="euclidean")
     bbknn(adata, n_pcs=15,batch_key="phase",algorithm="brute", key_added="rapids")
     counter = 0
-    for i in range(adata.shape[0]):
-        rsc_start =adata.obsp["rapids_distances"].indptr[i]
-        rsc_stop = adata.obsp["rapids_distances"].indptr[i+1]
-        b_start=adata.obsp["distances"].indptr[i]
-        b_stop=adata.obsp["distances"].indptr[i+1]
+    for (rsc_start, rsc_stop), (b_start, b_stop) in zip(itertools.pairwise(adata.obsp["rapids_distances"].indptr),
+                                                        itertools.pairwise(adata.obsp["distances"].indptr)):
         counter+=len(np.intersect1d(adata.obsp["rapids_distances"].indices[rsc_start:rsc_stop],
                         adata.obsp["distances"].indices[b_start:b_stop]))
     assert counter/b_stop > 0.9
