@@ -57,7 +57,13 @@ _MetricsSparse = Literal[
 _Metrics = Union[_MetricsDense, _MetricsSparse]
 
 
-def _brute_knn(X, Y, k, metric, metric_kwds):
+def _brute_knn(
+    X: cp_sparse.spmatrix | cp.ndarray,
+    Y: cp_sparse.spmatrix | cp.ndarray,
+    k: int,
+    metric: _Metrics,
+    metric_kwds: Mapping,
+) -> tuple[cp.ndarray, cp.ndarray]:
     from cuml.neighbors import NearestNeighbors
 
     nn = NearestNeighbors(
@@ -72,7 +78,9 @@ def _brute_knn(X, Y, k, metric, metric_kwds):
     return neighbors, distances
 
 
-def _cagra_knn(X, Y, k, metric, metric_kwds):
+def _cagra_knn(
+    X: cp.ndarray, Y: cp.ndarray, k: int, metric: _Metrics, metric_kwds: Mapping
+) -> tuple[cp.ndarray, cp.ndarray]:
     try:
         from pylibraft.neighbors import cagra
     except ImportError:
@@ -107,7 +115,9 @@ def _cagra_knn(X, Y, k, metric, metric_kwds):
     return all_neighbors, all_distances
 
 
-def _ivf_flat_knn(X, Y, k, metric, metric_kwds):
+def _ivf_flat_knn(
+    X: cp.ndarray, Y: cp.ndarray, k: int, metric: _Metrics, metric_kwds: Mapping
+) -> tuple[cp.ndarray, cp.ndarray]:
     from pylibraft.neighbors import ivf_flat
 
     handle = DeviceResources()
@@ -127,7 +137,9 @@ def _ivf_flat_knn(X, Y, k, metric, metric_kwds):
     return neighbors, distances
 
 
-def _ivf_pq_knn(X, Y, k, metric, metric_kwds):
+def _ivf_pq_knn(
+    X: cp.ndarray, Y: cp.ndarray, k: int, metric: _Metrics, metric_kwds: Mapping
+) -> tuple[cp.ndarray, cp.ndarray]:
     from pylibraft.neighbors import ivf_pq
 
     handle = DeviceResources()
@@ -155,7 +167,10 @@ KNN_ALGORITHMS = {
 }
 
 
-def _check_neighbors_X(X, algorithm):
+def _check_neighbors_X(
+    X: cp_sparse.spmatrix | sc_sparse.spmatrix | np.ndarray | cp.ndarray,
+    algorithm: _Alogithms,
+) -> cp_sparse.spmatrix | cp.ndarray:
     """Check and convert input X to the expected format based on algorithm.
 
     Parameters
@@ -188,7 +203,7 @@ def _check_neighbors_X(X, algorithm):
     return X_contiguous
 
 
-def _check_metrics(algorithm, metric):
+def _check_metrics(algorithm: _Alogithms, metric: _Metrics) -> bool:
     """Check if the provided metric is compatible with the chosen algorithm.
 
     Parameters
@@ -221,8 +236,14 @@ def _check_metrics(algorithm, metric):
 
 
 def _get_connectivities(
-    n_neighbors, *, n_obs, random_state, metric, knn_indices, knn_dist
-):
+    n_neighbors: int,
+    *,
+    n_obs: int,
+    random_state: AnyRandom,
+    metric: _Metrics,
+    knn_indices: cp.ndarray,
+    knn_dist: cp.ndarray,
+) -> cp_sparse.coo_matrix:
     set_op_mix_ratio = 1.0
     local_connectivity = 1.0
     X_conn = cp.empty((n_obs, 1), dtype=np.float32)
