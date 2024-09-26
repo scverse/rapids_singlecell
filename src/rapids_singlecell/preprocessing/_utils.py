@@ -99,17 +99,13 @@ def _mean_var_minor_dask(X, major, minor):
         return cp.vstack([mean, var])[None, ...]  # new axis for summing
 
     n_blocks = len(X.to_delayed().ravel())
-    mean, var = (
-        X.map_blocks(
-            __mean_var,
-            new_axis=(1,),
-            chunks=((1,) * n_blocks, (2,), (minor,)),
-            dtype=cp.float64,
-            meta=cp.array([]),
-        )
-        .sum(axis=0)
-        .compute()
-    )
+    mean, var = X.map_blocks(
+        __mean_var,
+        new_axis=(1,),
+        chunks=((1,) * n_blocks, (2,), (minor,)),
+        dtype=cp.float64,
+        meta=cp.array([]),
+    ).sum(axis=0)
     var = (var - mean**2) * (major / (major - 1))
     return mean, var
 
@@ -189,9 +185,9 @@ def _mean_var_dense_dask(X, axis):
     )
 
     if axis == 0:
-        mean, var = mean_var.sum(axis=0).compute()
+        mean, var = mean_var.sum(axis=0)
     else:
-        mean, var = mean_var.compute()
+        mean, var = mean_var
 
     mean = mean / X.shape[axis]
     var = var / X.shape[axis]
