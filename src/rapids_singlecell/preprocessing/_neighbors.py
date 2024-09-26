@@ -431,23 +431,25 @@ def bbknn(
         the number of batches. This then serves as the basis for the construction
         of a symmetrical matrix of connectivities.
     n_pcs
-        Use this many PCs. If `n_pcs==0` use `.X` if `use_rep is None`.
+        Use this many PCs. If `n_pcs==0` and `use_rep is None`, use `.X`.
     use_rep
         Use the indicated representation. `'X'` or any key for `.obsm` is valid.
-        If None, the representation is chosen automatically: For .n_vars < 50, .X
+        If `None`, the representation is chosen automatically: For `.n_vars < 50`, `.X`
         is used, otherwise `'X_pca'` is used. If `'X_pca'` is not present, it's
         computed with default parameters or `n_pcs` if present.
     random_state
         A numpy random seed.
     algorithm
         The query algorithm to use. Valid options are:
-            * 'brute': Brute-force search that computes distances to all data points, guaranteeing exact results.
 
-            * 'ivfflat': Uses inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
-
-            * 'ivfpq': Combines inverted file indexing with product quantization to encode sub-vectors of the dataset, facilitating faster distance computation.
-
-            * 'cagra': Employs the Compressed, Accurate Graph-based search to quickly find nearest neighbors by traversing a graph structure.
+        `'brute'`
+            Brute-force search that computes distances to all data points, guaranteeing exact results.
+        `'ivfflat'`
+            Uses inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
+        `'ivfpq'`
+            Combines inverted file indexing with product quantization to encode sub-vectors of the dataset, facilitating faster distance computation.
+        `'cagra'`
+            Employs the Compressed, Accurate Graph-based search to quickly find nearest neighbors by traversing a graph structure.
 
         Please ensure that the chosen algorithm is compatible with your dataset and the specific requirements of your search problem.
     metric
@@ -455,12 +457,12 @@ def bbknn(
     metric_kwds
         Options for the metric.
     key_added
-        If not specified, the neighbors data is stored in .uns['neighbors'],
-        distances and connectivities are stored in .obsp['distances'] and
-        .obsp['connectivities'] respectively.
-        If specified, the neighbors data is added to .uns[key_added],
-        distances are stored in .obsp[key_added+'_distances'] and
-        connectivities in .obsp[key_added+'_connectivities'].
+        If not specified, the neighbors data is stored in `.uns['neighbors']`,
+        distances and connectivities are stored in `.obsp['distances']` and
+        `.obsp['connectivities']` respectively.
+        If specified, the neighbors data is added to `.uns[key_added]`,
+        distances are stored in `.obsp[f'{key_added}_distances']` and
+        connectivities in `.obsp[f'{key_added}_connectivities']`.
     copy
         Return a copy instead of writing to adata.
 
@@ -468,16 +470,15 @@ def bbknn(
     -------
     Depending on `copy`, updates or returns `adata` with the following:
 
+    connectivities : sparse matrix of dtype `float32`.
+        Weighted adjacency matrix of the neighborhood graph of data
+        points. Weights should be interpreted as connectivities.
+    distances : sparse matrix of dtype `float32`.
+        Instead of decaying weights, this stores distances for each pair of
+        neighbors.
+
     See `key_added` parameter description for the storage path of
     connectivities and distances.
-
-        **connectivities** : sparse matrix of dtype `float32`.
-            Weighted adjacency matrix of the neighborhood graph of data
-            points. Weights should be interpreted as connectivities.
-        **distances** : sparse matrix of dtype `float32`.
-            Instead of decaying weights, this stores distances for each pair of
-            neighbors.
-
     """
 
     if batch_key is None:
