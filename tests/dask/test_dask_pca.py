@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import cupy as cp
 import numpy as np
-from scipy import sparse
-from cupyx.scipy import sparse as cusparse
 from conftest import as_dense_cupy_dask_array, as_sparse_cupy_dask_array
+from cupyx.scipy import sparse as cusparse
+from scanpy.datasets import pbmc3k, pbmc3k_processed
+from scipy import sparse
+
 import rapids_singlecell as rsc
-import numpy as np
-from scanpy.datasets import pbmc3k_processed, pbmc3k
+
 
 def test_pca_sparse_dask(client):
     sparse_ad = pbmc3k_processed()
@@ -35,17 +36,18 @@ def test_pca_sparse_dask(client):
         atol=1e-6,
     )
 
+
 def test_pca_dense_dask_full_pipeline(client):
     dense = pbmc3k()
     default = pbmc3k()
     dense.X = cp.array(dense.X.astype(np.float64).toarray())
     default.X = as_dense_cupy_dask_array(default.X.astype(np.float64).toarray())
 
-    rsc.pp.filter_genes(dense,min_count=500)
-    rsc.pp.filter_genes(default,min_count=500)
+    rsc.pp.filter_genes(dense, min_count=500)
+    rsc.pp.filter_genes(default, min_count=500)
 
-    rsc.pp.normalize_total(dense,  target_sum=1e4)
-    rsc.pp.normalize_total(default,target_sum=1e4)
+    rsc.pp.normalize_total(dense, target_sum=1e4)
+    rsc.pp.normalize_total(default, target_sum=1e4)
 
     rsc.pp.log1p(dense)
     rsc.pp.log1p(default)
@@ -71,17 +73,18 @@ def test_pca_dense_dask_full_pipeline(client):
         atol=1e-6,
     )
 
+
 def test_pca_sparse_dask_full_pipeline(client):
     sparse_ad = pbmc3k()
     default = pbmc3k()
     sparse_ad.X = cusparse.csr_matrix(sparse.csr_matrix(sparse_ad.X.astype(np.float64)))
     default.X = as_sparse_cupy_dask_array(default.X.astype(np.float64))
 
-    rsc.pp.filter_genes(sparse_ad,min_count=100)
-    rsc.pp.filter_genes(default,min_count=100)
+    rsc.pp.filter_genes(sparse_ad, min_count=100)
+    rsc.pp.filter_genes(default, min_count=100)
 
-    rsc.pp.normalize_total(sparse_ad,  target_sum=1e4)
-    rsc.pp.normalize_total(default,target_sum=1e4)
+    rsc.pp.normalize_total(sparse_ad, target_sum=1e4)
+    rsc.pp.normalize_total(default, target_sum=1e4)
 
     rsc.pp.log1p(sparse_ad)
     rsc.pp.log1p(default)
@@ -106,6 +109,7 @@ def test_pca_sparse_dask_full_pipeline(client):
         rtol=1e-7,
         atol=1e-6,
     )
+
 
 def test_pca_dense_dask(client):
     sparse_ad = pbmc3k_processed()

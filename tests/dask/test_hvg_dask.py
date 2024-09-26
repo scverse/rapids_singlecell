@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import cupy as cp
-import numpy as np
-from cupyx.scipy import sparse as cusparse
-import scanpy as sc
 import pandas as pd
+import scanpy as sc
 from conftest import as_dense_cupy_dask_array, as_sparse_cupy_dask_array
+from cupyx.scipy import sparse as cusparse
+from scanpy.datasets import pbmc3k
+
 import rapids_singlecell as rsc
 
-from scanpy.datasets import pbmc3k
 
 def _get_anndata():
     adata = pbmc3k()
@@ -17,6 +17,7 @@ def _get_anndata():
     sc.pp.normalize_total(adata)
     sc.pp.log1p(adata)
     return adata
+
 
 def test_seurat_sparse(client):
     adata = _get_anndata()
@@ -27,7 +28,9 @@ def test_seurat_sparse(client):
     rsc.pp.highly_variable_genes(dask_data)
     cp.testing.assert_allclose(adata.var["means"], dask_data.var["means"])
     cp.testing.assert_allclose(adata.var["dispersions"], dask_data.var["dispersions"])
-    cp.testing.assert_allclose(adata.var["dispersions_norm"], dask_data.var["dispersions_norm"])
+    cp.testing.assert_allclose(
+        adata.var["dispersions_norm"], dask_data.var["dispersions_norm"]
+    )
 
 
 def test_seurat_sparse_batch(client):
@@ -39,10 +42,13 @@ def test_seurat_sparse_batch(client):
     dask_data.X = as_sparse_cupy_dask_array(dask_data.X).persist()
     adata.X = cusparse.csr_matrix(adata.X)
     rsc.pp.highly_variable_genes(adata, batch_key="batch")
-    rsc.pp.highly_variable_genes(dask_data,batch_key="batch")
+    rsc.pp.highly_variable_genes(dask_data, batch_key="batch")
     cp.testing.assert_allclose(adata.var["means"], dask_data.var["means"])
     cp.testing.assert_allclose(adata.var["dispersions"], dask_data.var["dispersions"])
-    cp.testing.assert_allclose(adata.var["dispersions_norm"], dask_data.var["dispersions_norm"])
+    cp.testing.assert_allclose(
+        adata.var["dispersions_norm"], dask_data.var["dispersions_norm"]
+    )
+
 
 def test_cr_sparse(client):
     adata = _get_anndata()
@@ -53,7 +59,10 @@ def test_cr_sparse(client):
     rsc.pp.highly_variable_genes(dask_data, flavor="cell_ranger")
     cp.testing.assert_allclose(adata.var["means"], dask_data.var["means"])
     cp.testing.assert_allclose(adata.var["dispersions"], dask_data.var["dispersions"])
-    cp.testing.assert_allclose(adata.var["dispersions_norm"], dask_data.var["dispersions_norm"])
+    cp.testing.assert_allclose(
+        adata.var["dispersions_norm"], dask_data.var["dispersions_norm"]
+    )
+
 
 def test_cr_sparse_batch(client):
     adata = _get_anndata()
@@ -64,10 +73,13 @@ def test_cr_sparse_batch(client):
     dask_data.X = as_sparse_cupy_dask_array(dask_data.X).persist()
     adata.X = cusparse.csr_matrix(adata.X)
     rsc.pp.highly_variable_genes(adata, batch_key="batch", flavor="cell_ranger")
-    rsc.pp.highly_variable_genes(dask_data,batch_key="batch", flavor="cell_ranger")
+    rsc.pp.highly_variable_genes(dask_data, batch_key="batch", flavor="cell_ranger")
     cp.testing.assert_allclose(adata.var["means"], dask_data.var["means"])
     cp.testing.assert_allclose(adata.var["dispersions"], dask_data.var["dispersions"])
-    cp.testing.assert_allclose(adata.var["dispersions_norm"], dask_data.var["dispersions_norm"])
+    cp.testing.assert_allclose(
+        adata.var["dispersions_norm"], dask_data.var["dispersions_norm"]
+    )
+
 
 def test_cr_dense(client):
     adata = _get_anndata()
@@ -79,7 +91,10 @@ def test_cr_dense(client):
     rsc.pp.highly_variable_genes(dask_data, flavor="cell_ranger")
     cp.testing.assert_allclose(adata.var["means"], dask_data.var["means"])
     cp.testing.assert_allclose(adata.var["dispersions"], dask_data.var["dispersions"])
-    cp.testing.assert_allclose(adata.var["dispersions_norm"], dask_data.var["dispersions_norm"])
+    cp.testing.assert_allclose(
+        adata.var["dispersions_norm"], dask_data.var["dispersions_norm"]
+    )
+
 
 def test_seurat_dense(client):
     adata = _get_anndata()
@@ -91,7 +106,9 @@ def test_seurat_dense(client):
     rsc.pp.highly_variable_genes(dask_data)
     cp.testing.assert_allclose(adata.var["means"], dask_data.var["means"])
     cp.testing.assert_allclose(adata.var["dispersions"], dask_data.var["dispersions"])
-    cp.testing.assert_allclose(adata.var["dispersions_norm"], dask_data.var["dispersions_norm"])
+    cp.testing.assert_allclose(
+        adata.var["dispersions_norm"], dask_data.var["dispersions_norm"]
+    )
 
 
 def test_cr_dense_batch(client):
@@ -104,10 +121,13 @@ def test_cr_dense_batch(client):
     dask_data.X = as_dense_cupy_dask_array(dask_data.X).persist()
     adata.X = cp.array(adata.X.toarray())
     rsc.pp.highly_variable_genes(adata, batch_key="batch", flavor="cell_ranger")
-    rsc.pp.highly_variable_genes(dask_data,batch_key="batch", flavor="cell_ranger")
+    rsc.pp.highly_variable_genes(dask_data, batch_key="batch", flavor="cell_ranger")
     cp.testing.assert_allclose(adata.var["means"], dask_data.var["means"])
     cp.testing.assert_allclose(adata.var["dispersions"], dask_data.var["dispersions"])
-    cp.testing.assert_allclose(adata.var["dispersions_norm"], dask_data.var["dispersions_norm"])
+    cp.testing.assert_allclose(
+        adata.var["dispersions_norm"], dask_data.var["dispersions_norm"]
+    )
+
 
 def test_seurat_dense_batch(client):
     adata = _get_anndata()
@@ -117,9 +137,11 @@ def test_seurat_dense_batch(client):
     adata.X = adata.X.astype("float64")
     dask_data = adata.copy()
     dask_data.X = as_dense_cupy_dask_array(dask_data.X).persist()
-    adata.X =  cp.array(adata.X.toarray())
+    adata.X = cp.array(adata.X.toarray())
     rsc.pp.highly_variable_genes(adata, batch_key="batch")
-    rsc.pp.highly_variable_genes(dask_data,batch_key="batch")
+    rsc.pp.highly_variable_genes(dask_data, batch_key="batch")
     cp.testing.assert_allclose(adata.var["means"], dask_data.var["means"])
     cp.testing.assert_allclose(adata.var["dispersions"], dask_data.var["dispersions"])
-    cp.testing.assert_allclose(adata.var["dispersions_norm"], dask_data.var["dispersions_norm"])
+    cp.testing.assert_allclose(
+        adata.var["dispersions_norm"], dask_data.var["dispersions_norm"]
+    )
