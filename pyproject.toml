@@ -96,6 +96,9 @@ addopts = [
     "--import-mode=importlib",
     "--strict-markers",
 ]
+markers = [
+    "gpu: tests that use a GPU (currently unused, but needs to be specified here as we import anndata.tests.helpers, which uses it)",
+]
 
 [tool.hatch.envs.hatch-test]
 features = ["test", "rapids12"]
