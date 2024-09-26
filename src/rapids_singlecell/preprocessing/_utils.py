@@ -161,13 +161,13 @@ def _mean_var_major_dask(X, major, minor):
 @with_cupy_rmm
 def _mean_var_dense_dask(X, axis):
     """
-    Implements sum operation for dask array when the backend is cupy sparse csr matrix
+    Implements sum operation for dask array when the backend is cupy dense matrix
     """
+    from ._kernels._mean_var_kernel import mean_sum, sq_sum
 
-    # ToDo: get a 64bit version working without copying the data
     def __mean_var(X_part):
-        mean = X_part.sum(axis=axis)
-        var = (X_part**2).sum(axis=axis)
+        var = sq_sum(X_part, axis=axis)
+        mean = mean_sum(X_part, axis=axis)
         if axis == 0:
             mean = mean.reshape(-1, 1)
             var = var.reshape(-1, 1)
@@ -191,7 +191,7 @@ def _mean_var_dense_dask(X, axis):
 
     mean = mean / X.shape[axis]
     var = var / X.shape[axis]
-    var -= cp.power(mean, 2)
+    var -= mean**2
     var *= X.shape[axis] / (X.shape[axis] - 1)
     return mean, var
 
