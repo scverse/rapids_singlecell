@@ -416,7 +416,7 @@ def bbknn(
     copy: bool = False,
 ) -> AnnData | None:
     """\
-	Batch balanced KNN, altering the KNN procedure to identify each cell's top neighbours in
+    Batch balanced KNN, altering the KNN procedure to identify each cell's top neighbours in
     each batch separately instead of the entire cell pool with no accounting for batch.
     The nearest neighbours for each batch are then merged to create a final list of
     neighbours for the cell.
