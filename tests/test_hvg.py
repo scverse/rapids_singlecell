@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 import cupy as cp
@@ -5,10 +7,11 @@ import cupyx as cpx
 import numpy as np
 import pandas as pd
 import pytest
-import rapids_singlecell as rsc
 import scanpy as sc
 from anndata import AnnData
 from scipy.sparse import csr_matrix
+
+import rapids_singlecell as rsc
 
 FILE = Path(__file__).parent / Path("_scripts/seurat_hvg.csv")
 FILE_V3 = Path(__file__).parent / Path("_scripts/seurat_hvg_v3.csv.gz")

@@ -1,14 +1,19 @@
+from __future__ import annotations
+
 import pickle
 from itertools import product
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
 import pytest
 import scanpy as sc
 from anndata import AnnData, read_h5ad
+
 from rapids_singlecell.gr import ligrec
+
+HERE = Path(__file__).parent
 
 _CK = "leiden"
 Interactions_t = Tuple[Sequence[str], Sequence[str]]
@@ -17,14 +22,14 @@ Complexes_t = Sequence[Tuple[str, str]]
 
 @pytest.fixture()
 def adata() -> AnnData:
-    file = Path(__file__).parent / Path("_data/test_data.h5ad")
+    file = HERE / "_data/test_data.h5ad"
     adata = read_h5ad(file)
     adata.raw = adata.copy()
     return adata
 
 
 @pytest.fixture()
-def interactions(adata: AnnData) -> Tuple[Sequence[str], Sequence[str]]:
+def interactions(adata: AnnData) -> tuple[Sequence[str], Sequence[str]]:
     return tuple(product(adata.raw.var_names[:5], adata.raw.var_names[:5]))
 
 
@@ -40,7 +45,7 @@ def paul15() -> AnnData:
 
 @pytest.fixture()
 def paul15_means() -> pd.DataFrame:
-    with open("tests/_data/paul15_means.pickle", "rb") as fin:
+    with (HERE / "_data/paul15_means.pickle").open("rb") as fin:
         return pickle.load(fin)
 
 
@@ -222,7 +227,7 @@ class TestValidBehavior:
 
     @pytest.mark.parametrize("fdr_method", [None, "fdr_bh"])
     def test_pvals_in_correct_range(
-        self, adata: AnnData, interactions: Interactions_t, fdr_method: Optional[str]
+        self, adata: AnnData, interactions: Interactions_t, fdr_method: str | None
     ):
         r = ligrec(
             adata,

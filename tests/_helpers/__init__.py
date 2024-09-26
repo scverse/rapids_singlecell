@@ -8,7 +8,6 @@ import pytest
 from anndata.tests.helpers import asarray
 from scipy import sparse
 
-
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from typing import Literal
