@@ -87,10 +87,18 @@ lint.ignore = [
 "src/rapids_singlecell/decoupler_gpu/_method_mlm.py" = ["PLR0917"]
 "src/rapids_singlecell/decoupler_gpu/_method_wsum.py" = ["PLR0917"]
 
-
 [tool.ruff.lint.isort]
 known-first-party = ["rapids_singlecell"]
 required-imports = ["from __future__ import annotations"]
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+    "--strict-markers",
+]
+markers = [
+    "gpu: tests that use a GPU (currently unused, but needs to be specified here as we import anndata.tests.helpers, which uses it)",
+]
 
 [tool.hatch.envs.hatch-test]
 features = ["test", "rapids12"]

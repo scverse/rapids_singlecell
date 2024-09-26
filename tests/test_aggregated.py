@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import pytest
 import scanpy as sc
-from _helpers import ARRAY_TYPES_MEM
 from anndata.tests.helpers import assert_equal
 from packaging.version import Version
 from scanpy._utils import _resolve_axis
@@ -14,6 +13,7 @@ from scanpy.datasets import pbmc3k_processed
 from scipy.sparse import csr_matrix
 
 import rapids_singlecell as rsc
+from rapids_singlecell._testing import ARRAY_TYPES_MEM
 
 
 @pytest.fixture
