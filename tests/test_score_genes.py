@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pickle
 from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -8,16 +7,14 @@ from typing import TYPE_CHECKING
 import cupy as cp
 import numpy as np
 import pytest
-from anndata import AnnData
-from scipy.sparse import csr_matrix, csc_matrix
-
 import scanpy as sc
+from anndata import AnnData
 from scanpy.datasets import paul15
+from scipy.sparse import csc_matrix, csr_matrix
+
 import rapids_singlecell as rsc
 
 if TYPE_CHECKING:
-    from typing import Literal
-
     from numpy.typing import NDArray
 
 
@@ -61,9 +58,10 @@ def _create_adata(n_obs, n_var, p_zero, p_nan):
     adata.var_names = gene_names
     return adata
 
-@pytest.mark.parametrize("array_type", ["csr","csc","default"])
+
+@pytest.mark.parametrize("array_type", ["csr", "csc", "default"])
 def test_score_with_reference(array_type):
-    #Checks if score_genes output agrees with scanpy
+    # Checks if score_genes output agrees with scanpy
     adata = paul15()
     if array_type != "default":
         if array_type == "csr":
@@ -75,7 +73,9 @@ def test_score_with_reference(array_type):
 
     sc.tl.score_genes(adata, gene_list=adata.var_names[:100], score_name="Test_cpu")
     rsc.tl.score_genes(adata, gene_list=adata.var_names[:100], score_name="Test_gpu")
-    np.testing.assert_allclose(adata.obs["Test_cpu"].to_numpy(), adata.obs["Test_gpu"].to_numpy())
+    np.testing.assert_allclose(
+        adata.obs["Test_cpu"].to_numpy(), adata.obs["Test_gpu"].to_numpy()
+    )
 
 
 def test_add_score():
@@ -97,7 +97,8 @@ def test_add_score():
     rsc.tl.score_genes(adata, some_genes, score_name="Test")
     assert adata.obs["Test"].dtype == "float64"
 
-@pytest.mark.parametrize("array_type", ["csr","csc"])
+
+@pytest.mark.parametrize("array_type", ["csr", "csc"])
 def test_sparse_nanmean(array_type):
     """Needs to be fixed"""
     from rapids_singlecell.tools._utils import _nan_mean
@@ -111,12 +112,8 @@ def test_sparse_nanmean(array_type):
     A = S.toarray()
     if array_type == "csc":
         S = S.tocsc()
-    cp.testing.assert_allclose(
-        _nan_mean(A, 1).ravel(), (_nan_mean(S, 1)).ravel()
-    )
-    cp.testing.assert_allclose(
-        _nan_mean(A, 0).ravel(), (_nan_mean(S, 0)).ravel()
-    )
+    cp.testing.assert_allclose(_nan_mean(A, 1).ravel(), (_nan_mean(S, 1)).ravel())
+    cp.testing.assert_allclose(_nan_mean(A, 0).ravel(), (_nan_mean(S, 0)).ravel())
 
     # sparse matrix, no NaN
     S = _create_sparse_nan_matrix(R, C, percent_zero=0.3, percent_nan=0)
@@ -126,13 +123,8 @@ def test_sparse_nanmean(array_type):
     if array_type == "csc":
         S = S.tocsc()
     # col/col sum
-    cp.testing.assert_allclose(
-        cp.mean(A,0).ravel(), (_nan_mean(S, 0)).ravel()
-    )
-    cp.testing.assert_allclose(
-        cp.mean(A,1).ravel(), (_nan_mean(S, 1)).ravel()
-    )
-
+    cp.testing.assert_allclose(cp.mean(A, 0).ravel(), (_nan_mean(S, 0)).ravel())
+    cp.testing.assert_allclose(cp.mean(A, 1).ravel(), (_nan_mean(S, 1)).ravel())
 
 
 def test_score_genes_sparse_vs_dense():

@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import numpy as np
-from anndata import AnnData
-from rapids_singlecell.pp import neighbors
-from scanpy.datasets import pbmc68k_reduced
 import pytest
+from anndata import AnnData
+from scanpy.datasets import pbmc68k_reduced
+
+from rapids_singlecell.pp import neighbors
 
 # the input data
 X = np.array([[1, 0], [3, 0], [5, 6], [0, 4]])
@@ -21,6 +24,7 @@ connectivities_umap = [
     [1.0, 0.8277419907567016, 1.0, 0.0],
 ]
 
+
 @pytest.mark.parametrize("algo", ["brute", "cagra", "ivfflat"])
 def test_umap_connectivities_euclidean(algo):
     adata = AnnData(X=X)
@@ -30,6 +34,7 @@ def test_umap_connectivities_euclidean(algo):
 
 
 key = "test"
+
 
 def test_neighbors_key_added():
     adata = pbmc68k_reduced()

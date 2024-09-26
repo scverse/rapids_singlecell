@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import numpy as np
 import pytest
-import rapids_singlecell as rsc
 import scanpy as sc
-from rapids_singlecell.preprocessing._utils import _check_gpu_X
 from scipy.sparse import csc_matrix, csr_matrix
+
+import rapids_singlecell as rsc
+from rapids_singlecell.preprocessing._utils import _check_gpu_X
 
 
 @pytest.mark.parametrize("mtype", ["csc", "csr", "dense"])
