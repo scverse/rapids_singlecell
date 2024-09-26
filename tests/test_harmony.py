@@ -1,5 +1,8 @@
-import rapids_singlecell as rsc
+from __future__ import annotations
+
 import scanpy as sc
+
+import rapids_singlecell as rsc
 
 
 def test_harmony_integrate():

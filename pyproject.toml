@@ -41,7 +41,8 @@ doc = [
 test = [
     "pytest",
     "profimp",
-    "scanpy[test]>=1.10.0"
+    "scanpy[test]>=1.10.0",
+    "bbknn",
 ]
 
 [project.urls]
@@ -50,9 +51,8 @@ Source = "https://github.com/scverse/rapids_singlecell"
 
 [tool.ruff]
 src = ["src"]
-exclude = ["tests/"]
 line-length = 88
-select = [
+lint.select = [
     "F",  # Errors detected by Pyflakes
     "E",  # Error detected by Pycodestyle
     "W",  # Warning detected by Pycodestyle
@@ -69,7 +69,7 @@ select = [
     "PLR0917", # Ban APIs with too many positional parameters
 ]
 
-ignore = [
+lint.ignore = [
     # line too long -> we accept long comment lines; formatting gets rid of long code lines
     "E501",
     # Do not assign a lambda expression, use a def -> lambda expression assignments are convenient
@@ -80,7 +80,7 @@ ignore = [
     "F403",
 ]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "docs/*" = ["I"]
 "tests/*" = ["D"]
 "*/__init__.py" = ["F401"]
@@ -88,10 +88,18 @@ ignore = [
 "src/rapids_singlecell/decoupler_gpu/_method_mlm.py" = ["PLR0917"]
 "src/rapids_singlecell/decoupler_gpu/_method_wsum.py" = ["PLR0917"]
 
-
 [tool.ruff.lint.isort]
 known-first-party = ["rapids_singlecell"]
 required-imports = ["from __future__ import annotations"]
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+    "--strict-markers",
+]
+markers = [
+    "gpu: tests that use a GPU (currently unused, but needs to be specified here as we import anndata.tests.helpers, which uses it)",
+]
 
 [tool.hatch.envs.hatch-test]
 features = ["test", "rapids12"]

@@ -1,10 +1,13 @@
+from __future__ import annotations
+
 import cupy as cp
 import numpy as np
 import pandas as pd
 import pytest
-import rapids_singlecell as rsc
 from anndata import AnnData
 from cupyx.scipy import sparse as sparse_gpu
+
+import rapids_singlecell as rsc
 
 
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])

@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import pytest
-import rapids_singlecell as rsc
 from scanpy.datasets import pbmc68k_reduced
+
+import rapids_singlecell as rsc
 
 
 @pytest.fixture
