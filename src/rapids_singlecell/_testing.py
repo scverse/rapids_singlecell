@@ -54,4 +54,3 @@ def as_dense_cupy_dask_array(X):
     X = X.map_blocks(cp.array)
     X = X.rechunk((X.shape[0] // 2, X.shape[1]))
     return X
-
