@@ -1,10 +1,14 @@
-import numpy as np
-from anndata import AnnData
-from rapids_singlecell.pp import neighbors, bbknn
-from scanpy.datasets import pbmc68k_reduced
-import scanpy.external as sce
+from __future__ import annotations
+
 import itertools
+
+import numpy as np
 import pytest
+import scanpy.external as sce
+from anndata import AnnData
+from scanpy.datasets import pbmc68k_reduced
+
+from rapids_singlecell.pp import bbknn, neighbors
 
 # the input data
 X = np.array([[1, 0], [3, 0], [5, 6], [0, 4]])
@@ -23,6 +27,7 @@ connectivities_umap = [
     [1.0, 0.8277419907567016, 1.0, 0.0],
 ]
 
+
 @pytest.mark.parametrize("algo", ["brute", "cagra", "ivfflat"])
 def test_umap_connectivities_euclidean(algo):
     adata = AnnData(X=X)
@@ -32,6 +37,7 @@ def test_umap_connectivities_euclidean(algo):
 
 
 key = "test"
+
 
 def test_neighbors_key_added():
     adata = pbmc68k_reduced()
@@ -50,6 +56,7 @@ def test_neighbors_key_added():
         adata.obsp["distances"].toarray(), adata.obsp[dists_key].toarray()
     )
 
+
 def test_bbknn():
     """
     Test the bbknn function against the scanpy implementation. We want more than a 90% overlap between the two.
@@ -57,11 +64,23 @@ def test_bbknn():
     """
 
     adata = pbmc68k_reduced()
-    sce.pp.bbknn(adata, n_pcs=15,batch_key="phase",computation="pynndescent", metric="euclidean")
-    bbknn(adata, n_pcs=15,batch_key="phase",algorithm="brute", key_added="rapids")
+    sce.pp.bbknn(
+        adata,
+        n_pcs=15,
+        batch_key="phase",
+        computation="pynndescent",
+        metric="euclidean",
+    )
+    bbknn(adata, n_pcs=15, batch_key="phase", algorithm="brute", key_added="rapids")
     counter = 0
-    for (rsc_start, rsc_stop), (b_start, b_stop) in zip(itertools.pairwise(adata.obsp["rapids_distances"].indptr),
-                                                        itertools.pairwise(adata.obsp["distances"].indptr)):
-        counter+=len(np.intersect1d(adata.obsp["rapids_distances"].indices[rsc_start:rsc_stop],
-                        adata.obsp["distances"].indices[b_start:b_stop]))
-    assert counter/b_stop > 0.9
+    for (rsc_start, rsc_stop), (b_start, b_stop) in zip(
+        itertools.pairwise(adata.obsp["rapids_distances"].indptr),
+        itertools.pairwise(adata.obsp["distances"].indptr),
+    ):
+        counter += len(
+            np.intersect1d(
+                adata.obsp["rapids_distances"].indices[rsc_start:rsc_stop],
+                adata.obsp["distances"].indices[b_start:b_stop],
+            )
+        )
+    assert counter / b_stop > 0.9

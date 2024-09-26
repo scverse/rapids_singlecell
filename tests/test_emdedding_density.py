@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import numpy as np
-import rapids_singlecell as rsc
 from anndata import AnnData
+
+import rapids_singlecell as rsc
 
 
 def test_embedding_density():

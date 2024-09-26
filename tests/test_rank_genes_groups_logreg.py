@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import numpy as np
-import rapids_singlecell as rsc
 import scanpy as sc
+
+import rapids_singlecell as rsc
 
 
 def test_rank_genes_groups_with_renamed_categories():

@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 import numpy as np
 import pytest
 from anndata import read_h5ad
+
 from rapids_singlecell.gr import spatial_autocorr
 
 MORAN_I = "moranI"

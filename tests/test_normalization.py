@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import cupy as cp
 import numpy as np
 import pytest
-import rapids_singlecell as rsc
 from anndata import AnnData
 from cupyx.scipy.sparse import csr_matrix
+
+import rapids_singlecell as rsc
 
 X_total = cp.array([[1, 0], [3, 0], [5, 6]], dtype=np.float64)
 

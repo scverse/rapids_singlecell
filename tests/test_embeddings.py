@@ -1,5 +1,8 @@
-from rapids_singlecell.tools import tsne, umap
+from __future__ import annotations
+
 from scanpy.datasets import pbmc68k_reduced
+
+from rapids_singlecell.tools import tsne, umap
 
 
 def test_umap():
