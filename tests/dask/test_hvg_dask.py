@@ -3,11 +3,14 @@ from __future__ import annotations
 import cupy as cp
 import pandas as pd
 import scanpy as sc
-from conftest import as_dense_cupy_dask_array, as_sparse_cupy_dask_array
 from cupyx.scipy import sparse as cusparse
 from scanpy.datasets import pbmc3k
 
 import rapids_singlecell as rsc
+from rapids_singlecell._testing import (
+    as_dense_cupy_dask_array,
+    as_sparse_cupy_dask_array,
+)
 
 
 def _get_anndata():

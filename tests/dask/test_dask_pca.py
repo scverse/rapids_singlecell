@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import cupy as cp
 import numpy as np
-from conftest import as_dense_cupy_dask_array, as_sparse_cupy_dask_array
 from cupyx.scipy import sparse as cusparse
 from scanpy.datasets import pbmc3k, pbmc3k_processed
 from scipy import sparse
 
 import rapids_singlecell as rsc
+from rapids_singlecell._testing import (
+    as_dense_cupy_dask_array,
+    as_sparse_cupy_dask_array,
+)
 
 
 def test_pca_sparse_dask(client):
