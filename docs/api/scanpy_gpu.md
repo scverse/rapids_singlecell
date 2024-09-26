@@ -52,6 +52,7 @@ Any transformation of the data matrix that is not a tool. Other than `tools`, pr
    :toctree: generated/
 
    pp.neighbors
+   pp.bbknn
 ```
 
 ## Tools: `tl`
