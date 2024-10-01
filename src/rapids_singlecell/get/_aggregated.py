@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal, Union, get_args
 
 import cupy as cp
@@ -13,13 +14,14 @@ from rapids_singlecell.get import _check_mask
 from rapids_singlecell.preprocessing._utils import _check_gpu_X
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Iterable
+    from collections.abc import Collection
 
     import pandas as pd
     from numpy.typing import NDArray
 
 Array = Union[cp.ndarray, cp_sparse.csc_matrix, cp_sparse.csr_matrix]
 AggType = Literal["count_nonzero", "mean", "sum", "var"]
+Functions = Union[AggType, Iterable[AggType]]
 
 
 class Aggregate:
@@ -308,10 +310,10 @@ class Aggregate:
 def aggregate(
     adata: AnnData,
     by: str | Collection[str],
-    func: AggType | Iterable[AggType],
+    func: Functions,
     *,
     axis: Literal["obs", 0, "var", 1] | None = None,
-    mask: NDArray[np.bool_] | str | None = None,
+    mask: NDArray[np.bool] | str | None = None,
     dof: int = 1,
     layer: str | None = None,
     obsm: str | None = None,
