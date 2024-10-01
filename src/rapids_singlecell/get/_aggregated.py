@@ -1,7 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import TYPE_CHECKING, Literal, Union, get_args
+from typing import (
+    TYPE_CHECKING,
+    Collection,
+    Iterable,
+    Literal,
+    Union,
+    get_args,
+)
 
 import cupy as cp
 import numpy as np
@@ -14,14 +20,11 @@ from rapids_singlecell.get import _check_mask
 from rapids_singlecell.preprocessing._utils import _check_gpu_X
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
-
     import pandas as pd
     from numpy.typing import NDArray
 
 Array = Union[cp.ndarray, cp_sparse.csc_matrix, cp_sparse.csr_matrix]
 AggType = Literal["count_nonzero", "mean", "sum", "var"]
-Functions = Union[AggType, Iterable[AggType]]
 
 
 class Aggregate:
@@ -310,10 +313,10 @@ class Aggregate:
 def aggregate(
     adata: AnnData,
     by: str | Collection[str],
-    func: Functions,
+    func: AggType | Iterable[AggType],
     *,
     axis: Literal["obs", 0, "var", 1] | None = None,
-    mask: NDArray[np.bool] | str | None = None,
+    mask: NDArray[np.bool_] | str | None = None,
     dof: int = 1,
     layer: str | None = None,
     obsm: str | None = None,
@@ -333,8 +336,8 @@ def aggregate(
     If `func` only has length 1 or is just an `AggType`, then aggregation data is written to `X`.
     Otherwise, it is written to `layers` or `xxxm` as appropriate for the dimensions of the aggregation data.
 
-    Params
-    ------
+    Parameters
+    ----------
     adata
         :class:`~anndata.AnnData` to be aggregated.
     by
