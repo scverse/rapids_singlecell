@@ -554,7 +554,7 @@ def bbknn(
         metric=metric,
         **({"metric_kwds": metric_kwds} if metric_kwds else {}),
         **({"use_rep": use_rep} if use_rep is not None else {}),
-        **({"use_rep": n_pcs} if n_pcs is not None else {}),
+        **({"n_pcs": n_pcs} if n_pcs is not None else {}),
     )
     neighbors_dict = {
         "connectivities_key": conns_key,
