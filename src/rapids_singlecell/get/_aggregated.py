@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Union, get_args
+from typing import (
+    TYPE_CHECKING,
+    Collection,
+    Iterable,
+    Literal,
+    Union,
+    get_args,
+)
 
 import cupy as cp
 import numpy as np
@@ -13,8 +20,6 @@ from rapids_singlecell.get import _check_mask
 from rapids_singlecell.preprocessing._utils import _check_gpu_X
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Iterable
-
     import pandas as pd
     from numpy.typing import NDArray
 
@@ -331,8 +336,8 @@ def aggregate(
     If `func` only has length 1 or is just an `AggType`, then aggregation data is written to `X`.
     Otherwise, it is written to `layers` or `xxxm` as appropriate for the dimensions of the aggregation data.
 
-    Params
-    ------
+    Parameters
+    ----------
     adata
         :class:`~anndata.AnnData` to be aggregated.
     by
