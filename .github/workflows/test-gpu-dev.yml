@@ -50,7 +50,7 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install rapids-singlecell
-        run: >- 
+        run: >-
           uv pip install --system -e .[test,rapids12]
           git+https://github.com/scverse/scanpy.git
           git+https://github.com/scverse/anndata.git
