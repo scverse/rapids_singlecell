@@ -54,7 +54,7 @@ jobs:
 
       - name: Install scanpy-dev
         run: uv pip install --system git+https://github.com/scverse/scanpy.git
-      
+
       - name: Install anndata-dev
         run: uv pip install --system git+https://github.com/scverse/anndata.git
 
