@@ -50,17 +50,10 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install rapids-singlecell
-        run: uv pip install --system -e .[test,rapids12] --extra-index-url=https://pypi.nvidia.com
-
-      - name: Install scanpy-dev
-        run: uv pip install --system git+https://github.com/scverse/scanpy.git
-
-      - name: Install anndata-dev
-        run: uv pip install --system git+https://github.com/scverse/anndata.git
-
-
-      - name: Pip list
-        run: pip list
+        run: uv pip install --system -e .[test,rapids12] \
+            git+https://github.com/scverse/scanpy.git \
+            git+https://github.com/scverse/anndata.git \
+            --extra-index-url=https://pypi.nvidia.com
 
       - name: Run test
         run: pytest
