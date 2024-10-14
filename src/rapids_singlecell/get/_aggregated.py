@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable
 from typing import (
     TYPE_CHECKING,
     Literal,
-    Union,
     get_args,
 )
 
@@ -19,10 +17,12 @@ from rapids_singlecell.get import _check_mask
 from rapids_singlecell.preprocessing._utils import _check_gpu_X
 
 if TYPE_CHECKING:
+    from collections.abc import Collection, Iterable
+
     import pandas as pd
     from numpy.typing import NDArray
 
-Array = Union[cp.ndarray, cp_sparse.csc_matrix, cp_sparse.csr_matrix]
+Array = cp.ndarray | cp_sparse.csc_matrix | cp_sparse.csr_matrix
 AggType = Literal["count_nonzero", "mean", "sum", "var"]
 
 

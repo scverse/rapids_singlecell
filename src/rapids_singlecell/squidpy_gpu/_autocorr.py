@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import (
     TYPE_CHECKING,
     Literal,
@@ -18,6 +17,8 @@ from ._moransi import _morans_I_cupy
 from ._utils import _p_value_calc
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from anndata import AnnData
 
 

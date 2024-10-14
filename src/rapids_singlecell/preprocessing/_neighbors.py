@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, Union
+from typing import TYPE_CHECKING, Any, Literal
 
 import cupy as cp
 import numpy as np
@@ -15,9 +14,11 @@ from scipy import sparse as sc_sparse
 from rapids_singlecell.tools._utils import _choose_representation
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from anndata import AnnData
 
-AnyRandom = Union[None, int, np.random.RandomState]
+AnyRandom = None | int | np.random.RandomState
 _Alogithms = Literal["brute", "ivfflat", "ivfpq", "cagra"]
 _MetricsDense = Literal[
     "l2",
@@ -55,7 +56,7 @@ _MetricsSparse = Literal[
     "minkowski",
     "taxicab",
 ]
-_Metrics = Union[_MetricsDense, _MetricsSparse]
+_Metrics = _MetricsDense | _MetricsSparse
 
 
 def _brute_knn(

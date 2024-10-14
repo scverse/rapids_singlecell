@@ -16,8 +16,8 @@ from scipy.sparse import isspmatrix_csr as isspmatrix_csr_cpu
 if TYPE_CHECKING:
     from anndata import AnnData
 
-GPU_ARRAY_TYPE = Union[cp.ndarray, csr_matrix_gpu, csc_matrix_gpu]
-CPU_ARRAY_TYPE = Union[np.ndarray, csr_matrix_cpu, csc_matrix_cpu]
+GPU_ARRAY_TYPE = Union[cp.ndarray, csr_matrix_gpu, csc_matrix_gpu]  # noqa: UP007
+CPU_ARRAY_TYPE = Union[np.ndarray, csr_matrix_cpu, csc_matrix_cpu]  # noqa: UP007
 
 
 def anndata_to_GPU(

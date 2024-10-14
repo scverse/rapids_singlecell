@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
@@ -8,6 +7,8 @@ import numpy as np
 import pandas as pd
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from anndata import AnnData
 
 
@@ -104,7 +105,7 @@ def rank_genes_groups_logreg(
     # for clarity, rename variable
     if groups == "all" or groups is None:
         groups_order = "all"
-    elif isinstance(groups, (str, int)):
+    elif isinstance(groups, str | int):
         raise ValueError("Specify a sequence of groups")
     else:
         groups_order = list(groups)
