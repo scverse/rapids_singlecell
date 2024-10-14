@@ -42,7 +42,7 @@ jobs:
       - name: Install Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
 
       - name: Install UV
         uses: hynek/setup-cached-uv@v2
