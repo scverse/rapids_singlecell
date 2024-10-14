@@ -15,6 +15,8 @@ from ._utils import _check_gpu_X
 if TYPE_CHECKING:
     from anndata import AnnData
 
+    from rapids_singlecell._utils import ArrayTypesDask
+
 
 def calculate_qc_metrics(
     adata: AnnData,
@@ -110,7 +112,9 @@ def calculate_qc_metrics(
                 )
 
 
-def _first_pass_qc(X):
+def _first_pass_qc(
+    X: ArrayTypesDask,
+) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, cp.ndarray]:
     if isinstance(X, DaskArray):
         return _first_pass_qc_dask(X)
 
@@ -181,7 +185,9 @@ def _first_pass_qc(X):
 
 
 @with_cupy_rmm
-def _first_pass_qc_dask(X):
+def _first_pass_qc_dask(
+    X: DaskArray,
+) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, cp.ndarray]:
     import dask
     import dask.array as da
 
@@ -337,7 +343,7 @@ def _first_pass_qc_dask(X):
     )
 
 
-def _second_pass_qc(X, mask):
+def _second_pass_qc(X: ArrayTypesDask, mask: cp.ndarray) -> cp.ndarray:
     if isinstance(X, DaskArray):
         return _second_pass_qc_dask(X, mask)
     sums_cells_sub = cp.zeros(X.shape[0], dtype=X.dtype)
@@ -381,7 +387,7 @@ def _second_pass_qc(X, mask):
 
 
 @with_cupy_rmm
-def _second_pass_qc_dask(X, mask):
+def _second_pass_qc_dask(X: DaskArray, mask: cp.ndarray) -> cp.ndarray:
     if isinstance(X._meta, sparse.csr_matrix):
         from ._kernels._qc_kernels import _sparse_qc_csr_sub
 

@@ -2,29 +2,7 @@ from __future__ import annotations
 
 import cupy as cp
 from cupyx.scipy.sparse import csr_matrix
-
-try:
-    from dask.array import Array as DaskArray
-except ImportError:
-
-    class DaskArray:
-        pass
-
-
-try:
-    from dask.distributed import Client as DaskClient
-except ImportError:
-
-    class DaskClient:
-        pass
-
-
-def _get_dask_client(client=None):
-    from dask.distributed import default_client
-
-    if client is None or not isinstance(client, DaskClient):
-        return default_client()
-    return client
+from dask.array import Array as DaskArray  # noqa: F401
 
 
 def _meta_dense(dtype):
