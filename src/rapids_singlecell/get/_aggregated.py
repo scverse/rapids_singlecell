@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import (
     TYPE_CHECKING,
     Literal,
+    Union,
     get_args,
 )
 
@@ -22,7 +23,7 @@ if TYPE_CHECKING:
     import pandas as pd
     from numpy.typing import NDArray
 
-Array = cp.ndarray | cp_sparse.csc_matrix | cp_sparse.csr_matrix
+Array = Union[cp.ndarray, cp_sparse.csc_matrix, cp_sparse.csr_matrix]  # noqa: UP007
 AggType = Literal["count_nonzero", "mean", "sum", "var"]
 
 
