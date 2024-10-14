@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, Mapping, Union
+from typing import TYPE_CHECKING, Any, Literal, Union
 
 import cupy as cp
 import numpy as np

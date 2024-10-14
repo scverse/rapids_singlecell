@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import (
     TYPE_CHECKING,
-    Literal,  # < 3.8
-    Sequence,
+    Literal,
 )
 
 import cupy as cp

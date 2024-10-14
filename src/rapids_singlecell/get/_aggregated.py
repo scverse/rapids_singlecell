@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Collection, Iterable
 from typing import (
     TYPE_CHECKING,
-    Collection,
-    Iterable,
     Literal,
     Union,
     get_args,
