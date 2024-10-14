@@ -13,8 +13,7 @@ from rapids_singlecell.preprocessing._utils import _check_gpu_X, _check_use_raw
 from ._utils import _nan_mean
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-    from typing import Sequence
+    from collections.abc import Generator, Sequence
 
     from anndata import AnnData
 

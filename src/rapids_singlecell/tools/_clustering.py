@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING
 
 import cudf
 import numpy as np
@@ -11,6 +11,8 @@ from scanpy.tools._utils import _choose_graph
 from scanpy.tools._utils_clustering import rename_groups, restrict_adjacency
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from anndata import AnnData
     from scipy import sparse
 

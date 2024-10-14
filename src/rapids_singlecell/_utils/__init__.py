@@ -4,4 +4,4 @@ from typing import TYPE_CHECKING, Union
 
 import numpy as np
 
-AnyRandom = Union[int, np.random.RandomState, None]
+AnyRandom = Union[int, np.random.RandomState, None]  # noqa: UP007

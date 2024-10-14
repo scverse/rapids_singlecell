@@ -264,8 +264,8 @@ def _check_pearson_hvg_columns(output_df, n_top_genes):
     assert np.nanmax(output_df["highly_variable_rank"].values) <= n_top_genes - 1
 
 
-@pytest.mark.parametrize("clip", [None, np.Inf, 30])
-@pytest.mark.parametrize("theta", [100, np.Inf])
+@pytest.mark.parametrize("clip", [None, np.inf, 30])
+@pytest.mark.parametrize("theta", [100, np.inf])
 @pytest.mark.parametrize("n_top_genes", [100, 200])
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
 @pytest.mark.parametrize("sparse", [True, False])
