@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable, Mapping, Sequence
 from itertools import product
 from typing import (
-    Iterable,
     Literal,
-    Mapping,
-    Sequence,
 )
 
 import cupy as cp

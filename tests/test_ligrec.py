@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import pickle
+from collections.abc import Sequence
 from itertools import product
 from pathlib import Path
-from typing import TYPE_CHECKING, Sequence, Tuple
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -16,8 +17,8 @@ from rapids_singlecell.gr import ligrec
 HERE = Path(__file__).parent
 
 _CK = "leiden"
-Interactions_t = Tuple[Sequence[str], Sequence[str]]
-Complexes_t = Sequence[Tuple[str, str]]
+Interactions_t = tuple[Sequence[str], Sequence[str]]
+Complexes_t = Sequence[tuple[str, str]]
 
 
 @pytest.fixture()
