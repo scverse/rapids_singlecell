@@ -258,7 +258,7 @@ def log1p(
         X = X.log1p()
     elif isinstance(X, DaskArray):
         if isinstance(X._meta, cp.ndarray):
-            X = X.map_blocks(cp.log1p, meta=_meta_dense(X.dtype))
+            X = X.map_blocks(lambda x: cp.log1p(x), meta=_meta_dense(X.dtype))
         elif isinstance(X._meta, sparse.csr_matrix):
             X = X.map_blocks(lambda x: x.log1p(), meta=_meta_sparse(X.dtype))
     adata.uns["log1p"] = {"base": None}
