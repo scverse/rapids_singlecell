@@ -20,6 +20,8 @@ if TYPE_CHECKING:
     from anndata import AnnData
     from cupyx.scipy.sparse import csr_matrix, spmatrix
 
+    from rapids_singlecell._utils import ArrayTypesDask
+
 
 def normalize_total(
     adata: AnnData,
@@ -81,7 +83,7 @@ def normalize_total(
         return X
 
 
-def _normalize_total(X: cp.ndarray, target_sum: int):
+def _normalize_total(X: ArrayTypesDask, target_sum: int):
     if isinstance(X, sparse.csr_matrix):
         return _normalize_total_csr(X, target_sum)
     elif isinstance(X, DaskArray):
@@ -148,7 +150,7 @@ def _normalize_total_dask(X: DaskArray, target_sum: int) -> DaskArray:
     return X
 
 
-def _get_target_sum(X) -> int:
+def _get_target_sum(X: ArrayTypesDask) -> int:
     if isinstance(X, sparse.csr_matrix):
         return _get_target_sum_csr(X)
     elif isinstance(X, DaskArray):
@@ -167,7 +169,7 @@ def _get_target_sum_csr(X: sparse.csr_matrix) -> int:
         (64,),
         (X.indptr, X.data, counts_per_cell, X.shape[0]),
     )
-
+    counts_per_cell = counts_per_cell[counts_per_cell > 0]
     target_sum = cp.median(counts_per_cell)
     return target_sum
 
@@ -202,6 +204,7 @@ def _get_target_sum_dask(X: DaskArray) -> int:
         drop_axis=1,
     )
     counts_per_cell = target_sum_chunk_matrices.compute()
+    counts_per_cell = counts_per_cell[counts_per_cell > 0]
     target_sum = cp.median(counts_per_cell)
     return target_sum
 
@@ -255,7 +258,7 @@ def log1p(
         X = X.log1p()
     elif isinstance(X, DaskArray):
         if isinstance(X._meta, cp.ndarray):
-            X = X.map_blocks(lambda X: cp.log1p(X), meta=_meta_dense(X.dtype))
+            X = X.map_blocks(cp.log1p, meta=_meta_dense(X.dtype))
         elif isinstance(X._meta, sparse.csr_matrix):
             X = X.map_blocks(lambda x: x.log1p(), meta=_meta_sparse(X.dtype))
     adata.uns["log1p"] = {"base": None}
