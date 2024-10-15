@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import cupy as cp
 import numpy as np
+import pytest
 from cupyx.scipy import sparse as cusparse
 from scanpy.datasets import pbmc3k, pbmc3k_processed
 from scipy import sparse
@@ -13,129 +14,85 @@ from rapids_singlecell._testing import (
 )
 
 
-def test_pca_sparse_dask(client):
-    sparse_ad = pbmc3k_processed()
-    default = pbmc3k_processed()
-    sparse_ad.X = sparse.csr_matrix(sparse_ad.X.astype(np.float64))
-    default.X = as_sparse_cupy_dask_array(default.X.astype(np.float64))
-    rsc.pp.pca(sparse_ad)
-    rsc.pp.pca(default)
+@pytest.mark.parametrize("data_kind", ["sparse", "dense"])
+def test_pca_dask(client, data_kind):
+    adata_1 = pbmc3k_processed()
+    adata_2 = pbmc3k_processed()
+
+    if data_kind == "sparse":
+        adata_1.X = sparse.csr_matrix(adata_1.X.astype(np.float64))
+        adata_2.X = as_sparse_cupy_dask_array(adata_2.X.astype(np.float64))
+    elif data_kind == "dense":
+        adata_1.X = cp.array(adata_1.X.astype(np.float64))
+        adata_2.X = as_dense_cupy_dask_array(adata_2.X.astype(np.float64))
+    else:
+        raise ValueError(f"Unknown data_kind {data_kind}")
+
+    rsc.pp.pca(adata_1, svd_solver="full")
+    rsc.pp.pca(adata_2, svd_solver="full")
 
     cp.testing.assert_allclose(
-        np.abs(sparse_ad.obsm["X_pca"]),
-        cp.abs(default.obsm["X_pca"].compute()),
+        np.abs(adata_1.obsm["X_pca"]),
+        cp.abs(adata_2.obsm["X_pca"].compute()),
         rtol=1e-7,
         atol=1e-6,
     )
 
     cp.testing.assert_allclose(
-        np.abs(sparse_ad.varm["PCs"]), np.abs(default.varm["PCs"]), rtol=1e-7, atol=1e-6
-    )
-
-    cp.testing.assert_allclose(
-        np.abs(sparse_ad.uns["pca"]["variance_ratio"]),
-        np.abs(default.uns["pca"]["variance_ratio"]),
-        rtol=1e-7,
-        atol=1e-6,
-    )
-
-
-def test_pca_dense_dask_full_pipeline(client):
-    dense = pbmc3k()
-    default = pbmc3k()
-    dense.X = cp.array(dense.X.astype(np.float64).toarray())
-    default.X = as_dense_cupy_dask_array(default.X.astype(np.float64).toarray())
-
-    rsc.pp.filter_genes(dense, min_count=500)
-    rsc.pp.filter_genes(default, min_count=500)
-
-    rsc.pp.normalize_total(dense, target_sum=1e4)
-    rsc.pp.normalize_total(default, target_sum=1e4)
-
-    rsc.pp.log1p(dense)
-    rsc.pp.log1p(default)
-
-    rsc.pp.pca(dense, svd_solver="full")
-    rsc.pp.pca(default, svd_solver="full")
-
-    cp.testing.assert_allclose(
-        np.abs(dense.obsm["X_pca"]),
-        cp.abs(default.obsm["X_pca"].compute()),
+        np.abs(adata_1.varm["PCs"]),
+        np.abs(adata_2.varm["PCs"]),
         rtol=1e-7,
         atol=1e-6,
     )
 
     cp.testing.assert_allclose(
-        np.abs(dense.varm["PCs"]), np.abs(default.varm["PCs"]), rtol=1e-7, atol=1e-6
-    )
-
-    cp.testing.assert_allclose(
-        np.abs(dense.uns["pca"]["variance_ratio"]),
-        np.abs(default.uns["pca"]["variance_ratio"]),
+        np.abs(adata_1.uns["pca"]["variance_ratio"]),
+        np.abs(adata_2.uns["pca"]["variance_ratio"]),
         rtol=1e-7,
         atol=1e-6,
     )
 
 
-def test_pca_sparse_dask_full_pipeline(client):
-    sparse_ad = pbmc3k()
-    default = pbmc3k()
-    sparse_ad.X = cusparse.csr_matrix(sparse.csr_matrix(sparse_ad.X.astype(np.float64)))
-    default.X = as_sparse_cupy_dask_array(default.X.astype(np.float64))
+@pytest.mark.parametrize("data_kind", ["sparse", "dense"])
+def test_pca_dask_full_pipeline(client, data_kind):
+    adata_1 = pbmc3k()
+    adata_2 = pbmc3k()
 
-    rsc.pp.filter_genes(sparse_ad, min_count=100)
-    rsc.pp.filter_genes(default, min_count=100)
+    if data_kind == "sparse":
+        adata_1.X = cusparse.csr_matrix(sparse.csr_matrix(adata_1.X.astype(np.float64)))
+        adata_2.X = as_sparse_cupy_dask_array(adata_2.X.astype(np.float64))
+    elif data_kind == "dense":
+        adata_1.X = cp.array(adata_1.X.astype(np.float64).toarray())
+        adata_2.X = as_dense_cupy_dask_array(adata_2.X.astype(np.float64).toarray())
+    else:
+        raise ValueError(f"Unknown data_kind {data_kind}")
 
-    rsc.pp.normalize_total(sparse_ad, target_sum=1e4)
-    rsc.pp.normalize_total(default, target_sum=1e4)
+    rsc.pp.filter_genes(adata_1, min_count=500)
+    rsc.pp.filter_genes(adata_2, min_count=500)
 
-    rsc.pp.log1p(sparse_ad)
-    rsc.pp.log1p(default)
+    rsc.pp.normalize_total(adata_1, target_sum=1e4)
+    rsc.pp.normalize_total(adata_2, target_sum=1e4)
 
-    rsc.pp.pca(sparse_ad)
-    rsc.pp.pca(default)
+    rsc.pp.log1p(adata_1)
+    rsc.pp.log1p(adata_2)
+
+    rsc.pp.pca(adata_1, svd_solver="full")
+    rsc.pp.pca(adata_2, svd_solver="full")
 
     cp.testing.assert_allclose(
-        np.abs(sparse_ad.obsm["X_pca"]),
-        cp.abs(default.obsm["X_pca"].compute()),
+        np.abs(adata_1.obsm["X_pca"]),
+        cp.abs(adata_2.obsm["X_pca"].compute()),
         rtol=1e-7,
         atol=1e-6,
     )
 
     cp.testing.assert_allclose(
-        np.abs(sparse_ad.varm["PCs"]), np.abs(default.varm["PCs"]), rtol=1e-7, atol=1e-6
+        np.abs(adata_1.varm["PCs"]), np.abs(adata_2.varm["PCs"]), rtol=1e-7, atol=1e-6
     )
 
     cp.testing.assert_allclose(
-        np.abs(sparse_ad.uns["pca"]["variance_ratio"]),
-        np.abs(default.uns["pca"]["variance_ratio"]),
-        rtol=1e-7,
-        atol=1e-6,
-    )
-
-
-def test_pca_dense_dask(client):
-    sparse_ad = pbmc3k_processed()
-    default = pbmc3k_processed()
-    sparse_ad.X = cp.array(sparse_ad.X.astype(np.float64))
-    default.X = as_dense_cupy_dask_array(default.X.astype(np.float64))
-    rsc.pp.pca(sparse_ad, svd_solver="full")
-    rsc.pp.pca(default, svd_solver="full")
-
-    cp.testing.assert_allclose(
-        np.abs(sparse_ad.obsm["X_pca"]),
-        cp.abs(default.obsm["X_pca"].compute()),
-        rtol=1e-7,
-        atol=1e-6,
-    )
-
-    cp.testing.assert_allclose(
-        np.abs(sparse_ad.varm["PCs"]), np.abs(default.varm["PCs"]), rtol=1e-7, atol=1e-6
-    )
-
-    cp.testing.assert_allclose(
-        np.abs(sparse_ad.uns["pca"]["variance_ratio"]),
-        np.abs(default.uns["pca"]["variance_ratio"]),
+        np.abs(adata_1.uns["pca"]["variance_ratio"]),
+        np.abs(adata_2.uns["pca"]["variance_ratio"]),
         rtol=1e-7,
         atol=1e-6,
     )
