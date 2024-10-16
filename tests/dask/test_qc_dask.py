@@ -14,7 +14,7 @@ from rapids_singlecell._testing import (
 
 
 @pytest.mark.parametrize("data_kind", ["sparse", "dense"])
-def test_qc_metrics_sparse(client, data_kind):
+def test_qc_metrics(client, data_kind):
     adata = pbmc3k()
     adata.var["mt"] = adata.var_names.str.startswith("MT-")
     dask_data = adata.copy()
