@@ -98,7 +98,7 @@ def _mean_var_minor_dask(X, major, minor):
         )
         return cp.vstack([mean, var])[None, ...]  # new axis for summing
 
-    n_blocks = len(X.to_delayed().ravel())
+    n_blocks = X.blocks.size
     mean, var = X.map_blocks(
         __mean_var,
         new_axis=(1,),
@@ -175,7 +175,7 @@ def _mean_var_dense_dask(X, axis):
             None if 1 - axis else slice(None, None), ...
         ]
 
-    n_blocks = len(X.to_delayed().ravel())
+    n_blocks = X.blocks.size
     mean_var = X.map_blocks(
         __mean_var,
         new_axis=(1,) if axis - 1 else None,

@@ -148,7 +148,7 @@ def _cov_sparse_dask(x, return_gram=False, return_mean=False):
         )
         return gram_matrix[None, ...]  # need new axis for summing
 
-    n_blocks = len(x.to_delayed().ravel())
+    n_blocks = x.blocks.size
     gram_matrix = x.map_blocks(
         __gram_block,
         new_axis=(1,),
