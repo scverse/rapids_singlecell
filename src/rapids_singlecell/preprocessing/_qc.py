@@ -332,24 +332,22 @@ def _second_pass_qc(X: ArrayTypesDask, mask: cp.ndarray) -> cp.ndarray:
 
             block = (32,)
             grid = (int(math.ceil(X.shape[0] / block[0])),)
-            sparse_qc_csr_sub = _sparse_qc_csr_sub(X.data.dtype)
-            sparse_qc_csr_sub(
-                grid,
-                block,
-                (X.indptr, X.indices, X.data, sums_cells_sub, mask, X.shape[0]),
-            )
+            call_shape = X.shape[0]
+            sparse_qc_sub = _sparse_qc_csr_sub(X.data.dtype)
+
         elif sparse.isspmatrix_csc(X):
             from ._kernels._qc_kernels import _sparse_qc_csc_sub
 
             block = (32,)
             grid = (int(math.ceil(X.shape[1] / block[0])),)
-            sparse_qc_csc_sub = _sparse_qc_csc_sub(X.data.dtype)
-            sparse_qc_csc_sub(
-                grid,
-                block,
-                (X.indptr, X.indices, X.data, sums_cells_sub, mask, X.shape[1]),
-            )
+            call_shape = X.shape[1]
+            sparse_qc_sub = _sparse_qc_csc_sub(X.data.dtype)
 
+        sparse_qc_sub(
+            grid,
+            block,
+            (X.indptr, X.indices, X.data, sums_cells_sub, mask, call_shape),
+        )
     else:
         from ._kernels._qc_kernels import _sparse_qc_dense_sub
 
