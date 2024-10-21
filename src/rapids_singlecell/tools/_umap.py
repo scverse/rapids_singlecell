@@ -155,6 +155,7 @@ def umap(
 
     n_obs = adata.shape[0]
     if parse_version(cuml.__version__) < parse_version("24.10"):
+        # `simplicial_set_embedding` is bugged in cuml<24.10. This is why we use `UMAP` instead.
         n_neighbors = neigh_params["n_neighbors"]
         if neigh_params.get("method") == "rapids":
             knn_dist = neighbors["distances"].data.reshape(n_obs, n_neighbors)
