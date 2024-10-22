@@ -201,7 +201,7 @@ def pca(
                     )
                     X_pca = pca_func.fit_transform(X)
 
-            elif not zero_center:
+            else: # not zero_center
                 from cuml.decomposition import TruncatedSVD
 
                 pca_func = TruncatedSVD(
