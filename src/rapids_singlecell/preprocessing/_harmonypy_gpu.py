@@ -33,9 +33,8 @@ formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(messag
 ch.setFormatter(formatter)
 logger.addHandler(ch)
 
+
 # from IPython.core.debugger import set_trace
-
-
 def run_harmony(
     data_mat: np.ndarray,
     meta_data: pd.DataFrame,
