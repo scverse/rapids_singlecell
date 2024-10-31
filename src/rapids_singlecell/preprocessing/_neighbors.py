@@ -262,6 +262,36 @@ def _get_connectivities(
     return connectivities
 
 
+def _trimming(cnts: cp_sparse.csr_matrix, trim: int) -> cp_sparse.csr_matrix:
+    from ._kernels._bbknn import cut_smaller_func, find_top_k_per_row_kernel
+
+    n_rows = cnts.shape[0]
+    vals_gpu = cp.zeros(n_rows, dtype=cp.float32)
+
+    threads_per_block = 64
+    blocks_per_grid = (n_rows + threads_per_block - 1) // threads_per_block
+
+    shared_mem_per_thread = trim * cp.dtype(cp.float32).itemsize
+    shared_mem_size = threads_per_block * shared_mem_per_thread
+
+    find_top_k_per_row_kernel(
+        (blocks_per_grid,),
+        (threads_per_block,),
+        (cnts.data, cnts.indptr, cnts.shape[0], trim, vals_gpu),
+        shared_mem=shared_mem_size,
+    )
+
+    for _ in range(2):
+        cut_smaller_func(
+            (cnts.shape[0],),
+            (64,),
+            (cnts.indptr, cnts.data, vals_gpu, cnts.shape[0]),
+        )
+        cnts.eliminate_zeros()
+        cnts = cnts.T.tocsr()
+    return cnts
+
+
 def neighbors(
     adata: AnnData,
     n_neighbors: int = 15,
@@ -414,6 +444,7 @@ def bbknn(
     algorithm: _Alogithms = "brute",
     metric: _Metrics = "euclidean",
     metric_kwds: Mapping[str, Any] = MappingProxyType({}),
+    trim: int | None = None,
     key_added: str | None = None,
     copy: bool = False,
 ) -> AnnData | None:
@@ -458,6 +489,8 @@ def bbknn(
         A known metric's name or a callable that returns a distance.
     metric_kwds
         Options for the metric.
+    trim
+        Trim the neighbours of each cell to these many top connectivities. May help with population independence and improve the tidiness of clustering. The lower the value the more independent the individual populations, at the cost of more conserved batch effect. If `None`, sets the parameter value automatically to 10 times `neighbors_within_batch` times the number of batches. Set to 0 to skip.
     key_added
         If not specified, the neighbors data is stored in `.uns['neighbors']`,
         distances and connectivities are stored in `.obsp['distances']` and
@@ -539,7 +572,13 @@ def bbknn(
         knn_dist=knn_dist,
     )
 
-    connectivities = connectivities.tocsr().get()
+    connectivities = connectivities.tocsr()
+    if trim is None:
+        trim = 10 * neighbors_within_batch
+    if trim > 0:
+        connectivities = _trimming(connectivities, trim)
+
+    connectivities = connectivities.get()
     distances = distances.get()
     if key_added is None:
         key_added = "neighbors"
@@ -554,6 +593,7 @@ def bbknn(
         method="rapids",
         random_state=random_state,
         metric=metric,
+        trim=trim,
         **({"metric_kwds": metric_kwds} if metric_kwds else {}),
         **({"use_rep": use_rep} if use_rep is not None else {}),
         **({"n_pcs": n_pcs} if n_pcs is not None else {}),
