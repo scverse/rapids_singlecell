@@ -73,23 +73,24 @@ find_top_k_per_row_kernel = cp.RawKernel(_find_top_k_kernel, "find_top_k_per_row
 _cut_smaller_kernel = r"""
 extern "C" __global__
 void cut_smaller(
-const int *indptr,
-float *data,
-float* vals,
-int n_rows) {
-int row_id = blockIdx.x;
-if(row_id >= n_rows){
-    return;
-}
-int start_idx = indptr[row_id];
-int stop_idx = indptr[row_id+1];
-
-float cut = vals[row_id];
-for(int i = start_idx+threadIdx.x; i < stop_idx; i+= blockDim.x){
-    if(data[i]<cut){
-        data[i] = 0;
+    const int *indptr,
+    float *data,
+    float* vals,
+    int n_rows) {
+    int row_id = blockIdx.x;
+    if(row_id >= n_rows){
+        return;
     }
+    int start_idx = indptr[row_id];
+    int stop_idx = indptr[row_id+1];
 
-}}
+    float cut = vals[row_id];
+    for(int i = start_idx+threadIdx.x; i < stop_idx; i+= blockDim.x){
+        if(data[i]<cut){
+            data[i] = 0;
+        }
+
+    }
+}
 """
 cut_smaller_func = cp.RawKernel(_cut_smaller_kernel, "cut_smaller")
