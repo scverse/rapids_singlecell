@@ -490,7 +490,13 @@ def bbknn(
     metric_kwds
         Options for the metric.
     trim
-        Trim the neighbours of each cell to these many top connectivities. May help with population independence and improve the tidiness of clustering. The lower the value the more independent the individual populations, at the cost of more conserved batch effect. If `None`, sets the parameter value automatically to 10 times `neighbors_within_batch` times the number of batches. Set to 0 to skip.
+        Trim the neighbours of each cell to these many top connectivities.
+        May help with population independence and improve the tidiness of clustering.
+        The lower the value the more independent the individual populations,
+        at the cost of more conserved batch effect.
+        If `None`, sets the parameter value automatically to
+        10 times `neighbors_within_batch` times the number of batches.
+        Set to 0 to skip.
     key_added
         If not specified, the neighbors data is stored in `.uns['neighbors']`,
         distances and connectivities are stored in `.obsp['distances']` and
