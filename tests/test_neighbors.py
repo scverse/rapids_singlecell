@@ -95,8 +95,8 @@ def test_trimming():
     cnts_gpu = X_to_GPU(adata.obsp["connectivities"]).astype(np.float32)
     cnts_cpu = adata.obsp["connectivities"].astype(np.float32)
 
-    cnts_cpu = trimming_cpu(cnts_gpu, 5)
-    cnts_gpu = trimming_gpu(cnts_cpu, 5)
+    cnts_cpu = trimming_cpu(cnts_cpu, 5)
+    cnts_gpu = trimming_gpu(cnts_gpu, 5)
 
     cp.testing.assert_array_equal(cnts_cpu.data, cnts_gpu.data)
     cp.testing.assert_array_equal(cnts_cpu.indices, cnts_gpu.indices)
