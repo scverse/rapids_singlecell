@@ -36,33 +36,23 @@ void find_top_k_per_row(
     }
 
     // Process each element in the row
+    int min_index = 0;
     for (int idx = start; idx < end; ++idx) {
-        float num = data[idx];
+        if (data[idx] <= top_k[min_index]) continue;
 
-        // Find the smallest value in top_k
-        int min_index = 0;
-        float min_value = top_k[0];
-        for (int i = 1; i < trim; ++i) {
-            if (top_k[i] < min_value) {
-                min_value = top_k[i];
+        // If current value is larger than the smallest in top_k, replace it
+        top_k[min_index] = data[idx];
+
+        // Find the new smallest value in top_k and set min_index
+        for (int i = 0; i < trim; ++i) {
+            if (top_k[i] < top_k[min_index]) {
                 min_index = i;
             }
-        }
-
-        // If current num is larger than the smallest in top_k, replace it
-        if (num > min_value) {
-            top_k[min_index] = num;
         }
     }
 
     // After processing, find the smallest value in top_k, which is the kth largest
-    float kth_largest = top_k[0];
-    for (int i = 1; i < trim; ++i) {
-        if (top_k[i] < kth_largest) {
-            kth_largest = top_k[i];
-        }
-    }
-
+    float kth_largest = top_k[min_index];
     vals[row] = kth_largest;
 }
 """
