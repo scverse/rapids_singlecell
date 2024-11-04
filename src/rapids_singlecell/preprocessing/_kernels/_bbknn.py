@@ -38,9 +38,9 @@ void find_top_k_per_row(
     // Process each element in the row
     int min_index = 0;
     for (int idx = start; idx < end; ++idx) {
-        if (data[idx] < top_k[min_index]) continue;
+        if (data[idx] <= top_k[min_index]) continue;
 
-        // If current num is larger than the smallest in top_k, replace it
+        // If current value is larger than the smallest in top_k, replace it
         top_k[min_index] = data[idx];
 
         // Find the new smallest value in top_k and set min_index
