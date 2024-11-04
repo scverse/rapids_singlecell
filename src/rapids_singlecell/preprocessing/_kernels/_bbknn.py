@@ -51,7 +51,7 @@ void find_top_k_per_row(
         }
     }
 
-    // After processing, find the smallest value in top_k, which is the kth largest
+    // After processing, use min_index to write the smallest value in top_k to vals
     float kth_largest = top_k[min_index];
     vals[row] = kth_largest;
 }
