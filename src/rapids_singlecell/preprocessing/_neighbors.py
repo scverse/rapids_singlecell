@@ -280,15 +280,12 @@ def _trimming(cnts: cp_sparse.csr_matrix, trim: int) -> cp_sparse.csr_matrix:
         (cnts.data, cnts.indptr, cnts.shape[0], trim, vals_gpu),
         shared_mem=shared_mem_size,
     )
-
-    for _ in range(2):
-        cut_smaller_func(
-            (cnts.shape[0],),
-            (64,),
-            (cnts.indptr, cnts.data, vals_gpu, cnts.shape[0]),
-        )
-        cnts.eliminate_zeros()
-        cnts = cnts.T.tocsr()
+    cut_smaller_func(
+        (cnts.shape[0],),
+        (64,),
+        (cnts.indptr, cnts.indices, cnts.data, vals_gpu, cnts.shape[0]),
+    )
+    cnts.eliminate_zeros()
     return cnts
 
 

@@ -64,6 +64,7 @@ _cut_smaller_kernel = r"""
 extern "C" __global__
 void cut_smaller(
     const int *indptr,
+    const int * index,
     float *data,
     float* vals,
     int n_rows) {
@@ -74,13 +75,15 @@ void cut_smaller(
     int start_idx = indptr[row_id];
     int stop_idx = indptr[row_id+1];
 
-    float cut = vals[row_id];
+    float cut_row = vals[row_id];
     for(int i = start_idx+threadIdx.x; i < stop_idx; i+= blockDim.x){
+        float cut = max(vals[index[i]], cut_row);
         if(data[i]<cut){
             data[i] = 0;
         }
 
     }
+
 }
 """
 cut_smaller_func = cp.RawKernel(_cut_smaller_kernel, "cut_smaller")
