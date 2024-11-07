@@ -36,5 +36,3 @@ set -x
 /opt/conda/bin/python -m pip uninstall -y --no-cache-dir rapids-singlecell
 /opt/conda/bin/python -m pip cache purge
 EOF
-
-ENTRYPOINT ["/opt/conda/bin/ipython"]

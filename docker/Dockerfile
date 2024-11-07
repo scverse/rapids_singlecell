@@ -16,5 +16,3 @@ cd rapids_singlecell
 git checkout ${GIT_ID}
 /opt/conda/bin/python -m pip install --no-cache-dir -e .
 EOF
-
-ENTRYPOINT ["/opt/conda/bin/ipython"]
