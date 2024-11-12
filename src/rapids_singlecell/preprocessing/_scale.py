@@ -335,7 +335,9 @@ def _scale_dask(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=N
     elif isinstance(X._meta, cp.ndarray) and not zero_center:
         scale = _scale_dask_array_nzc
     else:
-        TODO  # raise error
+        raise ValueError(
+            "Invalid `._meta` type only supports `cupyx.scipy.sparse.csr_matrix` and `cp.ndarray`"
+        )
     return scale(X, mask_array=mask_array, mean=mean, std=std, max_value=max_value)
 
 
