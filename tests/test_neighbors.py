@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import itertools
 
+import cupy as cp
 import numpy as np
 import pytest
 import scanpy.external as sce
 from anndata import AnnData
+from bbknn.matrix import trimming as trimming_cpu
 from scanpy.datasets import pbmc68k_reduced
 
+from rapids_singlecell.get import X_to_GPU
 from rapids_singlecell.pp import bbknn, neighbors
+from rapids_singlecell.preprocessing._neighbors import _trimming as trimming_gpu
 
 # the input data
 X = np.array([[1, 0], [3, 0], [5, 6], [0, 4]])
@@ -84,3 +88,16 @@ def test_bbknn():
             )
         )
     assert counter / b_stop > 0.9
+
+
+def test_trimming():
+    adata = pbmc68k_reduced()
+    cnts_gpu = X_to_GPU(adata.obsp["connectivities"]).astype(np.float32)
+    cnts_cpu = adata.obsp["connectivities"].astype(np.float32)
+
+    cnts_cpu = trimming_cpu(cnts_cpu, 5)
+    cnts_gpu = trimming_gpu(cnts_gpu, 5)
+
+    cp.testing.assert_array_equal(cnts_cpu.data, cnts_gpu.data)
+    cp.testing.assert_array_equal(cnts_cpu.indices, cnts_gpu.indices)
+    cp.testing.assert_array_equal(cnts_cpu.indptr, cnts_gpu.indptr)
