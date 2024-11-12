@@ -36,6 +36,7 @@ doc = [
     "scanpydoc[typehints,theme]>=0.9.4",
     "readthedocs-sphinx-ext",
     "sphinx_copybutton",
+    "pytest",
 ]
 test = [
     "pytest",
