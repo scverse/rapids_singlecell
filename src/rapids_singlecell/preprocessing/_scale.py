@@ -327,24 +327,16 @@ def _scale_dask(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=N
             dtype=X.dtype,
             meta=_meta_dense(X.dtype),
         )
-        return _scale_dask_array_zc(
-            X, mask_array=mask_array, mean=mean, std=std, max_value=max_value
-        )
-
+        scale = _scale_dask_array_zc
     elif isinstance(X._meta, sparse.csr_matrix) and not zero_center:
-        return _scale_sparse_csr_dask(
-            X, mask_array=mask_array, mean=mean, std=std, max_value=max_value
-        )
-
+        scale = _scale_sparse_csr_dask
     elif isinstance(X._meta, cp.ndarray) and zero_center:
-        return _scale_dask_array_zc(
-            X, mask_array=mask_array, mean=mean, std=std, max_value=max_value
-        )
-
+        scale = _scale_dask_array_zc
     elif isinstance(X._meta, cp.ndarray) and not zero_center:
-        return _scale_dask_array_nzc(
-            X, mask_array=mask_array, mean=mean, std=std, max_value=max_value
-        )
+        scale = _scale_dask_array_nzc
+    else:
+        TODO  # raise error
+    return scale(X, mask_array=mask_array, mean=mean, std=std, max_value=max_value)
 
 
 def _scale_dask_array_zc(X, *, mask_array, mean, std, max_value):
