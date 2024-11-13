@@ -154,6 +154,7 @@ def pca(
                 svd_solver = "jacobi"
             pca_func = PCA(n_components=n_comps, svd_solver=svd_solver, whiten=False)
             X_pca = pca_func.fit_transform(X)
+            # cuml-issue #5883
             X_pca = X_pca.compute_chunk_sizes()
         elif isinstance(X._meta, csr_matrix):
             from ._sparse_pca._dask_sparse_pca import PCA_sparse_dask
