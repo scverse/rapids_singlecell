@@ -284,14 +284,11 @@ def _scale_dask(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=N
 
     if not inplace:
         X = X.copy()
+   mean, var = dask.compute(*_get_mean_var(X[mask_obs if mask_obs is not None else slice(None), :]))
     if mask_obs is None:
-        mean, var = _get_mean_var(X)
         mask_array = cp.ones(X.shape[0], dtype=cp.int32)
-
     else:
-        mean, var = _get_mean_var(X[mask_obs, :])
         mask_array = cp.array(mask_obs).astype(cp.int32)
-    mean, var = dask.compute(mean, var)
     std = cp.sqrt(var)
     std[std == 0] = 1
     max_value = _get_max_value(max_value, X.dtype)
