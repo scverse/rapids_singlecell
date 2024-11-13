@@ -4,6 +4,8 @@ import math
 from typing import Union
 
 import cupy as cp
+import dask
+import dask.array as da
 import numpy as np
 from anndata import AnnData
 from cupyx.scipy import sparse
@@ -20,11 +22,6 @@ from rapids_singlecell.preprocessing._utils import (
     _get_mean_var,
     _sparse_to_dense,
 )
-
-try:
-    import dask.array as da
-except ImportError:
-    pass
 
 
 def scale(
@@ -280,11 +277,11 @@ def _scale_sparse_csr(
 
 
 def _scale_dask(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=None):
-    import dask
-
     if not inplace:
         X = X.copy()
-   mean, var = dask.compute(*_get_mean_var(X[mask_obs if mask_obs is not None else slice(None), :]))
+    mean, var = dask.compute(
+        *_get_mean_var(X[mask_obs if mask_obs is not None else slice(None), :])
+    )
     if mask_obs is None:
         mask_array = cp.ones(X.shape[0], dtype=cp.int32)
     else:
