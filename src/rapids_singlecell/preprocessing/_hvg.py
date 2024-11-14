@@ -266,6 +266,21 @@ class _Cutoffs:
         )
 
 
+def _hvg_expm1(X):
+    if isinstance(X, DaskArray):
+        if isinstance(X._meta, cp.ndarray):
+            X = X.map_blocks(lambda X: cp.expm1(X), meta=_meta_dense(X.dtype))
+        elif isinstance(X._meta, csr_matrix):
+            X = X.map_blocks(lambda X: X.expm1(), meta=_meta_sparse(X.dtype))
+    else:
+        X = X.copy()
+        if issparse(X):
+            X = X.expm1()
+        else:
+            X = cp.expm1(X)
+    return X
+
+
 def _highly_variable_genes_single_batch(
     adata: AnnData,
     *,
@@ -288,17 +303,7 @@ def _highly_variable_genes_single_batch(
         X = X.copy()
 
     if flavor == "seurat":
-        if isinstance(X, DaskArray):
-            if isinstance(X._meta, cp.ndarray):
-                X = X.map_blocks(lambda X: cp.expm1(X), meta=_meta_dense(X.dtype))
-            elif isinstance(X._meta, csr_matrix):
-                X = X.map_blocks(lambda X: X.expm1(), meta=_meta_sparse(X.dtype))
-        else:
-            X = X.copy()
-            if issparse(X):
-                X = X.expm1()
-            else:
-                X = cp.expm1(X)
+        X = _hvg_expm1(X)
 
     mean, var = _get_mean_var(X, axis=0)
     if isinstance(X, DaskArray):
@@ -429,11 +434,11 @@ def _highly_variable_genes_batched(
     dfs = []
     gene_list = adata.var_names
     for batch in batches:
-        adata_subset = adata[adata.obs[batch_key] == batch].copy()
+        adata_subset = adata[adata.obs[batch_key] == batch]
 
         calculate_qc_metrics(adata_subset, layer=layer)
         filt = adata_subset.var["n_cells_by_counts"].to_numpy() > 0
-        adata_subset = adata_subset[:, filt].copy()
+        adata_subset = adata_subset[:, filt]
 
         hvg = _highly_variable_genes_single_batch(
             adata_subset,
