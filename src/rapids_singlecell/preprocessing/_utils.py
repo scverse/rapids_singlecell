@@ -275,8 +275,8 @@ def _check_gpu_X(X, require_cf=False, allow_dask=False, allow_csc=True):
     elif isspmatrix_csc(X) or isspmatrix_csr(X):
         if not allow_csc and isspmatrix_csc(X):
             raise TypeError(
-                "Dask only supports CSR matrices and cp.ndarray. "
-                "Please convert your data to CSR format before passing it to this function."
+                "When using Dask, only CuPy ndarrays and CSR matrices are supported as "
+                "meta arrays. Please convert your data to CSR format if it is in CSC."
             )
         elif not require_cf:
             return True
