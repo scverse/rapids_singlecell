@@ -260,10 +260,10 @@ def _check_nonnegative_integers(X):
         return True
 
 
-def _check_gpu_X(X, require_cf=False, allow_dask=False):
+def _check_gpu_X(X, require_cf=False, allow_dask=False, allow_csc=True):
     if isinstance(X, DaskArray):
         if allow_dask:
-            return _check_gpu_X(X._meta)
+            return _check_gpu_X(X._meta, allow_csc=False)
         else:
             raise TypeError(
                 "The input is a DaskArray. "
@@ -272,8 +272,13 @@ def _check_gpu_X(X, require_cf=False, allow_dask=False):
             )
     elif isinstance(X, cp.ndarray):
         return True
-    elif issparse(X):
-        if not require_cf:
+    elif isspmatrix_csc(X) or isspmatrix_csr(X):
+        if not allow_csc and isspmatrix_csc(X):
+            raise TypeError(
+                "Dask only supports CSR matrices and cp.ndarray. "
+                "Please convert your data to CSR format before passing it to this function."
+            )
+        elif not require_cf:
             return True
         elif X.has_canonical_format:
             return True
