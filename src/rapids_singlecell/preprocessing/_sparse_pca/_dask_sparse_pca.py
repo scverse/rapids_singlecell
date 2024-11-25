@@ -57,7 +57,9 @@ class PCA_sparse_dask:
     def transform(self, X):
         def _transform(X_part, mean_, components_):
             pre_mean = mean_ @ components_.T
-            mean_impact = cp.ones((X_part.shape[0], 1)) @ pre_mean.reshape(1, -1)
+            mean_impact = cp.ones(
+                (X_part.shape[0], 1), dtype=X_part.dtype
+            ) @ pre_mean.reshape(1, -1)
             X_transformed = X_part.dot(components_.T) - mean_impact
             return X_transformed
 

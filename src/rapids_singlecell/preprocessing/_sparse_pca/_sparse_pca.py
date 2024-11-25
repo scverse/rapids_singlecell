@@ -52,7 +52,9 @@ class PCA_sparse:
 
     def transform(self, X):
         precomputed_mean_impact = self.mean_ @ self.components_.T
-        mean_impact = cp.ones((X.shape[0], 1)) @ precomputed_mean_impact.reshape(1, -1)
+        mean_impact = cp.ones(
+            (X.shape[0], 1), dtype=cp.float32
+        ) @ precomputed_mean_impact.reshape(1, -1)
         X_transformed = X.dot(self.components_.T) - mean_impact
         # X = X - self.mean_
         # X_transformed = X.dot(self.components_.T)
