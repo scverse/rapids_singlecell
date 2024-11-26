@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
+import numpy as np
 from cupyx import cusparse
 from cupyx.scipy import sparse
 
@@ -84,3 +85,9 @@ def pca(
     X_obs = pca.transform(X_obs)
     X_sim = pca.transform(cusparse.sparseToDense(self._counts_sim_norm))
     self.set_manifold(X_obs, X_sim)
+
+
+def get_random_state(seed: AnyRandom) -> np.random.RandomState:
+    if isinstance(seed, np.random.RandomState):
+        return seed
+    return np.random.RandomState(seed)
