@@ -4,9 +4,8 @@ import math
 from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
-
-from cuml.internals.memory_utils import with_cupy_rmm
 import numpy as np
+from cuml.internals.memory_utils import with_cupy_rmm
 from cupyx.scipy.sparse import issparse, isspmatrix_csc, isspmatrix_csr, spmatrix
 
 from rapids_singlecell._compat import DaskArray
