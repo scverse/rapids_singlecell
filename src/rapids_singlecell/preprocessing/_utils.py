@@ -4,13 +4,17 @@ import math
 from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
+
 from cuml.internals.memory_utils import with_cupy_rmm
+import numpy as np
 from cupyx.scipy.sparse import issparse, isspmatrix_csc, isspmatrix_csr, spmatrix
 
 from rapids_singlecell._compat import DaskArray
 
 if TYPE_CHECKING:
     from anndata import AnnData
+
+    from rapids_singlecell._utils import AnyRandom
 
 
 def _sparse_to_dense(X: spmatrix, order: Literal["C", "F"] | None = None) -> cp.ndarray:
@@ -306,3 +310,9 @@ def _check_use_raw(adata: AnnData, use_raw: None | bool, layer: str | None) -> b
     if layer is not None:
         return False
     return adata.raw is not None
+
+
+def get_random_state(seed: AnyRandom) -> np.random.RandomState:
+    if isinstance(seed, np.random.RandomState):
+        return seed
+    return np.random.RandomState(seed)
