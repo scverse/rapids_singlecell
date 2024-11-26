@@ -3,10 +3,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
-from cupyx import cusparse
 from cupyx.scipy import sparse
 
-from rapids_singlecell.preprocessing._utils import _get_mean_var
+from rapids_singlecell.preprocessing._utils import _get_mean_var, _sparse_to_dense
 
 from .sparse_utils import sparse_multiply, sparse_zscore
 
@@ -59,10 +58,10 @@ def truncated_svd(
 
     self._counts_obs_norm = self._counts_obs_norm.astype(cp.float32)
     self._counts_sim_norm = self._counts_sim_norm.astype(cp.float32)
-    X_obs = cusparse.sparseToDense(self._counts_obs_norm)
+    X_obs = _sparse_to_dense(self._counts_obs_norm)
     svd = TruncatedSVD(n_components=n_prin_comps, random_state=random_state).fit(X_obs)
     X_obs = svd.transform(X_obs)
-    X_sim = svd.transform(cusparse.sparseToDense(self._counts_sim_norm))
+    X_sim = svd.transform(_sparse_to_dense(self._counts_sim_norm))
     self.set_manifold(X_obs, X_sim)
 
 
@@ -79,8 +78,9 @@ def pca(
 
     self._counts_obs_norm = self._counts_obs_norm.astype(cp.float32)
     self._counts_sim_norm = self._counts_sim_norm.astype(cp.float32)
-    X_obs = cusparse.sparseToDense(self._counts_obs_norm)
+    X_obs = _sparse_to_dense(self._counts_obs_norm)
+
     pca = PCA(n_components=n_prin_comps, random_state=random_state).fit(X_obs)
     X_obs = pca.transform(X_obs)
-    X_sim = pca.transform(cusparse.sparseToDense(self._counts_sim_norm))
+    X_sim = pca.transform(_sparse_to_dense(self._counts_sim_norm))
     self.set_manifold(X_obs, X_sim)
