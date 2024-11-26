@@ -11,7 +11,8 @@ from cuml.neighbors import NearestNeighbors
 from cupyx.scipy import sparse
 from scanpy.preprocessing._utils import sample_comb
 
-from .pipeline import get_random_state
+from rapids_singlecell.preprocessing._utils import get_random_state
+
 from .sparse_utils import subsample_counts
 
 if TYPE_CHECKING:

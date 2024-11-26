@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
-import numpy as np
 from cupyx.scipy import sparse
 
 from rapids_singlecell.preprocessing._utils import _get_mean_var, _sparse_to_dense
@@ -85,9 +84,3 @@ def pca(
     X_obs = pca.transform(self._counts_obs_norm)
     X_sim = pca.transform(self._counts_sim_norm)
     self.set_manifold(X_obs, X_sim)
-
-
-def get_random_state(seed: AnyRandom) -> np.random.RandomState:
-    if isinstance(seed, np.random.RandomState):
-        return seed
-    return np.random.RandomState(seed)
