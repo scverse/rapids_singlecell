@@ -9,8 +9,9 @@ import pandas as pd
 from anndata import AnnData, concat
 from cuml.neighbors import NearestNeighbors
 from cupyx.scipy import sparse
-from scanpy._utils import get_random_state
 from scanpy.preprocessing._utils import sample_comb
+
+from rapids_singlecell.preprocessing._utils import get_random_state
 
 from .sparse_utils import subsample_counts
 
