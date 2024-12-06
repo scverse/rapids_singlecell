@@ -16,7 +16,7 @@ build:
     - uv pip install --system .[doc]
 
     # Build documentation using uv and sphinx
-    - python run -m sphinx -T -b html -d docs/_build/doctrees -D language=en docs $READTHEDOCS_OUTPUT/html
+    - python -m sphinx -T -b html -d docs/_build/doctrees -D language=en docs $READTHEDOCS_OUTPUT/html
 
 sphinx:
   configuration: docs/conf.py
