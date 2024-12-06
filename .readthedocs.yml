@@ -13,7 +13,7 @@ build:
     - asdf global uv latest
 
     # Use uv to synchronize dependencies
-    - uv pip install .[doc]
+    - uv pip install --system .[doc]
 
     # Build documentation using uv and sphinx
     - python run -m sphinx -T -b html -d docs/_build/doctrees -D language=en docs $READTHEDOCS_OUTPUT/html
