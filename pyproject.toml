@@ -26,8 +26,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-rapids11 = ["cupy-cuda11x","cudf-cu11==24.10.*", "cuml-cu11==24.10.*", "cugraph-cu11==24.10.*"]
-rapids12 = ["cupy-cuda12x","cudf-cu12==24.10.*", "cuml-cu12==24.10.*", "cugraph-cu12==24.10.*"]
 doc = [
     "sphinx>=4.5.0",
     "sphinx-copybutton",
@@ -38,6 +36,10 @@ doc = [
     "sphinx_copybutton",
     "pytest",
 ]
+
+rapids11 = ["cupy-cuda11x","cudf-cu11==24.10.*", "cuml-cu11==24.10.*", "cugraph-cu11==24.10.*"]
+rapids12 = ["cupy-cuda12x","cudf-cu12==24.10.*", "cuml-cu12==24.10.*", "cugraph-cu12==24.10.*"]
+
 test = [
     "pytest",
     "profimp",
