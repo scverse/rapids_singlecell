@@ -15,11 +15,6 @@ from scipy import sparse as sc_sparse
 
 from rapids_singlecell.tools._utils import _choose_representation
 
-
-def _cuvs_switch():
-    return parse_version(pylibraft.__version__) > parse_version("24.10")
-
-
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -64,6 +59,10 @@ _MetricsSparse = Literal[
     "taxicab",
 ]
 _Metrics = _MetricsDense | _MetricsSparse
+
+
+def _cuvs_switch():
+    return parse_version(pylibraft.__version__) > parse_version("24.10")
 
 
 def _brute_knn(
