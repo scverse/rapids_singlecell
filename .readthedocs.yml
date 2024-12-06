@@ -5,7 +5,7 @@ submodules:
 build:
   os: ubuntu-24.04
   tools:
-    python: "3.12"
+    python: "3.11"
   commands:
     # Install and set up uv
     - asdf plugin add uv
