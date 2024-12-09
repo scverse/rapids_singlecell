@@ -1,0 +1,11 @@
+[envs.default]
+installer = "uv"
+features = ["dev"]
+
+[envs.hatch-test]
+features = ["test", "rapids12"]
+
+[envs.docs]
+features = ["doc"]
+scripts.build = "sphinx-build -M html docs docs/_build {args}"
+scripts.clean = "git clean -fXd docs"
