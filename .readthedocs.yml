@@ -15,7 +15,7 @@ build:
     # Use uv to synchronize dependencies
     - uv pip install --system .[doc]
 
-    # Build documentation using uv and sphinx
+    # Build documentation using sphinx
     - python -m sphinx -T -b html -d docs/_build/doctrees -D language=en docs $READTHEDOCS_OUTPUT/html
 
 sphinx:
