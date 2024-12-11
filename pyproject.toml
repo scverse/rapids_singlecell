@@ -87,6 +87,7 @@ lint.ignore = [
 "src/rapids_singlecell/preprocessing/_harmonypy_gpu.py" = ["PLR0917"]
 "src/rapids_singlecell/decoupler_gpu/_method_mlm.py" = ["PLR0917"]
 "src/rapids_singlecell/decoupler_gpu/_method_wsum.py" = ["PLR0917"]
+"src/rapids_singlecell/preprocessing/_harmony/__init__.py" = ["PLR0917"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["rapids_singlecell"]
