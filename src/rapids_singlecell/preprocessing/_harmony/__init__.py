@@ -409,7 +409,7 @@ def _compute_objective(
     O: cp.ndarray,
     E: cp.ndarray,
     objective_arr: list,
-):
+) -> None:
     kmeans_error = cp.sum(_R_multi_m(R, cp.dot(Z_norm, Y_norm.T)))
     R = R / R.sum(axis=1, keepdims=True)
     entropy = cp.sum(R * cp.log(R + 1e-12))
@@ -431,7 +431,7 @@ def _is_convergent_harmony(objectives_harmony: list, tol: float) -> bool:
 
 def _is_convergent_clustering(
     objectives_clustering: list, tol: list, window_size: int = 3
-):
+) -> bool:
     if len(objectives_clustering) < window_size + 1:
         return False
     obj_old = 0.0
