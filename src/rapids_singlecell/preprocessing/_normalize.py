@@ -88,7 +88,7 @@ def _normalize_total(X: ArrayTypesDask, target_sum: int):
         return _normalize_total_csr(X, target_sum)
     elif isinstance(X, DaskArray):
         return _normalize_total_dask(X, target_sum)
-    else:
+    elif isinstance(X, cp.ndarray):
         from ._kernels._norm_kernel import _mul_dense
 
         if not X.flags.c_contiguous:
@@ -100,6 +100,8 @@ def _normalize_total(X: ArrayTypesDask, target_sum: int):
             (X, X.shape[0], X.shape[1], int(target_sum)),
         )
         return X
+    else:
+        raise ValueError(f"Cannot normalize {type(X)}")
 
 
 def _normalize_total_csr(X: sparse.csr_matrix, target_sum: int) -> sparse.csr_matrix:

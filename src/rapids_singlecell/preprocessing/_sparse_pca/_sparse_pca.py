@@ -1,3 +1,5 @@
+# This file will be removed in Q3 2025 when in favor of the CUML implementation
+
 from __future__ import annotations
 
 import math

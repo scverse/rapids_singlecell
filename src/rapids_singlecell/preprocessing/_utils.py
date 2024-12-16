@@ -231,6 +231,8 @@ def _get_mean_var(X, axis=0):
                 major = X.shape[1]
                 minor = X.shape[0]
                 mean, var = _mean_var_minor(X, major, minor)
+        else:
+            raise ValueError("axis must be either 0 or 1")
     elif isinstance(X, DaskArray):
         if isspmatrix_csr(X._meta):
             if axis == 0:
@@ -243,6 +245,10 @@ def _get_mean_var(X, axis=0):
                 mean, var = _mean_var_major_dask(X, major, minor)
         elif isinstance(X._meta, cp.ndarray):
             mean, var = _mean_var_dense_dask(X, axis)
+        else:
+            raise ValueError(
+                "Type not supported. Please provide a CuPy ndarray or a CuPy sparse matrix. Or a Dask array with a CuPy ndarray or a CuPy sparse matrix as meta."
+            )
     else:
         mean, var = _mean_var_dense(X, axis)
     return mean, var
