@@ -19,11 +19,6 @@ def _calc_R(term: cp.ndarray, mm: cp.ndarray) -> cp.ndarray:
 
 
 @cp.fuse
-def _div_clip(X: cp.ndarray, norm: cp.ndarray) -> cp.ndarray:
-    return X / cp.clip(norm, a_min=1e-12, a_max=cp.inf)
-
-
-@cp.fuse
 def _log_div_OE(O: cp.ndarray, E: cp.ndarray) -> cp.ndarray:
     return O * cp.log((O + 1) / (E + 1))
 

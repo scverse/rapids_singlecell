@@ -6,7 +6,7 @@ import cupy as cp
 import numpy as np
 from cuml import KMeans as cumlKMeans
 
-from ._fuses import _calc_R, _div_clip, _get_factor, _get_pen, _log_div_OE, _R_multi_m
+from ._fuses import _calc_R, _get_factor, _get_pen, _log_div_OE, _R_multi_m
 from ._kernels._normalize import _get_normalize_kernel_optimized
 
 if TYPE_CHECKING:
@@ -39,7 +39,7 @@ def _normalize_cp_p1(X: cp.ndarray) -> cp.ndarray:
 
 def _normalize_cp(X: cp.ndarray, p: int = 2) -> cp.ndarray:
     if p == 2:
-        return _div_clip(X, cp.linalg.norm(X, ord=p, axis=1, keepdims=True))
+        return X / cp.linalg.norm(X, ord=2, axis=1, keepdims=True).clip(min=1e-12)
 
     else:
         return _normalize_cp_p1(X)
