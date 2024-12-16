@@ -21,6 +21,10 @@ pip install 'rapids-singlecell[rapids12]' --extra-index-url=https://pypi.nvidia.
 ```
 It is important to ensure that the CUDA environment is set up correctly so that RAPIDS and Cupy can locate the necessary libraries.
 
+```{note}
+If you are using `python=3.12` with `uv`, you might need to add the `--index-strategy unsafe-best-match` flag to ensure compatibility.
+```
+
 ## Docker
 
 We also offer a Docker container for `rapids-singlecell`. This container includes all the necessary dependencies, making it even easier to get started with `rapids-singlecell`.
