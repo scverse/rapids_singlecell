@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
+import cupy as cp
 import numpy as np
 
 if TYPE_CHECKING:
@@ -15,6 +16,7 @@ def harmony_integrate(
     basis: str = "X_pca",
     adjusted_basis: str = "X_pca_harmony",
     dtype: type = np.float64,
+    correction_method: Literal["fast", "original"] = "original",
     **kwargs,
 ) -> None:
     """
@@ -43,6 +45,8 @@ def harmony_integrate(
         dtype
             The data type to use for the Harmony. If you use 32-bit you may experience
             numerical instability.
+        correction_method
+            Choose which method for the correction step: ``original`` for original method, ``fast`` for improved method.
         kwargs
             Any additional arguments will be passed to
             ``harmonpy_gpu.run_harmony()``.
@@ -54,10 +58,13 @@ def harmony_integrate(
         different experiments are integrated.
 
     """
-    from . import _harmonypy_gpu
+    from ._harmony import harmonize
 
     X = adata.obsm[basis].astype(dtype)
+    if isinstance(X, np.ndarray):
+        X = cp.array(X)
+    harmony_out = harmonize(
+        X, adata.obs, key, correction_method=correction_method, **kwargs
+    )
 
-    harmony_out = _harmonypy_gpu.run_harmony(X, adata.obs, key, dtype=dtype, **kwargs)
-
-    adata.obsm[adjusted_basis] = harmony_out.Z_corr.T.get()
+    adata.obsm[adjusted_basis] = harmony_out.get()

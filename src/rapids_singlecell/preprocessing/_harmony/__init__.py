@@ -73,6 +73,7 @@ def harmonize(
     Z: cp.array,
     batch_mat: pd.DataFrame,
     batch_key: str | list[str],
+    *,
     n_clusters: int = None,
     max_iter_harmony: int = 10,
     max_iter_clustering: int = 200,
@@ -228,7 +229,7 @@ def _initialize_centroids(
     theta: cp.ndarray,
     random_state: int,
     n_init: int = 10,
-) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, list]:  # noqa: PLR0917, RUF100
+) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, list]:
     kmeans = cumlKMeans(
         n_clusters=n_clusters, init="k-means||", max_iter=25, random_state=random_state
     )
@@ -263,7 +264,7 @@ def _clustering(
     max_iter: int,
     sigma: float,
     block_proportion: float,
-):  # noqa: PLR0917, RUF100
+):
     n_cells = Z_norm.shape[0]
     objectives_clustering = []
     block_size = int(n_cells * block_proportion)
@@ -281,7 +282,9 @@ def _clustering(
             idx_in = idx_list[pos : (pos + block_size)]
             R_in = R[idx_in]  # Slice rows for R
             Phi_in = Phi[idx_in]  # Slice rows for Phi
+            # O-=Phi_in.T@R_in
             cp.cublas.gemm("T", "N", Phi_in, R_in, alpha=-1, beta=1, out=O)
+            # E-=Pr_b@R_in
             cp.cublas.gemm(
                 "N",
                 "N",
@@ -296,9 +299,7 @@ def _clustering(
             R_out = _calc_R(term, cp.dot(Z_norm[idx_in], Y_norm.T))
 
             # Precompute penalty term and apply
-            penalty_term = _get_pen(
-                E, O, theta.T
-            )  # cp.power(cp.divide(E + 1, O + 1), theta.T)
+            penalty_term = _get_pen(E, O, theta.T)
             omega = cp.dot(Phi_in, penalty_term)
             R_out *= omega
 
@@ -308,7 +309,9 @@ def _clustering(
             R[idx_in] = R_out
 
             # Compute O and E with full data using precomputed terms
+            # O+=Phi_in.T@R_in
             cp.cublas.gemm("T", "N", Phi_in, R_out, alpha=1, beta=1, out=O)
+            # E+=Pr_b@R_in
             cp.cublas.gemm(
                 "N",
                 "N",
