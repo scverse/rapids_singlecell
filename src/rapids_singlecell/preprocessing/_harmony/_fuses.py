@@ -4,7 +4,7 @@ import cupy as cp
 
 
 @cp.fuse
-def _get_factor(O_k, ridge_lambda):
+def _get_factor(O_k: cp.ndarray, ridge_lambda: float) -> cp.ndarray:
     return 1 / (O_k + ridge_lambda)
 
 
@@ -29,5 +29,5 @@ def _log_div_OE(O: cp.ndarray, E: cp.ndarray) -> cp.ndarray:
 
 
 @cp.fuse
-def _R_multi_m(R, other):
+def _R_multi_m(R: cp.ndarray, other: cp.ndarray) -> cp.ndarray:
     return R * 2 * (1 - other)
