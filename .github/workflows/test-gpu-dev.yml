@@ -42,7 +42,7 @@ jobs:
       - name: Install Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install UV
         uses: hynek/setup-cached-uv@v2
@@ -55,6 +55,7 @@ jobs:
           "scanpy @ git+https://github.com/scverse/scanpy.git"
           "anndata @ git+https://github.com/scverse/anndata.git"
           --extra-index-url=https://pypi.nvidia.com
+          --index-strategy=unsafe-best-match
 
       - name: Run test
         run: pytest
