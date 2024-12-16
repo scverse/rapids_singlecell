@@ -6,6 +6,7 @@ import cupy as cp
 import numpy as np
 from cuml import KMeans as cumlKMeans
 
+from ._fuses import _calc_R, _div_clip, _get_factor, _get_pen, _log_div_OE, _R_multi_m
 from ._kernels._normalize import _get_normalize_kernel_optimized
 
 if TYPE_CHECKING:
@@ -34,11 +35,6 @@ def _normalize_cp_p1(X: cp.ndarray) -> cp.ndarray:
     # Launch the kernel
     normalize_p1((grid_dim,), (block_dim,), (X, rows, cols))
     return X
-
-
-@cp.fuse
-def _div_clip(X: cp.ndarray, norm: cp.ndarray) -> cp.ndarray:
-    return X / cp.clip(norm, a_min=1e-12, a_max=cp.inf)
 
 
 def _normalize_cp(X: cp.ndarray, p: int = 2) -> cp.ndarray:
@@ -210,12 +206,12 @@ def harmonize(
             block_proportion,
         )
 
-        Z_hat = correction(Z, R, Phi, O, ridge_lambda, correction_method)
+        Z_hat = _correction(Z, R, Phi, O, ridge_lambda, correction_method)
         Z_norm = _normalize_cp(Z_hat, p=2)
         if verbose:
             print(f"\tCompleted {i + 1} / {max_iter_harmony} iteration(s).")
 
-        if is_convergent_harmony(objectives_harmony, tol=tol_harmony):
+        if _is_convergent_harmony(objectives_harmony, tol=tol_harmony):
             if verbose:
                 print(f"Reach convergence after {i + 1} iteration(s).")
             break
@@ -251,16 +247,6 @@ def _initialize_centroids(
     _compute_objective(Y_norm, Z_norm, R, theta, sigma, O, E, objectives_harmony)
 
     return R, E, O, objectives_harmony
-
-
-@cp.fuse
-def _get_pen(E: cp.ndarray, O: cp.ndarray, theta: cp.ndarray) -> cp.ndarray:
-    return cp.power(cp.divide(E + 1, O + 1), theta)
-
-
-@cp.fuse
-def _calc_R(term: cp.ndarray, mm: cp.ndarray) -> cp.ndarray:
-    return cp.exp(term * (1 - mm))
 
 
 def _clustering(
@@ -335,19 +321,28 @@ def _clustering(
             pos += block_size
         _compute_objective(Y_norm, Z_norm, R, theta, sigma, O, E, objectives_clustering)
 
-        if is_convergent_clustering(objectives_clustering, tol):
+        if _is_convergent_clustering(objectives_clustering, tol):
             objectives_harmony.append(objectives_clustering[-1])
             break
 
 
-def correction(X, R, Phi, O, ridge_lambda, correction_method):  # noqa: PLR0917, RUF100
+def _correction(
+    X: cp.ndarray,
+    R: cp.ndarray,
+    Phi: cp.ndarray,
+    O: cp.ndarray,
+    ridge_lambda: float,
+    correction_method: str,
+) -> cp.ndarray:
     if correction_method == "fast":
-        return correction_fast(X, R, Phi, O, ridge_lambda)
+        return _correction_fast(X, R, Phi, O, ridge_lambda)
     else:
-        return correction_original(X, R, Phi, ridge_lambda)
+        return _correction_original(X, R, Phi, ridge_lambda)
 
 
-def correction_original(X, R, Phi, ridge_lambda):
+def _correction_original(
+    X: cp.ndarray, R: cp.ndarray, Phi: cp.ndarray, ridge_lambda: float
+) -> cp.ndarray:
     n_cells = X.shape[0]
     n_clusters = R.shape[1]
     n_batches = Phi.shape[1]
@@ -367,12 +362,9 @@ def correction_original(X, R, Phi, ridge_lambda):
     return Z
 
 
-@cp.fuse
-def _get_factor(O_k, ridge_lambda):
-    return 1 / (O_k + ridge_lambda)
-
-
-def correction_fast(X, R, Phi, O, ridge_lambda):
+def _correction_fast(
+    X: cp.ndarray, R: cp.ndarray, Phi: cp.ndarray, O: cp.ndarray, ridge_lambda: float
+) -> cp.ndarray:
     n_cells = X.shape[0]
     n_clusters = R.shape[1]
     n_batches = Phi.shape[1]
@@ -408,16 +400,6 @@ def correction_fast(X, R, Phi, O, ridge_lambda):
     return Z
 
 
-@cp.fuse
-def log_div_OE(O: cp.ndarray, E: cp.ndarray) -> cp.ndarray:
-    return O * cp.log((O + 1) / (E + 1))
-
-
-@cp.fuse
-def R_multi_m(R, other):
-    return R * 2 * (1 - other)
-
-
 def _compute_objective(
     Y_norm: cp.ndarray,
     Z_norm: cp.ndarray,
@@ -427,17 +409,17 @@ def _compute_objective(
     O: cp.ndarray,
     E: cp.ndarray,
     objective_arr: list,
-):  # noqa: PLR0917, RUF100
-    kmeans_error = cp.sum(R_multi_m(R, cp.dot(Z_norm, Y_norm.T)))
+):
+    kmeans_error = cp.sum(_R_multi_m(R, cp.dot(Z_norm, Y_norm.T)))
     R = R / R.sum(axis=1, keepdims=True)
     entropy = cp.sum(R * cp.log(R + 1e-12))
     entropy_term = sigma * entropy
-    diversity_penalty = sigma * cp.sum(cp.dot(theta, log_div_OE(O, E)))
+    diversity_penalty = sigma * cp.sum(cp.dot(theta, _log_div_OE(O, E)))
     objective = kmeans_error + entropy_term + diversity_penalty
     objective_arr.append(objective)
 
 
-def is_convergent_harmony(objectives_harmony, tol):
+def _is_convergent_harmony(objectives_harmony: list, tol: float) -> bool:
     if len(objectives_harmony) < 2:
         return False
 
@@ -447,7 +429,9 @@ def is_convergent_harmony(objectives_harmony, tol):
     return (obj_old - obj_new) < tol * np.abs(obj_old)
 
 
-def is_convergent_clustering(objectives_clustering, tol, window_size=3):
+def _is_convergent_clustering(
+    objectives_clustering: list, tol: list, window_size: int = 3
+):
     if len(objectives_clustering) < window_size + 1:
         return False
     obj_old = 0.0
