@@ -26,7 +26,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-#rapids11 = ["cupy-cuda11x","cudf-cu11==24.10.*", "cuml-cu11==24.10.*", "cugraph-cu11==24.10.*"]
+#rapids11 = ["cupy-cuda11x","cudf-cu11==24.12.*", "cuml-cu11==24.12.*", "cugraph-cu11==24.12.*"]
 rapids12 = ["cupy-cuda12x","cudf-cu12==24.12.*", "cuml-cu12==24.12.*", "cugraph-cu12==24.12.*"]
 doc = [
     "sphinx>=4.5.0",

@@ -5,16 +5,18 @@ submodules:
 build:
   os: ubuntu-24.04
   tools:
-    python: "3.11"
+    python: "3.12"
   commands:
     # Install and set up uv
     - asdf plugin add uv
     - asdf install uv latest
     - asdf global uv latest
 
-    - uv sync --extra docs
-    - uv run -m sphinx -T -b html -d docs/_build/doctrees -D language=en docs $READTHEDOCS_OUTPUT/html
+    # Use uv to synchronize dependencies
+    - uv pip install --system .[doc]
 
+    # Build documentation using sphinx
+    - python -m sphinx -T -b html -d docs/_build/doctrees -D language=en docs $READTHEDOCS_OUTPUT/html
 
 sphinx:
   configuration: docs/conf.py
