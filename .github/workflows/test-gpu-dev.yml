@@ -55,6 +55,7 @@ jobs:
           "scanpy @ git+https://github.com/scverse/scanpy.git"
           "anndata @ git+https://github.com/scverse/anndata.git"
           --extra-index-url=https://pypi.nvidia.com
+          --index-strategy  unsafe-best-match
 
       - name: Run test
         run: pytest

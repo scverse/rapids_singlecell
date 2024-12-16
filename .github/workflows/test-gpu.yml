@@ -50,7 +50,7 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install rapids-singlecell
-        run: uv pip install --system -e .[test,rapids12] --extra-index-url=https://pypi.nvidia.com
+        run: uv pip install --system -e .[test,rapids12] --extra-index-url=https://pypi.nvidia.com --index-strategy  unsafe-best-match
 
       - name: Pip list
         run: pip list
