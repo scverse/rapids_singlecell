@@ -279,14 +279,16 @@ def _clustering(
     *,
     E: cp.ndarray,
     O: cp.ndarray,
-    n_clusters: int,
     theta: cp.ndarray,
     tol: float,
     objectives_harmony: list,
     max_iter: int,
     sigma: float,
     block_proportion: float,
-):
+) -> None:
+    """
+    Modifies R, O and E in place.
+    """
     n_cells = Z_norm.shape[0]
     objectives_clustering = []
     block_size = int(n_cells * block_proportion)
