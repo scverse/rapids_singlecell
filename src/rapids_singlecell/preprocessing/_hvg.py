@@ -14,7 +14,7 @@ from scanpy.get import _get_obs_rep
 
 from rapids_singlecell._compat import DaskArray, _meta_dense, _meta_sparse
 
-from ._qc import calculate_qc_metrics
+from ._qc import _basic_qc
 from ._utils import _check_gpu_X, _check_nonnegative_integers, _get_mean_var
 
 if TYPE_CHECKING:
@@ -434,8 +434,10 @@ def _highly_variable_genes_batched(
     for batch in batches:
         adata_subset = adata[adata.obs[batch_key] == batch]
 
-        calculate_qc_metrics(adata_subset, layer=layer)
-        filt = adata_subset.var["n_cells_by_counts"].to_numpy() > 0
+        X = _get_obs_rep(adata_subset, layer=layer)
+        _check_gpu_X(X, allow_dask=True)
+        _, _, _, n_cells_per_gene = _basic_qc(X=X)
+        filt = (n_cells_per_gene > 0).get()
         adata_subset = adata_subset[:, filt]
 
         hvg = _highly_variable_genes_single_batch(
