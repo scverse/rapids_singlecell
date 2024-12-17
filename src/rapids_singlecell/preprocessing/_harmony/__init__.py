@@ -177,7 +177,6 @@ def harmonize(
 
     cp.random.seed(random_state)
 
-    # Initialize centroids
     R, E, O, objectives_harmony = _initialize_centroids(
         Z_norm,
         n_clusters,
