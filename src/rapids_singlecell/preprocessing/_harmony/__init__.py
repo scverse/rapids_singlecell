@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import cupy as cp
 import numpy as np
-from cuml import KMeans as cumlKMeans
+from cuml import KMeans as CumlKMeans
 
 from ._fuses import _calc_R, _get_factor, _get_pen, _log_div_OE, _R_multi_m
 from ._kernels._normalize import _get_normalize_kernel_optimized
