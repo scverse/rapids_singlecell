@@ -195,8 +195,8 @@ def harmonize(
         sigma,
         Pr_b,
         Phi,
-        theta,
-        random_state,
+        theta=theta,
+        random_state=random_state,
     )
     is_converged = False
     for _ in range(max_iter_harmony):
@@ -205,15 +205,15 @@ def harmonize(
             Pr_b,
             Phi,
             R,
-            E,
-            O,
-            n_clusters,
-            theta,
-            tol_clustering,
-            objectives_harmony,
-            max_iter_clustering,
-            sigma,
-            block_proportion,
+            E=E,
+            O=O,
+            n_clusters=n_clusters,
+            theta=theta,
+            tol_clustering=tol_clustering,
+            objectives_harmony=objectives_harmony,
+            max_iter=max_iter_clustering,
+            sigma=sigma,
+            block_proportion=block_proportion,
         )
 
         Z_hat = _correction(Z, R, Phi, O, ridge_lambda, correction_method)
@@ -235,8 +235,9 @@ def _initialize_centroids(
     sigma: float,
     Pr_b: cp.ndarray,
     Phi: cp.ndarray,
+    *,
     theta: cp.ndarray,
-    random_state: int,
+    random_state: int = 0,
     n_init: int = 10,
 ) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, list]:
     kmeans = CumlKMeans(
@@ -254,7 +255,16 @@ def _initialize_centroids(
     O = cp.dot(Phi.T, R)
 
     objectives_harmony = []
-    _compute_objective(Y_norm, Z_norm, R, theta, sigma, O, E, objectives_harmony)
+    _compute_objective(
+        Y_norm,
+        Z_norm,
+        R,
+        theta=theta,
+        sigma=sigma,
+        O=O,
+        E=E,
+        objective_arr=objectives_harmony,
+    )
 
     return R, E, O, objectives_harmony
 
@@ -264,6 +274,7 @@ def _clustering(
     Pr_b: cp.ndarray,
     Phi: cp.ndarray,
     R: cp.ndarray,
+    *,
     E: cp.ndarray,
     O: cp.ndarray,
     n_clusters: int,
@@ -331,7 +342,16 @@ def _clustering(
                 out=E,
             )
             pos += block_size
-        _compute_objective(Y_norm, Z_norm, R, theta, sigma, O, E, objectives_clustering)
+        _compute_objective(
+            Y_norm,
+            Z_norm,
+            R,
+            theta=theta,
+            sigma=sigma,
+            O=O,
+            E=E,
+            objective_arr=objectives_clustering,
+        )
 
         if _is_convergent_clustering(objectives_clustering, tol):
             objectives_harmony.append(objectives_clustering[-1])
@@ -344,7 +364,8 @@ def _correction(
     Phi: cp.ndarray,
     O: cp.ndarray,
     ridge_lambda: float,
-    correction_method: str,
+    *,
+    correction_method: str = "fast",
 ) -> cp.ndarray:
     if correction_method == "fast":
         return _correction_fast(X, R, Phi, O, ridge_lambda)
@@ -416,6 +437,7 @@ def _compute_objective(
     Y_norm: cp.ndarray,
     Z_norm: cp.ndarray,
     R: cp.ndarray,
+    *,
     theta: cp.ndarray,
     sigma: float,
     O: cp.ndarray,
