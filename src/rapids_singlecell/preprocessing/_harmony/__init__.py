@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
 import cupy as cp
@@ -17,10 +18,12 @@ def _normalize_cp_p1(X: cp.ndarray) -> cp.ndarray:
     """
     Normalize rows of a matrix using an optimized kernel with shared memory and warp shuffle.
 
-    Parameters:
+    Parameters
+    ----------
         X (cp.ndarray): Input 2D array.
 
-    Returns:
+    Returns
+    -------
         cp.ndarray: Row-normalized 2D array.
     """
     assert X.ndim == 2, "Input must be a 2D array."
@@ -62,6 +65,17 @@ def _get_batch_codes(batch_mat: pd.DataFrame, batch_key: str | list[str]) -> pd.
 
 
 def _one_hot_tensor_cp(X: pd.Series) -> cp.array:
+    """
+    One-hot encode a categorical series.
+
+    Parameters
+    ----------
+    X
+        Input categorical series.
+    Returns
+    -------
+    One-hot encoded array.
+    """
     ids = cp.array(X.cat.codes.values.copy(), dtype=cp.int32).reshape(-1)
     n_col = X.cat.categories.size
     Phi = cp.eye(n_col)[ids]
@@ -86,7 +100,6 @@ def harmonize(
     tau: int = 0,
     correction_method: str = "fast",
     random_state: int = 0,
-    verbose: bool = True,
 ) -> cp.array:
     """
     Integrate data using Harmony algorithm.
@@ -139,8 +152,6 @@ def harmonize(
     random_state
         Random seed for reproducing results.
 
-    verbose
-        If ``True``, print verbose output.
 
     Returns
     -------
@@ -173,7 +184,8 @@ def harmonize(
 
     theta = theta.reshape(1, -1)
     assert block_proportion > 0 and block_proportion <= 1
-    assert correction_method in {"fast", "original"}
+    if correction_method not in {"fast", "original"}:
+        raise ValueError("correction_method must be either 'fast' or 'original'.")
 
     cp.random.seed(random_state)
 
@@ -186,10 +198,8 @@ def harmonize(
         theta,
         random_state,
     )
-    if verbose:
-        print("Initialization is completed.")
-
-    for i in range(max_iter_harmony):
+    is_converged = False
+    for _ in range(max_iter_harmony):
         _clustering(
             Z_norm,
             Pr_b,
@@ -208,14 +218,14 @@ def harmonize(
 
         Z_hat = _correction(Z, R, Phi, O, ridge_lambda, correction_method)
         Z_norm = _normalize_cp(Z_hat, p=2)
-        if verbose:
-            print(f"\tCompleted {i + 1} / {max_iter_harmony} iteration(s).")
-
         if _is_convergent_harmony(objectives_harmony, tol=tol_harmony):
-            if verbose:
-                print(f"Reach convergence after {i + 1} iteration(s).")
+            is_converged = True
             break
 
+    if not is_converged:
+        warnings.warn(
+            "Harmony did not converge. Consider increasing the number of iterations"
+        )
     return Z_hat
 
 
@@ -229,7 +239,7 @@ def _initialize_centroids(
     random_state: int,
     n_init: int = 10,
 ) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, list]:
-    kmeans = cumlKMeans(
+    kmeans = CumlKMeans(
         n_clusters=n_clusters, init="k-means||", max_iter=25, random_state=random_state
     )
     kmeans.fit(Z_norm)
