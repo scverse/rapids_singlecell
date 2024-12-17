@@ -209,14 +209,16 @@ def harmonize(
             O=O,
             n_clusters=n_clusters,
             theta=theta,
-            tol_clustering=tol_clustering,
+            tol=tol_clustering,
             objectives_harmony=objectives_harmony,
             max_iter=max_iter_clustering,
             sigma=sigma,
             block_proportion=block_proportion,
         )
 
-        Z_hat = _correction(Z, R, Phi, O, ridge_lambda, correction_method)
+        Z_hat = _correction(
+            Z, R, Phi, O, ridge_lambda, correction_method=correction_method
+        )
         Z_norm = _normalize_cp(Z_hat, p=2)
         if _is_convergent_harmony(objectives_harmony, tol=tol_harmony):
             is_converged = True
@@ -291,7 +293,6 @@ def _clustering(
     term = -2 / sigma
     for _ in range(max_iter):
         # Compute Cluster Centroids
-
         Y = cp.dot(R.T, Z_norm)  # Compute centroids
         Y_norm = _normalize_cp(Y, p=2)  # Normalize centroids
 
