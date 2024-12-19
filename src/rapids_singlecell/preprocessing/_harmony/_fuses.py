@@ -14,8 +14,8 @@ def _get_pen(E: cp.ndarray, O: cp.ndarray, theta: cp.ndarray) -> cp.ndarray:
 
 
 @cp.fuse
-def _calc_R(term: cp.ndarray, mm: cp.ndarray) -> cp.ndarray:
-    return cp.exp(term * (1 - mm))
+def _calc_R(term: cp.ndarray, dotproduct: cp.ndarray) -> cp.ndarray:
+    return cp.exp(term * (1 - dotproduct))
 
 
 @cp.fuse
@@ -24,5 +24,5 @@ def _log_div_OE(O: cp.ndarray, E: cp.ndarray) -> cp.ndarray:
 
 
 @cp.fuse
-def _R_multi_m(R: cp.ndarray, other: cp.ndarray) -> cp.ndarray:
-    return R * 2 * (1 - other)
+def _R_multi_m(R: cp.ndarray, dotproduct: cp.ndarray) -> cp.ndarray:
+    return R * 2 * (1 - dotproduct)
