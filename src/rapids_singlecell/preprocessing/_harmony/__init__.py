@@ -20,11 +20,12 @@ def _normalize_cp_p1(X: cp.ndarray) -> cp.ndarray:
 
     Parameters
     ----------
-        X (cp.ndarray): Input 2D array.
+    X
+        Input 2D array.
 
     Returns
     -------
-        cp.ndarray: Row-normalized 2D array.
+    Row-normalized 2D array.
     """
     assert X.ndim == 2, "Input must be a 2D array."
 
