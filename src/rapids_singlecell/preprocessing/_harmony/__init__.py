@@ -43,7 +43,7 @@ def _normalize_cp_p1(X: cp.ndarray) -> cp.ndarray:
 
 def _normalize_cp(X: cp.ndarray, p: int = 2) -> cp.ndarray:
     """
-    Analogous to torch.nn.functional.normalize, p in numpy is known as ord.
+    Analogous to `torch.nn.functional.normalize` for `axis = 1`, `p` in numpy is known as `ord`.
     """
     if p == 2:
         return X / cp.linalg.norm(X, ord=2, axis=1, keepdims=True).clip(min=1e-12)
