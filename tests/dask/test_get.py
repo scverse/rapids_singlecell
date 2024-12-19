@@ -28,12 +28,32 @@ def test_get_anndata(client, data_kind):
 
     assert type(adata.X) is type(dask_adata.X._meta)
 
+    if data_kind == "sparse":
+        cp.testing.assert_array_equal(
+            adata.X.toarray(), dask_adata.X.compute().toarray()
+        )
+    else:
+        cp.testing.assert_array_equal(adata.X, dask_adata.X.compute())
+
     rsc.get.anndata_to_CPU(dask_adata)
     rsc.get.anndata_to_CPU(adata)
 
     assert type(adata.X) is type(dask_adata.X._meta)
 
+    if data_kind == "sparse":
+        cp.testing.assert_array_equal(
+            adata.X.toarray(), dask_adata.X.compute().toarray()
+        )
+    else:
+        cp.testing.assert_array_equal(adata.X, dask_adata.X.compute())
     rsc.get.anndata_to_GPU(dask_adata)
     rsc.get.anndata_to_GPU(adata)
 
     assert type(adata.X) is type(dask_adata.X._meta)
+
+    if data_kind == "sparse":
+        cp.testing.assert_array_equal(
+            adata.X.toarray(), dask_adata.X.compute().toarray()
+        )
+    else:
+        cp.testing.assert_array_equal(adata.X, dask_adata.X.compute())
