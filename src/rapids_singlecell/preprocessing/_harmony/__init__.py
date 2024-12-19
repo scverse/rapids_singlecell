@@ -195,10 +195,10 @@ def harmonize(
 
     R, E, O, objectives_harmony = _initialize_centroids(
         Z_norm,
-        n_clusters,
-        sigma,
-        Pr_b,
-        Phi,
+        n_clusters=n_clusters,
+        sigma=sigma,
+        Pr_b=Pr_b,
+        Phi=Phi,
         theta=theta,
         random_state=random_state,
     )
@@ -206,9 +206,9 @@ def harmonize(
     for _ in range(max_iter_harmony):
         _clustering(
             Z_norm,
-            Pr_b,
-            Phi,
-            R,
+            Pr_b=Pr_b,
+            Phi=Phi,
+            R=R,
             E=E,
             O=O,
             theta=theta,
@@ -220,7 +220,12 @@ def harmonize(
         )
 
         Z_hat = _correction(
-            Z, R, Phi, O, ridge_lambda, correction_method=correction_method
+            Z,
+            R=R,
+            Phi=Phi,
+            O=O,
+            ridge_lambda=ridge_lambda,
+            correction_method=correction_method,
         )
         Z_norm = _normalize_cp(Z_hat, p=2)
         if _is_convergent_harmony(objectives_harmony, tol=tol_harmony):
@@ -236,11 +241,11 @@ def harmonize(
 
 def _initialize_centroids(
     Z_norm: cp.ndarray,
+    *,
     n_clusters: int,
     sigma: float,
     Pr_b: cp.ndarray,
     Phi: cp.ndarray,
-    *,
     theta: cp.ndarray,
     random_state: int = 0,
 ) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, list]:
@@ -262,7 +267,7 @@ def _initialize_centroids(
     _compute_objective(
         Y_norm,
         Z_norm,
-        R,
+        R=R,
         theta=theta,
         sigma=sigma,
         O=O,
@@ -275,10 +280,10 @@ def _initialize_centroids(
 
 def _clustering(
     Z_norm: cp.ndarray,
+    *,
     Pr_b: cp.ndarray,
     Phi: cp.ndarray,
     R: cp.ndarray,
-    *,
     E: cp.ndarray,
     O: cp.ndarray,
     theta: cp.ndarray,
@@ -355,7 +360,7 @@ def _clustering(
         _compute_objective(
             Y_norm,
             Z_norm,
-            R,
+            R=R,
             theta=theta,
             sigma=sigma,
             O=O,
@@ -370,11 +375,11 @@ def _clustering(
 
 def _correction(
     X: cp.ndarray,
+    *,
     R: cp.ndarray,
     Phi: cp.ndarray,
     O: cp.ndarray,
     ridge_lambda: float,
-    *,
     correction_method: str = "fast",
 ) -> cp.ndarray:
     if correction_method == "fast":
@@ -446,8 +451,8 @@ def _correction_fast(
 def _compute_objective(
     Y_norm: cp.ndarray,
     Z_norm: cp.ndarray,
-    R: cp.ndarray,
     *,
+    R: cp.ndarray,
     theta: cp.ndarray,
     sigma: float,
     O: cp.ndarray,
