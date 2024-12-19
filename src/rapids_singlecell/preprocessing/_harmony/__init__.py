@@ -241,7 +241,6 @@ def _initialize_centroids(
     *,
     theta: cp.ndarray,
     random_state: int = 0,
-    n_init: int = 10,
 ) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, list]:
     kmeans = CumlKMeans(
         n_clusters=n_clusters, init="k-means||", max_iter=25, random_state=random_state
@@ -288,7 +287,12 @@ def _clustering(
     block_proportion: float,
 ) -> None:
     """
-    Modifies R, O and E in place.
+    Perform iterative clustering updates on normalized input data, adjusting
+    cluster assignments and associated penalty terms until convergence or
+    maximum iterations are reached.
+
+    This function operates in-place to update the cluster assignment matrix (R)
+    and penalty-related matrices (O and E).
     """
     n_cells = Z_norm.shape[0]
     objectives_clustering = []
