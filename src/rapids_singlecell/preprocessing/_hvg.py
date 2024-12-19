@@ -9,10 +9,12 @@ from typing import TYPE_CHECKING, Literal
 import cupy as cp
 import numpy as np
 import pandas as pd
-from cupyx.scipy.sparse import issparse, isspmatrix_csc
+from cupyx.scipy.sparse import csr_matrix, issparse, isspmatrix_csc
 from scanpy.get import _get_obs_rep
 
-from ._simple import calculate_qc_metrics
+from rapids_singlecell._compat import DaskArray, _meta_dense, _meta_sparse
+
+from ._qc import _basic_qc
 from ._utils import _check_gpu_X, _check_nonnegative_integers, _get_mean_var
 
 if TYPE_CHECKING:
@@ -188,7 +190,11 @@ def highly_variable_genes(
 
         if batch_key is None:
             df = _highly_variable_genes_single_batch(
-                adata, layer=layer, cutoff=cutoff, n_bins=n_bins, flavor=flavor
+                adata,
+                layer=layer,
+                cutoff=cutoff,
+                n_bins=n_bins,
+                flavor=flavor,
             )
         else:
             df = _highly_variable_genes_batched(
@@ -260,6 +266,19 @@ class _Cutoffs:
         )
 
 
+def _hvg_expm1(X):
+    if isinstance(X, DaskArray):
+        meta = _meta_sparse if isinstance(X._meta, csr_matrix) else _meta_dense
+        X = X.map_blocks(_hvg_expm1, meta=meta(X.dtype))
+    else:
+        X = X.copy()
+        if issparse(X):
+            X = X.expm1()
+        else:
+            X = cp.expm1(X)
+    return X
+
+
 def _highly_variable_genes_single_batch(
     adata: AnnData,
     *,
@@ -277,18 +296,18 @@ def _highly_variable_genes_single_batch(
     `highly_variable`, `means`, `dispersions`, and `dispersions_norm`.
     """
     X = _get_obs_rep(adata, layer=layer)
-
+    _check_gpu_X(X, allow_dask=True)
     if hasattr(X, "_view_args"):  # AnnData array view
-        # For compatibility with anndata<0.9
-        X = X.copy()  # Doesn't actually copy memory, just removes View class wrapper
+        X = X.copy()
 
     if flavor == "seurat":
-        X = X.copy()
-        if issparse(X):
-            X = X.expm1()
-        else:
-            X = cp.expm1(X)
+        X = _hvg_expm1(X)
+
     mean, var = _get_mean_var(X, axis=0)
+    if isinstance(X, DaskArray):
+        import dask
+
+        mean, var = dask.compute(mean, var)
     mean[mean == 0] = 1e-12
     disp = var / mean
     if flavor == "seurat":  # logarithmized mean as in Seurat
@@ -415,12 +434,18 @@ def _highly_variable_genes_batched(
     for batch in batches:
         adata_subset = adata[adata.obs[batch_key] == batch]
 
-        calculate_qc_metrics(adata_subset, layer=layer)
-        filt = adata_subset.var["n_cells_by_counts"].to_numpy() > 0
+        X = _get_obs_rep(adata_subset, layer=layer)
+        _check_gpu_X(X, allow_dask=True)
+        _, _, _, n_cells_per_gene = _basic_qc(X=X)
+        filt = (n_cells_per_gene > 0).get()
         adata_subset = adata_subset[:, filt]
 
         hvg = _highly_variable_genes_single_batch(
-            adata_subset, layer=layer, cutoff=cutoff, n_bins=n_bins, flavor=flavor
+            adata_subset,
+            layer=layer,
+            cutoff=cutoff,
+            n_bins=n_bins,
+            flavor=flavor,
         )
         hvg.reset_index(drop=False, inplace=True, names=["gene"])
 

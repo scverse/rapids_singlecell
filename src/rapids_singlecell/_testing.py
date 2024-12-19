@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import cupy as cp
 import pytest
-from anndata.tests.helpers import asarray
+from anndata.tests.helpers import as_dense_dask_array, as_sparse_dask_array, asarray
+from cupyx.scipy import sparse as cusparse
 from scipy import sparse
 
 if TYPE_CHECKING:
@@ -38,3 +40,17 @@ MAP_ARRAY_TYPES: dict[
 ARRAY_TYPES_MEM = tuple(
     at for (strg, _), ats in MAP_ARRAY_TYPES.items() if strg == "mem" for at in ats
 )
+
+
+def as_sparse_cupy_dask_array(X):
+    da = as_sparse_dask_array(X)
+    da = da.rechunk((da.shape[0] // 2, da.shape[1]))
+    da = da.map_blocks(cusparse.csr_matrix, dtype=X.dtype)
+    return da
+
+
+def as_dense_cupy_dask_array(X):
+    X = as_dense_dask_array(X)
+    X = X.map_blocks(cp.array)
+    X = X.rechunk((X.shape[0] // 2, X.shape[1]))
+    return X
