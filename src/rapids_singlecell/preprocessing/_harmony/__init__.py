@@ -208,7 +208,6 @@ def harmonize(
             R,
             E=E,
             O=O,
-            n_clusters=n_clusters,
             theta=theta,
             tol=tol_clustering,
             objectives_harmony=objectives_harmony,
@@ -462,6 +461,9 @@ def _compute_objective(
 
 
 def _is_convergent_harmony(objectives_harmony: list, tol: float) -> bool:
+    """
+    Check if the Harmony algorithm has converged based on the objective function values.
+    """
     if len(objectives_harmony) < 2:
         return False
 
@@ -474,6 +476,9 @@ def _is_convergent_harmony(objectives_harmony: list, tol: float) -> bool:
 def _is_convergent_clustering(
     objectives_clustering: list, tol: list, window_size: int = 3
 ) -> bool:
+    """
+    Check if the clustering step has converged based on the objective function values
+    """
     if len(objectives_clustering) < window_size + 1:
         return False
     obj_old = 0.0
