@@ -103,6 +103,7 @@ markers = [
 [tool.hatch.build]
 # exclude big files that don’t need to be installed
 exclude = [
+    "src/rapids_singlecell/_testing.py",
     "tests",
     "docs",
     "notebooks"
