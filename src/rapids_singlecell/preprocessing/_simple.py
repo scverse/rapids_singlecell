@@ -98,7 +98,7 @@ def filter_genes(
 
         if verbose:
             print(
-                f"filtered out {adata.var.shape[0]-thr.sum()} genes based on {qc_var}"
+                f"filtered out {adata.var.shape[0] - thr.sum()} genes based on {qc_var}"
             )
 
         adata._inplace_subset_var(thr)
@@ -122,7 +122,7 @@ def filter_genes(
             thr = adata.var[qc_var] <= max_count
         if verbose:
             print(
-                f"filtered out {adata.var.shape[0]-thr.sum()} genes based on {qc_var}"
+                f"filtered out {adata.var.shape[0] - thr.sum()} genes based on {qc_var}"
             )
 
         adata._inplace_subset_var(thr)
@@ -173,7 +173,7 @@ def filter_cells(
         else:
             print("Please specify a cutoff to filter against")
         if verbose:
-            print(f"filtered out {adata.obs.shape[0]-inter.sum()} cells")
+            print(f"filtered out {adata.obs.shape[0] - inter.sum()} cells")
         adata._inplace_subset_obs(inter)
     elif qc_var in ["n_genes_by_counts", "total_counts"]:
         if verbose:
@@ -191,7 +191,7 @@ def filter_cells(
         else:
             print("Please specify a cutoff to filter against")
         if verbose:
-            print(f"filtered out {adata.obs.shape[0]-inter.sum()} cells")
+            print(f"filtered out {adata.obs.shape[0] - inter.sum()} cells")
         adata._inplace_subset_obs(inter)
     else:
         print("Please check qc_var.")
