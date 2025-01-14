@@ -1,11 +1,11 @@
 ARG CUDA_VER=12.5.0
-ARG LINUX_VER=ubuntu22.04
+ARG LINUX_VER=ubuntu24.04
 
 FROM nvidia/cuda:${CUDA_VER}-base-${LINUX_VER}
 
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 
-ARG PYTHON_VER=3.11
+ARG PYTHON_VER=3.12
 
 ENV PATH=/opt/conda/bin:$PATH
 ENV PYTHON_VERSION=${PYTHON_VER}
