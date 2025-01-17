@@ -10,7 +10,7 @@ ARG PYTHON_VER=3.12
 ENV PATH=/opt/conda/bin:$PATH
 ENV PYTHON_VERSION=${PYTHON_VER}
 
-COPY --from=condaforge/miniforge3:24.11.2-1 /opt/conda /opt/conda
+COPY --from=condaforge/miniforge3:24.9.2-0 /opt/conda /opt/conda
 
 COPY rsc_rapids.yml rsc_rapids.yml
 
