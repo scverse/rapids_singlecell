@@ -13,7 +13,6 @@ dependencies:
  - cusparselt
  - leidenalg
  - louvain
- - fa2
  - jupyterlab
  - pip
  - pip:
