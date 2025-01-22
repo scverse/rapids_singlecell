@@ -50,7 +50,9 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Set UV Timeout
-        run: UV_HTTP_TIMEOUT = 120
+        env:
+          UV_HTTP_TIMEOUT: 120
+        run: echo "UV_HTTP_TIMEOUT is set to $UV_HTTP_TIMEOUT"
 
       - name: Install rapids-singlecell
         run: >-
