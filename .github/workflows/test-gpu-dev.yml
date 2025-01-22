@@ -51,7 +51,7 @@ jobs:
 
       - name: Set UV Timeout
         run: UV_HTTP_TIMEOUT = 120
-      
+
       - name: Install rapids-singlecell
         run: >-
           uv pip install --system -e .[test,rapids12]
