@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 import cupy as cp
 import numpy as np
@@ -458,10 +458,10 @@ def neighbors(
     """
     adata = adata.copy() if copy else adata
 
-    if algorithm not in _Alogithms:
+    if algorithm not in get_args(_Alogithms):
         raise ValueError(
-            f"Invalid algorithm '{algorithm}' for batch-balanced KNN. "
-            f"Valid options are: {_Alogithms}."
+            f"Invalid algorithm '{algorithm}' for KNN. "
+            f"Valid options are: {get_args(_Alogithms)}."
         )
 
     if adata.is_view:
@@ -534,7 +534,7 @@ def bbknn(
     batch_key: str | None = None,
     use_rep: str | None = None,
     random_state: AnyRandom = 0,
-    algorithm: _Alogithms = "brute",
+    algorithm: _Alogithms_bbknn = "brute",
     metric: _Metrics = "euclidean",
     metric_kwds: Mapping[str, Any] = MappingProxyType({}),
     trim: int | None = None,
@@ -621,10 +621,10 @@ def bbknn(
     if batch_key not in adata.obs:
         raise ValueError(f"Batch key '{batch_key}' not present in `adata.obs`.")
 
-    if algorithm not in _Alogithms_bbknn:
+    if algorithm not in get_args(_Alogithms_bbknn):
         raise ValueError(
             f"Invalid algorithm '{algorithm}' for batch-balanced KNN. "
-            f"Valid options are: {_Alogithms_bbknn}."
+            f"Valid options are: {get_args(_Alogithms_bbknn)}."
         )
     adata = adata.copy() if copy else adata
     if adata.is_view:
