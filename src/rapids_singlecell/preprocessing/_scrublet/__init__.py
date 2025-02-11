@@ -187,10 +187,8 @@ def scrublet(
         # counts and simulating doublets
 
         if ad_sim is None:
-            pp.filter_genes(ad_obs, min_count=3, verbose=False)
-            pp.filter_cells(
-                ad_obs, min_count=3, qc_var="n_genes_by_counts", verbose=False
-            )
+            pp.filter_genes(ad_obs, min_cells=3, verbose=False)
+            pp.filter_cells(ad_obs, min_genes=3, verbose=False)
 
             # Doublet simulation will be based on the un-normalised counts, but on the
             # selection of genes following normalisation and variability filtering. So

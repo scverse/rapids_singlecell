@@ -86,8 +86,8 @@ def test_scrublet_batched():
 
 def _preprocess_for_scrublet(adata: AnnData) -> AnnData:
     adata_pp = adata.copy()
-    rsc.pp.filter_genes(adata_pp, min_count=3)
-    rsc.pp.filter_cells(adata_pp, qc_var="n_genes_by_counts", min_count=3)
+    rsc.pp.filter_genes(adata_pp, min_cells=3)
+    rsc.pp.filter_cells(adata_pp, min_genes=3)
     adata_pp.layers["raw"] = adata_pp.X.copy()
     rsc.pp.normalize_total(adata_pp)
     logged = rsc.pp.log1p(adata_pp, copy=True)
@@ -169,7 +169,7 @@ def _scrub_small_sess() -> AnnData:
     # Reduce size of input for faster test
     adata = pbmc200()
     rsc.get.anndata_to_GPU(adata)
-    rsc.pp.filter_genes(adata, min_count=100, verbose=False)
+    rsc.pp.filter_genes(adata, min_cells=100)
     rsc.pp.scrublet(adata, use_approx_neighbors=False)
     return adata
 
@@ -210,10 +210,8 @@ def test_scrublet_simulate_doublets():
     """Check that doublet simulation runs and simulates some doublets."""
     adata_obs = pbmc200()
     rsc.get.anndata_to_GPU(adata_obs)
-    rsc.pp.filter_genes(adata_obs, min_count=3, verbose=False)
-    rsc.pp.filter_cells(
-        adata_obs, min_count=3, qc_var="n_genes_by_counts", verbose=False
-    )
+    rsc.pp.filter_genes(adata_obs, min_cells=3)
+    rsc.pp.filter_cells(adata_obs, min_genes=3)
     adata_obs.layers["raw"] = adata_obs.X
     rsc.pp.normalize_total(adata_obs)
     logged = rsc.pp.log1p(adata_obs, copy=True)
