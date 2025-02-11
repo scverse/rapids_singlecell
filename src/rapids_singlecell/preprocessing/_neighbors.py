@@ -21,8 +21,7 @@ if TYPE_CHECKING:
     from anndata import AnnData
 
 AnyRandom = None | int | np.random.RandomState
-_Alogithms = Literal["brute", "ivfflat", "ivfpq", "cagra", "nn_descent"]
-_Alogithms_bbknn = Literal["brute", "ivfflat", "ivfpq", "cagra"]
+_Alogithms = Literal[_Alogithms_bbknn, Literal["nn_descent"]]
 _MetricsDense = Literal[
     "l2",
     "chebyshev",
