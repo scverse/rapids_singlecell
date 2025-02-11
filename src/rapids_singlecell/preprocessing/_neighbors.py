@@ -217,18 +217,12 @@ def _nn_descent_knn(
         dataset=X,
     )
     neighbors = cp.array(idx.graph).astype(cp.uint32)
-    if metric_to_use == "sqeuclidean":
-        from ._kernels._nn_descent import calc_distance_kernel
-
-        dist_func = calc_distance_kernel
-    elif metric_to_use == "cosine":
-        from ._kernels._nn_descent import calc_distance_kernel_cos
-
-        dist_func = calc_distance_kernel_cos
-    elif metric_to_use == "inner_product":
-        from ._kernels._nn_descent import calc_distance_kernel_inner
-
-        dist_func = calc_distance_kernel_inner
+    if metric == "euclidean":
+        from ._kernels._nn_descent import calc_distance_kernel as dist_func
+    elif metric == "cosine":
+        from ._kernels._nn_descent import calc_distance_kernel_cos as dist_func
+    elif metric == "inner_product":
+        from ._kernels._nn_descent import calc_distance_kernel_inner as dist_func
     grid_size = (X.shape[0] + 32 - 1) // 32
     distances = cp.zeros((X.shape[0], neighbors.shape[1]), dtype=cp.float32)
 
