@@ -32,7 +32,7 @@ connectivities_umap = [
 ]
 
 
-@pytest.mark.parametrize("algo", ["brute", "cagra", "ivfflat"])
+@pytest.mark.parametrize("algo", ["brute", "cagra", "ivfflat", "nn_descent"])
 def test_umap_connectivities_euclidean(algo):
     adata = AnnData(X=X)
     neighbors(adata, n_neighbors=3, algorithm=algo)
