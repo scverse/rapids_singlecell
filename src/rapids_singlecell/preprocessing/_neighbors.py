@@ -239,7 +239,6 @@ def _nn_descent_knn(
         )
         add_self_distances = cp.zeros((X.shape[0], 1), dtype=cp.float32)
         distances = cp.concatenate((add_self_distances, distances[:, :-1]), axis=1)
-    print(neighbors.shape, distances.shape, k)
     return neighbors, distances
 
 
