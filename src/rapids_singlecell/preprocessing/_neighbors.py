@@ -239,6 +239,14 @@ def _nn_descent_knn(
     )
     if metric == "euclidean":
         distances = cp.sqrt(distances)
+    if metric in ("cosine", "euclidean", "sqeuclidean"):
+        add_self_neighbors = cp.arange(X.shape[0], dtype=cp.uint32)
+        neighbors = cp.concatenate(
+            (add_self_neighbors[:, None], neighbors[:, :-1]), axis=1
+        )
+        add_self_distances = cp.zeros((X.shape[0], 1), dtype=cp.float32)
+        distances = cp.concatenate((add_self_distances, distances[:, :-1]), axis=1)
+    print(neighbors.shape, distances.shape, k)
     return neighbors, distances
 
 
