@@ -1,16 +1,16 @@
 [envs.default]
 installer = "uv"
-features = ["dev"]
+features = [ "dev" ]
 
 [envs.hatch-test]
-features = ["test", "rapids12"]
+features = [ "test", "rapids12" ]
 
 [envs.docs]
-features = ["doc"]
+features = [ "doc" ]
 scripts.build = "sphinx-build -M html docs docs/_build {args}"
 scripts.clean = "git clean -fXd docs"
 
 [envs.default.pip]
 extra_index_urls = [
-  "https://pypi.nvidia.com"
+    "https://pypi.nvidia.com",
 ]
