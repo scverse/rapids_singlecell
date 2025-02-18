@@ -67,8 +67,8 @@ def test_pca_dask_full_pipeline(client, data_kind):
     else:
         raise ValueError(f"Unknown data_kind {data_kind}")
 
-    rsc.pp.filter_genes(adata_1, min_count=500)
-    rsc.pp.filter_genes(adata_2, min_count=500)
+    rsc.pp.filter_genes(adata_1, min_cells=500)
+    rsc.pp.filter_genes(adata_2, min_cells=500)
 
     rsc.pp.normalize_total(adata_1, target_sum=1e4)
     rsc.pp.normalize_total(adata_2, target_sum=1e4)
