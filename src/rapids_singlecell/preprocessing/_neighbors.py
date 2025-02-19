@@ -21,7 +21,9 @@ if TYPE_CHECKING:
     from anndata import AnnData
 
 AnyRandom = None | int | np.random.RandomState
-_Algorithms = _Algorithms_bbknn | Literal["nn_descent"]
+
+_Algorithms_bbknn = Literal["brute", "cagra", "ivfflat", "ivfpq"]
+_Algorithms = Literal["brute", "cagra", "ivfflat", "ivfpq", "nn_descent"]
 _MetricsDense = Literal[
     "l2",
     "chebyshev",
@@ -206,11 +208,9 @@ def _nn_descent_knn(
         )
     from cuvs.neighbors import nn_descent
 
-    if metric == "euclidean":
-        metric_to_use = "sqeuclidean"
-    else:
-        metric_to_use = metric
-    idxparams = nn_descent.IndexParams(graph_degree=k, metric=metric_to_use)
+    idxparams = nn_descent.IndexParams(
+        graph_degree=k, metric="sqeuclidean" if metric == "euclidean" else metric
+    )
     idx = nn_descent.build(
         idxparams,
         dataset=X,
@@ -233,6 +233,8 @@ def _nn_descent_knn(
     if metric == "euclidean":
         distances = cp.sqrt(distances)
     if metric in ("cosine", "euclidean", "sqeuclidean"):
+        # Add self-neighbors and self-distances for distance metrics.
+        # This is not needed for inner_product, as it is a similarity metric.
         add_self_neighbors = cp.arange(X.shape[0], dtype=cp.uint32)
         neighbors = cp.concatenate(
             (add_self_neighbors[:, None], neighbors[:, :-1]), axis=1
@@ -253,7 +255,7 @@ KNN_ALGORITHMS = {
 
 def _check_neighbors_X(
     X: cp_sparse.spmatrix | sc_sparse.spmatrix | np.ndarray | cp.ndarray,
-    algorithm: _Alogithms,
+    algorithm: _Algorithms,
 ) -> cp_sparse.spmatrix | cp.ndarray:
     """Check and convert input X to the expected format based on algorithm.
 
@@ -287,7 +289,7 @@ def _check_neighbors_X(
     return X_contiguous
 
 
-def _check_metrics(algorithm: _Alogithms, metric: _Metrics) -> bool:
+def _check_metrics(algorithm: _Algorithms, metric: _Metrics) -> bool:
     """Check if the provided metric is compatible with the chosen algorithm.
 
     Parameters
@@ -383,7 +385,7 @@ def neighbors(
     *,
     use_rep: str | None = None,
     random_state: AnyRandom = 0,
-    algorithm: _Alogithms = "brute",
+    algorithm: _Algorithms = "brute",
     metric: _Metrics = "euclidean",
     metric_kwds: Mapping[str, Any] = MappingProxyType({}),
     key_added: str | None = None,
@@ -458,10 +460,10 @@ def neighbors(
     """
     adata = adata.copy() if copy else adata
 
-    if algorithm not in get_args(_Alogithms):
+    if algorithm not in get_args(_Algorithms):
         raise ValueError(
             f"Invalid algorithm '{algorithm}' for KNN. "
-            f"Valid options are: {get_args(_Alogithms)}."
+            f"Valid options are: {get_args(_Algorithms)}."
         )
 
     if adata.is_view:
@@ -534,7 +536,7 @@ def bbknn(
     batch_key: str | None = None,
     use_rep: str | None = None,
     random_state: AnyRandom = 0,
-    algorithm: _Alogithms_bbknn = "brute",
+    algorithm: _Algorithms_bbknn = "brute",
     metric: _Metrics = "euclidean",
     metric_kwds: Mapping[str, Any] = MappingProxyType({}),
     trim: int | None = None,
@@ -621,10 +623,10 @@ def bbknn(
     if batch_key not in adata.obs:
         raise ValueError(f"Batch key '{batch_key}' not present in `adata.obs`.")
 
-    if algorithm not in get_args(_Alogithms_bbknn):
+    if algorithm not in get_args(_Algorithms_bbknn):
         raise ValueError(
             f"Invalid algorithm '{algorithm}' for batch-balanced KNN. "
-            f"Valid options are: {get_args(_Alogithms_bbknn)}."
+            f"Valid options are: {get_args(_Algorithms_bbknn)}."
         )
     adata = adata.copy() if copy else adata
     if adata.is_view:
