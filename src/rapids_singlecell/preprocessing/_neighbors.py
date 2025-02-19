@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from anndata import AnnData
 
 AnyRandom = None | int | np.random.RandomState
-_Alogithms = Literal[_Alogithms_bbknn, Literal["nn_descent"]]
+_Algorithms = _Algorithms_bbknn | Literal["nn_descent"]
 _MetricsDense = Literal[
     "l2",
     "chebyshev",
