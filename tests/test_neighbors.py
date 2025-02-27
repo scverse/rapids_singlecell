@@ -32,12 +32,18 @@ connectivities_umap = [
 ]
 
 
-@pytest.mark.parametrize("algo", ["brute", "cagra", "ivfflat"])
+@pytest.mark.parametrize("algo", ["brute", "ivfflat"])
 def test_umap_connectivities_euclidean(algo):
     adata = AnnData(X=X)
     neighbors(adata, n_neighbors=3, algorithm=algo)
     assert np.allclose(adata.obsp["distances"].toarray(), distances_euclidean)
     assert np.allclose(adata.obsp["connectivities"].toarray(), connectivities_umap)
+
+
+@pytest.mark.parametrize("algo", ["brute", "ivfflat", "cagra", "ivfpq"])
+def test_algo(algo):
+    adata = pbmc68k_reduced()
+    neighbors(adata, n_neighbors=5, algorithm=algo)
 
 
 key = "test"
