@@ -4,11 +4,11 @@ import cupy as cp
 
 kernel_code_cos = r"""
 extern "C" __global__
-void computeDistances_Cosine(const float* pca,
+void computeDistances_Cosine(const float* data,
                     float* out,
                     const unsigned int* pairs,
                     const long long int n_samples,
-                    const long long int n_pcs,
+                    const long long int n_features,
                     const long long int n_neighbors)
 {
     long long int i1 = blockDim.x * blockIdx.x + threadIdx.x;
@@ -17,17 +17,17 @@ void computeDistances_Cosine(const float* pca,
     }
 
     float sum_i1 = 0.0f;
-    for (long long int d = 0; d < n_pcs; d++) {
-        sum_i1 += pca[i1 * n_pcs + d] * pca[i1 * n_pcs + d];
+    for (long long int d = 0; d < n_features; d++) {
+        sum_i1 += data[i1 * n_features + d] * data[i1 * n_features + d];
     }
     for (long long int j = 0; j < n_neighbors; j++){
         long long int i2 = static_cast<long long>(pairs[i1 * n_neighbors + j]);
         float dist = 0.0f;
 
         float sum_i2 = 0.0f;
-        for (long long int d = 0; d < n_pcs; d++) {
-            dist += pca[i1 * n_pcs + d] * pca[i2 * n_pcs + d];
-            sum_i2 += pca[i2 * n_pcs + d] * pca[i2 * n_pcs + d];
+        for (long long int d = 0; d < n_features; d++) {
+            dist += data[i1 * n_features + d] * data[i2 * n_features + d];
+            sum_i2 += data[i2 * n_features + d] * data[i2 * n_features + d];
         }
         out[i1 * n_neighbors + j] = 1-dist/ (sqrtf(sum_i1) * sqrtf(sum_i2));
     }
@@ -35,7 +35,6 @@ void computeDistances_Cosine(const float* pca,
 }
 """
 
-# Create the RawKernel object
 calc_distance_kernel_cos = cp.RawKernel(
     code=kernel_code_cos,
     name="computeDistances_Cosine",
@@ -43,11 +42,11 @@ calc_distance_kernel_cos = cp.RawKernel(
 
 kernel_code = r"""
 extern "C" __global__
-void computeDistances(const float* pca,
+void computeDistances(const float* data,
                     float* out,
                     const unsigned int* pairs,
                     const long long int n_samples,
-                    const long long int n_pcs,
+                    const long long int n_features,
                     const long long int n_neighbors)
 {
     long long int i1 = blockDim.x * blockIdx.x + threadIdx.x;
@@ -57,8 +56,8 @@ void computeDistances(const float* pca,
     for (long long int j = 0; j < n_neighbors; j++){
         long long int i2 = static_cast<long long>(pairs[i1 * n_neighbors + j]);
         float dist = 0.0f;
-        for (long long int d = 0; d < n_pcs; d++) {
-            float diff = pca[i1 * n_pcs + d] - pca[i2 * n_pcs + d];
+        for (long long int d = 0; d < n_features; d++) {
+            float diff = data[i1 * n_features + d] - data[i2 * n_features + d];
             dist += diff * diff;
         }
         out[i1 * n_neighbors + j] = dist;
@@ -66,7 +65,6 @@ void computeDistances(const float* pca,
 }
 """
 
-# Create the RawKernel object
 calc_distance_kernel = cp.RawKernel(
     code=kernel_code,
     name="computeDistances",
@@ -74,11 +72,11 @@ calc_distance_kernel = cp.RawKernel(
 
 kernel_code_inner = r"""
 extern "C" __global__
-void computeDistances_inner(const float* pca,
+void computeDistances_inner(const float* data,
                     float* out,
                     const unsigned int* pairs,
                     const long long int n_samples,
-                    const long long int n_pcs,
+                    const long long int n_features,
                     const long long int n_neighbors)
 {
     long long int i1 = blockDim.x * blockIdx.x + threadIdx.x;
@@ -91,8 +89,8 @@ void computeDistances_inner(const float* pca,
         long long int i2 = static_cast<long long>(pairs[i1 * n_neighbors + j]);
         float dist = 0.0f;
 
-        for (long long int d = 0; d < n_pcs; d++) {
-            dist += pca[i1 * n_pcs + d] * pca[i2 * n_pcs + d];
+        for (long long int d = 0; d < n_features; d++) {
+            dist += data[i1 * n_features + d] * data[i2 * n_features + d];
 
         }
         out[i1 * n_neighbors + j] =  dist;
@@ -101,8 +99,7 @@ void computeDistances_inner(const float* pca,
 }
 """
 
-# Create the RawKernel object
 calc_distance_kernel_inner = cp.RawKernel(
     code=kernel_code_inner,
-    name="computeDistances_inner",  # name must match function name in code
+    name="computeDistances_inner",
 )

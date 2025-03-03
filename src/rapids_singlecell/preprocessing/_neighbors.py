@@ -216,7 +216,7 @@ def _nn_descent_knn(
         dataset=X,
     )
     neighbors = cp.array(idx.graph).astype(cp.uint32)
-    if metric == "euclidean":
+    if metric == "euclidean" or metric == "sqeuclidean":
         from ._kernels._nn_descent import calc_distance_kernel as dist_func
     elif metric == "cosine":
         from ._kernels._nn_descent import calc_distance_kernel_cos as dist_func
