@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 import cupy as cp
 import numpy as np
@@ -21,7 +21,9 @@ if TYPE_CHECKING:
     from anndata import AnnData
 
 AnyRandom = None | int | np.random.RandomState
-_Alogithms = Literal["brute", "ivfflat", "ivfpq", "cagra"]
+
+_Algorithms_bbknn = Literal["brute", "cagra", "ivfflat", "ivfpq"]
+_Algorithms = Literal["brute", "cagra", "ivfflat", "ivfpq", "nn_descent"]
 _MetricsDense = Literal[
     "l2",
     "chebyshev",
@@ -107,34 +109,28 @@ def _cagra_knn(
         build_kwargs = {}
         search_kwargs = {}
 
-    build_params = cagra.IndexParams(metric="sqeuclidean", build_algo="nn_descent")
+    if metric == "euclidean":
+        metric_to_use = "sqeuclidean"
+    else:
+        metric_to_use = metric
+    build_params = cagra.IndexParams(
+        metric=metric_to_use, graph_degree=k, build_algo="nn_descent"
+    )
     index = cagra.build(build_params, X, **build_kwargs)
 
-    n_samples = Y.shape[0]
-    all_neighbors = cp.zeros((n_samples, k), dtype=cp.int32)
-    all_distances = cp.zeros((n_samples, k), dtype=cp.float32)
-
-    batchsize = 65000
-    n_batches = math.ceil(n_samples / batchsize)
-    for batch in range(n_batches):
-        start_idx = batch * batchsize
-        stop_idx = min((batch + 1) * batchsize, n_samples)
-        batch_Y = Y[start_idx:stop_idx, :]
-
-        search_params = cagra.SearchParams()
-        distances, neighbors = cagra.search(
-            search_params, index, batch_Y, k, **search_kwargs
-        )
-        all_neighbors[start_idx:stop_idx, :] = cp.asarray(neighbors)
-        all_distances[start_idx:stop_idx, :] = cp.asarray(distances)
+    search_params = cagra.SearchParams()
+    distances, neighbors = cagra.search(search_params, index, Y, k, **search_kwargs)
 
     if resources is not None:
         resources.sync()
 
-    if metric == "euclidean":
-        all_distances = cp.sqrt(all_distances)
+    neighbors = cp.asarray(neighbors)
+    distances = cp.asarray(distances)
 
-    return all_neighbors, all_distances
+    if metric == "euclidean":
+        distances = cp.sqrt(distances)
+
+    return neighbors, distances
 
 
 def _ivf_flat_knn(
@@ -200,17 +196,66 @@ def _ivf_pq_knn(
     return neighbors, distances
 
 
+def _nn_descent_knn(
+    X: cp.ndarray, Y: cp.ndarray, k: int, metric: _Metrics, metric_kwds: Mapping
+) -> tuple[cp.ndarray, cp.ndarray]:
+    from cuvs import __version__ as cuvs_version
+
+    if parse_version(cuvs_version) <= parse_version("24.12"):
+        raise ValueError(
+            "The 'nn_descent' algorithm is only available in cuvs >= 25.02. "
+            "Please update your cuvs installation."
+        )
+    from cuvs.neighbors import nn_descent
+
+    idxparams = nn_descent.IndexParams(
+        graph_degree=k, metric="sqeuclidean" if metric == "euclidean" else metric
+    )
+    idx = nn_descent.build(
+        idxparams,
+        dataset=X,
+    )
+    neighbors = cp.array(idx.graph).astype(cp.uint32)
+    if metric == "euclidean" or metric == "sqeuclidean":
+        from ._kernels._nn_descent import calc_distance_kernel as dist_func
+    elif metric == "cosine":
+        from ._kernels._nn_descent import calc_distance_kernel_cos as dist_func
+    elif metric == "inner_product":
+        from ._kernels._nn_descent import calc_distance_kernel_inner as dist_func
+    grid_size = (X.shape[0] + 32 - 1) // 32
+    distances = cp.zeros((X.shape[0], neighbors.shape[1]), dtype=cp.float32)
+
+    dist_func(
+        (grid_size,),
+        (32,),
+        (X, distances, neighbors, X.shape[0], X.shape[1], neighbors.shape[1]),
+    )
+    if metric == "euclidean":
+        distances = cp.sqrt(distances)
+    if metric in ("cosine", "euclidean", "sqeuclidean"):
+        # Add self-neighbors and self-distances for distance metrics.
+        # This is not needed for inner_product, as it is a similarity metric.
+        add_self_neighbors = cp.arange(X.shape[0], dtype=cp.uint32)
+        neighbors = cp.concatenate(
+            (add_self_neighbors[:, None], neighbors[:, :-1]), axis=1
+        )
+        add_self_distances = cp.zeros((X.shape[0], 1), dtype=cp.float32)
+        distances = cp.concatenate((add_self_distances, distances[:, :-1]), axis=1)
+    return neighbors, distances
+
+
 KNN_ALGORITHMS = {
     "brute": _brute_knn,
     "cagra": _cagra_knn,
     "ivfflat": _ivf_flat_knn,
     "ivfpq": _ivf_pq_knn,
+    "nn_descent": _nn_descent_knn,
 }
 
 
 def _check_neighbors_X(
     X: cp_sparse.spmatrix | sc_sparse.spmatrix | np.ndarray | cp.ndarray,
-    algorithm: _Alogithms,
+    algorithm: _Algorithms,
 ) -> cp_sparse.spmatrix | cp.ndarray:
     """Check and convert input X to the expected format based on algorithm.
 
@@ -244,7 +289,7 @@ def _check_neighbors_X(
     return X_contiguous
 
 
-def _check_metrics(algorithm: _Alogithms, metric: _Metrics) -> bool:
+def _check_metrics(algorithm: _Algorithms, metric: _Metrics) -> bool:
     """Check if the provided metric is compatible with the chosen algorithm.
 
     Parameters
@@ -261,14 +306,19 @@ def _check_metrics(algorithm: _Alogithms, metric: _Metrics) -> bool:
         # 'brute' support all metrics, no need to check further.
         return True
     elif algorithm == "cagra":
-        if metric not in ["euclidean", "sqeuclidean"]:
+        if metric not in ["euclidean", "sqeuclidean", "inner_product"]:
             raise ValueError(
-                "cagra only supports 'euclidean' and 'sqeuclidean' metrics."
+                "cagra only supports 'euclidean', 'inner_product' and 'sqeuclidean' metrics."
             )
     elif algorithm in ["ivfpq", "ivfflat"]:
         if metric not in ["euclidean", "sqeuclidean", "inner_product"]:
             raise ValueError(
                 f"{algorithm} only supports 'euclidean', 'sqeuclidean', and 'inner_product' metrics."
+            )
+    elif algorithm == "nn_descent":
+        if metric not in ["euclidean", "sqeuclidean", "cosine", "inner_product"]:
+            raise ValueError(
+                "nn_descent only supports 'euclidean', 'sqeuclidean', 'inner_product' and 'cosine' metrics."
             )
     else:
         raise NotImplementedError(f"The {algorithm} algorithm is not implemented yet.")
@@ -335,7 +385,7 @@ def neighbors(
     *,
     use_rep: str | None = None,
     random_state: AnyRandom = 0,
-    algorithm: _Alogithms = "brute",
+    algorithm: _Algorithms = "brute",
     metric: _Metrics = "euclidean",
     metric_kwds: Mapping[str, Any] = MappingProxyType({}),
     key_added: str | None = None,
@@ -376,6 +426,8 @@ def neighbors(
 
             * 'cagra': Employs the Compressed, Accurate Graph-based search to quickly find nearest neighbors by traversing a graph structure.
 
+            * 'nn_descent': Uses the NN-descent algorithm to approximate the k-nearest neighbors.
+
         Please ensure that the chosen algorithm is compatible with your dataset and the specific requirements of your search problem.
     metric
         A known metric's name or a callable that returns a distance.
@@ -407,6 +459,13 @@ def neighbors(
 
     """
     adata = adata.copy() if copy else adata
+
+    if algorithm not in get_args(_Algorithms):
+        raise ValueError(
+            f"Invalid algorithm '{algorithm}' for KNN. "
+            f"Valid options are: {get_args(_Algorithms)}."
+        )
+
     if adata.is_view:
         adata._init_as_actual(adata.copy())
     X = _choose_representation(adata, use_rep=use_rep, n_pcs=n_pcs)
@@ -477,7 +536,7 @@ def bbknn(
     batch_key: str | None = None,
     use_rep: str | None = None,
     random_state: AnyRandom = 0,
-    algorithm: _Alogithms = "brute",
+    algorithm: _Algorithms_bbknn = "brute",
     metric: _Metrics = "euclidean",
     metric_kwds: Mapping[str, Any] = MappingProxyType({}),
     trim: int | None = None,
@@ -564,6 +623,11 @@ def bbknn(
     if batch_key not in adata.obs:
         raise ValueError(f"Batch key '{batch_key}' not present in `adata.obs`.")
 
+    if algorithm not in get_args(_Algorithms_bbknn):
+        raise ValueError(
+            f"Invalid algorithm '{algorithm}' for batch-balanced KNN. "
+            f"Valid options are: {get_args(_Algorithms_bbknn)}."
+        )
     adata = adata.copy() if copy else adata
     if adata.is_view:
         adata._init_as_actual(adata.copy())

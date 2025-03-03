@@ -1,15 +1,19 @@
 Notebooks
 ==========
 
-Sample notebooks
+Sample notebooks for the rapids-singlecell package.
+
+To get the datasets for the notebooks, please use this `notebook <https://github.com/scverse/rapids_singlecell-notebooks/blob/main/00_DO_FIRST.ipynb>`_
+
 
 .. toctree::
    :maxdepth: 1
 
-   notebooks/demo_gpu
-   notebooks/demo_gpu-seuratv3
-   notebooks/demo_gpu-PR
+   notebooks/01_demo_gpu
+   notebooks/02_decoupler
+   notebooks/03_demo_gpu-PR
+   notebooks/04_spatial_autocorr
+   notebooks/05_out-of-core
+   notebooks/06-multi_gpu_show
    notebooks/demo_gpu-seuratv3-brain-1M
-   notebooks/multi_gpu_show
-   notebooks/autocorr_benchmark
    notebooks/ligrec_benchmark
