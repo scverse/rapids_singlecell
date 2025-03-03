@@ -3,7 +3,8 @@ Notebooks
 
 Sample notebooks for the rapids-singlecell package.
 
-To get the datasets for the notebooks, please use this :ref:`notebook <https://github.com/scverse/rapids_singlecell-notebooks/blob/main/00_DO_FIRST.ipynb>`.
+To get the datasets for the notebooks, please use this `notebook <https://github.com/scverse/rapids_singlecell-notebooks/blob/main/00_DO_FIRST.ipynb>`
+
 
 .. toctree::
    :maxdepth: 1
