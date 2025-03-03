@@ -18,7 +18,7 @@ void computeDistances_Cosine(const float* data,
 
     float sum_i1 = 0.0f;
     for (long long int d = 0; d < n_features; d++) {
-        sum_i1 += data[i1 * n_features + d] * data[i1 * n_features + d];
+        sum_i1 += powf(data[i1 * n_features + d], 2);
     }
     for (long long int j = 0; j < n_neighbors; j++){
         long long int i2 = static_cast<long long>(pairs[i1 * n_neighbors + j]);
@@ -27,7 +27,7 @@ void computeDistances_Cosine(const float* data,
         float sum_i2 = 0.0f;
         for (long long int d = 0; d < n_features; d++) {
             dist += data[i1 * n_features + d] * data[i2 * n_features + d];
-            sum_i2 += data[i2 * n_features + d] * data[i2 * n_features + d];
+            sum_i2 += powf(data[i2 * n_features + d], 2);
         }
         out[i1 * n_neighbors + j] = 1-dist/ (sqrtf(sum_i1) * sqrtf(sum_i2));
     }
@@ -58,7 +58,7 @@ void computeDistances(const float* data,
         float dist = 0.0f;
         for (long long int d = 0; d < n_features; d++) {
             float diff = data[i1 * n_features + d] - data[i2 * n_features + d];
-            dist += diff * diff;
+            dist += powf(diff, 2);
         }
         out[i1 * n_neighbors + j] = dist;
     }
