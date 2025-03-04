@@ -32,7 +32,7 @@ connectivities_umap = [
 ]
 
 
-@pytest.mark.parametrize("algo", ["brute", "ivfflat"])
+@pytest.mark.parametrize("algo", ["brute", "ivfflat", "cagra"])
 def test_umap_connectivities_euclidean(algo):
     adata = AnnData(X=X)
     neighbors(adata, n_neighbors=3, algorithm=algo)
@@ -40,10 +40,30 @@ def test_umap_connectivities_euclidean(algo):
     assert np.allclose(adata.obsp["connectivities"].toarray(), connectivities_umap)
 
 
-@pytest.mark.parametrize("algo", ["brute", "ivfflat", "cagra", "ivfpq"])
+@pytest.mark.parametrize("algo", ["brute", "ivfflat", "cagra", "ivfpq", "nn_descent"])
 def test_algo(algo):
     adata = pbmc68k_reduced()
     neighbors(adata, n_neighbors=5, algorithm=algo)
+
+
+@pytest.mark.parametrize("algo", ["nn_descent", "ivfpq"])
+def test_indices_approx_nn(algo):
+    adata = pbmc68k_reduced()
+    brute_data = adata.copy()
+    neighbors(adata, n_neighbors=5, algorithm=algo)
+    neighbors(brute_data, n_neighbors=5, algorithm="brute")
+    counter = 0
+    for (rsc_start, rsc_stop), (b_start, b_stop) in zip(
+        itertools.pairwise(adata.obsp["distances"].indptr),
+        itertools.pairwise(brute_data.obsp["distances"].indptr),
+    ):
+        counter += len(
+            np.intersect1d(
+                adata.obsp["distances"].indices[rsc_start:rsc_stop],
+                brute_data.obsp["distances"].indices[b_start:b_stop],
+            )
+        )
+    assert counter / b_stop > 0.9
 
 
 key = "test"
