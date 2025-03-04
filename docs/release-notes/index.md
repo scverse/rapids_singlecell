@@ -3,6 +3,8 @@
 # Release notes
 
 ## Version 0.12.0
+```{include} /release-notes/0.12.1.md
+```
 ```{include} /release-notes/0.12.0.md
 ```
 
