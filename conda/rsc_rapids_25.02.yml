@@ -5,9 +5,9 @@ channels:
  - conda-forge
  - bioconda
 dependencies:
- - rapids=24.08
- - python=3.11
- - cuda-version=12.5
+ - rapids=25.02
+ - python=3.12
+ - cuda-version=12.8
  - cudnn
  - cutensor
  - cusparselt

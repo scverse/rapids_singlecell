@@ -26,8 +26,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-rapids11 = [ "cupy-cuda11x", "cudf-cu11==24.12.*", "cuml-cu11==24.12.*", "cugraph-cu11==24.12.*", "numba < 0.61.0" ]
-rapids12 = [ "cupy-cuda12x", "cudf-cu12==24.12.*", "cuml-cu12==24.12.*", "cugraph-cu12==24.12.*", "numba < 0.61.0" ]
+rapids11 = [ "cupy-cuda11x", "cudf-cu11==25.02.*", "cuml-cu11==25.02.*", "cugraph-cu11==25.02.*" ]
+rapids12 = [ "cupy-cuda12x", "cudf-cu12==25.02.*", "cuml-cu12==25.02.*", "cugraph-cu12==25.02.*" ]
 doc = [
     "sphinx>=4.5.0",
     "sphinx-copybutton",
