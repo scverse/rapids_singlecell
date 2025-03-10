@@ -12,3 +12,10 @@ AnyRandom = Union[int, np.random.RandomState, None]  # noqa: UP007
 
 ArrayTypes = Union[cp.ndarray, csc_matrix, csr_matrix]  # noqa: UP007
 ArrayTypesDask = Union[cp.ndarray, csc_matrix, csr_matrix, DaskArray]  # noqa: UP007
+
+
+def _get_logger_level(logger):
+    for i in range(15):
+        out = logger.should_log_for(i)
+        if out:
+            return i
