@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 import cuml
+import cuml.internals.logger as logger
 import cupy as cp
 from cuml.manifold.simpl_set import simplicial_set_embedding
 from cuml.manifold.umap import UMAP
@@ -11,6 +12,8 @@ from cupyx.scipy import sparse
 from packaging.version import parse as parse_version
 from scanpy._utils import NeighborsView
 from sklearn.utils import check_random_state
+
+from rapids_singlecell._utils import _get_logger_level
 
 from ._utils import _choose_representation
 
@@ -191,7 +194,7 @@ def umap(
 
         if init_pos == "auto":
             init_pos = "spectral" if n_obs < 1000000 else "random"
-
+        logger_level = _get_logger_level(logger)
         X_umap = simplicial_set_embedding(
             data=cp.array(X),
             graph=sparse.coo_matrix(pre_knn),
@@ -206,6 +209,7 @@ def umap(
             metric=neigh_params.get("metric", "euclidean"),
             metric_kwds=neigh_params.get("metric_kwds", None),
         )
+        logger.set_level(logger_level)
         X_umap = cp.asarray(X_umap).get()
 
     key_obsm, key_uns = ("X_umap", "umap") if key_added is None else [key_added] * 2

@@ -4,6 +4,7 @@ import math
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
+import cuml.internals.logger as logger
 import cupy as cp
 import numpy as np
 import pylibraft
@@ -13,6 +14,7 @@ from packaging.version import parse as parse_version
 from pylibraft.common import DeviceResources
 from scipy import sparse as sc_sparse
 
+from rapids_singlecell._utils import _get_logger_level
 from rapids_singlecell.tools._utils import _choose_representation
 
 if TYPE_CHECKING:
@@ -338,6 +340,7 @@ def _get_connectivities(
     set_op_mix_ratio = 1.0
     local_connectivity = 1.0
     X_conn = cp.empty((n_obs, 1), dtype=np.float32)
+    logger_level = _get_logger_level(logger)
     connectivities = fuzzy_simplicial_set(
         X_conn,
         n_neighbors,
@@ -348,6 +351,7 @@ def _get_connectivities(
         set_op_mix_ratio=set_op_mix_ratio,
         local_connectivity=local_connectivity,
     )
+    logger.set_level(logger_level)
     return connectivities
 
 

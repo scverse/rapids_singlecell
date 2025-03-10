@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import cuml.internals.logger as logger
 from cuml.manifold import TSNE
+
+from rapids_singlecell._utils import _get_logger_level
 
 from ._utils import _choose_representation
 
@@ -83,7 +86,7 @@ def tsne(
     adata = adata.copy() if copy else adata
 
     X = _choose_representation(adata, use_rep=use_rep, n_pcs=n_pcs)
-
+    logger_level = _get_logger_level(logger)
     key_uns, key_obsm = ("tsne", "X_tsne") if key_added is None else [key_added] * 2
     adata.obsm[key_obsm] = TSNE(
         perplexity=perplexity,
@@ -92,6 +95,7 @@ def tsne(
         method=method,
         metric=metric,
     ).fit_transform(X)
+    logger.set_level(logger_level)
     adata.uns[key_uns] = {
         "params": {
             k: v
