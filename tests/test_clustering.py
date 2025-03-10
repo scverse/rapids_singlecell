@@ -51,3 +51,8 @@ def test_clustering_subset(adata_neighbors, key):
         nonzero_cat = cat_counts[cat_counts > 0].index
         common_cat = nonzero_cat.intersection(adata_neighbors.obs[key].cat.categories)
         assert len(common_cat) == 0
+
+
+def test_kmeans_basic(adata_neighbors):
+    rsc.tl.kmeans(adata_neighbors)
+    assert adata_neighbors.obs["kmeans"].nunique() == 8

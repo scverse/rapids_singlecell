@@ -250,7 +250,11 @@ def _initialize_centroids(
     random_state: int = 0,
 ) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, list]:
     kmeans = CumlKMeans(
-        n_clusters=n_clusters, init="k-means||", max_iter=25, random_state=random_state
+        n_clusters=n_clusters,
+        init="k-means||",
+        n_init=1,
+        max_iter=25,
+        random_state=random_state,
     )
     kmeans.fit(Z_norm)
     Y = kmeans.cluster_centers_.astype(Z_norm.dtype)
