@@ -88,6 +88,7 @@ Any transformation of the data matrix that is not a tool. Other than `tools`, pr
 
     tl.louvain
     tl.leiden
+    tl.kmeans
 ```
 
 ### Gene scores, Cell cycle
