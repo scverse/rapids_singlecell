@@ -19,7 +19,7 @@ def co_occurrence(
     adata: AnnData,
     cluster_key: str,
     spatial_key: str = "spatial",
-    interval: int | NDArrayA = 50,
+    interval: int | NDArrayA | NDArrayC = 50,
     copy: bool = False,
 ) -> tuple[NDArrayA, NDArrayA] | None:
     """
