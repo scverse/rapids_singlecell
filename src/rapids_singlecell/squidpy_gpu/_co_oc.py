@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 def co_occurrence(
     adata: AnnData,
     cluster_key: str,
+    *,
     spatial_key: str = "spatial",
     interval: int | NDArrayA | NDArrayC = 50,
     copy: bool = False,
