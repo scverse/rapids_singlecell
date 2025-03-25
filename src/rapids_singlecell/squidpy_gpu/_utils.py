@@ -215,3 +215,8 @@ def _assert_categorical_obs(adata, key):
         raise TypeError(
             f"Expected `adata.obs[{key!r}]` to be `categorical`, found `{infer_dtype(adata.obs[key])}`."
         )
+
+
+def _assert_spatial_basis(adata, key: str) -> None:
+    if key not in adata.obsm:
+        raise KeyError(f"Spatial basis `{key}` not found in `adata.obsm`.")
