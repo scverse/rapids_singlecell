@@ -4,9 +4,9 @@ import cupy as cp
 
 kernel_code = r"""
 extern "C" __global__
-void occur_count_kernel(const float* spatial,
-                        const float* thresholds, const int* label_idx,
-                        int* result, int n, int k, int l_val)
+void occur_count_kernel(const float* __restrict__ spatial,
+                        const float* __restrict__ thresholds, const int* __restrict__ label_idx,
+                        int* __restrict__ result, int n, int k, int l_val)
 {
     // Each block corresponds to a unique point pair (i, j).
 
@@ -47,7 +47,7 @@ occur_count_kernel = cp.RawKernel(kernel_code, "occur_count_kernel")
 
 kernel_code2 = r"""
 extern "C" __global__
-void occur_reduction_kernel(const int* result, float *out, int k, int l_val)
+void occur_reduction_kernel(const int* __restrict__ result, float* __restrict__ out, int k, int l_val)
 {
     // Each block handles one threshold index.
     int r_th = blockIdx.x;  // threshold index
