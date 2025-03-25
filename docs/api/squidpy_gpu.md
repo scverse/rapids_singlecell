@@ -10,5 +10,6 @@
     :toctree: generated
 
     gr.spatial_autocorr
+    gr.co_occurrence
     gr.ligrec
 ```
