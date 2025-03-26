@@ -7,7 +7,11 @@ import numpy as np
 import pytest
 from anndata import AnnData, read_h5ad
 
-from rapids_singlecell.squidpy_gpu._co_oc import _find_min_max, co_occurrence
+from rapids_singlecell.squidpy_gpu._co_oc import (
+    _co_occurrence_helper,
+    _find_min_max,
+    co_occurrence,
+)
 
 
 @pytest.fixture
@@ -62,3 +66,16 @@ def test_co_occurrence_explicit_interval(adata: AnnData, size: int):
         cp.testing.assert_allclose(
             interval, interval_1
         )  # allclose because in the func, we use f32
+
+
+def test_co_occurrence_fast_kernel():
+    n = 100  # number of points
+    k = 5  # number of labels
+    # Generate random data
+    spatial = cp.asarray(np.random.rand(n, 2).astype(np.float32))
+    thresholds = cp.asarray(np.array([0.1, 0.2, 0.3], dtype=np.float32))
+    label_idx = cp.asarray(np.random.randint(0, k, size=n, dtype=np.int32))
+    occ_prob_fast = _co_occurrence_helper(spatial, thresholds, label_idx, fast=True)
+    cp.cuda.Stream.null.synchronize()
+    occ_prob_slow = _co_occurrence_helper(spatial, thresholds, label_idx, fast=False)
+    cp.testing.assert_allclose(occ_prob_fast, occ_prob_slow)
