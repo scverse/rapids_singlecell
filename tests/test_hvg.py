@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 import cupy as cp
@@ -5,10 +7,11 @@ import cupyx as cpx
 import numpy as np
 import pandas as pd
 import pytest
-import rapids_singlecell as rsc
 import scanpy as sc
 from anndata import AnnData
 from scipy.sparse import csr_matrix
+
+import rapids_singlecell as rsc
 
 FILE = Path(__file__).parent / Path("_scripts/seurat_hvg.csv")
 FILE_V3 = Path(__file__).parent / Path("_scripts/seurat_hvg_v3.csv.gz")
@@ -261,8 +264,8 @@ def _check_pearson_hvg_columns(output_df, n_top_genes):
     assert np.nanmax(output_df["highly_variable_rank"].values) <= n_top_genes - 1
 
 
-@pytest.mark.parametrize("clip", [None, np.Inf, 30])
-@pytest.mark.parametrize("theta", [100, np.Inf])
+@pytest.mark.parametrize("clip", [None, np.inf, 30])
+@pytest.mark.parametrize("theta", [100, np.inf])
 @pytest.mark.parametrize("n_top_genes", [100, 200])
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
 @pytest.mark.parametrize("sparse", [True, False])

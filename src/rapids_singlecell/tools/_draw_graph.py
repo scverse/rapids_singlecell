@@ -76,7 +76,7 @@ def draw_graph(
                     init_coords[subset] = group_pos
         else:
             raise ValueError(
-                "Plot PAGA first, so that adata.uns['paga']" "with key 'pos'."
+                "Plot PAGA first, so that adata.uns['paga']with key 'pos'."
             )
 
     else:

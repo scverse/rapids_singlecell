@@ -61,6 +61,7 @@ extern "C" __global__ void check_zero_genes(const int* indices, int* genes, int 
 
 }
 """
+
 _zero_genes_kernel = cp.RawKernel(check_zero_genes, "check_zero_genes")
 
 

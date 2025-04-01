@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Union, get_args
+from typing import (
+    TYPE_CHECKING,
+    Literal,
+    Union,
+    get_args,
+)
 
 import cupy as cp
 import numpy as np
@@ -18,7 +23,7 @@ if TYPE_CHECKING:
     import pandas as pd
     from numpy.typing import NDArray
 
-Array = Union[cp.ndarray, cp_sparse.csc_matrix, cp_sparse.csr_matrix]
+Array = Union[cp.ndarray, cp_sparse.csc_matrix, cp_sparse.csr_matrix]  # noqa: UP007
 AggType = Literal["count_nonzero", "mean", "sum", "var"]
 
 
@@ -331,8 +336,8 @@ def aggregate(
     If `func` only has length 1 or is just an `AggType`, then aggregation data is written to `X`.
     Otherwise, it is written to `layers` or `xxxm` as appropriate for the dimensions of the aggregation data.
 
-    Params
-    ------
+    Parameters
+    ----------
     adata
         :class:`~anndata.AnnData` to be aggregated.
     by

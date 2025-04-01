@@ -5,15 +5,14 @@ channels:
  - conda-forge
  - bioconda
 dependencies:
- - rapids=24.06
- - python=3.11
- - cuda-version=11.8
+ - rapids=25.02
+ - python=3.12
+ - cuda-version=12.8
  - cudnn
  - cutensor
  - cusparselt
  - leidenalg
  - louvain
- - fa2
  - jupyterlab
  - pip
  - pip:

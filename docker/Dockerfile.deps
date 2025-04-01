@@ -1,16 +1,16 @@
-ARG CUDA_VER=11.8.0
+ARG CUDA_VER=12.8.0
 ARG LINUX_VER=ubuntu22.04
 
 FROM nvidia/cuda:${CUDA_VER}-base-${LINUX_VER}
 
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 
-ARG PYTHON_VER=3.11
+ARG PYTHON_VER=3.12
 
 ENV PATH=/opt/conda/bin:$PATH
 ENV PYTHON_VERSION=${PYTHON_VER}
 
-COPY --from=condaforge/miniforge3:24.3.0-0 /opt/conda /opt/conda
+COPY --from=condaforge/miniforge3:24.9.2-0 /opt/conda /opt/conda
 
 COPY rsc_rapids.yml rsc_rapids.yml
 
@@ -36,5 +36,3 @@ set -x
 /opt/conda/bin/python -m pip uninstall -y --no-cache-dir rapids-singlecell
 /opt/conda/bin/python -m pip cache purge
 EOF
-
-ENTRYPOINT ["/opt/conda/bin/ipython"]

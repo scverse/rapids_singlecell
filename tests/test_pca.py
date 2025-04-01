@@ -1,12 +1,15 @@
-import numpy as np
+from __future__ import annotations
+
 import cupy as cp
-from cupyx.scipy import sparse as cusparse
+import numpy as np
 import pytest
-import rapids_singlecell as rsc
-from anndata import AnnData
-from scanpy.datasets import pbmc3k_processed, pbmc3k
-from scipy import sparse
 import scanpy as sc
+from anndata import AnnData
+from cupyx.scipy import sparse as cusparse
+from scanpy.datasets import pbmc3k, pbmc3k_processed
+from scipy import sparse
+
+import rapids_singlecell as rsc
 
 A_list = [
     [0, 0, 7, 0, 0],
@@ -48,6 +51,7 @@ def _pbmc3k_normalized() -> AnnData:
     sc.pp.normalize_total(pbmc)
     sc.pp.highly_variable_genes(pbmc)
     return pbmc
+
 
 def test_pca_transform():
     A = np.array(A_list).astype("float32")
@@ -145,6 +149,7 @@ def test_pca_sparse():
         atol=1e-6,
     )
 
+
 def test_mask_length_error():
     """Check error for n_obs / mask length mismatch."""
     adata = AnnData(np.array(A_list).astype("float32"))
@@ -154,11 +159,14 @@ def test_mask_length_error():
     ):
         rsc.pp.pca(adata, mask_var=mask_var)
 
+
 @pytest.mark.parametrize("float_dtype", [np.float32, np.float64])
-@pytest.mark.parametrize("array_type", ["array", cusparse.csr_matrix, cusparse.csc_matrix])
+@pytest.mark.parametrize(
+    "array_type", ["array", cusparse.csr_matrix, cusparse.csc_matrix]
+)
 def test_mask_var_argument_equivalence(float_dtype, array_type):
     """Test if pca result is equal when given mask as boolarray vs string"""
-    X = cp.random.random((100, 10),dtype=float_dtype)
+    X = cp.random.random((100, 10), dtype=float_dtype)
     if array_type != "array":
         X = array_type(X)
     adata_base = AnnData(X)
@@ -173,7 +181,9 @@ def test_mask_var_argument_equivalence(float_dtype, array_type):
 
     assert cp.allclose(
         adata.X.toarray() if cusparse.issparse(adata.X) else adata.X,
-        adata_w_mask.X.toarray() if cusparse.issparse(adata_w_mask.X) else adata_w_mask.X,
+        adata_w_mask.X.toarray()
+        if cusparse.issparse(adata_w_mask.X)
+        else adata_w_mask.X,
     )
 
 
@@ -194,6 +204,7 @@ def test_mask():
         adata.varm["PCs"][mask_var], adata_masked.varm["PCs"], rtol=1e-11
     )
 
+
 @pytest.mark.parametrize("float_dtype", ["float32", "float64"])
 def test_mask_defaults(float_dtype):
     """
@@ -205,7 +216,7 @@ def test_mask_defaults(float_dtype):
 
     without_var = rsc.pp.pca(adata, copy=True, dtype=float_dtype)
 
-    mask = np.array([True, True,False,True,False])
+    mask = np.array([True, True, False, True, False])
 
     adata.var["highly_variable"] = mask
     with_var = rsc.pp.pca(adata, copy=True, dtype=float_dtype)
@@ -214,6 +225,7 @@ def test_mask_defaults(float_dtype):
     assert not np.array_equal(without_var.obsm["X_pca"], with_var.obsm["X_pca"])
     with_no_mask = rsc.pp.pca(adata, mask_var=None, copy=True, dtype=float_dtype)
     assert np.array_equal(without_var.obsm["X_pca"], with_no_mask.obsm["X_pca"])
+
 
 def test_pca_layer():
     """
@@ -241,9 +253,13 @@ def test_pca_layer():
     np.testing.assert_almost_equal(X_adata.obsm["X_pca"], layer_adata.obsm["X_pca"])
     np.testing.assert_almost_equal(X_adata.varm["PCs"], layer_adata.varm["PCs"])
 
+
 def test_pca_layer_mask():
-    adata = sc.datasets.pbmc3k()[:,1000].copy()
+    adata = sc.datasets.pbmc3k()[:, 1000].copy()
     sc.pp.normalize_total(adata)
     sc.pp.log1p(adata)
-    with pytest.raises(ValueError,match="There are genes with zero expression. Please remove them before running PCA."):
+    with pytest.raises(
+        ValueError,
+        match="There are genes with zero expression. Please remove them before running PCA.",
+    ):
         rsc.pp.pca(adata)

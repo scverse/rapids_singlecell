@@ -2,9 +2,9 @@
 ## Conda
 The easiest way to install *rapids-singlecell* is to use one of the *yaml* file provided in the [conda](https://github.com/scverse/rapids_singlecell/tree/main/conda) folder. These *yaml* files install everything needed to run the example notebooks and get you started.
 ```
-conda env create -f conda/rsc_rapids_24.06.yml
+conda env create -f conda/rsc_rapids_25.02.yml #default CUDA-12.5
 # or
-mamba env create -f conda/rsc_rapids_24.04.yml
+mamba env create -f conda/rsc_rapids_24.12.yml #default CUDA-12.5
 ```
 ## PyPI
 As of version 0.4.0 *rapids-singlecell* is now on PyPI.
@@ -20,6 +20,10 @@ pip install 'rapids-singlecell[rapids12]' --extra-index-url=https://pypi.nvidia.
 
 ```
 It is important to ensure that the CUDA environment is set up correctly so that RAPIDS and Cupy can locate the necessary libraries.
+
+```{note}
+If you are using `python=3.12` with `uv`, you might need to add the `--index-strategy=unsafe-best-match` flag to ensure compatibility.
+```
 
 ## Docker
 

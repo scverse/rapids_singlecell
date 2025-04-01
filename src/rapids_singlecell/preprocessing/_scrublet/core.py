@@ -9,8 +9,9 @@ import pandas as pd
 from anndata import AnnData, concat
 from cuml.neighbors import NearestNeighbors
 from cupyx.scipy import sparse
-from scanpy._utils import get_random_state
 from scanpy.preprocessing._utils import sample_comb
+
+from rapids_singlecell.preprocessing._utils import get_random_state
 
 from .sparse_utils import subsample_counts
 
@@ -227,8 +228,8 @@ class Scrublet:
 
         pair_ix = sample_comb((n_obs, n_obs), n_sim, random_state=self._random_state)
 
-        E1 = cast(sparse.csc_matrix, self._counts_obs[pair_ix[:, 0], :])
-        E2 = cast(sparse.csc_matrix, self._counts_obs[pair_ix[:, 1], :])
+        E1 = cast("sparse.csc_matrix", self._counts_obs[pair_ix[:, 0], :])
+        E2 = cast("sparse.csc_matrix", self._counts_obs[pair_ix[:, 1], :])
         tots1 = self._total_counts_obs[pair_ix[:, 0]]
         tots2 = self._total_counts_obs[pair_ix[:, 1]]
         if synthetic_doublet_umi_subsampling < 1:
@@ -435,7 +436,7 @@ class Scrublet:
             from skimage.filters import threshold_minimum
 
             try:
-                threshold = cast(float, threshold_minimum(self.doublet_scores_sim_))
+                threshold = cast("float", threshold_minimum(self.doublet_scores_sim_))
                 if verbose:
                     print(
                         f"Automatically set threshold at doublet score = {threshold:.2f}"

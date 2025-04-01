@@ -4,26 +4,30 @@ import cupy as cp
 import numpy as np
 import pandas as pd
 from anndata import AnnData
-from decoupler.pre import extract, filt_min_n, get_net_mat, match, rename_net
+from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
 from scipy.sparse import csr_matrix
-from tqdm import tqdm
+from tqdm.auto import tqdm
+
+from rapids_singlecell.preprocessing._utils import _sparse_to_dense
+
+from ._pre import extract, filt_min_n, get_net_mat, match, rename_net
 
 
 def run_perm(mat, net, idxs, times, seed):
-    mat = cp.array(mat)
-    mat = cp.ascontiguousarray(mat)
-    net = cp.array(net)
     estimate = mat.dot(net)
     cp.random.seed(seed)
     # Init null distribution
-    null_dst = cp.zeros((mat.shape[0], net.shape[1], times), dtype=np.float32)
     pvals = cp.zeros((mat.shape[0], net.shape[1]), dtype=np.float32)
-
+    abs_estimate = cp.abs(estimate)
+    sum_permuted = cp.zeros((mat.shape[0], net.shape[1]), dtype=cp.float32)
+    sum_squares_permuted = cp.zeros((mat.shape[0], net.shape[1]), dtype=cp.float32)
     # Permute
     for i in range(times):
         cp.random.shuffle(idxs)
-        null_dst[:, :, i] = mat.dot(net[idxs])
-        pvals += cp.abs(null_dst[:, :, i]) > cp.abs(estimate)
+        permuted = mat.dot(net[idxs])
+        pvals += cp.abs(permuted) > abs_estimate
+        sum_permuted += permuted
+        sum_squares_permuted += permuted**2
 
     # Compute empirical p-value
     pvals = cp.where(pvals == 0.0, 1.0, pvals).astype(np.float32)
@@ -33,8 +37,12 @@ def run_perm(mat, net, idxs, times, seed):
     pvals = pvals * 2
 
     # Compute z-score
-    norm = (estimate - null_dst.mean(axis=2)) / null_dst.std(ddof=1, axis=2)
-
+    mean_permuted = sum_permuted / times
+    variance_permuted = (sum_squares_permuted / times) - (mean_permuted**2) * times / (
+        times - 1
+    )
+    std_permuted = cp.sqrt(variance_permuted)
+    norm = (estimate - mean_permuted) / std_permuted
     # Compute corr score
     corr = (estimate * -cp.log10(pvals)).astype(np.float32)
 
@@ -42,7 +50,6 @@ def run_perm(mat, net, idxs, times, seed):
     norm_return = norm.get()
     corr_return = corr.get()
     pvals_return = pvals.get()
-    del estimate, norm, corr, pvals, mat, null_dst
     return estimate_return, norm_return, corr_return, pvals_return
 
 
@@ -60,16 +67,17 @@ def wsum(mat, net, times, batch_size, seed, verbose):
         idxs = cp.arange(n_features, dtype=np.int64)
     else:
         norm, corr, pvals = None, None, None
-
-    if isinstance(mat, csr_matrix):
+    net = cp.array(net)
+    if isinstance(mat, csr_matrix) or isinstance(mat, cp_csr_matrix):
         n_batches = int(np.ceil(n_samples / batch_size))
         for i in tqdm(range(n_batches), disable=not verbose):
             # Subset batch
             srt, end = i * batch_size, i * batch_size + batch_size
-            tmp = mat[srt:end].toarray()
-
+            if isinstance(mat, csr_matrix):
+                tmp = _sparse_to_dense(cp_csr_matrix(mat[srt:end]))
+            else:
+                tmp = _sparse_to_dense(mat[srt:end])
             # Run WSUM
-
             if times > 1:
                 (
                     estimate[srt:end],
@@ -82,9 +90,11 @@ def wsum(mat, net, times, batch_size, seed, verbose):
     else:
         estimate = mat.dot(net)
         if times > 1:
-            estimate, norm, corr, pvals = run_perm(mat, net, idxs, times, seed)
+            estimate, norm, corr, pvals = run_perm(
+                cp.ascontiguousarray(mat), net, idxs, times, seed
+            )
         else:
-            estimate = mat.dot(net)
+            estimate = cp.array(mat).dot(net)
 
     return estimate, norm, corr, pvals
 
@@ -101,7 +111,9 @@ def run_wsum(
     min_n: int = 5,
     seed: int = 42,
     verbose: bool = False,
-    use_raw: bool = True,
+    use_raw: bool | None = None,
+    layer: str | None = None,
+    pre_load: bool | None = False,
 ) -> tuple | None:
     """
     Weighted sum (WSUM).
@@ -133,7 +145,11 @@ def run_wsum(
         verbose
             Whether to show progress.
         use_raw
-            Use raw attribute of mat if present.
+            Use raw attribute of mat.
+        layer
+            Layer to use in AnnData object.
+        pre_load
+            Whether to pre-load the data into memory. This can be faster for small datasets.
 
     Returns
     -------
@@ -149,7 +165,9 @@ def run_wsum(
                 Obtained p-values. Stored in `.obsm['wsum_pvals']` if `mat` is AnnData.
     """
     # Extract sparse matrix and array of genes
-    m, r, c = extract(mat, use_raw=use_raw, verbose=verbose)
+    m, r, c = extract(
+        mat, use_raw=use_raw, layer=layer, verbose=verbose, pre_load=pre_load
+    )
     # Transform net
     net = rename_net(net, source=source, target=target, weight=weight)
     net = filt_min_n(c, net, min_n=min_n)

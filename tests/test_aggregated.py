@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 import anndata as ad
-import numpy as np
 import cupy as cp
+import numpy as np
 import pandas as pd
 import pytest
+import scanpy as sc
+from anndata.tests.helpers import assert_equal
 from packaging.version import Version
+from scanpy._utils import _resolve_axis
+from scanpy.datasets import pbmc3k_processed
 from scipy.sparse import csr_matrix
 
-import scanpy as sc
-from scanpy._utils import _resolve_axis
-from anndata.tests.helpers import assert_equal
-from scanpy.datasets import pbmc3k_processed
-from _helpers import ARRAY_TYPES_MEM
-
 import rapids_singlecell as rsc
+from rapids_singlecell._testing import ARRAY_TYPES_MEM
 
 
 @pytest.fixture
@@ -125,7 +124,7 @@ def test_aggregate_vs_pandas(metric, array_type):
     )
     expected.index.name = None
     expected.columns.name = None
-    rsc.get.anndata_to_CPU(result,convert_all=True)
+    rsc.get.anndata_to_CPU(result, convert_all=True)
     result_df = result.to_df(layer=metric)
     result_df.index.name = None
     result_df.columns.name = None
@@ -211,11 +210,15 @@ def test_aggregate_axis_specification(axis_name):
     agg_index = rsc.get.aggregate(adata, by=by, func="mean", axis=axis)
     agg_name = rsc.get.aggregate(adata, by=by, func="mean", axis=axis_name)
 
-    cp.testing.assert_array_almost_equal(agg_index.layers["mean"], agg_name.layers["mean"])
+    cp.testing.assert_array_almost_equal(
+        agg_index.layers["mean"], agg_name.layers["mean"]
+    )
 
     if axis_name == "obs":
         agg_unspecified = rsc.get.aggregate(adata, by=by, func="mean")
-        cp.testing.assert_array_almost_equal(agg_name.layers["mean"], agg_unspecified.layers["mean"])
+        cp.testing.assert_array_almost_equal(
+            agg_name.layers["mean"], agg_unspecified.layers["mean"]
+        )
 
 
 @pytest.mark.parametrize(
@@ -323,6 +326,7 @@ def test_aggregate_examples(matrix, df, keys, metrics, expected):
 
     assert_equal(expected, result)
 
+
 def test_factors():
     from itertools import product
 
@@ -343,11 +347,19 @@ def test_sparse_vs_dense():
     adata = pbmc3k_processed().raw.to_adata()
     rsc.get.anndata_to_GPU(adata)
     mask = adata.obs.louvain == "Megakaryocytes"
-    rsc_get = rsc.get.aggregate(adata,by= "louvain", func= ["sum","mean","var","count_nonzero"], mask = mask)
-    rsc_get_sparse = rsc.get.aggregate(adata,by= "louvain", func= ["sum","mean","var","count_nonzero"], mask = mask, return_sparse=True)
+    rsc_get = rsc.get.aggregate(
+        adata, by="louvain", func=["sum", "mean", "var", "count_nonzero"], mask=mask
+    )
+    rsc_get_sparse = rsc.get.aggregate(
+        adata,
+        by="louvain",
+        func=["sum", "mean", "var", "count_nonzero"],
+        mask=mask,
+        return_sparse=True,
+    )
 
     for i in range(4):
-        c = ["sum","mean","var","count_nonzero"][i]
+        c = ["sum", "mean", "var", "count_nonzero"][i]
         a = rsc_get_sparse.layers[c].toarray()
         b = rsc_get.layers[c]
-        cp.testing.assert_allclose(a,b)
+        cp.testing.assert_allclose(a, b)

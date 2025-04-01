@@ -52,6 +52,7 @@ Any transformation of the data matrix that is not a tool. Other than `tools`, pr
    :toctree: generated/
 
    pp.neighbors
+   pp.bbknn
 ```
 
 ## Tools: `tl`
@@ -87,6 +88,17 @@ Any transformation of the data matrix that is not a tool. Other than `tools`, pr
 
     tl.louvain
     tl.leiden
+    tl.kmeans
+```
+
+### Gene scores, Cell cycle
+
+```{eval-rst}
+.. autosummary::
+   :toctree: generated/
+
+    tl.score_genes
+    tl.score_genes_cell_cycle
 ```
 
 ### Marker genes

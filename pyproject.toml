@@ -1,21 +1,20 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+requires = [ "hatchling", "hatch-vcs" ]
 build-backend = "hatchling.build"
 
 [project]
 name = "rapids_singlecell"
 description = "running single cell analysis on Nvidia GPUs"
-requires-python = ">=3.8"
-license = {file = "LICENSE"}
-authors = [{name = "Severin Dicks"}]
-readme = {file = "README.md", content-type="text/markdown"}
-dynamic = ["version"]
+requires-python = ">=3.10, <3.13"
+license = { file = "LICENSE" }
+authors = [ { name = "Severin Dicks" } ]
+readme = { file = "README.md", content-type = "text/markdown" }
+dynamic = [ "version" ]
 
 dependencies = [
     "anndata>=0.10.0",
     "scanpy>=1.10.0",
     "numpy>=1.17.0",
-    "decoupler>=1.3.2",
     "scipy>=1.4",
     "pandas",
     "natsort",
@@ -27,8 +26,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-rapids11 = ["cudf-cu11==24.6.*", "cuml-cu11==24.6.*", "cugraph-cu11==24.6.*"]
-rapids12 = ["cudf-cu12==24.6.*", "cuml-cu12==24.6.*", "cugraph-cu12==24.6.*"]
+rapids11 = [ "cupy-cuda11x", "cudf-cu11==25.02.*", "cuml-cu11==25.02.*", "cugraph-cu11==25.02.*" ]
+rapids12 = [ "cupy-cuda12x", "cudf-cu12==25.02.*", "cuml-cu12==25.02.*", "cugraph-cu12==25.02.*" ]
 doc = [
     "sphinx>=4.5.0",
     "sphinx-copybutton",
@@ -37,12 +36,14 @@ doc = [
     "scanpydoc[typehints,theme]>=0.9.4",
     "readthedocs-sphinx-ext",
     "sphinx_copybutton",
+    "dask",
+    "pytest",
 ]
 test = [
     "pytest",
-    "omnipath",
     "profimp",
-    "scanpy[test]>=1.10.0"
+    "scanpy>=1.10.0",
+    "bbknn",
 ]
 
 [project.urls]
@@ -50,18 +51,17 @@ Documentation = "https://rapids-singlecell.readthedocs.io"
 Source = "https://github.com/scverse/rapids_singlecell"
 
 [tool.ruff]
-src = ["src"]
-exclude = ["tests/"]
+src = [ "src" ]
 line-length = 88
-select = [
-    "F",  # Errors detected by Pyflakes
-    "E",  # Error detected by Pycodestyle
-    "W",  # Warning detected by Pycodestyle
-    "I",  # isort
-    "TID",  # flake8-tidy-imports
-    "C4",  # flake8-comprehensions
-    "BLE",  # flake8-blind-except
-    "UP",  # pyupgrade
+lint.select = [
+    "F",       # Errors detected by Pyflakes
+    "E",       # Error detected by Pycodestyle
+    "W",       # Warning detected by Pycodestyle
+    "I",       # isort
+    "TID",     # flake8-tidy-imports
+    "C4",      # flake8-comprehensions
+    "BLE",     # flake8-blind-except
+    "UP",      # pyupgrade
     "TID251",  # Banned imports
     "RUF100",  # Report unused noqa directives
     "ICN",     # Follow import conventions
@@ -70,7 +70,7 @@ select = [
     "PLR0917", # Ban APIs with too many positional parameters
 ]
 
-ignore = [
+lint.ignore = [
     # line too long -> we accept long comment lines; formatting gets rid of long code lines
     "E501",
     # Do not assign a lambda expression, use a def -> lambda expression assignments are convenient
@@ -81,25 +81,32 @@ ignore = [
     "F403",
 ]
 
-[tool.ruff.per-file-ignores]
-"docs/*" = ["I"]
-"tests/*" = ["D"]
-"*/__init__.py" = ["F401"]
-"src/rapids_singlecell/preprocessing/_harmonypy_gpu.py" = ["PLR0917"]
-"src/rapids_singlecell/decoupler_gpu/_method_mlm.py" = ["PLR0917"]
-"src/rapids_singlecell/decoupler_gpu/_method_wsum.py" = ["PLR0917"]
-
-
+[tool.ruff.lint.per-file-ignores]
+"docs/*" = [ "I" ]
+"tests/*" = [ "D" ]
+"*/__init__.py" = [ "F401" ]
+"src/rapids_singlecell/decoupler_gpu/_method_mlm.py" = [ "PLR0917" ]
+"src/rapids_singlecell/decoupler_gpu/_method_wsum.py" = [ "PLR0917" ]
 [tool.ruff.lint.isort]
-known-first-party = ["rapids_singlecell"]
-required-imports = ["from __future__ import annotations"]
+known-first-party = [ "rapids_singlecell" ]
+required-imports = [ "from __future__ import annotations" ]
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+    "--strict-markers",
+]
+markers = [
+    "gpu: tests that use a GPU (currently unused, but needs to be specified here as we import anndata.tests.helpers, which uses it)",
+]
 
 [tool.hatch.build]
 # exclude big files that don’t need to be installed
 exclude = [
+    "src/rapids_singlecell/_testing.py",
     "tests",
     "docs",
-    "notebooks"
+    "notebooks",
 ]
 [tool.hatch.build.hooks.vcs]
 version-file = "src/rapids_singlecell/_version.py"
@@ -108,7 +115,7 @@ version-file = "src/rapids_singlecell/_version.py"
 source = "vcs"
 
 [tool.hatch.build.targets.wheel]
-packages = ['src/rapids_singlecell']
+packages = [ 'src/rapids_singlecell' ]
 
 [tool.codespell]
 skip = '*.ipynb,*.csv'

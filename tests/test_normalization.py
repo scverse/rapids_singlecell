@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import cupy as cp
 import numpy as np
 import pytest
-import rapids_singlecell as rsc
 from anndata import AnnData
 from cupyx.scipy.sparse import csr_matrix
+
+import rapids_singlecell as rsc
 
 X_total = cp.array([[1, 0], [3, 0], [5, 6]], dtype=np.float64)
 
@@ -38,8 +41,8 @@ def test_normalize_total_layers(dtype):
     "sparsity_func", [cp.array, csr_matrix], ids=lambda x: x.__name__
 )
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])
-@pytest.mark.parametrize("theta", [0.01, 1.0, 100, np.Inf])
-@pytest.mark.parametrize("clip", [None, 1.0, np.Inf])
+@pytest.mark.parametrize("theta", [0.01, 1.0, 100, np.inf])
+@pytest.mark.parametrize("clip", [None, 1.0, np.inf])
 def test_normalize_pearson_residuals_values(sparsity_func, dtype, theta, clip):
     # toy data
     X = cp.array([[3, 6], [2, 4], [1, 0]], dtype=dtype)

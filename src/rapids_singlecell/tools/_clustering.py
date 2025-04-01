@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING
 
 import cudf
 import numpy as np
 import pandas as pd
 from natsort import natsorted
-from packaging import version
 from scanpy.tools._utils import _choose_graph
 from scanpy.tools._utils_clustering import rename_groups, restrict_adjacency
 
+from ._utils import _choose_representation
+
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from anndata import AnnData
     from scipy import sparse
 
@@ -41,6 +44,7 @@ def leiden(
     resolution: float = 1.0,
     *,
     random_state: int | None = 0,
+    theta: float = 1.0,
     restrict_to: tuple[str, Sequence[str]] | None = None,
     key_added: str = "leiden",
     adjacency: sparse.spmatrix | None = None,
@@ -70,6 +74,11 @@ def leiden(
 
         random_state
             Change the initialization of the optimization. Defaults to 0.
+
+        theta
+            Called theta in the Leiden algorithm, this is used to scale modularity
+            gain in Leiden refinement phase, to compute the probability of joining
+            a random leiden community.
 
         restrict_to
             Restrict the clustering to the categories within the key for
@@ -128,6 +137,7 @@ def leiden(
         g,
         resolution=resolution,
         random_state=random_state,
+        theta=theta,
         max_iter=n_iterations,
     )
 
@@ -236,7 +246,6 @@ def louvain(
 
     """
     # Adjacency graph
-    from cugraph import __version__ as cuv
     from cugraph import louvain as culouvain
 
     adata = adata.copy() if copy else adata
@@ -254,19 +263,12 @@ def louvain(
     g = _create_graph(adjacency, use_weights)
 
     # Cluster
-    if version.parse(cuv) >= version.parse("23.08.00"):
-        louvain_parts, _ = culouvain(
-            g,
-            resolution=resolution,
-            max_level=n_iterations,
-            threshold=threshold,
-        )
-    else:
-        louvain_parts, _ = culouvain(
-            g,
-            resolution=resolution,
-            max_iter=n_iterations,
-        )
+    louvain_parts, _ = culouvain(
+        g,
+        resolution=resolution,
+        max_level=n_iterations,
+        threshold=threshold,
+    )
 
     # Format output
     groups = (
@@ -303,33 +305,57 @@ def louvain(
 def kmeans(
     adata: AnnData,
     n_clusters: int = 8,
+    n_pcs: int = 50,
     *,
-    key_added: str = "kmeans",
+    use_rep: str = "X_pca",
+    n_init: int = 1,
     random_state: float = 42,
+    key_added: str = "kmeans",
+    copy: bool = False,
+    **kwargs,
 ) -> None:
     """
-    KMeans is a basic but powerful clustering method which is optimized via Expectation Maximization.
+    KMeans is a basic but powerful clustering method which is optimized via Expectation Maximization. It randomly selects K data points in X, and computes which samples are close to these points. For every cluster of points, a mean is computed (hence the name), and this becomes the new centroid.
 
     Parameters
     ----------
-        adata: adata object with `.obsm['X_pca']`
-
-        n_clusters: int (default:8)
+        adata
+            Annotated data matrix.
+        n_clusters
             Number of clusters to compute
-
+        n_pcs
+            Use this many PCs. If `n_pcs==0` use `.X` if `use_rep is None`.
+        use_rep
+            Use the indicated representation. `'X'` or any key for `.obsm` is valid.
+            If None, the representation is chosen automatically: For .n_vars < 50, .X
+            is used, otherwise `'X_pca'` is used. If `'X_pca'` is not present, it's
+            computed with default parameters or `n_pcs` if present.
+        n_init
+            Number of initializations to run the KMeans algorithm
         random_state: float (default: 42)
             if you want results to be the same when you restart Python, select a
             state.
+        key_added
+            `adata.obs` key under which to add the cluster labels.
+        copy
+            Whether to copy `adata` or modify it in place.
+        **kwargs
+            Additional keyword arguments for KMeans.
 
     """
     from cuml.cluster import KMeans
 
-    kmeans_out = KMeans(n_clusters=n_clusters, random_state=random_state).fit(
-        adata.obsm["X_pca"]
-    )
-    groups = kmeans_out.labels_.astype(str)
+    adata = adata.copy() if copy else adata
+    X = _choose_representation(adata, use_rep=use_rep, n_pcs=n_pcs)
+
+    kmeans_out = KMeans(
+        n_clusters=n_clusters, n_init=n_init, random_state=random_state, **kwargs
+    ).fit(X)
+    groups = kmeans_out.labels_
 
     adata.obs[key_added] = pd.Categorical(
         values=groups.astype("U"),
         categories=natsorted(map(str, np.unique(groups))),
     )
+
+    return adata if copy else None
