@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from typing import TYPE_CHECKING
 
 import cupy as cp
@@ -9,9 +8,10 @@ from cuml.metrics import pairwise_distances
 
 from ._utils import _assert_categorical_obs, _assert_spatial_basis
 from .kernels._co_oc import (
-    occur_count_kernel,
-    occur_count_kernel2,
-    occur_count_kernel_fast,
+    occur_count_kernel_pairwise,
+    occur_count_kernel_pairwise_fast,
+    occur_reduction_kernel_global,
+    occur_reduction_kernel_shared,
 )
 
 if TYPE_CHECKING:
@@ -99,6 +99,26 @@ def _find_min_max(spatial: NDArrayC) -> tuple[float, float]:
     return thres_min.astype(np.float32), thres_max.astype(np.float32)
 
 
+def calculate_optimal_k(target_occupancy=0.4):
+    props = cp.cuda.runtime.getDeviceProperties(0)
+
+    # Get key SM properties
+    shared_mem_per_sm = props["sharedMemPerMultiprocessor"]  # bytes
+    max_warps_per_sm = props["maxThreadsPerMultiProcessor"] // 32
+    block_size = 128  # Your current block size
+    warps_per_block = block_size // 32  # 4 warps per block
+
+    # Target blocks per SM based on desired occupancy
+    target_blocks = int(max_warps_per_sm * target_occupancy) // warps_per_block
+
+    # Maximum shared memory per block to achieve target occupancy
+    max_shared_per_block = shared_mem_per_sm // target_blocks
+
+    # Calculate max k value
+    max_k = max_shared_per_block // (block_size * cp.dtype("float32").itemsize)
+    return max_k
+
+
 def _co_occurrence_helper(
     spatial: NDArrayC, v_radium: NDArrayC, labs: NDArrayC, fast: bool = True
 ) -> NDArrayC:
@@ -125,35 +145,57 @@ def _co_occurrence_helper(
     k = len(labs_unique)
     l_val = len(v_radium) - 1
     thresholds = (v_radium[1:]) ** 2
-    shared_mem_size_fast = (k * k * 32) * cp.dtype("float32").itemsize
-    props = cp.cuda.runtime.getDeviceProperties(0)
-    # if the shared memory is enough, use the fast kernel
-    if props["sharedMemPerBlock"] > shared_mem_size_fast and fast:
-        counts = cp.zeros((l_val, k, k), dtype=cp.int32)
-        grid = (int(math.ceil(n / 32)), l_val)
-        block = (32, 1)
-        occur_count_kernel_fast(
-            grid,
-            block,
-            (spatial, thresholds, labs, counts, n, k, l_val),
-            shared_mem=shared_mem_size_fast,
-        )
-        reader = 1
-    # if the shared memory is not enough, use the slow kernel
-    else:
+    use_fast_kernel = False  # Flag to track which kernel path was taken
+    if fast:
+        # Optimize occupancy vs speed
+        can_use_fast_kernel = calculate_optimal_k(0.4) > k
+        # If shared memory is sufficient, use the fast kernel
+        if can_use_fast_kernel:
+            shared_mem_size_fast = (k * 128) * cp.dtype("float32").itemsize
+            counts = cp.zeros((l_val, k, k), dtype=cp.int32)
+            grid = (n, l_val)
+            block = (128, 1)
+            occur_count_kernel_pairwise_fast(
+                grid,
+                block,
+                (spatial, thresholds, labs, counts, n, k, l_val),
+                shared_mem=shared_mem_size_fast,
+            )
+            reader = 1
+            use_fast_kernel = True
+
+    # Fallback to the standard kernel if fast=False or shared memory was insufficient
+    if not use_fast_kernel:
         counts = cp.zeros((k, k, l_val * 2), dtype=cp.int32)
         grid = (n,)
         block = (32,)
-        occur_count_kernel(
+        occur_count_kernel_pairwise(
             grid, block, (spatial, thresholds, labs, counts, n, k, l_val)
         )
         reader = 0
 
     occ_prob = cp.empty((k, k, l_val), dtype=np.float32)
     shared_mem_size = (k * k + k) * cp.dtype("float32").itemsize
-    grid = (l_val,)
-    block = (32,)
-    occur_count_kernel2(
-        grid, block, (counts, occ_prob, k, l_val, reader), shared_mem=shared_mem_size
-    )
+    props = cp.cuda.runtime.getDeviceProperties(0)
+    if fast and shared_mem_size < props["sharedMemPerBlock"]:
+        grid2 = (l_val,)
+        block2 = (32,)
+        occur_reduction_kernel_shared(
+            grid2,
+            block2,
+            (counts, occ_prob, k, l_val, reader),
+            shared_mem=shared_mem_size,
+        )
+    else:
+        shared_mem_size = (k) * cp.dtype("float32").itemsize
+        grid2 = (l_val,)
+        block2 = (32,)
+        inter_out = cp.zeros((l_val, k, k), dtype=np.float32)
+        occur_reduction_kernel_global(
+            grid2,
+            block2,
+            (counts, inter_out, occ_prob, k, l_val, reader),
+            shared_mem=shared_mem_size,
+        )
+
     return occ_prob
