@@ -68,19 +68,21 @@ void occur_count_kernel_fast(const float* __restrict__ spatial,
 {
     extern __shared__ float shared[];
     float* Y = shared;
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = blockIdx.x;
     int r = blockIdx.y;
-    for (int j = 0; j < k * k ; j++){
-        Y[k * k * threadIdx.x + j] = 0;
+    for (int j = threadIdx.x; j < k * 32 ; j+= blockDim.x){
+        Y[j] = 0;
     }
     __syncthreads();
-    for(int j = i+1; j< n; j++){
+
+
+    for(int j = i+1+ threadIdx.x; j< n; j+= blockDim.x){
         float spx = spatial[i * 2];
-        float spy = spatial[i * 2 + 1];
         float dx = spx - spatial[j * 2];
+        int low = label_idx[i];
+        float spy = spatial[i * 2 + 1];
         float dy = spy - spatial[j * 2 + 1];
         float dist_sq = dx * dx + dy * dy;
-        int low = label_idx[i];
         int high = label_idx[j];
         if (high < low) {
             int tmp = low;
@@ -89,25 +91,24 @@ void occur_count_kernel_fast(const float* __restrict__ spatial,
         }
 
         if (dist_sq <= thresholds[r]) {
-            int index = k * k * threadIdx.x + low * k + high;
+            int index = k * threadIdx.x + high;
             Y[index] += 1;
         }
     }
 
     __syncthreads();
-    for (int bin = threadIdx.x; bin < k * k; bin += blockDim.x) {
-        int blockSum = 0;
-        for (int t = 0; t < blockDim.x; t++) {
-            blockSum += Y[t * (k * k) + bin];
-        }
-        if (blockSum>0) atomicAdd(&result[r*(k*k)+bin], blockSum);
 
+    for (int j = threadIdx.x; j < k; j+= blockDim.x){
+        float sum = 0;
+        for (int t = 0; t < blockDim.x; t++){
+            int index = k * t + j;
+            sum += Y[index];
+        }
+        if (sum>0) atomicAdd(&result[r*(k*k)+i*k+j], sum);
     }
     __syncthreads();
 }
 """
-
-# Compile the kernel.
 occur_count_kernel_fast = cp.RawKernel(kernel_code_fast, "occur_count_kernel_fast")
 
 

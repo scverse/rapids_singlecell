@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from typing import TYPE_CHECKING
 
 import cupy as cp
@@ -27,6 +26,7 @@ def co_occurrence(
     spatial_key: str = "spatial",
     interval: int | NDArrayA | NDArrayC = 50,
     copy: bool = False,
+    fast: bool = True,
 ) -> tuple[NDArrayA, NDArrayA] | None:
     """
     Compute co-occurrence probability of clusters.
@@ -64,7 +64,6 @@ def co_occurrence(
     original_clust = adata.obs[cluster_key]
     clust_map = {v: i for i, v in enumerate(original_clust.cat.categories.values)}
     labs = cp.array([clust_map[c] for c in original_clust], dtype=np.int32)
-    print(labs)
     # create intervals thresholds
     if isinstance(interval, int):
         thresh_min, thresh_max = _find_min_max(spatial)
@@ -126,12 +125,12 @@ def _co_occurrence_helper(
     k = len(labs_unique)
     l_val = len(v_radium) - 1
     thresholds = (v_radium[1:]) ** 2
-    shared_mem_size_fast = (k * k * 32) * cp.dtype("float32").itemsize
+    shared_mem_size_fast = (k * 32) * cp.dtype("float32").itemsize
     props = cp.cuda.runtime.getDeviceProperties(0)
     # if the shared memory is enough, use the fast kernel
     if props["sharedMemPerBlock"] > shared_mem_size_fast and fast:
         counts = cp.zeros((l_val, k, k), dtype=cp.int32)
-        grid = (int(math.ceil(n / 32)), l_val)
+        grid = (n, l_val)
         block = (32, 1)
         occur_count_kernel_fast(
             grid,
