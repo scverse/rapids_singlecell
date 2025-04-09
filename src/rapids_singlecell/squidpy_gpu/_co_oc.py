@@ -75,7 +75,7 @@ def co_occurrence(
             f"Expected interval to be of length `>= 2`, found `{len(interval)}`."
         )
 
-    out = _co_occurrence_helper(spatial, interval, labs)
+    out = _co_occurrence_helper(spatial, interval, labs, fast)
     out, interval = out.get(), interval.get()
     if copy:
         return out, interval
@@ -97,6 +97,19 @@ def _find_min_max(spatial: NDArrayC) -> tuple[float, float]:
         spatial[min_idx, :].reshape(1, -1), spatial[min_idx2, :].reshape(1, -1)
     )[0, 0]
     return thres_min.astype(np.float32), thres_max.astype(np.float32)
+
+
+def _find_blocks(k: int) -> tuple[int, int]:
+    props = cp.cuda.runtime.getDeviceProperties(0)
+    itemsize = cp.dtype("float32").itemsize
+    if props["sharedMemPerBlock"] > itemsize * k * 128:
+        return 128, True
+    elif props["sharedMemPerBlock"] > itemsize * k * 64:
+        return 64, True
+    elif props["sharedMemPerBlock"] > itemsize * k * 32:
+        return 32, True
+    else:
+        return 0, False
 
 
 def _co_occurrence_helper(
@@ -125,35 +138,40 @@ def _co_occurrence_helper(
     k = len(labs_unique)
     l_val = len(v_radium) - 1
     thresholds = (v_radium[1:]) ** 2
-    shared_mem_size_fast = (k * 32) * cp.dtype("float32").itemsize
-    props = cp.cuda.runtime.getDeviceProperties(0)
-    # if the shared memory is enough, use the fast kernel
-    if props["sharedMemPerBlock"] > shared_mem_size_fast and fast:
-        counts = cp.zeros((l_val, k, k), dtype=cp.int32)
-        grid = (n, l_val)
-        block = (32, 1)
-        occur_count_kernel_fast(
-            grid,
-            block,
-            (spatial, thresholds, labs, counts, n, k, l_val),
-            shared_mem=shared_mem_size_fast,
-        )
-        reader = 1
-    # if the shared memory is not enough, use the slow kernel
-    else:
+    use_fast_kernel = False  # Flag to track which kernel path was taken
+
+    if fast:
+        block_size, can_use_fast_kernel = _find_blocks(k)
+        # If shared memory is sufficient, use the fast kernel
+        if can_use_fast_kernel:
+            shared_mem_size_fast = (k * block_size) * cp.dtype("float32").itemsize
+            counts = cp.zeros((l_val, k, k), dtype=cp.int32)
+            grid = (n, l_val)
+            block = (block_size, 1)
+            occur_count_kernel_fast(
+                grid,
+                block,
+                (spatial, thresholds, labs, counts, n, k, l_val),
+                shared_mem=shared_mem_size_fast,
+            )
+            reader = 1
+            use_fast_kernel = True
+
+    # Fallback to the standard kernel if fast=False or shared memory was insufficient
+    if not use_fast_kernel:
         counts = cp.zeros((k, k, l_val * 2), dtype=cp.int32)
         grid = (n,)
         block = (32,)
         occur_count_kernel(
             grid, block, (spatial, thresholds, labs, counts, n, k, l_val)
         )
-        reader = 0
+        reader = 0  # Reader value for the standard kernel path
 
     occ_prob = cp.empty((k, k, l_val), dtype=np.float32)
     shared_mem_size = (k * k + k) * cp.dtype("float32").itemsize
-    grid = (l_val,)
-    block = (32,)
+    grid2 = (l_val,)  # Renamed grid variable for clarity
+    block2 = (32,)  # Renamed block variable for clarity
     occur_count_kernel2(
-        grid, block, (counts, occ_prob, k, l_val, reader), shared_mem=shared_mem_size
+        grid2, block2, (counts, occ_prob, k, l_val, reader), shared_mem=shared_mem_size
     )
     return occ_prob

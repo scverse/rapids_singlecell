@@ -70,32 +70,24 @@ void occur_count_kernel_fast(const float* __restrict__ spatial,
     float* Y = shared;
     int i = blockIdx.x;
     int r = blockIdx.y;
-    for (int j = threadIdx.x; j < k * 32 ; j+= blockDim.x){
+    for (int j = threadIdx.x; j < k * blockDim.x ; j+= blockDim.x){
         Y[j] = 0;
     }
     __syncthreads();
 
-
+    float spx = spatial[i * 2];
+    int low = label_idx[i];
+    float spy = spatial[i * 2 + 1];
     for(int j = i+1+ threadIdx.x; j< n; j+= blockDim.x){
-        float spx = spatial[i * 2];
         float dx = spx - spatial[j * 2];
-        int low = label_idx[i];
-        float spy = spatial[i * 2 + 1];
         float dy = spy - spatial[j * 2 + 1];
         float dist_sq = dx * dx + dy * dy;
         int high = label_idx[j];
-        if (high < low) {
-            int tmp = low;
-            low = high;
-            high = tmp;
-        }
-
         if (dist_sq <= thresholds[r]) {
             int index = k * threadIdx.x + high;
             Y[index] += 1;
         }
     }
-
     __syncthreads();
 
     for (int j = threadIdx.x; j < k; j+= blockDim.x){
@@ -104,7 +96,12 @@ void occur_count_kernel_fast(const float* __restrict__ spatial,
             int index = k * t + j;
             sum += Y[index];
         }
-        if (sum>0) atomicAdd(&result[r*(k*k)+i*k+j], sum);
+        if (low < j){
+            if (sum>0) atomicAdd(&result[r*(k*k)+low*k+j], sum);
+        }
+        else{
+            if (sum>0) atomicAdd(&result[r*(k*k)+j*k+low], sum);
+        }
     }
     __syncthreads();
 }
