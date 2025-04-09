@@ -64,7 +64,6 @@ def co_occurrence(
     original_clust = adata.obs[cluster_key]
     clust_map = {v: i for i, v in enumerate(original_clust.cat.categories.values)}
     labs = cp.array([clust_map[c] for c in original_clust], dtype=np.int32)
-    print(labs)
     # create intervals thresholds
     if isinstance(interval, int):
         thresh_min, thresh_max = _find_min_max(spatial)
