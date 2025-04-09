@@ -8,9 +8,10 @@ from cuml.metrics import pairwise_distances
 
 from ._utils import _assert_categorical_obs, _assert_spatial_basis
 from .kernels._co_oc import (
-    occur_count_kernel,
-    occur_count_kernel2,
-    occur_count_kernel_fast,
+    occur_count_kernel_pairwise,
+    occur_count_kernel_pairwise_fast,
+    occur_reduction_kernel_global,
+    occur_reduction_kernel_shared,
 )
 
 if TYPE_CHECKING:
@@ -26,7 +27,6 @@ def co_occurrence(
     spatial_key: str = "spatial",
     interval: int | NDArrayA | NDArrayC = 50,
     copy: bool = False,
-    fast: bool = True,
 ) -> tuple[NDArrayA, NDArrayA] | None:
     """
     Compute co-occurrence probability of clusters.
@@ -75,7 +75,7 @@ def co_occurrence(
             f"Expected interval to be of length `>= 2`, found `{len(interval)}`."
         )
 
-    out = _co_occurrence_helper(spatial, interval, labs, fast)
+    out = _co_occurrence_helper(spatial, interval, labs)
     out, interval = out.get(), interval.get()
     if copy:
         return out, interval
@@ -148,7 +148,7 @@ def _co_occurrence_helper(
             counts = cp.zeros((l_val, k, k), dtype=cp.int32)
             grid = (n, l_val)
             block = (block_size, 1)
-            occur_count_kernel_fast(
+            occur_count_kernel_pairwise_fast(
                 grid,
                 block,
                 (spatial, thresholds, labs, counts, n, k, l_val),
@@ -162,16 +162,33 @@ def _co_occurrence_helper(
         counts = cp.zeros((k, k, l_val * 2), dtype=cp.int32)
         grid = (n,)
         block = (32,)
-        occur_count_kernel(
+        occur_count_kernel_pairwise(
             grid, block, (spatial, thresholds, labs, counts, n, k, l_val)
         )
         reader = 0  # Reader value for the standard kernel path
 
     occ_prob = cp.empty((k, k, l_val), dtype=np.float32)
     shared_mem_size = (k * k + k) * cp.dtype("float32").itemsize
-    grid2 = (l_val,)  # Renamed grid variable for clarity
-    block2 = (32,)  # Renamed block variable for clarity
-    occur_count_kernel2(
-        grid2, block2, (counts, occ_prob, k, l_val, reader), shared_mem=shared_mem_size
-    )
+    props = cp.cuda.runtime.getDeviceProperties(0)
+    if fast and shared_mem_size > props["sharedMemPerBlock"]:
+        print("using shared memory")
+        grid2 = (l_val,)  # Renamed grid variable for clarity
+        block2 = (32,)  # Renamed block variable for clarity
+        occur_reduction_kernel_shared(
+            grid2,
+            block2,
+            (counts, occ_prob, k, l_val, reader),
+            shared_mem=shared_mem_size,
+        )
+    else:
+        shared_mem_size = (k) * cp.dtype("float32").itemsize
+        grid2 = (l_val,)  # Renamed grid variable for clarity
+        block2 = (32,)  # Renamed block variable for clarity
+        inter_out = cp.zeros((l_val, k, k), dtype=np.float32)
+        occur_reduction_kernel_global(
+            grid2,
+            block2,
+            (counts, inter_out, occ_prob, k, l_val, reader),
+            shared_mem=shared_mem_size,
+        )
     return occ_prob
