@@ -27,7 +27,7 @@ jobs:
     strategy:
       matrix:
         RAPIDS_VER:
-          - 25.02
+          - 25.04
     name: Build Docker images
     runs-on: ubuntu-latest
     permissions:
