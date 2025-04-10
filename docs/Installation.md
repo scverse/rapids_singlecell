@@ -4,8 +4,12 @@ The easiest way to install *rapids-singlecell* is to use one of the *yaml* file 
 ```
 conda env create -f conda/rsc_rapids_25.02.yml #default CUDA-12.5
 # or
-mamba env create -f conda/rsc_rapids_24.12.yml #default CUDA-12.5
+mamba env create -f conda/rsc_rapids_25.04.yml #default CUDA-12.8
 ```
+```{note}
+RAPIDS currently doesn't support `channel_priority: strict`; use `channel_priority: flexible` instead
+```
+
 ## PyPI
 As of version 0.4.0 *rapids-singlecell* is now on PyPI.
 ```
