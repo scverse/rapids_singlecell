@@ -14,7 +14,7 @@ def _get_pen(e: cp.ndarray, o: cp.ndarray, theta: cp.ndarray) -> cp.ndarray:
 
 
 @cp.fuse
-def _calc_R(term: cp.ndarray, dotproduct: cp.ndarray) -> cp.ndarray:
+def _calc_R(term: float, dotproduct: cp.ndarray) -> cp.ndarray:
     return cp.exp(term * (1 - dotproduct))
 
 

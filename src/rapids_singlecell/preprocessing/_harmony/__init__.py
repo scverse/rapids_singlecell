@@ -92,7 +92,7 @@ def harmonize(
     batch_mat: pd.DataFrame,
     batch_key: str | list[str],
     *,
-    n_clusters: int = None,
+    n_clusters: int | None = None,
     max_iter_harmony: int = 10,
     max_iter_clustering: int = 200,
     tol_harmony: float = 1e-4,
@@ -259,14 +259,13 @@ def _initialize_centroids(
     kmeans.fit(Z_norm)
     Y = kmeans.cluster_centers_.astype(Z_norm.dtype)
     Y_norm = _normalize_cp(Y, p=2)
-
     # Initialize R
-    R = _calc_R(-2 / sigma, cp.dot(Z_norm, Y_norm.T))
+    term = cp.float64(-2 / sigma).astype(Z_norm.dtype)
+    R = _calc_R(term, cp.dot(Z_norm, Y_norm.T))
     R = _normalize_cp(R, p=1)
 
     E = cp.dot(Pr_b, cp.sum(R, axis=0, keepdims=True))
     O = cp.dot(Phi.T, R)
-
     objectives_harmony = []
     _compute_objective(
         Y_norm,
@@ -278,7 +277,6 @@ def _initialize_centroids(
         E=E,
         objective_arr=objectives_harmony,
     )
-
     return R, E, O, objectives_harmony
 
 
@@ -308,7 +306,7 @@ def _clustering(
     n_cells = Z_norm.shape[0]
     objectives_clustering = []
     block_size = int(n_cells * block_proportion)
-    term = -2 / sigma
+    term = cp.float64(-2 / sigma).astype(Z_norm.dtype)
     for _ in range(max_iter):
         # Compute Cluster Centroids
         Y = cp.dot(R.T, Z_norm)  # Compute centroids
