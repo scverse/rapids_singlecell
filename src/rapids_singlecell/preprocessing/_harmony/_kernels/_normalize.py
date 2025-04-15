@@ -3,18 +3,18 @@ from __future__ import annotations
 from cuml.common.kernel_utils import cuda_kernel_factory
 
 normalize_kernel_optimized = r"""
-({0} * X, int rows, int cols) {
+({0} * X, long long rows, long long cols) {
     __shared__ {0}  shared[32];  // Shared memory for partial sums (one per thread)
 
-    int row = blockIdx.x;  // One block per row
-    int tid = threadIdx.x;  // Thread index within the block
+    long long row = blockIdx.x;  // One block per row
+    long long tid = threadIdx.x;  // Thread index within the block
 
     // Ensure we're within matrix bounds
     if (row >= rows) return;
 
     // Step 1: Compute partial sums within each thread
     {0}  norm = 0.0;
-    for (int col = tid; col < cols; col += blockDim.x) {
+    for (long long col = tid; col < cols; col += blockDim.x) {
         norm += fabs(X[row * cols + col]);// Manhattan norm
 
     }
@@ -25,7 +25,7 @@ normalize_kernel_optimized = r"""
 
     // Step 2: Perform shared memory reduction using warp shuffle
     #pragma unroll
-    for (int offset = 16; offset > 0; offset /= 2) {
+    for (long long offset = 16; offset > 0; offset /= 2) {
         shared[tid] += __shfl_down_sync(0xFFFFFFFF, shared[tid], offset);
     }
     __syncthreads();
@@ -39,7 +39,7 @@ normalize_kernel_optimized = r"""
     __syncthreads();
 
     // Step 3: Normalize the row
-    for (int col = tid; col < cols; col += blockDim.x) {
+    for (long long col = tid; col < cols; col += blockDim.x) {
         X[row * cols + col] *= shared[0];
     }
 }

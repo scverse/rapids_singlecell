@@ -9,6 +9,8 @@ from cuml import KMeans as CumlKMeans
 
 from ._fuses import _calc_R, _get_factor, _get_pen, _log_div_OE, _R_multi_m
 from ._kernels._normalize import _get_normalize_kernel_optimized
+from ._kernels._outer import _get_outer_kernel
+from ._kernels._scatter_add import _get_scatter_add_kernel_optimized
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -39,6 +41,46 @@ def _normalize_cp_p1(X: cp.ndarray) -> cp.ndarray:
     # Launch the kernel
     normalize_p1((grid_dim,), (block_dim,), (X, rows, cols))
     return X
+
+
+def _scatter_add_cp(
+    X: cp.ndarray,
+    out: cp.ndarray,
+    cats: cp.ndarray,
+    switcher: int,
+    bias: cp.ndarray | None = None,
+) -> None:
+    """
+    Scatter add operation for Harmony algorithm.
+    """
+    if bias is None:
+        bias = cp.ones(X.shape[0], dtype=X.dtype)
+    n_cells = X.shape[0]
+    n_pcs = X.shape[1]
+    N = n_cells * n_pcs
+    threads_per_block = 256
+    blocks = (N + threads_per_block - 1) // threads_per_block
+
+    scatter_add_kernel = _get_scatter_add_kernel_optimized(X.dtype)
+    scatter_add_kernel(
+        (blocks,), (256,), (X, cats, n_cells, n_pcs, switcher, out, bias)
+    )
+    # return out
+
+
+def _outer_cp(
+    E: cp.ndarray, Pr_b: cp.ndarray, R_sum: cp.ndarray, switcher: int
+) -> None:
+    n_cats, n_pcs = E.shape
+
+    # Determine the total number of elements to process and configure the grid.
+    N = n_cats * n_pcs
+    threads_per_block = 256
+    blocks = (N + threads_per_block - 1) // threads_per_block
+    outer_kernel = _get_outer_kernel(E.dtype)
+    outer_kernel(
+        (blocks,), (threads_per_block,), (E, Pr_b, R_sum, n_cats, n_pcs, switcher)
+    )
 
 
 def _normalize_cp(X: cp.ndarray, p: int = 2) -> cp.ndarray:
@@ -104,6 +146,7 @@ def harmonize(
     tau: int = 0,
     correction_method: str = "fast",
     random_state: int = 0,
+    use_gemm: bool | None = None,
 ) -> cp.array:
     """
     Integrate data using Harmony algorithm.
@@ -153,6 +196,9 @@ def harmonize(
     correction_method
         Choose which method for the correction step: ``original`` for original method, ``fast`` for improved method. By default, use improved method.
 
+    use_gemm
+        If True, use a One-Hot-Encoding Matrix and GEMM to compute Harmony. If False use a label vector. This is more memory efficient and faster for large datasets with a large number of batches. Defaults to True for less than 30 batches.
+
     random_state
         Random seed for reproducing results.
 
@@ -177,8 +223,16 @@ def harmonize(
     n_batches = batch_codes.cat.categories.size
     N_b = cp.array(batch_codes.value_counts(sort=False).values, dtype=Z.dtype)
     Pr_b = (N_b.reshape(-1, 1) / len(batch_codes)).astype(Z.dtype)
+    print("n_batches", n_batches)
+    if use_gemm is None:
+        use_gemm = n_batches < 30
+    if use_gemm:
+        Phi = _one_hot_tensor_cp(batch_codes).astype(Z.dtype)
+        cats = None
+    else:
+        Phi = None
+        cats = cp.array(batch_codes.cat.codes.values, dtype=cp.int32)
 
-    Phi = _one_hot_tensor_cp(batch_codes).astype(Z.dtype)
     if n_clusters is None:
         n_clusters = int(min(100, n_cells / 30))
     theta = (cp.ones(n_batches) * theta).astype(Z.dtype)
@@ -192,7 +246,9 @@ def harmonize(
         raise ValueError("correction_method must be either 'fast' or 'original'.")
 
     cp.random.seed(random_state)
+    import time
 
+    start = time.time()
     R, E, O, objectives_harmony = _initialize_centroids(
         Z_norm,
         n_clusters=n_clusters,
@@ -201,13 +257,19 @@ def harmonize(
         Phi=Phi,
         theta=theta,
         random_state=random_state,
+        cats=cats,
+        n_batches=n_batches,
     )
+    end = time.time()
+    print(f"Initialization time: {end - start} seconds")
     is_converged = False
-    for _ in range(max_iter_harmony):
+    for t in range(max_iter_harmony):
+        start2 = time.time()
         _clustering(
             Z_norm,
             Pr_b=Pr_b,
             Phi=Phi,
+            cats=cats,
             R=R,
             E=E,
             O=O,
@@ -218,7 +280,9 @@ def harmonize(
             sigma=sigma,
             block_proportion=block_proportion,
         )
-
+        cp.cuda.Stream.null.synchronize()
+        end2 = time.time()
+        print(f"Clustering time: {end2 - start2} seconds")
         Z_hat = _correction(
             Z,
             R=R,
@@ -226,8 +290,13 @@ def harmonize(
             O=O,
             ridge_lambda=ridge_lambda,
             correction_method=correction_method,
+            cats=cats,
+            n_batches=n_batches,
         )
         Z_norm = _normalize_cp(Z_hat, p=2)
+        cp.cuda.Stream.null.synchronize()
+        print("Correction time: ", time.time() - end2)
+        print(f"Harmony iteration {t} time: {time.time() - start2} seconds")
         if _is_convergent_harmony(objectives_harmony, tol=tol_harmony):
             is_converged = True
             break
@@ -245,9 +314,11 @@ def _initialize_centroids(
     n_clusters: int,
     sigma: float,
     Pr_b: cp.ndarray,
-    Phi: cp.ndarray,
+    Phi: cp.ndarray | None,
     theta: cp.ndarray,
     random_state: int = 0,
+    cats: cp.ndarray | None = None,
+    n_batches: int = None,
 ) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, list]:
     kmeans = CumlKMeans(
         n_clusters=n_clusters,
@@ -265,7 +336,11 @@ def _initialize_centroids(
     R = _normalize_cp(R, p=1)
 
     E = cp.dot(Pr_b, cp.sum(R, axis=0, keepdims=True))
-    O = cp.dot(Phi.T, R)
+    if Phi is None:
+        O = cp.zeros((n_batches, R.shape[1]), dtype=Z_norm.dtype)
+        _scatter_add_cp(R, O, cats, 1)
+    else:
+        O = cp.dot(Phi.T, R)
     objectives_harmony = []
     _compute_objective(
         Y_norm,
@@ -284,7 +359,8 @@ def _clustering(
     Z_norm: cp.ndarray,
     *,
     Pr_b: cp.ndarray,
-    Phi: cp.ndarray,
+    Phi: cp.ndarray | None,
+    cats: cp.ndarray | None,
     R: cp.ndarray,
     E: cp.ndarray,
     O: cp.ndarray,
@@ -318,27 +394,27 @@ def _clustering(
         while pos < len(idx_list):
             idx_in = idx_list[pos : (pos + block_size)]
             R_in = R[idx_in]  # Slice rows for R
-            Phi_in = Phi[idx_in]  # Slice rows for Phi
-            # O-=Phi_in.T@R_in
-            cp.cublas.gemm("T", "N", Phi_in, R_in, alpha=-1, beta=1, out=O)
-            # E-=Pr_b@R_in
-            cp.cublas.gemm(
-                "N",
-                "N",
-                Pr_b,
-                cp.sum(R_in, axis=0, keepdims=True),
-                alpha=-1,
-                beta=1,
-                out=E,
-            )
+            # Slice rows for Phi
 
+            # cp.add.at(O, Phi_in, -R_in)
+            if Phi is None:
+                cats_in = cats[idx_in]
+                _scatter_add_cp(R_in, O, cats_in, 0)
+            else:
+                Phi_in = Phi[idx_in]
+                cp.cublas.gemm("T", "N", Phi_in, R_in, alpha=-1, beta=1, out=O)
+            # E-=Pr_b@R_in
+            _outer_cp(E, Pr_b, cp.sum(R_in, axis=0), 0)
             # Update and Normalize R
             R_out = _calc_R(term, cp.dot(Z_norm[idx_in], Y_norm.T))
 
             # Precompute penalty term and apply
             penalty_term = _get_pen(E, O, theta.T)
-            omega = cp.dot(Phi_in, penalty_term)
-            R_out *= omega
+            if Phi is None:
+                R_out *= penalty_term[cats_in]
+            else:
+                omega = cp.dot(Phi_in, penalty_term)
+                R_out *= omega
 
             # Normalize R_out and update R
             R_out = _normalize_cp(R_out, p=1)
@@ -347,18 +423,15 @@ def _clustering(
 
             # Compute O and E with full data using precomputed terms
             # O+=Phi_in.T@R_in
-            cp.cublas.gemm("T", "N", Phi_in, R_out, alpha=1, beta=1, out=O)
+            # cp.add.at(O, Phi_in, R_out)
+            if Phi is None:
+                _scatter_add_cp(R_out, O, cats_in, 1)
+            else:
+                cp.cublas.gemm("T", "N", Phi_in, R_out, alpha=1, beta=1, out=O)
             # E+=Pr_b@R_in
-            cp.cublas.gemm(
-                "N",
-                "N",
-                Pr_b,
-                cp.sum(R_out, axis=0, keepdims=True),
-                alpha=1,
-                beta=1,
-                out=E,
-            )
+            _outer_cp(E, Pr_b, cp.sum(R_in, axis=0), 1)
             pos += block_size
+            # cp.cuda.Stream.null.synchronize()
         _compute_objective(
             Y_norm,
             Z_norm,
@@ -379,46 +452,97 @@ def _correction(
     X: cp.ndarray,
     *,
     R: cp.ndarray,
-    Phi: cp.ndarray,
+    Phi: cp.ndarray | None,
     O: cp.ndarray,
     ridge_lambda: float,
     correction_method: str = "fast",
+    cats: cp.ndarray | None = None,
+    n_batches: int = None,
 ) -> cp.ndarray:
     if correction_method == "fast":
-        return _correction_fast(X, R, Phi, O, ridge_lambda)
+        return _correction_fast(
+            X,
+            R,
+            Phi=Phi,
+            O=O,
+            ridge_lambda=ridge_lambda,
+            cats=cats,
+            n_batches=n_batches,
+        )
     else:
-        return _correction_original(X, R, Phi, ridge_lambda)
+        return _correction_original(
+            X, R, Phi=Phi, ridge_lambda=ridge_lambda, cats=cats, n_batches=n_batches
+        )
 
 
 def _correction_original(
-    X: cp.ndarray, R: cp.ndarray, Phi: cp.ndarray, ridge_lambda: float
+    X: cp.ndarray,
+    R: cp.ndarray,
+    *,
+    Phi: cp.ndarray | None,
+    ridge_lambda: float,
+    cats: cp.ndarray | None = None,
+    n_batches: int = None,
 ) -> cp.ndarray:
     n_cells = X.shape[0]
     n_clusters = R.shape[1]
-    n_batches = Phi.shape[1]
-    Phi_1 = cp.concatenate((cp.ones((n_cells, 1), dtype=X.dtype), Phi), axis=1)
+
+    if Phi is not None:
+        Phi_1 = cp.concatenate((cp.ones((n_cells, 1), dtype=X.dtype), Phi), axis=1)
+        n_batches = Phi.shape[1]
 
     Z = X.copy()
     id_mat = cp.eye(n_batches + 1, n_batches + 1, dtype=X.dtype)
     id_mat[0, 0] = 0
     Lambda = ridge_lambda * id_mat
     for k in range(n_clusters):
-        Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
-        inv_mat = cp.linalg.inv(cp.dot(Phi_t_diag_R, Phi_1) + Lambda)
-        W = cp.dot(inv_mat, cp.dot(Phi_t_diag_R, X))
+        if Phi is not None:
+            Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
+            inv_mat = cp.linalg.inv(cp.dot(Phi_t_diag_R, Phi_1) + Lambda)
+            Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
+            Phi_t_diag_R_X = cp.dot(Phi_t_diag_R, X)
+        else:
+            scatter_sum = cp.zeros(n_batches, dtype=R.dtype)
+            cp.add.at(scatter_sum, cats, R[:, k])
+            top = cp.concatenate(
+                [cp.array([[scatter_sum.sum()]]), scatter_sum.reshape(1, -1)], axis=1
+            )
+            bottom = cp.concatenate(
+                [scatter_sum.reshape(-1, 1), cp.diag(scatter_sum)], axis=1
+            )
+            aggregated_matrix = cp.concatenate([top, bottom], axis=0)
+            inv_mat = cp.linalg.inv(aggregated_matrix + Lambda)
+            Phi_t_diag_R_X = cp.zeros((n_batches, X.shape[1]), dtype=X.dtype)
+            _scatter_add_cp(X, Phi_t_diag_R_X, cats, 1, bias=R[:, k].copy())
+            Phi_t_diag_R_X = cp.concatenate(
+                [Phi_t_diag_R_X.sum(axis=0, keepdims=True), Phi_t_diag_R_X], axis=0
+            )
+        W = cp.dot(inv_mat, Phi_t_diag_R_X)
         W[0, :] = 0
-        Z -= cp.dot(Phi_t_diag_R.T, W)
+        if Phi is not None:
+            Z -= cp.dot(Phi_t_diag_R.T, W)
+        else:
+            Z -= (W[1:][cats] + W[0]) * R[:, k].reshape(-1, 1)
 
     return Z
 
 
 def _correction_fast(
-    X: cp.ndarray, R: cp.ndarray, Phi: cp.ndarray, O: cp.ndarray, ridge_lambda: float
+    X: cp.ndarray,
+    R: cp.ndarray,
+    *,
+    Phi: cp.ndarray | None,
+    O: cp.ndarray,
+    ridge_lambda: float,
+    cats: cp.ndarray | None = None,
+    n_batches: int = None,
 ) -> cp.ndarray:
     n_cells = X.shape[0]
     n_clusters = R.shape[1]
-    n_batches = Phi.shape[1]
-    Phi_1 = cp.concatenate((cp.ones((n_cells, 1), dtype=X.dtype), Phi), axis=1)
+    if Phi is not None:
+        n_batches = Phi.shape[1]
+        Phi_1 = cp.concatenate((cp.ones((n_cells, 1), dtype=X.dtype), Phi), axis=1)
+
     Z = X.copy()
     P = cp.eye(n_batches + 1, n_batches + 1, dtype=X.dtype)
     for k in range(n_clusters):
@@ -440,13 +564,21 @@ def _correction_fast(
         # Set off-diagonal entries
         P_t_B_inv[1:, 0] = P[0, 1:] * c_inv
         inv_mat = cp.dot(P_t_B_inv, P)
-
-        Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
-        W = cp.dot(inv_mat, cp.dot(Phi_t_diag_R, X))
+        if Phi is not None:
+            Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
+            Phi_t_diag_R_X = cp.dot(Phi_t_diag_R, X)
+        else:
+            Phi_t_diag_R_X = cp.zeros((n_batches, X.shape[1]), dtype=X.dtype)
+            _scatter_add_cp(X, Phi_t_diag_R_X, cats, 1, bias=R[:, k].copy())
+            Phi_t_diag_R_X = cp.concatenate(
+                [Phi_t_diag_R_X.sum(axis=0, keepdims=True), Phi_t_diag_R_X], axis=0
+            )
+        W = cp.dot(inv_mat, Phi_t_diag_R_X)
         W[0, :] = 0
-
-        Z -= cp.dot(Phi_t_diag_R.T, W)
-
+        if Phi is not None:
+            Z -= cp.dot(Phi_t_diag_R.T, W)
+        else:
+            Z -= (W[1:][cats] + W[0]) * R[:, k].reshape(-1, 1)
     return Z
 
 
