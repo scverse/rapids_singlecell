@@ -146,7 +146,7 @@ def harmonize(
     tau: int = 0,
     correction_method: str = "fast",
     random_state: int = 0,
-    allow_blas: bool = True,
+    use_gemm: bool | None = None,
 ) -> cp.array:
     """
     Integrate data using Harmony algorithm.
@@ -195,6 +195,9 @@ def harmonize(
 
     correction_method
         Choose which method for the correction step: ``original`` for original method, ``fast`` for improved method. By default, use improved method.
+    
+    use_gemm
+        If True, use a One-Hot-Encoding Matrix and GEMM to compute Harmony. If False use a label vector. This is more memory efficient and faster for large datasets with a large number of batches. Defaults to True for less than 30 batches.
 
     random_state
         Random seed for reproducing results.
@@ -221,7 +224,9 @@ def harmonize(
     N_b = cp.array(batch_codes.value_counts(sort=False).values, dtype=Z.dtype)
     Pr_b = (N_b.reshape(-1, 1) / len(batch_codes)).astype(Z.dtype)
     print("n_batches", n_batches)
-    if allow_blas:
+    if use_gemm is None:
+        use_gemm = n_batches < 30
+    if use_gemm:
         Phi = _one_hot_tensor_cp(batch_codes).astype(Z.dtype)
         cats = None
     else:

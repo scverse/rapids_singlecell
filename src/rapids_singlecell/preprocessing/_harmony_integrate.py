@@ -17,6 +17,7 @@ def harmony_integrate(
     adjusted_basis: str = "X_pca_harmony",
     dtype: type = np.float64,
     correction_method: Literal["fast", "original"] = "original",
+    use_gemm: bool|None = None,
     **kwargs,
 ) -> None:
     """
@@ -47,6 +48,8 @@ def harmony_integrate(
             numerical instability.
         correction_method
             Choose which method for the correction step: ``original`` for original method, ``fast`` for improved method.
+        use_gemm
+            If True, use a One-Hot-Encoding Matrix and GEMM to compute Harmony. If False use a label vector. This is more memory efficient and faster for large datasets with a large number of batches. Defaults to True for more than 30 batches.
         kwargs
             Any additional arguments will be passed to
             ``harmonpy_gpu.run_harmony()``.
@@ -64,7 +67,7 @@ def harmony_integrate(
     if isinstance(X, np.ndarray):
         X = cp.array(X)
     harmony_out = harmonize(
-        X, adata.obs, key, correction_method=correction_method, **kwargs
+        X, adata.obs.copy(), key, correction_method=correction_method, use_gemm=use_gemm, **kwargs
     )
 
     adata.obsm[adjusted_basis] = harmony_out.get()
