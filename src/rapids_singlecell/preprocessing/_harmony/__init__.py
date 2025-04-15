@@ -9,6 +9,7 @@ from cuml import KMeans as CumlKMeans
 
 from ._fuses import _calc_R, _get_factor, _get_pen, _log_div_OE, _R_multi_m
 from ._kernels._normalize import _get_normalize_kernel_optimized
+from ._kernels._outer import _get_outer_kernel
 from ._kernels._scatter_add import _get_scatter_add_kernel_optimized
 
 if TYPE_CHECKING:
@@ -48,7 +49,7 @@ def _scatter_add_cp(
     cats: cp.ndarray,
     switcher: int,
     bias: cp.ndarray | None = None,
-) -> cp.ndarray:
+) -> None:
     """
     Scatter add operation for Harmony algorithm.
     """
@@ -65,6 +66,21 @@ def _scatter_add_cp(
         (blocks,), (256,), (X, cats, n_cells, n_pcs, switcher, out, bias)
     )
     # return out
+
+
+def _outer_cp(
+    E: cp.ndarray, Pr_b: cp.ndarray, R_sum: cp.ndarray, switcher: int
+) -> None:
+    n_cats, n_pcs = E.shape
+
+    # Determine the total number of elements to process and configure the grid.
+    N = n_cats * n_pcs
+    threads_per_block = 256
+    blocks = (N + threads_per_block - 1) // threads_per_block
+    outer_kernel = _get_outer_kernel(E.dtype)
+    outer_kernel(
+        (blocks,), (threads_per_block,), (E, Pr_b, R_sum, n_cats, n_pcs, switcher)
+    )
 
 
 def _normalize_cp(X: cp.ndarray, p: int = 2) -> cp.ndarray:
@@ -383,16 +399,7 @@ def _clustering(
                 Phi_in = Phi[idx_in]
                 cp.cublas.gemm("T", "N", Phi_in, R_in, alpha=-1, beta=1, out=O)
             # E-=Pr_b@R_in
-            cp.cublas.gemm(
-                "N",
-                "N",
-                Pr_b,
-                cp.sum(R_in, axis=0, keepdims=True),
-                alpha=-1,
-                beta=1,
-                out=E,
-            )
-
+            _outer_cp(E, Pr_b, cp.sum(R_in, axis=0), 0)
             # Update and Normalize R
             R_out = _calc_R(term, cp.dot(Z_norm[idx_in], Y_norm.T))
 
@@ -417,15 +424,7 @@ def _clustering(
             else:
                 cp.cublas.gemm("T", "N", Phi_in, R_out, alpha=1, beta=1, out=O)
             # E+=Pr_b@R_in
-            cp.cublas.gemm(
-                "N",
-                "N",
-                Pr_b,
-                cp.sum(R_out, axis=0, keepdims=True),
-                alpha=1,
-                beta=1,
-                out=E,
-            )
+            _outer_cp(E, Pr_b, cp.sum(R_in, axis=0), 1)
             pos += block_size
             # cp.cuda.Stream.null.synchronize()
         _compute_objective(
