@@ -17,7 +17,7 @@ def harmony_integrate(
     adjusted_basis: str = "X_pca_harmony",
     dtype: type = np.float64,
     correction_method: Literal["fast", "original"] = "original",
-    use_gemm: bool|None = None,
+    use_gemm: bool | None = None,
     **kwargs,
 ) -> None:
     """
@@ -67,7 +67,12 @@ def harmony_integrate(
     if isinstance(X, np.ndarray):
         X = cp.array(X)
     harmony_out = harmonize(
-        X, adata.obs.copy(), key, correction_method=correction_method, use_gemm=use_gemm, **kwargs
+        X,
+        adata.obs.copy(),
+        key,
+        correction_method=correction_method,
+        use_gemm=use_gemm,
+        **kwargs,
     )
 
     adata.obsm[adjusted_basis] = harmony_out.get()
