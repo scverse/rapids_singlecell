@@ -64,7 +64,7 @@ def _scatter_add_cp(
     scatter_add_kernel(
         (blocks,), (256,), (X, cats, n_cells, n_pcs, switcher, out, bias)
     )
-    return out
+    # return out
 
 
 def _normalize_cp(X: cp.ndarray, p: int = 2) -> cp.ndarray:
@@ -237,7 +237,7 @@ def harmonize(
         theta=theta,
         random_state=random_state,
         cats=cats,
-        num_cats=n_batches,
+        n_batches=n_batches,
     )
     end = time.time()
     print(f"Initialization time: {end - start} seconds")
@@ -270,7 +270,7 @@ def harmonize(
             ridge_lambda=ridge_lambda,
             correction_method=correction_method,
             cats=cats,
-            num_cats=n_batches,
+            n_batches=n_batches,
         )
         Z_norm = _normalize_cp(Z_hat, p=2)
         cp.cuda.Stream.null.synchronize()
@@ -297,7 +297,7 @@ def _initialize_centroids(
     theta: cp.ndarray,
     random_state: int = 0,
     cats: cp.ndarray | None = None,
-    num_cats: cp.ndarray | None = None,
+    n_batches: int = None,
 ) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, list]:
     kmeans = CumlKMeans(
         n_clusters=n_clusters,
@@ -316,7 +316,7 @@ def _initialize_centroids(
 
     E = cp.dot(Pr_b, cp.sum(R, axis=0, keepdims=True))
     if Phi is None:
-        O = cp.zeros((num_cats, R.shape[1]), dtype=Z_norm.dtype)
+        O = cp.zeros((n_batches, R.shape[1]), dtype=Z_norm.dtype)
         _scatter_add_cp(R, O, cats, 1)
     else:
         O = cp.dot(Phi.T, R)
@@ -453,15 +453,21 @@ def _correction(
     ridge_lambda: float,
     correction_method: str = "fast",
     cats: cp.ndarray | None = None,
-    num_cats: cp.ndarray | None = None,
+    n_batches: int = None,
 ) -> cp.ndarray:
     if correction_method == "fast":
         return _correction_fast(
-            X, R, Phi=Phi, O=O, ridge_lambda=ridge_lambda, cats=cats, num_cats=num_cats
+            X,
+            R,
+            Phi=Phi,
+            O=O,
+            ridge_lambda=ridge_lambda,
+            cats=cats,
+            n_batches=n_batches,
         )
     else:
         return _correction_original(
-            X, R, Phi=Phi, ridge_lambda=ridge_lambda, cats=cats, num_cats=num_cats
+            X, R, Phi=Phi, ridge_lambda=ridge_lambda, cats=cats, n_batches=n_batches
         )
 
 
@@ -472,7 +478,7 @@ def _correction_original(
     Phi: cp.ndarray | None,
     ridge_lambda: float,
     cats: cp.ndarray | None = None,
-    num_cats: int = None,
+    n_batches: int = None,
 ) -> cp.ndarray:
     n_cells = X.shape[0]
     n_clusters = R.shape[1]
@@ -480,8 +486,6 @@ def _correction_original(
     if Phi is not None:
         Phi_1 = cp.concatenate((cp.ones((n_cells, 1), dtype=X.dtype), Phi), axis=1)
         n_batches = Phi.shape[1]
-    else:
-        n_batches = num_cats
 
     Z = X.copy()
     id_mat = cp.eye(n_batches + 1, n_batches + 1, dtype=X.dtype)
@@ -496,17 +500,16 @@ def _correction_original(
         else:
             scatter_sum = cp.zeros(n_batches, dtype=R.dtype)
             cp.add.at(scatter_sum, cats, R[:, k])
-            aggregated_matrix = cp.zeros((n_batches + 1, n_batches + 1), dtype=R.dtype)
-            aggregated_matrix[1:, 0] = scatter_sum
-            aggregated_matrix[0, 1:] = scatter_sum
-            aggregated_matrix[0, 0] = scatter_sum.sum()
-            indices = cp.arange(1, n_batches + 1)
-            aggregated_matrix[indices, indices] = scatter_sum
+            top = cp.concatenate(
+                [cp.array([[scatter_sum.sum()]]), scatter_sum.reshape(1, -1)], axis=1
+            )
+            bottom = cp.concatenate(
+                [scatter_sum.reshape(-1, 1), cp.diag(scatter_sum)], axis=1
+            )
+            aggregated_matrix = cp.concatenate([top, bottom], axis=0)
             inv_mat = cp.linalg.inv(aggregated_matrix + Lambda)
             Phi_t_diag_R_X = cp.zeros((n_batches, X.shape[1]), dtype=X.dtype)
-            Phi_t_diag_R_X = _scatter_add_cp(
-                X, Phi_t_diag_R_X, cats, 1, bias=R[:, k].copy()
-            )
+            _scatter_add_cp(X, Phi_t_diag_R_X, cats, 1, bias=R[:, k].copy())
             Phi_t_diag_R_X = cp.concatenate(
                 [Phi_t_diag_R_X.sum(axis=0, keepdims=True), Phi_t_diag_R_X], axis=0
             )
@@ -528,15 +531,14 @@ def _correction_fast(
     O: cp.ndarray,
     ridge_lambda: float,
     cats: cp.ndarray | None = None,
-    num_cats: int = None,
+    n_batches: int = None,
 ) -> cp.ndarray:
     n_cells = X.shape[0]
     n_clusters = R.shape[1]
     if Phi is not None:
         n_batches = Phi.shape[1]
         Phi_1 = cp.concatenate((cp.ones((n_cells, 1), dtype=X.dtype), Phi), axis=1)
-    else:
-        n_batches = num_cats
+
     Z = X.copy()
     P = cp.eye(n_batches + 1, n_batches + 1, dtype=X.dtype)
     for k in range(n_clusters):
@@ -563,9 +565,7 @@ def _correction_fast(
             Phi_t_diag_R_X = cp.dot(Phi_t_diag_R, X)
         else:
             Phi_t_diag_R_X = cp.zeros((n_batches, X.shape[1]), dtype=X.dtype)
-            Phi_t_diag_R_X = _scatter_add_cp(
-                X, Phi_t_diag_R_X, cats, 1, bias=R[:, k].copy()
-            )
+            _scatter_add_cp(X, Phi_t_diag_R_X, cats, 1, bias=R[:, k].copy())
             Phi_t_diag_R_X = cp.concatenate(
                 [Phi_t_diag_R_X.sum(axis=0, keepdims=True), Phi_t_diag_R_X], axis=0
             )
