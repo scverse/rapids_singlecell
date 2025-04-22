@@ -229,7 +229,7 @@ def harmonize(
         Choose which method for the correction step: ``original`` for original method, ``fast`` for improved method. By default, use improved method.
 
     use_gemm
-        If True, use a One-Hot-Encoding Matrix and GEMM to compute Harmony. If False use a label vector. This is more memory efficient and faster for large datasets with a large number of batches. Defaults to True for less than 30 batches.
+        If True, use a One-Hot-Encoding Matrix and GEMM to compute Harmony. If False use a label vector. A label vector is more memory efficient and faster for large datasets with a large number of batches. Defaults to True for less than 30 batches.
 
     random_state
         Random seed for reproducing results.
