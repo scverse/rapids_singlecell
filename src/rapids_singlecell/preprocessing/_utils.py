@@ -5,8 +5,11 @@ from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
 import numpy as np
+import pandas as pd
 from cuml.internals.memory_utils import with_cupy_rmm
 from cupyx.scipy.sparse import issparse, isspmatrix_csc, isspmatrix_csr, spmatrix
+from natsort import natsorted
+from pandas.api.types import infer_dtype
 
 from rapids_singlecell._compat import DaskArray
 
@@ -44,6 +47,23 @@ def _sparse_to_dense(X: spmatrix, order: Literal["C", "F"] | None = None) -> cp.
         (X.indptr, X.indices, X.data, dense, major, minor, switcher),
     )
     return dense
+
+
+def _sanitize_column(adata: AnnData, column: str):
+    dont_sanitize = adata.is_view or adata.isbacked
+    if infer_dtype(adata.obs[column]) == "string":
+        c = pd.Categorical(adata.obs[column])
+        sorted_categories = natsorted(c.categories)
+        if not np.array_equal(c.categories, sorted_categories):
+            c = c.reorder_categories(sorted_categories)
+        if dont_sanitize:
+            msg = (
+                "Please call `.strings_to_categoricals()` on full "
+                "AnnData, not on this view. You might encounter this"
+                "error message while copying or writing to disk."
+            )
+            raise RuntimeError(msg)
+        adata.obs[column] = c
 
 
 def _mean_var_major(X, major, minor):
