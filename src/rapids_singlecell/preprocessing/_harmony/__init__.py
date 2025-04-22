@@ -10,7 +10,11 @@ from cuml import KMeans as CumlKMeans
 from ._fuses import _calc_R, _get_factor, _get_pen, _log_div_OE, _R_multi_m
 from ._kernels._normalize import _get_normalize_kernel_optimized
 from ._kernels._outer import _get_outer_kernel
-from ._kernels._scatter_add import _get_scatter_add_kernel_optimized
+from ._kernels._scatter_add import (
+    _get_aggregated_matrix_kernel,
+    _get_scatter_add_kernel_optimized,
+    _get_scatter_add_kernel_with_bias,
+)
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -48,13 +52,10 @@ def _scatter_add_cp(
     out: cp.ndarray,
     cats: cp.ndarray,
     switcher: int,
-    bias: cp.ndarray | None = None,
 ) -> None:
     """
     Scatter add operation for Harmony algorithm.
     """
-    if bias is None:
-        bias = cp.ones(X.shape[0], dtype=X.dtype)
     n_cells = X.shape[0]
     n_pcs = X.shape[1]
     N = n_cells * n_pcs
@@ -62,10 +63,26 @@ def _scatter_add_cp(
     blocks = (N + threads_per_block - 1) // threads_per_block
 
     scatter_add_kernel = _get_scatter_add_kernel_optimized(X.dtype)
-    scatter_add_kernel(
-        (blocks,), (256,), (X, cats, n_cells, n_pcs, switcher, out, bias)
-    )
-    # return out
+    scatter_add_kernel((blocks,), (256,), (X, cats, n_cells, n_pcs, switcher, out))
+
+
+def _scatter_add_cp_bias(
+    X: cp.ndarray,
+    out: cp.ndarray,
+    cats: cp.ndarray,
+    bias: cp.ndarray,
+) -> None:
+    """
+    Scatter add operation for Harmony algorithm.
+    """
+    n_cells = X.shape[0]
+    n_pcs = X.shape[1]
+    N = n_cells * n_pcs
+    threads_per_block = 256
+    blocks = (N + threads_per_block - 1) // threads_per_block
+
+    scatter_add_kernel = _get_scatter_add_kernel_with_bias(X.dtype)
+    scatter_add_kernel((blocks,), (256,), (X, cats, n_cells, n_pcs, out, bias))
 
 
 def _outer_cp(
@@ -92,6 +109,21 @@ def _normalize_cp(X: cp.ndarray, p: int = 2) -> cp.ndarray:
 
     else:
         return _normalize_cp_p1(X)
+
+
+def _get_aggregated_matrix(
+    aggregated_matrix: cp.ndarray, sum: cp.ndarray, n_batches: int
+) -> None:
+    """
+    Get the aggregated matrix for the correction step.
+    """
+    aggregated_matrix_kernel = _get_aggregated_matrix_kernel(aggregated_matrix.dtype)
+
+    threads_per_block = 32
+    blocks = (n_batches + 1 + threads_per_block - 1) // threads_per_block
+    aggregated_matrix_kernel(
+        (blocks,), (threads_per_block,), (aggregated_matrix, sum, sum.sum(), n_batches)
+    )
 
 
 def _get_batch_codes(batch_mat: pd.DataFrame, batch_key: str | list[str]) -> pd.Series:
@@ -502,21 +534,15 @@ def _correction_original(
             Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
             Phi_t_diag_R_X = cp.dot(Phi_t_diag_R, X)
         else:
+            R_col = R[:, k].copy()
             scatter_sum = cp.zeros(n_batches, dtype=R.dtype)
-            cp.add.at(scatter_sum, cats, R[:, k])
-            top = cp.concatenate(
-                [cp.array([[scatter_sum.sum()]]), scatter_sum.reshape(1, -1)], axis=1
-            )
-            bottom = cp.concatenate(
-                [scatter_sum.reshape(-1, 1), cp.diag(scatter_sum)], axis=1
-            )
-            aggregated_matrix = cp.concatenate([top, bottom], axis=0)
+            cp.add.at(scatter_sum, cats, R_col)
+            aggregated_matrix = cp.zeros((n_batches + 1, n_batches + 1), dtype=X.dtype)
+            _get_aggregated_matrix(aggregated_matrix, scatter_sum, n_batches=n_batches)
             inv_mat = cp.linalg.inv(aggregated_matrix + Lambda)
-            Phi_t_diag_R_X = cp.zeros((n_batches, X.shape[1]), dtype=X.dtype)
-            _scatter_add_cp(X, Phi_t_diag_R_X, cats, 1, bias=R[:, k].copy())
-            Phi_t_diag_R_X = cp.concatenate(
-                [Phi_t_diag_R_X.sum(axis=0, keepdims=True), Phi_t_diag_R_X], axis=0
-            )
+            Phi_t_diag_R_X = cp.zeros((n_batches + 1, X.shape[1]), dtype=X.dtype)
+            _scatter_add_cp_bias(X, Phi_t_diag_R_X, cats, bias=R_col)
+            # Phi_t_diag_R_X[0] = Phi_t_diag_R_X.sum(axis=0, keepdims=True)
         W = cp.dot(inv_mat, Phi_t_diag_R_X)
         W[0, :] = 0
         if Phi is not None:
@@ -568,11 +594,9 @@ def _correction_fast(
             Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
             Phi_t_diag_R_X = cp.dot(Phi_t_diag_R, X)
         else:
-            Phi_t_diag_R_X = cp.zeros((n_batches, X.shape[1]), dtype=X.dtype)
-            _scatter_add_cp(X, Phi_t_diag_R_X, cats, 1, bias=R[:, k].copy())
-            Phi_t_diag_R_X = cp.concatenate(
-                [Phi_t_diag_R_X.sum(axis=0, keepdims=True), Phi_t_diag_R_X], axis=0
-            )
+            Phi_t_diag_R_X = cp.zeros((n_batches + 1, X.shape[1]), dtype=X.dtype)
+            _scatter_add_cp_bias(X, Phi_t_diag_R_X, cats, bias=R[:, k].copy())
+            # Phi_t_diag_R_X[0] = Phi_t_diag_R_X.sum(axis=0, keepdims=True)
         W = cp.dot(inv_mat, Phi_t_diag_R_X)
         W[0, :] = 0
         if Phi is not None:
