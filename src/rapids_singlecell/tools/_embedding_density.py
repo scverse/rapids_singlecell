@@ -68,7 +68,8 @@ def embedding_density(
     """
     # to ensure that newly created covariates are categorical
     # to test for category numbers
-    _sanitize_column(adata, groupby)
+    if groupby is not None:
+        _sanitize_column(adata, groupby)
     # Test user inputs
     basis = basis.lower()
 
