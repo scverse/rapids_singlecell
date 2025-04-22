@@ -15,7 +15,12 @@ from scanpy.get import _get_obs_rep
 from rapids_singlecell._compat import DaskArray, _meta_dense, _meta_sparse
 
 from ._qc import _basic_qc
-from ._utils import _check_gpu_X, _check_nonnegative_integers, _get_mean_var
+from ._utils import (
+    _check_gpu_X,
+    _check_nonnegative_integers,
+    _get_mean_var,
+    _sanitize_column,
+)
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -48,7 +53,7 @@ def highly_variable_genes(
     clip: bool = None,
     chunksize: int = 1000,
     n_samples: int = 10000,
-    batch_key: str = None,
+    batch_key: str | None = None,
 ) -> None:
     """\
     Annotate highly variable genes.
@@ -147,7 +152,9 @@ def highly_variable_genes(
             `highly_variable_intersection` : bool
                 If batch_key is given, this denotes the genes that are highly variable in all batches
     """
-    adata._sanitize()
+    if batch_key is not None:
+        _sanitize_column(adata, batch_key)
+
     if flavor == "seurat_v3" or flavor == "seurat_v3_paper":
         _highly_variable_genes_seurat_v3(
             adata=adata,
@@ -296,6 +303,7 @@ def _highly_variable_genes_single_batch(
     `highly_variable`, `means`, `dispersions`, and `dispersions_norm`.
     """
     X = _get_obs_rep(adata, layer=layer)
+
     _check_gpu_X(X, allow_dask=True)
     if hasattr(X, "_view_args"):  # AnnData array view
         X = X.copy()
@@ -330,7 +338,6 @@ def _highly_variable_genes_single_batch(
         dispersion_norm=df["dispersions_norm"].to_numpy(),
         cutoff=cutoff,
     )
-
     df.index = adata.var_names
     return df
 
