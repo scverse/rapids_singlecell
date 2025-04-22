@@ -152,6 +152,9 @@ def highly_variable_genes(
             `highly_variable_intersection` : bool
                 If batch_key is given, this denotes the genes that are highly variable in all batches
     """
+    if batch_key is not None:
+        _sanitize_column(adata, batch_key)
+
     if flavor == "seurat_v3" or flavor == "seurat_v3_paper":
         _highly_variable_genes_seurat_v3(
             adata=adata,
@@ -201,7 +204,6 @@ def highly_variable_genes(
                 flavor=flavor,
             )
         else:
-            _sanitize_column(adata, batch_key)
             df = _highly_variable_genes_batched(
                 adata,
                 batch_key,
