@@ -542,7 +542,7 @@ def _correction_original(
             inv_mat = cp.linalg.inv(aggregated_matrix + Lambda)
             Phi_t_diag_R_X = cp.zeros((n_batches + 1, X.shape[1]), dtype=X.dtype)
             _scatter_add_cp_bias(X, Phi_t_diag_R_X, cats, bias=R_col)
-            # Phi_t_diag_R_X[0] = Phi_t_diag_R_X.sum(axis=0, keepdims=True)
+            Phi_t_diag_R_X[0] = Phi_t_diag_R_X.sum(axis=0, keepdims=True)
         W = cp.dot(inv_mat, Phi_t_diag_R_X)
         W[0, :] = 0
         if Phi is not None:
@@ -596,7 +596,7 @@ def _correction_fast(
         else:
             Phi_t_diag_R_X = cp.zeros((n_batches + 1, X.shape[1]), dtype=X.dtype)
             _scatter_add_cp_bias(X, Phi_t_diag_R_X, cats, bias=R[:, k].copy())
-            # Phi_t_diag_R_X[0] = Phi_t_diag_R_X.sum(axis=0, keepdims=True)
+            Phi_t_diag_R_X[0] = Phi_t_diag_R_X.sum(axis=0, keepdims=True)
         W = cp.dot(inv_mat, Phi_t_diag_R_X)
         W[0, :] = 0
         if Phi is not None:

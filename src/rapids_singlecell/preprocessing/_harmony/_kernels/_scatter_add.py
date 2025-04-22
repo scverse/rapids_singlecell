@@ -50,7 +50,6 @@ scatter_add_kernel_with_bias = r"""(const {0}* __restrict__ v,
     long long out_index  = cat * n_pcs + col;
 
     // Perform an atomic add on the output array.
-    atomicAdd(&a[col], v[i]*bias[row]);
     atomicAdd(&a[out_index], v[i]*bias[row]);
 }
 """
