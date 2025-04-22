@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 import cupy as cp
 import numpy as np
 
+from rapids_singlecell.preprocessing._utils import _sanitize_column
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -66,7 +68,7 @@ def embedding_density(
     """
     # to ensure that newly created covariates are categorical
     # to test for category numbers
-    adata._sanitize()
+    _sanitize_column(adata, groupby)
     # Test user inputs
     basis = basis.lower()
 
