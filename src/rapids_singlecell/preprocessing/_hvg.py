@@ -300,10 +300,8 @@ def _highly_variable_genes_single_batch(
     A DataFrame that contains the columns
     `highly_variable`, `means`, `dispersions`, and `dispersions_norm`.
     """
-    import time
-
-    start_time = time.time()
     X = _get_obs_rep(adata, layer=layer)
+
     _check_gpu_X(X, allow_dask=True)
     if hasattr(X, "_view_args"):  # AnnData array view
         X = X.copy()
@@ -316,9 +314,6 @@ def _highly_variable_genes_single_batch(
         import dask
 
         mean, var = dask.compute(mean, var)
-    end_time = time.time()
-    print(f"Time taken to compute mean and var: {end_time - start_time} seconds")
-    start_time2 = time.time()
     mean[mean == 0] = 1e-12
     disp = var / mean
     if flavor == "seurat":  # logarithmized mean as in Seurat
@@ -340,10 +335,6 @@ def _highly_variable_genes_single_batch(
         mean=mean,
         dispersion_norm=df["dispersions_norm"].to_numpy(),
         cutoff=cutoff,
-    )
-    end_time2 = time.time()
-    print(
-        f"Time taken to compute highly variable genes: {end_time2 - start_time2} seconds"
     )
     df.index = adata.var_names
     return df
