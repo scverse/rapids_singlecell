@@ -7,7 +7,14 @@ import cupy as cp
 import numpy as np
 from cuml import KMeans as CumlKMeans
 
-from ._fuses import _calc_R, _get_factor, _get_pen, _log_div_OE, _R_multi_m
+from ._fuses import (
+    _calc_R,
+    _get_factor,
+    _get_pen,
+    _log_div_OE,
+    _R_multi_m,
+    entropy_kernel,
+)
 from ._helper import (
     _create_category_index_mapping,
     _get_aggregated_matrix,
@@ -523,7 +530,8 @@ def _compute_objective(
 ) -> None:
     kmeans_error = cp.sum(_R_multi_m(R, cp.dot(Z_norm, Y_norm.T)))
     R = R / R.sum(axis=1, keepdims=True)
-    entropy = cp.sum(R * cp.log(R + 1e-12))
+    # entropy = cp.sum(R * cp.log(R + 1e-12))
+    entropy = entropy_kernel(R)
     entropy_term = sigma * entropy
     diversity_penalty = sigma * cp.sum(cp.dot(theta, _log_div_OE(O, E)))
     objective = kmeans_error + entropy_term + diversity_penalty
