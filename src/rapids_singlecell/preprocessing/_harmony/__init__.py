@@ -8,157 +8,20 @@ import numpy as np
 from cuml import KMeans as CumlKMeans
 
 from ._fuses import _calc_R, _get_factor, _get_pen, _log_div_OE, _R_multi_m
-from ._kernels._normalize import _get_normalize_kernel_optimized
-from ._kernels._outer import _get_outer_kernel
-from ._kernels._scatter_add import (
-    _get_aggregated_matrix_kernel,
-    _get_scatter_add_kernel_optimized,
-    _get_scatter_add_kernel_with_bias,
+from ._helper import (
+    _create_category_index_mapping,
+    _get_aggregated_matrix,
+    _get_batch_codes,
+    _normalize_cp,
+    _one_hot_tensor_cp,
+    _outer_cp,
+    _scatter_add_cp,
+    _scatter_add_cp_bias_csr,
+    _Z_correction,
 )
 
 if TYPE_CHECKING:
     import pandas as pd
-
-
-def _normalize_cp_p1(X: cp.ndarray) -> cp.ndarray:
-    """
-    Normalize rows of a matrix using an optimized kernel with shared memory and warp shuffle.
-
-    Parameters
-    ----------
-    X
-        Input 2D array.
-
-    Returns
-    -------
-    Row-normalized 2D array.
-    """
-    assert X.ndim == 2, "Input must be a 2D array."
-
-    rows, cols = X.shape
-
-    # Fixed block size of 32
-    block_dim = 32
-    grid_dim = rows  # One block per row
-
-    normalize_p1 = _get_normalize_kernel_optimized(X.dtype)
-    # Launch the kernel
-    normalize_p1((grid_dim,), (block_dim,), (X, rows, cols))
-    return X
-
-
-def _scatter_add_cp(
-    X: cp.ndarray,
-    out: cp.ndarray,
-    cats: cp.ndarray,
-    switcher: int,
-) -> None:
-    """
-    Scatter add operation for Harmony algorithm.
-    """
-    n_cells = X.shape[0]
-    n_pcs = X.shape[1]
-    N = n_cells * n_pcs
-    threads_per_block = 256
-    blocks = (N + threads_per_block - 1) // threads_per_block
-
-    scatter_add_kernel = _get_scatter_add_kernel_optimized(X.dtype)
-    scatter_add_kernel((blocks,), (256,), (X, cats, n_cells, n_pcs, switcher, out))
-
-
-def _scatter_add_cp_bias(
-    X: cp.ndarray,
-    out: cp.ndarray,
-    cats: cp.ndarray,
-    bias: cp.ndarray,
-) -> None:
-    """
-    Scatter add operation for Harmony algorithm.
-    """
-    n_cells = X.shape[0]
-    n_pcs = X.shape[1]
-    N = n_cells * n_pcs
-    threads_per_block = 256
-    blocks = (N + threads_per_block - 1) // threads_per_block
-
-    scatter_add_kernel = _get_scatter_add_kernel_with_bias(X.dtype)
-    scatter_add_kernel((blocks,), (256,), (X, cats, n_cells, n_pcs, out, bias))
-
-
-def _outer_cp(
-    E: cp.ndarray, Pr_b: cp.ndarray, R_sum: cp.ndarray, switcher: int
-) -> None:
-    n_cats, n_pcs = E.shape
-
-    # Determine the total number of elements to process and configure the grid.
-    N = n_cats * n_pcs
-    threads_per_block = 256
-    blocks = (N + threads_per_block - 1) // threads_per_block
-    outer_kernel = _get_outer_kernel(E.dtype)
-    outer_kernel(
-        (blocks,), (threads_per_block,), (E, Pr_b, R_sum, n_cats, n_pcs, switcher)
-    )
-
-
-def _normalize_cp(X: cp.ndarray, p: int = 2) -> cp.ndarray:
-    """
-    Analogous to `torch.nn.functional.normalize` for `axis = 1`, `p` in numpy is known as `ord`.
-    """
-    if p == 2:
-        return X / cp.linalg.norm(X, ord=2, axis=1, keepdims=True).clip(min=1e-12)
-
-    else:
-        return _normalize_cp_p1(X)
-
-
-def _get_aggregated_matrix(
-    aggregated_matrix: cp.ndarray, sum: cp.ndarray, n_batches: int
-) -> None:
-    """
-    Get the aggregated matrix for the correction step.
-    """
-    aggregated_matrix_kernel = _get_aggregated_matrix_kernel(aggregated_matrix.dtype)
-
-    threads_per_block = 32
-    blocks = (n_batches + 1 + threads_per_block - 1) // threads_per_block
-    aggregated_matrix_kernel(
-        (blocks,), (threads_per_block,), (aggregated_matrix, sum, sum.sum(), n_batches)
-    )
-
-
-def _get_batch_codes(batch_mat: pd.DataFrame, batch_key: str | list[str]) -> pd.Series:
-    if type(batch_key) is str:
-        batch_vec = batch_mat[batch_key]
-
-    elif len(batch_key) == 1:
-        batch_key = batch_key[0]
-
-        batch_vec = batch_mat[batch_key]
-
-    else:
-        df = batch_mat[batch_key].astype("str")
-        batch_vec = df.apply(lambda row: ",".join(row), axis=1)
-
-    return batch_vec.astype("category")
-
-
-def _one_hot_tensor_cp(X: pd.Series) -> cp.array:
-    """
-    One-hot encode a categorical series.
-
-    Parameters
-    ----------
-    X
-        Input categorical series.
-    Returns
-    -------
-    One-hot encoded array.
-    """
-    ids = cp.array(X.cat.codes.values.copy(), dtype=cp.int32).reshape(-1)
-    n_col = X.cat.categories.size
-    Phi = cp.eye(n_col)[ids]
-
-    return Phi
 
 
 def harmonize(
@@ -261,9 +124,18 @@ def harmonize(
     if use_gemm:
         Phi = _one_hot_tensor_cp(batch_codes).astype(Z.dtype)
         cats = None
+        cat_offsets = None
+        cell_indices = None
     else:
         Phi = None
         cats = cp.array(batch_codes.cat.codes.values, dtype=cp.int32)
+        import time
+
+        start = time.time()
+        cat_offsets, cell_indices = _create_category_index_mapping(cats, n_batches)
+        cp.cuda.Stream.null.synchronize()
+        end = time.time()
+        print(f"Category index mapping time: {end - start} seconds")
 
     if n_clusters is None:
         n_clusters = int(min(100, n_cells / 30))
@@ -324,6 +196,8 @@ def harmonize(
             correction_method=correction_method,
             cats=cats,
             n_batches=n_batches,
+            cat_offsets=cat_offsets,
+            cell_indices=cell_indices,
         )
         Z_norm = _normalize_cp(Z_hat, p=2)
         cp.cuda.Stream.null.synchronize()
@@ -490,6 +364,8 @@ def _correction(
     correction_method: str = "fast",
     cats: cp.ndarray | None = None,
     n_batches: int = None,
+    cat_offsets: cp.ndarray | None = None,
+    cell_indices: cp.ndarray | None = None,
 ) -> cp.ndarray:
     if correction_method == "fast":
         return _correction_fast(
@@ -500,10 +376,19 @@ def _correction(
             ridge_lambda=ridge_lambda,
             cats=cats,
             n_batches=n_batches,
+            cat_offsets=cat_offsets,
+            cell_indices=cell_indices,
         )
     else:
         return _correction_original(
-            X, R, Phi=Phi, ridge_lambda=ridge_lambda, cats=cats, n_batches=n_batches
+            X,
+            R,
+            Phi=Phi,
+            ridge_lambda=ridge_lambda,
+            cats=cats,
+            n_batches=n_batches,
+            cat_offsets=cat_offsets,
+            cell_indices=cell_indices,
         )
 
 
@@ -515,6 +400,8 @@ def _correction_original(
     ridge_lambda: float,
     cats: cp.ndarray | None = None,
     n_batches: int = None,
+    cat_offsets: cp.ndarray | None = None,
+    cell_indices: cp.ndarray | None = None,
 ) -> cp.ndarray:
     n_cells = X.shape[0]
     n_clusters = R.shape[1]
@@ -527,6 +414,7 @@ def _correction_original(
     id_mat = cp.eye(n_batches + 1, n_batches + 1, dtype=X.dtype)
     id_mat[0, 0] = 0
     Lambda = ridge_lambda * id_mat
+    print("R.shape", R.shape)
     for k in range(n_clusters):
         if Phi is not None:
             Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
@@ -541,15 +429,20 @@ def _correction_original(
             _get_aggregated_matrix(aggregated_matrix, scatter_sum, n_batches=n_batches)
             inv_mat = cp.linalg.inv(aggregated_matrix + Lambda)
             Phi_t_diag_R_X = cp.zeros((n_batches + 1, X.shape[1]), dtype=X.dtype)
-            _scatter_add_cp_bias(X, Phi_t_diag_R_X, cats, bias=R_col)
-            Phi_t_diag_R_X[0] = Phi_t_diag_R_X.sum(axis=0, keepdims=True)
+            _scatter_add_cp_bias_csr(
+                X,
+                Phi_t_diag_R_X,
+                cat_offsets=cat_offsets,
+                cell_indices=cell_indices,
+                bias=R_col,
+                n_batches=n_batches,
+            )
         W = cp.dot(inv_mat, Phi_t_diag_R_X)
         W[0, :] = 0
         if Phi is not None:
             Z -= cp.dot(Phi_t_diag_R.T, W)
         else:
-            Z -= (W[1:][cats] + W[0]) * R[:, k].reshape(-1, 1)
-
+            _Z_correction(Z, W, cats, R_col)
     return Z
 
 
@@ -562,6 +455,8 @@ def _correction_fast(
     ridge_lambda: float,
     cats: cp.ndarray | None = None,
     n_batches: int = None,
+    cat_offsets: cp.ndarray | None = None,
+    cell_indices: cp.ndarray | None = None,
 ) -> cp.ndarray:
     n_cells = X.shape[0]
     n_clusters = R.shape[1]
@@ -594,15 +489,25 @@ def _correction_fast(
             Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
             Phi_t_diag_R_X = cp.dot(Phi_t_diag_R, X)
         else:
+            R_col = R[:, k].copy()
             Phi_t_diag_R_X = cp.zeros((n_batches + 1, X.shape[1]), dtype=X.dtype)
-            _scatter_add_cp_bias(X, Phi_t_diag_R_X, cats, bias=R[:, k].copy())
-            Phi_t_diag_R_X[0] = Phi_t_diag_R_X.sum(axis=0, keepdims=True)
+            _scatter_add_cp_bias_csr(
+                X,
+                Phi_t_diag_R_X,
+                cat_offsets=cat_offsets,
+                cell_indices=cell_indices,
+                bias=R_col,
+                n_batches=n_batches,
+            )
         W = cp.dot(inv_mat, Phi_t_diag_R_X)
         W[0, :] = 0
+
         if Phi is not None:
             Z -= cp.dot(Phi_t_diag_R.T, W)
         else:
-            Z -= (W[1:][cats] + W[0]) * R[:, k].reshape(-1, 1)
+            _Z_correction(Z, W, cats, R_col)
+        cp.cuda.Stream.null.synchronize()
+
     return Z
 
 

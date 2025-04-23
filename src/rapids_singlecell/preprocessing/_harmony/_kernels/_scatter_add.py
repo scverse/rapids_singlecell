@@ -32,35 +32,6 @@ def _get_scatter_add_kernel_optimized(dtype):
     )
 
 
-scatter_add_kernel_with_bias = r"""(const {0}* __restrict__ v,
-                const int* __restrict__ cats,
-                long long n_cells,
-                long long n_pcs,
-                {0}* __restrict__ a,
-                {0}* __restrict__ bias)
-{
-    long long i = blockIdx.x * blockDim.x + threadIdx.x;
-    long long N = n_cells * n_pcs;
-    if (i >= N) return;
-
-    long long row = i / n_pcs;  // which cell (row) in R
-    long long col = i % n_pcs;  // which column (PC) in R
-
-    long long cat = (long long)cats[row]+1;
-    long long out_index  = cat * n_pcs + col;
-
-    // Perform an atomic add on the output array.
-    atomicAdd(&a[out_index], v[i]*bias[row]);
-}
-"""
-
-
-def _get_scatter_add_kernel_with_bias(dtype):
-    return cuda_kernel_factory(
-        scatter_add_kernel_with_bias, (dtype,), "scatter_add_kernel_with_bias"
-    )
-
-
 aggregated_matrix_kernel = r"""({0}* __restrict__ aggregated_matrix,
                 const {0}* __restrict__ sum,
                 {0}* __restrict__ top_corner,
@@ -83,4 +54,67 @@ aggregated_matrix_kernel = r"""({0}* __restrict__ aggregated_matrix,
 def _get_aggregated_matrix_kernel(dtype):
     return cuda_kernel_factory(
         aggregated_matrix_kernel, (dtype,), "aggregated_matrix_kernel"
+    )
+
+
+scatter_add_kernel_with_bias_block = r"""(const {0}* __restrict__ v,
+                const int* __restrict__ cat_offsets,
+                const int* __restrict__ cell_indices,
+                int n_cells,
+                int n_pcs,
+                int n_batches,
+                {0}* __restrict__ a,
+                const {0}* __restrict__ bias)
+{
+    // Each block handles one (category, PC) combination
+    int block_idx = blockIdx.x;
+    int total_blocks = (n_batches+1) * n_pcs;
+
+    if (block_idx >= total_blocks) return;
+
+    // Determine category and PC from block index
+    int cat = block_idx / n_pcs;
+    int pc = block_idx % n_pcs;
+    __shared__ {0} sdata[256];
+
+    // Initialize shared memory
+    sdata[threadIdx.x] = 0.0;
+    // Run the first row of a
+    if(cat == 0){
+        for(int i = threadIdx.x; i < n_cells; i += blockDim.x){
+        long long in_index = static_cast<long long>(i)* n_pcs + pc;
+        sdata[threadIdx.x] += v[in_index] * bias[i];
+        }
+    }
+    // Run the rest of the rows of a
+    else{
+        // Get range of cell indices for this category
+        int start_idx = cat_offsets[cat-1];
+        int end_idx = cat_offsets[cat];
+
+        for (int i = start_idx + threadIdx.x; i < end_idx; i += blockDim.x) {
+            int cell_idx = cell_indices[i];
+            long long in_index = static_cast<long long>(cell_idx)* n_pcs + pc;
+            sdata[threadIdx.x] += v[in_index] * bias[cell_idx];
+        }
+    }
+    __syncthreads();
+
+    #pragma unroll
+    for (int i = 256 / 2; i > 0; i /= 2) {
+        if (threadIdx.x < i) {
+            sdata[threadIdx.x] += sdata[threadIdx.x + i];
+        }
+        __syncthreads();
+    }
+    a[block_idx] =sdata[0];
+}
+"""
+
+
+def _get_scatter_add_kernel_with_bias_block(dtype):
+    return cuda_kernel_factory(
+        scatter_add_kernel_with_bias_block,
+        (dtype,),
+        "scatter_add_kernel_with_bias_block",
     )
