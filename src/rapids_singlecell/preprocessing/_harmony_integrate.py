@@ -17,7 +17,7 @@ def harmony_integrate(
     adjusted_basis: str = "X_pca_harmony",
     dtype: type = np.float64,
     correction_method: Literal["fast", "original"] = "original",
-    use_gemm: bool | None = None,
+    use_gemm: bool = False,
     **kwargs,
 ) -> None:
     """
@@ -49,7 +49,7 @@ def harmony_integrate(
         correction_method
             Choose which method for the correction step: ``original`` for original method, ``fast`` for improved method.
         use_gemm
-            If True, use a One-Hot-Encoding Matrix and GEMM to compute Harmony. If False use a label vector. A label vector is more memory efficient and faster for large datasets with a large number of batches. Defaults to True for more than 30 batches.
+            If True, use a One-Hot-Encoding Matrix and GEMM to compute Harmony. If False use a label vector. A label vector is more memory efficient and faster for large datasets with a large number of batches.
         kwargs
             Any additional arguments will be passed to
             ``harmonpy_gpu.run_harmony()``.
