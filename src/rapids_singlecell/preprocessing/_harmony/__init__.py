@@ -147,7 +147,6 @@ def harmonize(
     if n_clusters is None:
         n_clusters = int(min(100, n_cells / 30))
     theta = (cp.ones(n_batches) * theta).astype(Z.dtype)
-    print("theta", theta)
     if tau > 0:
         theta = theta * (1 - cp.exp(-N_b / (n_clusters * tau)) ** 2)
 

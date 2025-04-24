@@ -4,20 +4,20 @@ from cuml.common.kernel_utils import cuda_kernel_factory
 
 scatter_add_kernel_optimized = r"""(const {0}* __restrict__ v,
                 const int* __restrict__ cats,
-                long long n_cells,
-                long long n_pcs,
-                long long switcher,
+                size_t n_cells,
+                size_t n_pcs,
+                size_t switcher,
                 {0}* __restrict__ a)
 {
-    long long i = blockIdx.x * blockDim.x + threadIdx.x;
-    long long N = n_cells * n_pcs;
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t N = n_cells * n_pcs;
     if (i >= N) return;
 
-    long long row = i / n_pcs;  // which cell (row) in R
-    long long col = i % n_pcs;  // which column (PC) in R
+    size_t row = i / n_pcs;  // which cell (row) in R
+    size_t col = i % n_pcs;  // which column (PC) in R
 
-    long long cat = (long long)cats[row];
-    long long out_index  = cat * n_pcs + col;
+    size_t cat = (size_t)cats[row];
+    size_t out_index  = cat * n_pcs + col;
 
     // Perform an atomic add on the output array.
     if (switcher==0)atomicAdd(&a[out_index], -v[i]);
@@ -78,11 +78,11 @@ scatter_add_kernel_with_bias_block = r"""(const {0}* __restrict__ v,
     __shared__ {0} sdata[256];
 
     // Initialize shared memory
-    sdata[threadIdx.x] = 0.0;
+    sdata[threadIdx.x] = {0}(0);
     // Run the first row of a
     if(cat == 0){
         for(int i = threadIdx.x; i < n_cells; i += blockDim.x){
-        long long in_index = static_cast<long long>(i)* n_pcs + pc;
+        size_t in_index = static_cast<size_t>(i)* n_pcs + pc;
         sdata[threadIdx.x] += v[in_index] * bias[i];
         }
     }
@@ -94,7 +94,7 @@ scatter_add_kernel_with_bias_block = r"""(const {0}* __restrict__ v,
 
         for (int i = start_idx + threadIdx.x; i < end_idx; i += blockDim.x) {
             int cell_idx = cell_indices[i];
-            long long in_index = static_cast<long long>(cell_idx)* n_pcs + pc;
+            size_t in_index = static_cast<size_t>(cell_idx)* n_pcs + pc;
             sdata[threadIdx.x] += v[in_index] * bias[cell_idx];
         }
     }
