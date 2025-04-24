@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import warnings
 from typing import TYPE_CHECKING
 
@@ -9,16 +10,16 @@ from cuml import KMeans as CumlKMeans
 
 from ._fuses import (
     _calc_R,
+    _entropy_kernel,
     _get_factor,
     _get_pen,
     _log_div_OE,
-    _R_multi_m,
-    entropy_kernel,
 )
 from ._helper import (
     _create_category_index_mapping,
     _get_aggregated_matrix,
     _get_batch_codes,
+    _kmeans_error,
     _normalize_cp,
     _one_hot_tensor_cp,
     _outer_cp,
@@ -136,7 +137,6 @@ def harmonize(
     else:
         Phi = None
         cats = cp.array(batch_codes.cat.codes.values, dtype=cp.int32)
-        import time
 
         start = time.time()
         cat_offsets, cell_indices = _create_category_index_mapping(cats, n_batches)
@@ -147,7 +147,7 @@ def harmonize(
     if n_clusters is None:
         n_clusters = int(min(100, n_cells / 30))
     theta = (cp.ones(n_batches) * theta).astype(Z.dtype)
-
+    print("theta", theta)
     if tau > 0:
         theta = theta * (1 - cp.exp(-N_b / (n_clusters * tau)) ** 2)
 
@@ -157,7 +157,6 @@ def harmonize(
         raise ValueError("correction_method must be either 'fast' or 'original'.")
 
     cp.random.seed(random_state)
-    import time
 
     start = time.time()
     R, E, O, objectives_harmony = _initialize_centroids(
@@ -528,10 +527,11 @@ def _compute_objective(
     E: cp.ndarray,
     objective_arr: list,
 ) -> None:
-    kmeans_error = cp.sum(_R_multi_m(R, cp.dot(Z_norm, Y_norm.T)))
+    # Does: cp.sum(R * 2 * (1 - cp.dot(Z_norm, Y_norm.T))
+    kmeans_error = _kmeans_error(R, cp.dot(Z_norm, Y_norm.T))
     R = R / R.sum(axis=1, keepdims=True)
-    # entropy = cp.sum(R * cp.log(R + 1e-12))
-    entropy = entropy_kernel(R)
+    # Does: entropy = cp.sum(R * cp.log(R + 1e-12))
+    entropy = _entropy_kernel(R)
     entropy_term = sigma * entropy
     diversity_penalty = sigma * cp.sum(cp.dot(theta, _log_div_OE(O, E)))
     objective = kmeans_error + entropy_term + diversity_penalty

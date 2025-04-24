@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 import cupy as cp
 
+from ._kernels._kmeans import _get_kmeans_err_kernel
 from ._kernels._normalize import _get_normalize_kernel_optimized
 from ._kernels._outer import _get_harmony_correction_kernel, _get_outer_kernel
 from ._kernels._scatter_add import (
@@ -195,3 +196,19 @@ def _scatter_add_cp_bias_csr(
         (threads_per_block,),
         (X, cat_offsets, cell_indices, n_cells, n_pcs, n_batches, out, bias),
     )
+
+
+def _kmeans_error(R, dot):
+    """Optimized raw CUDA implementation of kmeans error calculation"""
+    assert R.size == dot.size and R.dtype == dot.dtype
+
+    out = cp.zeros(1, dtype=R.dtype)
+    threads = 256
+    blocks = min(
+        (R.size + threads - 1) // threads,
+        cp.cuda.Device().attributes["MultiProcessorCount"] * 8,
+    )
+    kernel = _get_kmeans_err_kernel(R.dtype.name)
+    kernel((blocks,), (threads,), (R, dot, R.size, out))
+
+    return out[0]

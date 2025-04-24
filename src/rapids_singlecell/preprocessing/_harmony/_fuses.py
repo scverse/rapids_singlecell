@@ -23,17 +23,12 @@ def _log_div_OE(o: cp.ndarray, e: cp.ndarray) -> cp.ndarray:
     return o * cp.log((o + 1) / (e + 1))
 
 
-@cp.fuse
-def _R_multi_m(r: cp.ndarray, dotproduct: cp.ndarray) -> cp.ndarray:
-    return r * 2 * (1 - dotproduct)
-
-
-entropy_kernel = cp.ReductionKernel(
-    "T x",  # Input
-    "T y",  # Output
-    "x * log(x + 1e-12)",  # Map operation
-    "a + b",  # Reduction operation
-    "y = a",  # Post-reduction operation
-    "0",  # Identity element
-    "entropy_reduce",  # Kernel name
+_entropy_kernel = cp.ReductionKernel(
+    "T x",
+    "T y",
+    "x * logf(x + 1e-12)",
+    "a + b",
+    "y = a",
+    "0",
+    "entropy_reduce",
 )
