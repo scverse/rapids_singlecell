@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 def harmony_integrate(
     adata: AnnData,
-    key: str,
+    key: str | list[str],
     *,
     basis: str = "X_pca",
     adjusted_basis: str = "X_pca_harmony",
@@ -34,7 +34,7 @@ def harmony_integrate(
         adata
             The annotated data matrix.
         key
-            The name of the column in ``adata.obs`` that differentiates among experiments/batches.
+            The key(s) of the column(s) in ``adata.obs`` that differentiates among experiments/batches.
         basis
             The name of the field in ``adata.obsm`` where the PCA table is
             stored. Defaults to ``'X_pca'``, which is the default for

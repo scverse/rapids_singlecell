@@ -66,24 +66,30 @@ scatter_add_kernel_with_bias_block = r"""(const {0}* __restrict__ v,
                 {0}* __restrict__ a,
                 const {0}* __restrict__ bias)
 {
+    using VecPC = {0}2;
     // Each block handles one (category, PC) combination
+    int pairs     = (n_pcs + 1) / 2;
     int block_idx = blockIdx.x;
-    int total_blocks = (n_batches+1) * n_pcs;
+    if (block_idx >= (n_batches+1)*pairs) return;
 
-    if (block_idx >= total_blocks) return;
+    int cat     = block_idx / pairs;
+    int pc_pair = block_idx % pairs;
 
-    // Determine category and PC from block index
-    int cat = block_idx / n_pcs;
-    int pc = block_idx % n_pcs;
-    __shared__ {0} sdata[256];
+    int pc0       = pc_pair*2;
+    int pc1       = pc0 + 1;
+    bool has_pc1  = (pc1 < n_pcs);
 
-    // Initialize shared memory
-    sdata[threadIdx.x] = {0}(0);
+    {0} acc0 = {0}(0);
+    {0} acc1 = {0}(0);
+
     // Run the first row of a
-    if(cat == 0){
-        for(int i = threadIdx.x; i < n_cells; i += blockDim.x){
-        size_t in_index = static_cast<size_t>(i)* n_pcs + pc;
-        sdata[threadIdx.x] += v[in_index] * bias[i];
+    if (cat == 0){
+        for (int i = threadIdx.x; i < n_cells; i += blockDim.x) {
+            size_t base = size_t(i)*n_pcs + pc0;
+            VecPC vv = *(const VecPC*)(v + base);
+            {0} bb = __ldg(bias + i);
+            acc0 += vv.x * bb;
+            if (has_pc1) acc1 += vv.y * bb;
         }
     }
     // Run the rest of the rows of a
@@ -94,20 +100,43 @@ scatter_add_kernel_with_bias_block = r"""(const {0}* __restrict__ v,
 
         for (int i = start_idx + threadIdx.x; i < end_idx; i += blockDim.x) {
             int cell_idx = cell_indices[i];
-            size_t in_index = static_cast<size_t>(cell_idx)* n_pcs + pc;
-            sdata[threadIdx.x] += v[in_index] * bias[cell_idx];
+            size_t in_index = static_cast<size_t>(cell_idx)* n_pcs + pc0;
+            VecPC vv = *(const VecPC*)(v + in_index);
+            {0} bb = __ldg(bias + cell_idx);
+            acc0 += vv.x * bb;
+            if (has_pc1) acc1 += vv.y * bb;
         }
     }
-    __syncthreads();
 
     #pragma unroll
-    for (int i = 256 / 2; i > 0; i /= 2) {
-        if (threadIdx.x < i) {
-            sdata[threadIdx.x] += sdata[threadIdx.x + i];
+    for (int offset = 16; offset > 0; offset >>= 1){
+        acc0 += __shfl_down_sync(0xffffffff, acc0, offset);
+        if (has_pc1) {
+            acc1 += __shfl_down_sync(0xffffffff, acc1, offset);
         }
-        __syncthreads();
     }
-    a[block_idx] =sdata[0];
+
+    static __shared__ VecPC s[32];
+    if ((threadIdx.x & 31) == 0)
+        s[threadIdx.x>>5] = VecPC{acc0, acc1};
+    __syncthreads();
+
+    if (threadIdx.x < 32) {
+        VecPC val = (threadIdx.x < (blockDim.x>>5))
+                        ? s[threadIdx.x]
+                        : VecPC{0,0};
+        #pragma unroll
+        for (int off = 16; off > 0; off >>= 1) {
+            val.x += __shfl_down_sync(0xffffffff, val.x, off);
+            val.y += __shfl_down_sync(0xffffffff, val.y, off);
+        }
+        if (threadIdx.x == 0) {
+            // write two outputs for this block:
+            int out_base = cat*n_pcs + pc0;
+            a[out_base]   = val.x;
+            if (has_pc1)  a[out_base+1] = val.y;
+        }
+    }
 }
 """
 
