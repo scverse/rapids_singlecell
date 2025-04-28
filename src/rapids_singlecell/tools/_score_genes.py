@@ -156,7 +156,6 @@ def _score_genes_bins(
     n_bins: int,
 ) -> Generator[pd.Index[str], None, None]:
     # average expression of genes
-    # average expression of genes
     idx = cp.array(var_names.isin(gene_pool), dtype=cp.bool_)
     nanmeans = _nan_mean(X, axis=0, mask=idx, n_features=len(gene_pool)).get()
     obs_avg = pd.Series(nanmeans, index=gene_pool)
