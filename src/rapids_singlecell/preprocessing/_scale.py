@@ -345,6 +345,7 @@ def _scale_dask_array_zc(X, *, mask_array, mean, std, max_value):
     std_ = std.astype(X.dtype)
 
     def __scale_kernel_center(X_part, mask_part):
+        X_part = X_part.copy()
         scale_kernel_center(
             (math.ceil(X_part.shape[0] / 32), math.ceil(X_part.shape[1] / 32)),
             (32, 32),
@@ -381,6 +382,7 @@ def _scale_dask_array_nzc(X, *, mask_array, mean, std, max_value):
     std_ = std.astype(X.dtype)
 
     def __scale_kernel(X_part, mask_part):
+        X_part = X_part.copy()
         scale_kernel(
             (math.ceil(X_part.shape[0] / 32), math.ceil(X_part.shape[1] / 32)),
             (32, 32),
@@ -410,6 +412,7 @@ def _scale_sparse_csr_dask(X, *, mask_array, mean, std, max_value):
     std_ = std.astype(X.dtype)
 
     def __scale_kernel_csr(X_part, mask_part):
+        X_part = X_part.copy()
         scale_kernel_csr(
             (X_part.shape[0],),
             (64,),
