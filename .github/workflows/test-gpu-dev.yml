@@ -45,9 +45,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install UV
-        uses: hynek/setup-cached-uv@v2
+        uses: astral-sh/setup-uv@v5
         with:
-          cache-dependency-path: pyproject.toml
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
 
       - name: Set UV Timeout
         env:
