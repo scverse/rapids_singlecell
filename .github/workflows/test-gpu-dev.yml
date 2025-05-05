@@ -39,26 +39,22 @@ jobs:
       - name: Nvidia SMI sanity check
         run: nvidia-smi
 
-      - name: Install Python
-        uses: actions/setup-python@v5
+      - uses: mamba-org/setup-micromamba@v2
         with:
-          python-version: "3.12"
-
-      - name: Install UV
-        uses: astral-sh/setup-uv@v5
-
-      - name: Set UV Timeout
-        env:
-          UV_HTTP_TIMEOUT: 120
-        run: echo "UV_HTTP_TIMEOUT is set to $UV_HTTP_TIMEOUT"
+          environment-file: ci/environment.yml
+          init-shell: >-
+            bash
+          cache-environment: true
+          post-cleanup: 'all'
 
       - name: Install rapids-singlecell
         run: >-
-          pip install -e .[test,rapids12]
+          pip install -e .[test]
           "scanpy @ git+https://github.com/scverse/scanpy.git"
           "anndata @ git+https://github.com/scverse/anndata.git"
-          --extra-index-url=https://pypi.nvidia.com
 
+      - name: Pip list
+        run: pip list
 
       - name: Run test
         run: pytest --setup-show -vv -s
