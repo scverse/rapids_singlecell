@@ -61,9 +61,11 @@ jobs:
       - name: Pip list
         run: pip list
 
-      - name: Run test
-        run: pytest --setup-show -vv -s --trace-config
+      - name: pytest collect
+        run: pytest --collect-only -vv
 
+      - name: Run test
+        run: pytest --setup-show -vv -s
 
       - name: Remove 'run-gpu-ci' Label
         if: always()
