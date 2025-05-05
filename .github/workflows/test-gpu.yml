@@ -62,7 +62,7 @@ jobs:
         run: pip list
 
       - name: Run test
-        run: pytest --setup-show -vv -s
+        run: pytest --setup-show -vv -s --trace-config
 
 
       - name: Remove 'run-gpu-ci' Label
