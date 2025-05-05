@@ -46,9 +46,6 @@ jobs:
 
       - name: Install UV
         uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          cache-dependency-glob: pyproject.toml
 
       - name: Set UV Timeout
         env:
@@ -60,9 +57,6 @@ jobs:
 
       - name: Pip list
         run: pip list
-
-      - name: pytest collect
-        run: pytest --collect-only -vv
 
       - name: Run test
         run: pytest --setup-show -vv -s
