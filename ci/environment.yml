@@ -1,0 +1,10 @@
+name: rapids_singlecell
+channels:
+ - rapidsai
+ - nvidia
+ - conda-forge
+dependencies:
+ - rapids=25.04
+ - python=3.12
+ - cuda-version=12.8
+ - cudnn
