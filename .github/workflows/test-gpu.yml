@@ -48,7 +48,7 @@ jobs:
           post-cleanup: 'all'
 
       - name: Install rapids-singlecell
-        run: pip install --system -e .[test]
+        run: pip install -e .[test]
 
       - name: Pip list
         run: pip list
