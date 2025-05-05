@@ -39,6 +39,23 @@ jobs:
       - name: Nvidia SMI sanity check
         run: nvidia-smi
 
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: ci/environment.yml
+          init-shell: >-
+            bash
+          cache-environment: true
+          post-cleanup: 'all'
+
+      - name: Install rapids-singlecell
+        run: pip install -e .[test]
+
+      - name: Pip list
+        run: pip list
+
+      - name: Run test
+        run: pytest
+
       - name: Remove 'run-gpu-ci' Label
         if: always()
         uses: actions-ecosystem/action-remove-labels@v1
