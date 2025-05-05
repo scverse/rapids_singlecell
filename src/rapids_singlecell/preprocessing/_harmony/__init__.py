@@ -133,10 +133,7 @@ def harmonize(
         n_clusters = int(min(100, n_cells / 30))
     import time
 
-    start_time = time.time()
     theta_array = _get_theta_array(theta, n_batches, Z.dtype)
-    cp.cuda.Stream.null.synchronize()
-    print(f"Time taken to create theta_array: {time.time() - start_time} seconds")
     if tau > 0:
         theta_array = theta_array * (1 - cp.exp(-N_b / (n_clusters * tau)) ** 2)
     theta_array = theta_array.reshape(1, -1)
