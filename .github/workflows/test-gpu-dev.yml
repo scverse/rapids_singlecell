@@ -46,9 +46,6 @@ jobs:
 
       - name: Install UV
         uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          cache-dependency-glob: pyproject.toml
 
       - name: Set UV Timeout
         env:
@@ -57,11 +54,11 @@ jobs:
 
       - name: Install rapids-singlecell
         run: >-
-          uv pip install --system -e .[test,rapids12]
+          pip install --system -e .[test,rapids12]
           "scanpy @ git+https://github.com/scverse/scanpy.git"
           "anndata @ git+https://github.com/scverse/anndata.git"
           --extra-index-url=https://pypi.nvidia.com
-          --index-strategy=unsafe-best-match
+
 
       - name: Run test
         run: pytest
