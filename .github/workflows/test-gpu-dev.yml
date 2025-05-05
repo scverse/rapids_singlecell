@@ -61,4 +61,4 @@ jobs:
 
 
       - name: Run test
-        run: pytest
+        run: pytest --setup-show -vv -s
