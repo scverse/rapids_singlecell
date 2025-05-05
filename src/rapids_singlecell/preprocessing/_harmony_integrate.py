@@ -63,12 +63,53 @@ def harmony_integrate(
     """
     from ._harmony import harmonize
 
-    X = adata.obsm[basis].astype(dtype)
-    if isinstance(X, np.ndarray):
-        X = cp.array(X)
+    # Ensure the basis exists in adata.obsm
+    if basis not in adata.obsm:
+        raise ValueError(
+            f"The specified basis '{basis}' is not available in adata.obsm. "
+            f"Available bases: {list(adata.obsm.keys())}"
+        )
+
+    # Get the input data
+    input_data = adata.obsm[basis]
+
+    try:
+        # Handle different array types
+        if isinstance(input_data, np.ndarray):
+            # NumPy array: convert directly to CuPy
+            try:
+                X = cp.array(input_data, dtype=dtype, order="C")
+            except (cp.cuda.memory.OutOfMemoryError, MemoryError) as e:
+                raise MemoryError(
+                    "Not enough GPU memory to allocate array. "
+                    "Try reducing the dataset size or using a GPU with more memory."
+                ) from e
+        elif isinstance(input_data, cp.ndarray):
+            # CuPy array: ensure correct dtype and layout with a copy
+            X = input_data.astype(dtype, order="C", copy=False)
+        else:
+            # Other array types: convert to NumPy first, then to CuPy
+            try:
+                # Try to convert to numpy (works for most array-like objects)
+                np_array = np.array(input_data, dtype=dtype, order="C")
+                X = cp.array(np_array, dtype=dtype, order="C")
+            except Exception as e:
+                raise TypeError(
+                    f"Could not convert input of type {type(input_data).__name__} to CuPy array: {str(e)}"
+                ) from e
+
+        # Verify array is valid
+        if cp.isnan(X).any():
+            raise ValueError(
+                "Input data contains NaN values. Please handle these before running harmony_integrate."
+            )
+
+    except Exception as e:
+        raise RuntimeError(f"Error preparing data for Harmony: {str(e)}") from e
+
     harmony_out = harmonize(
         X,
-        adata.obs.copy(),
+        adata.obs,
         key,
         correction_method=correction_method,
         use_gemm=use_gemm,
