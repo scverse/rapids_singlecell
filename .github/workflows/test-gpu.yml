@@ -61,14 +61,9 @@ jobs:
       - name: Pip list
         run: pip list
 
-      - name: Test can import rapids-singlecell
-        run: python -c "import rapids_singlecell; print(rapids_singlecell.__version__)"
-
-      - name: Test can import cupy
-        run: python -c "import cupy; print(cupy.array([1, 2, 3])*2)"
-
       - name: Run test
-        run: pytest
+        run: pytest --setup-show -vv -s
+
 
       - name: Remove 'run-gpu-ci' Label
         if: always()
