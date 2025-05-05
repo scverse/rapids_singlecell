@@ -165,9 +165,14 @@ def X_to_CPU(X: GPU_ARRAY_TYPE) -> CPU_ARRAY_TYPE:
             meta = _meta_sparse_csr_cpu
         elif isinstance(X._meta, csc_matrix_gpu):
             meta = _meta_sparse_csc_cpu
-        else:
+        elif isinstance(X._meta, cp.ndarray):
             meta = _meta_dense_cpu
-        X = X.map_blocks(X_to_GPU, meta=meta(X.dtype))
+        else:
+            meta = None
+        if meta is not None:
+            X = X.map_blocks(X_to_CPU, meta=meta(X.dtype))
+        else:
+            pass
     if isinstance(X, GPU_ARRAY_TYPE):
         X = X.get()
     else:
