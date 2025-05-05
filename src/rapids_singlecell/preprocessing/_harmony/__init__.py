@@ -18,6 +18,7 @@ from ._helper import (
     _create_category_index_mapping,
     _get_aggregated_matrix,
     _get_batch_codes,
+    _get_theta_array,
     _kmeans_error,
     _normalize_cp,
     _one_hot_tensor_cp,
@@ -44,7 +45,7 @@ def harmonize(
     ridge_lambda: float = 1.0,
     sigma: float = 0.1,
     block_proportion: float = 0.05,
-    theta: float = 2.0,
+    theta: float | int | list[float] | np.ndarray | cp.ndarray = 2.0,
     tau: int = 0,
     correction_method: str = "fast",
     random_state: int = 0,
@@ -130,8 +131,12 @@ def harmonize(
     # Set up parameters
     if n_clusters is None:
         n_clusters = int(min(100, n_cells / 30))
+    import time
 
-    theta_array = (cp.ones(n_batches) * theta).astype(Z.dtype)
+    start_time = time.time()
+    theta_array = _get_theta_array(theta, n_batches, Z.dtype)
+    cp.cuda.Stream.null.synchronize()
+    print(f"Time taken to create theta_array: {time.time() - start_time} seconds")
     if tau > 0:
         theta_array = theta_array * (1 - cp.exp(-N_b / (n_clusters * tau)) ** 2)
     theta_array = theta_array.reshape(1, -1)

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import cupy as cp
+import numpy as np
 
 from ._kernels._kmeans import _get_kmeans_err_kernel
 from ._kernels._normalize import _get_normalize_kernel_optimized
@@ -212,3 +213,36 @@ def _kmeans_error(R, dot):
     kernel((blocks,), (threads,), (R, dot, R.size, out))
 
     return out[0]
+
+
+def _get_theta_array(
+    theta: float | int | list[float | int] | np.ndarray | cp.ndarray,
+    n_batches: int,
+    dtype: cp.dtype,
+) -> cp.ndarray:
+    """
+    Convert theta parameter to a CuPy array of appropriate shape.
+    """
+    # Handle scalar inputs (float, int)
+    if isinstance(theta, float | int):
+        return cp.ones(n_batches, dtype=dtype) * float(theta)
+
+    # Handle array-like inputs (list, numpy array, cupy array)
+    if isinstance(theta, list):
+        theta_array = cp.array(theta, dtype=dtype)
+    elif isinstance(theta, np.ndarray):
+        theta_array = cp.array(theta, dtype=dtype)
+    elif isinstance(theta, cp.ndarray):
+        theta_array = theta.astype(dtype)
+    else:
+        raise ValueError(
+            f"Theta must be float, int, list, numpy array, or cupy array, got {type(theta)}"
+        )
+
+    # Verify dimensions
+    if theta_array.size != n_batches:
+        raise ValueError(
+            f"Theta array size ({theta_array.size}) must match number of batches ({n_batches})"
+        )
+
+    return theta_array.ravel()
