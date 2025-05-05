@@ -54,7 +54,7 @@ jobs:
 
       - name: Install rapids-singlecell
         run: >-
-          pip install --system -e .[test,rapids12]
+          pip install -e .[test,rapids12]
           "scanpy @ git+https://github.com/scverse/scanpy.git"
           "anndata @ git+https://github.com/scverse/anndata.git"
           --extra-index-url=https://pypi.nvidia.com
