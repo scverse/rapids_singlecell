@@ -62,7 +62,7 @@ jobs:
         run: pip list
 
       - name: Run test
-        run: pytest
+        run: pytest --setup-show -vv -s
 
       - name: Remove 'run-gpu-ci' Label
         if: always()
