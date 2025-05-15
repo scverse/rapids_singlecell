@@ -1,4 +1,4 @@
-name: rapids_singlecell-nightly
+name: rapids_singlecell_nightly
 channels:
  - rapidsai-nightly
  - nvidia
