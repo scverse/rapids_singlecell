@@ -1,0 +1,10 @@
+name: rapids_singlecell-nightly
+channels:
+ - rapidsai-nightly
+ - nvidia
+ - conda-forge
+dependencies:
+ - rapids=25.04
+ - python=3.13
+ - cuda-version=12.8
+ - cudnn
