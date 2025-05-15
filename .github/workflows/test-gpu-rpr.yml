@@ -1,4 +1,4 @@
-name: GPU-CI-DEV
+name: GPU-CI-RAPIDS-PRE
 
 on:
   push:
