@@ -7,4 +7,5 @@ dependencies:
  - rapids=25.06
  - python=3.13
  - cuda-version=12.8
+ - zarr=3.0.6
  - cudnn
