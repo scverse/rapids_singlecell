@@ -25,8 +25,8 @@ from rapids_singlecell._compat import (
 if TYPE_CHECKING:
     from anndata import AnnData
 
-GPU_ARRAY_TYPE = Union[cp.ndarray, csr_matrix_gpu, csc_matrix_gpu]  # noqa: UP007
-CPU_ARRAY_TYPE = Union[np.ndarray, csr_matrix_cpu, csc_matrix_cpu]  # noqa: UP007
+GPU_ARRAY_TYPE = Union[cp.ndarray, csr_matrix_gpu, csc_matrix_gpu, DaskArray]  # noqa: UP007
+CPU_ARRAY_TYPE = Union[np.ndarray, csr_matrix_cpu, csc_matrix_cpu, DaskArray]  # noqa: UP007
 
 
 def anndata_to_GPU(
