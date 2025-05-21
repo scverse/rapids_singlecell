@@ -15,6 +15,7 @@ from ._fuses import (
     _log_div_OE,
 )
 from ._helper import (
+    _column_sum,
     _create_category_index_mapping,
     _get_aggregated_matrix,
     _get_batch_codes,
@@ -304,6 +305,7 @@ def _clustering(
     objectives_clustering = []
     block_size = int(n_cells * block_proportion)
     term = cp.float64(-2 / sigma).astype(Z_norm.dtype)
+    import time
 
     for _ in range(max_iter):
         # Compute cluster centroids
@@ -320,6 +322,8 @@ def _clustering(
             idx_in = idx_list[pos : (pos + block_size)]
             R_in = R[idx_in]
 
+            R_in_sum = _column_sum(R_in)
+
             # Remove contribution of current block from O
             if Phi is None:
                 cats_in = cats[idx_in]
@@ -328,12 +332,11 @@ def _clustering(
                 Phi_in = Phi[idx_in]
                 cp.cublas.gemm("T", "N", Phi_in, R_in, alpha=-1, beta=1, out=O)
 
-            # Remove contribution of current block from E
-            _outer_cp(E, Pr_b, cp.sum(R_in, axis=0), 0)
+            # Use optimized column sum function
+            _outer_cp(E, Pr_b, R_in_sum, 0)
 
             # Update cluster assignments for current block
             R_out = _calc_R(term, cp.dot(Z_norm[idx_in], Y_norm.T))
-
             # Apply penalty term to cluster assignments
             penalty_term = _get_pen(E, O, theta.T)
             if Phi is None:
@@ -345,6 +348,8 @@ def _clustering(
             # Normalize updated cluster assignments
             R_out = _normalize_cp(R_out, p=1)
             R[idx_in] = R_out
+            # Use optimized column sum function again
+            R_out_sum = _column_sum(R_in)
 
             # Add contribution of updated block back to O
             if Phi is None:
@@ -353,7 +358,7 @@ def _clustering(
                 cp.cublas.gemm("T", "N", Phi_in, R_out, alpha=1, beta=1, out=O)
 
             # Add contribution of updated block back to E
-            _outer_cp(E, Pr_b, cp.sum(R_in, axis=0), 1)
+            _outer_cp(E, Pr_b, R_out_sum, 1)
 
             # Move to next block
             pos += block_size
@@ -456,10 +461,8 @@ def _correction_original(
     id_mat = cp.eye(n_batches + 1, n_batches + 1, dtype=X.dtype)
     id_mat[0, 0] = 0
     Lambda = ridge_lambda * id_mat
-    import time
 
     for k in range(n_clusters):
-        start_time = time.time()
         if Phi is not None:
             Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
             inv_mat = cp.linalg.inv(cp.dot(Phi_t_diag_R, Phi_1) + Lambda)
@@ -481,9 +484,6 @@ def _correction_original(
                 bias=R_col,
                 n_batches=n_batches,
             )
-        cp.cuda.Stream.null.synchronize()
-        end_time = time.time()
-        print(f"Scattering time: {end_time - start_time} seconds")
         W = cp.dot(inv_mat, Phi_t_diag_R_X)
         W[0, :] = 0
 

@@ -7,7 +7,11 @@ import numpy as np
 
 from ._kernels._kmeans import _get_kmeans_err_kernel
 from ._kernels._normalize import _get_normalize_kernel_optimized
-from ._kernels._outer import _get_harmony_correction_kernel, _get_outer_kernel
+from ._kernels._outer import (
+    _get_colsum_kernel,
+    _get_harmony_correction_kernel,
+    _get_outer_kernel,
+)
 from ._kernels._scatter_add import (
     _get_aggregated_matrix_kernel,
     _get_scatter_add_kernel_optimized,
@@ -248,3 +252,22 @@ def _get_theta_array(
         )
 
     return theta_array.ravel()
+
+
+def _column_sum(X):
+    """
+    Sum each column of the 2D, C-contiguous float32 array A.
+    Returns a 1D float32 cupy array of length A.shape[1].
+    """
+    rows, cols = X.shape
+    if not X.flags.c_contiguous:
+        return X.sum(axis=0)
+
+    out = cp.zeros(cols, dtype=X.dtype)
+
+    # choose threads: up to 1024 or rows, whichever smaller
+    threads = max(min(rows, 1024), 32)
+    blocks = cols
+    _colsum = _get_colsum_kernel(X.dtype)
+    _colsum((blocks,), (threads,), (X, out, rows, cols))
+    return out

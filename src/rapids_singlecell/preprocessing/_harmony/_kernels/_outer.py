@@ -61,3 +61,52 @@ def _get_harmony_correction_kernel(dtype):
     return cuda_kernel_factory(
         harmony_correction_kernel_code, (dtype,), "harmony_correction_kernel"
     )
+
+
+_colsum_kernel = r"""
+(const {0}* __restrict__ X,
+            {0}* __restrict__ out,
+            size_t rows,
+            size_t cols) {
+    size_t tid = threadIdx.x;
+    size_t col = blockIdx.x;
+    if (col >= cols) return;
+
+    // grid-stride loop over rows
+    {0} acc = {0}(0);
+    for (size_t i = tid; i < rows; i += blockDim.x) {
+        acc += X[i * cols + col];
+    }
+
+    #pragma unroll
+    for (int offset = 16; offset > 0; offset >>= 1){
+        acc += __shfl_down_sync(0xffffffff, acc, offset);
+    }
+    static __shared__ {0} s[32];
+    if ((threadIdx.x & 31) == 0){
+        s[threadIdx.x>>5] = acc;
+    }
+    __syncthreads();
+
+    if (threadIdx.x < 32) {
+        {0} val = (threadIdx.x < (blockDim.x>>5))
+                        ? s[threadIdx.x]
+                        : {0}(0);
+        #pragma unroll
+        for (int off = 16; off > 0; off >>= 1) {
+            val += __shfl_down_sync(0xffffffff, val, off);
+        }
+        if (threadIdx.x == 0) {
+            out[col] =val;
+        }
+    }
+}
+"""
+
+
+def _get_colsum_kernel(dtype):
+    return cuda_kernel_factory(
+        _colsum_kernel,
+        (dtype,),
+        "_colsum_kernel",
+    )
