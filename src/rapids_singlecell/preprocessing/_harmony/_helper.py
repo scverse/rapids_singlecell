@@ -12,6 +12,7 @@ from ._kernels._scatter_add import (
     _get_aggregated_matrix_kernel,
     _get_scatter_add_kernel_optimized,
     _get_scatter_add_kernel_with_bias_block,
+    _get_scatter_add_kernel_with_bias_cat0,
 )
 
 if TYPE_CHECKING:
@@ -187,10 +188,11 @@ def _scatter_add_cp_bias_csr(
     n_cells = X.shape[0]
     n_pcs = X.shape[1]
 
-    blocks = int((n_batches + 1) * (n_pcs + 1) / 2)
-
     threads_per_block = 1024
-
+    blocks = int((n_pcs + 1) / 2)
+    scatter_kernel0 = _get_scatter_add_kernel_with_bias_cat0(X.dtype)
+    scatter_kernel0((blocks,), (threads_per_block,), (X, n_cells, n_pcs, out, bias))
+    blocks = int((n_batches) * (n_pcs + 1) / 2)
     scatter_kernel = _get_scatter_add_kernel_with_bias_block(X.dtype)
     scatter_kernel(
         (blocks,),
