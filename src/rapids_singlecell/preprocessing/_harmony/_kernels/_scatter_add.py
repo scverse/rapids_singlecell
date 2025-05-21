@@ -64,22 +64,29 @@ scatter_add_kernel_with_bias_cat0 = r"""(const {0}* __restrict__ v,
                 const {0}* __restrict__ bias)
 {
     using VecPC = {0}2;
-    // Each block handles one PC pair, we use multiple blocks for cat=0 case
-    int pairs     = (n_pcs + 1) / 2;
-    int pc_pair   = blockIdx.x;
+    // Each block handles one PC pair and 1/4 of the cells
+    int pairs = (n_pcs + 1) / 2;
+    int pc_pair = blockIdx.x;
+    int eighth = blockIdx.y;
+
     if (pc_pair >= pairs) return;
 
-    int pc0       = pc_pair*2;
-    int pc1       = pc0 + 1;
-    bool has_pc1  = (pc1 < n_pcs);
+    int pc0 = pc_pair * 2;
+    int pc1 = pc0 + 1;
+    bool has_pc1 = (pc1 < n_pcs);
 
     {0} acc0 = {0}(0);
     {0} acc1 = {0}(0);
 
+    // Calculate cell range for this block
+    int cells_per_eighth = (n_cells + 7) / 8;
+    int start_cell = eighth * cells_per_eighth;
+    int end_cell = min(start_cell + cells_per_eighth, n_cells);
+
     // Unroll the main processing loop
     #pragma unroll 4
-    for (int i = threadIdx.x; i < n_cells; i += blockDim.x) {
-        size_t base = size_t(i)*n_pcs + pc0;
+    for (int i = start_cell + threadIdx.x; i < end_cell; i += blockDim.x) {
+        size_t base = size_t(i) * n_pcs + pc0;
         VecPC vv = *(const VecPC*)(v + base);
         {0} bb = __ldg(bias + i);
         acc0 += vv.x * bb;
@@ -109,9 +116,10 @@ scatter_add_kernel_with_bias_cat0 = r"""(const {0}* __restrict__ v,
             val.y += __shfl_down_sync(0xffffffff, val.y, off);
         }
         if (threadIdx.x == 0) {
-            // write two outputs for this block:
-            a[pc0]   = val.x;
-            if (has_pc1)  a[pc1] = val.y;
+            // Use atomic to combine results from all quarters
+            int out_base = 0 * n_pcs + pc0;  // cat is 0
+            atomicAdd(&a[out_base], val.x);
+            if (has_pc1) atomicAdd(&a[out_base+1], val.y);
         }
     }
 }

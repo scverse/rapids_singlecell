@@ -161,8 +161,9 @@ def harmonize(
 
     # Main harmony iterations
     is_converged = False
-    for _ in range(max_iter_harmony):
+    for i in range(max_iter_harmony):
         # Clustering step
+        start_time = time.time()
         _clustering(
             Z_norm,
             Pr_b=Pr_b,
@@ -178,8 +179,10 @@ def harmonize(
             sigma=sigma,
             block_proportion=block_proportion,
         )
-
+        end_time = time.time()
+        print(f"Clustering step {i} completed in {end_time - start_time} seconds")
         # Correction step
+        start_time = time.time()
         Z_hat = _correction(
             Z,
             R=R,
@@ -195,10 +198,12 @@ def harmonize(
 
         # Normalize corrected data
         Z_norm = _normalize_cp(Z_hat, p=2)
-
+        end_time = time.time()
+        print(f"Correction step {i} completed in {end_time - start_time} seconds")
         # Check for convergence
         if _is_convergent_harmony(objectives_harmony, tol=tol_harmony):
             is_converged = True
+            print(f"Harmony converged in {i} iterations")
             break
 
     if not is_converged:
@@ -451,8 +456,10 @@ def _correction_original(
     id_mat = cp.eye(n_batches + 1, n_batches + 1, dtype=X.dtype)
     id_mat[0, 0] = 0
     Lambda = ridge_lambda * id_mat
+    import time
 
     for k in range(n_clusters):
+        start_time = time.time()
         if Phi is not None:
             Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
             inv_mat = cp.linalg.inv(cp.dot(Phi_t_diag_R, Phi_1) + Lambda)
@@ -474,7 +481,9 @@ def _correction_original(
                 bias=R_col,
                 n_batches=n_batches,
             )
-
+        cp.cuda.Stream.null.synchronize()
+        end_time = time.time()
+        print(f"Scattering time: {end_time - start_time} seconds")
         W = cp.dot(inv_mat, Phi_t_diag_R_X)
         W[0, :] = 0
 
@@ -510,6 +519,7 @@ def _correction_fast(
 
     Z = X.copy()
     P = cp.eye(n_batches + 1, n_batches + 1, dtype=X.dtype)
+    import time
 
     for k in range(n_clusters):
         O_k = O[:, k]
@@ -530,7 +540,7 @@ def _correction_fast(
         # Set off-diagonal entries
         P_t_B_inv[1:, 0] = P[0, 1:] * c_inv
         inv_mat = cp.dot(P_t_B_inv, P)
-
+        start_time = time.time()
         if Phi is not None:
             Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
             Phi_t_diag_R_X = cp.dot(Phi_t_diag_R, X)
@@ -545,7 +555,9 @@ def _correction_fast(
                 bias=R_col,
                 n_batches=n_batches,
             )
-
+        cp.cuda.Stream.null.synchronize()
+        end_time = time.time()
+        print(f"Scattering time: {end_time - start_time} seconds")
         W = cp.dot(inv_mat, Phi_t_diag_R_X)
         W[0, :] = 0
 

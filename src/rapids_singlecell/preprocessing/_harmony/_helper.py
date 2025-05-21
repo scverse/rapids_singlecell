@@ -191,12 +191,12 @@ def _scatter_add_cp_bias_csr(
     threads_per_block = 1024
     blocks = int((n_pcs + 1) / 2)
     scatter_kernel0 = _get_scatter_add_kernel_with_bias_cat0(X.dtype)
-    scatter_kernel0((blocks,), (threads_per_block,), (X, n_cells, n_pcs, out, bias))
+    scatter_kernel0((blocks, 8), (threads_per_block,), (X, n_cells, n_pcs, out, bias))
     blocks = int((n_batches) * (n_pcs + 1) / 2)
     scatter_kernel = _get_scatter_add_kernel_with_bias_block(X.dtype)
     scatter_kernel(
         (blocks,),
-        (threads_per_block,),
+        (1024,),
         (X, cat_offsets, cell_indices, n_cells, n_pcs, n_batches, out, bias),
     )
 
