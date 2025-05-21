@@ -519,7 +519,6 @@ def _correction_fast(
 
     Z = X.copy()
     P = cp.eye(n_batches + 1, n_batches + 1, dtype=X.dtype)
-    import time
 
     for k in range(n_clusters):
         O_k = O[:, k]
@@ -540,7 +539,7 @@ def _correction_fast(
         # Set off-diagonal entries
         P_t_B_inv[1:, 0] = P[0, 1:] * c_inv
         inv_mat = cp.dot(P_t_B_inv, P)
-        start_time = time.time()
+
         if Phi is not None:
             Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
             Phi_t_diag_R_X = cp.dot(Phi_t_diag_R, X)
@@ -555,9 +554,7 @@ def _correction_fast(
                 bias=R_col,
                 n_batches=n_batches,
             )
-        cp.cuda.Stream.null.synchronize()
-        end_time = time.time()
-        print(f"Scattering time: {end_time - start_time} seconds")
+
         W = cp.dot(inv_mat, Phi_t_diag_R_X)
         W[0, :] = 0
 
