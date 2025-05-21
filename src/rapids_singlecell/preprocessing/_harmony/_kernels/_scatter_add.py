@@ -57,7 +57,6 @@ def _get_aggregated_matrix_kernel(dtype):
     )
 
 
-# New kernel for cat==0 case that distributes work across multiple blocks
 scatter_add_kernel_with_bias_cat0 = r"""(const {0}* __restrict__ v,
                 int n_cells,
                 int n_pcs,
@@ -77,7 +76,8 @@ scatter_add_kernel_with_bias_cat0 = r"""(const {0}* __restrict__ v,
     {0} acc0 = {0}(0);
     {0} acc1 = {0}(0);
 
-    // Process all cells, distributed across threads
+    // Unroll the main processing loop
+    #pragma unroll 4
     for (int i = threadIdx.x; i < n_cells; i += blockDim.x) {
         size_t base = size_t(i)*n_pcs + pc0;
         VecPC vv = *(const VecPC*)(v + base);
@@ -126,7 +126,6 @@ def _get_scatter_add_kernel_with_bias_cat0(dtype):
     )
 
 
-# Modified kernel to only handle cat > 0 cases
 scatter_add_kernel_with_bias_block = r"""(const {0}* __restrict__ v,
                 const int* __restrict__ cat_offsets,
                 const int* __restrict__ cell_indices,
