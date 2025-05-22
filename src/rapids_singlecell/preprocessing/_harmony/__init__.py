@@ -254,7 +254,10 @@ def _initialize_centroids(
     R = _normalize_cp(R, p=1)
 
     # Initialize E (expected) and O (observed) matrices
-    E = cp.dot(Pr_b, cp.sum(R, axis=0, keepdims=True))
+    R_sum = _column_sum(R)
+    E = cp.zeros((n_batches, R.shape[1]), dtype=Z_norm.dtype)
+    _outer_cp(E, Pr_b, R_sum, 1)
+
     if Phi is None:
         O = cp.zeros((n_batches, R.shape[1]), dtype=Z_norm.dtype)
         _scatter_add_cp(R, O, cats, 1)
