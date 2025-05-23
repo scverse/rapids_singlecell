@@ -147,7 +147,7 @@ scatter_add_kernel_with_bias_block = r"""(const {0}* __restrict__ v,
     // Each block handles one (category, PC) combination
     int pairs     = (n_pcs + 1) / 2;
     int block_idx = blockIdx.x;
-    if (block_idx >= n_batches*pairs) return;  // We handle n_batches (not n_batches+1)
+    if (block_idx >= n_batches*pairs) return;
 
     int cat     = block_idx / pairs + 1;  // Start from cat=1
     int pc_pair = block_idx % pairs;

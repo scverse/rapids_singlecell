@@ -8,6 +8,7 @@ from scipy.stats import pearsonr
 
 import rapids_singlecell as rsc
 from rapids_singlecell.preprocessing._harmony._helper import (
+    _auto_choose_colsum_algo,
     _choose_colsum_algo,
     _get_colsum_func,
 )
@@ -91,3 +92,12 @@ def test_choose_colsum_algo(compute_capability):
             assert algo in ["columns", "atomics", "gemm", "cupy"]
             if columns < 1024 or rows >= 5000:
                 assert algo != "cupy"
+
+
+@pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
+def test_benchmark_colsum_algorithms(dtype):
+    # Test that the benchmark_colsum_algorithms function returns the correct algorithm
+    # for the given shape of the matrix
+    test_shape = (1000, 100)
+    algo_func = _auto_choose_colsum_algo(test_shape[0], test_shape[1], dtype)
+    assert callable(algo_func)

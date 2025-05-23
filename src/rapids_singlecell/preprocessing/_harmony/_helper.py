@@ -330,6 +330,7 @@ def _get_colsum_func(rows: int, cols: int, algo: str | None) -> callable:
     return lambda X: X.sum(axis=0)
 
 
+# TODO: Make this more robust
 def _choose_colsum_algo(rows: int, cols: int, compute_capability: str) -> str:
     is_data_center = compute_capability in ["100", "90"]
     if cols < 200 and rows < 20000:
@@ -349,6 +350,7 @@ def _choose_colsum_algo(rows: int, cols: int, compute_capability: str) -> str:
     return "cupy"
 
 
+# TODO: Make this more robust
 def _benchmark_colsum_algorithms(
     shape: tuple[int, int],
     dtype: cp.dtype = cp.float32,

@@ -33,6 +33,8 @@ from ._helper import (
 if TYPE_CHECKING:
     import pandas as pd
 
+COLSUM_ALGO = Literal["columns", "atomics", "gemm", "cupy", "benchmark"]
+
 
 def harmonize(
     Z: cp.array,
@@ -51,8 +53,7 @@ def harmonize(
     tau: int = 0,
     correction_method: str = "fast",
     use_gemm: bool = False,
-    colsum_algo: Literal["columns", "atomics", "gemm", "cupy", "benchmark"]
-    | None = None,
+    colsum_algo: COLSUM_ALGO | None = None,
     random_state: int = 0,
 ) -> cp.array:
     """
@@ -106,7 +107,7 @@ def harmonize(
         If True, use a One-Hot-Encoding Matrix and GEMM to compute Harmony. If False use a label vector. A label vector is more memory efficient and faster for large datasets with a large number of batches.
 
     colsum_algo
-        Choose which algorithm to use for column sum. If `None`, choose the best algorithm based on the number of rows and columns. If `'benchmark'`, benchmark all algorithms and choose the best one.
+        Choose which algorithm to use for column sum. If `None`, choose the algorithm based on the number of rows and columns. If `'benchmark'`, benchmark all algorithms and choose the best one.
 
     random_state
         Random seed for reproducing results.
@@ -138,6 +139,8 @@ def harmonize(
     # Set up parameters
     if n_clusters is None:
         n_clusters = int(min(100, n_cells / 30))
+
+    # TODO: Allow for multiple colsum algorithms in a list
     assert colsum_algo in ["columns", "atomics", "gemm", "cupy", "benchmark", None]
     colsum_func_big = _get_colsum_func(n_cells, n_clusters, None)
     if colsum_algo == "benchmark":
