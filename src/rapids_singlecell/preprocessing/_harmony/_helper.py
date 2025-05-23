@@ -8,6 +8,7 @@ import numpy as np
 from ._kernels._kmeans import _get_kmeans_err_kernel
 from ._kernels._normalize import _get_normalize_kernel_optimized
 from ._kernels._outer import (
+    _get_colsum_atomic_kernel,
     _get_colsum_kernel,
     _get_harmony_correction_kernel,
     _get_outer_kernel,
@@ -164,7 +165,9 @@ def _one_hot_tensor_cp(X: pd.Series) -> cp.array:
     return Phi
 
 
-def _create_category_index_mapping(cats, n_batches):
+def _create_category_index_mapping(
+    cats: cp.ndarray, n_batches: int
+) -> tuple[cp.ndarray, cp.ndarray]:
     """
     Create a CSR-like data structure mapping categories to cell indices using lexicographical sort.
     """
@@ -205,7 +208,7 @@ def _scatter_add_cp_bias_csr(
     )
 
 
-def _kmeans_error(R, dot):
+def _kmeans_error(R: cp.ndarray, dot: cp.ndarray) -> float:
     """Optimized raw CUDA implementation of kmeans error calculation"""
     assert R.size == dot.size and R.dtype == dot.dtype
 
@@ -254,7 +257,7 @@ def _get_theta_array(
     return theta_array.ravel()
 
 
-def _column_sum(X):
+def _column_sum(X: cp.ndarray) -> cp.ndarray:
     """
     Sum each column of the 2D, C-contiguous float32 array A.
     Returns a 1D float32 cupy array of length A.shape[1].
@@ -265,9 +268,183 @@ def _column_sum(X):
 
     out = cp.zeros(cols, dtype=X.dtype)
 
-    # choose threads: up to 1024 or rows, whichever smaller
-    threads = max(min(rows, 1024), 32)
-    blocks = cols
+    dev = cp.cuda.Device()
+    nSM = dev.attributes["MultiProcessorCount"]
+    max_blocks = nSM * 8
+    threads = max(int(round(1 / 32) * 32), 32)
+    blocks = min(cols, max_blocks)
     _colsum = _get_colsum_kernel(X.dtype)
     _colsum((blocks,), (threads,), (X, out, rows, cols))
     return out
+
+
+def _column_sum_atomic(X: cp.ndarray) -> cp.ndarray:
+    """
+    Sum each column of the 2D, C-contiguous array A
+    using 32×32 tiles + one atomic per tile-column.
+    """
+    assert X.ndim == 2
+    rows, cols = X.shape
+    if not X.flags.c_contiguous:
+        return X.sum(axis=0)
+
+    out = cp.zeros(cols, dtype=X.dtype)
+    tile_rows = (rows + 31) // 32
+    tile_cols = (cols + 31) // 32
+    blocks = tile_rows * tile_cols
+    threads = (32, 32)
+
+    kernel = _get_colsum_atomic_kernel(X.dtype)
+    kernel((blocks,), threads, (X, out, rows, cols))
+    return out
+
+
+def _gemm_colsum(X: cp.ndarray) -> cp.ndarray:
+    """
+    Sum each column with cuBLAS GEMM
+    """
+    return X.T @ cp.ones(X.shape[0], dtype=X.dtype)
+
+
+def _get_colsum_func(rows: int, cols: int, algo: str | None) -> callable:
+    """
+    Returns one of:
+    - _colsum_columns
+    - _colsum_atomics
+    - _gemm_colsum
+    - cp.sum (with axis=0)
+    """
+    # first pick the strategy string
+    if algo is None:
+        cc = cp.cuda.Device().compute_capability
+        algo = _choose_colsum_algo(rows, cols, cc)
+    if algo == "cupy":
+        return lambda X: X.sum(axis=0)
+    if algo == "columns":
+        return _column_sum
+    if algo == "atomics":
+        return _column_sum_atomic
+    if algo == "gemm":
+        return _gemm_colsum
+    # fallback: global CuPy reduction
+    return lambda X: X.sum(axis=0)
+
+
+def _choose_colsum_algo(rows: int, cols: int, compute_capability: str) -> str:
+    is_data_center = compute_capability in ["100", "90"]
+    if cols < 200 and rows < 20000:
+        return "columns"
+    if cols < 200 and rows < 100000 and is_data_center:
+        return "columns"
+    if cols < 800 and rows < 10000:
+        return "atomics"
+    if cols < 1024 and rows < 5000:
+        return "atomics"
+    if cols < 800 and rows < 20000 and is_data_center:
+        return "atomics"
+    if cols < 2000 and rows < 10000 and is_data_center:
+        return "atomics"
+    if rows >= 5000:
+        return "gemm"
+    return "cupy"
+
+
+def _benchmark_colsum_algorithms(
+    shape: tuple[int, int],
+    dtype: cp.dtype = cp.float32,
+    n_warmup: int = 1,
+    n_trials: int = 3,
+) -> callable:
+    """
+    Benchmark all column sum algorithms and return the fastest one.
+    Parameters
+    ----------
+    shape
+        Shape of the test matrix (rows, cols)
+    dtype
+        Data type for the test matrix
+    n_warmup
+        Number of warmup iterations
+    n_trials
+        Number of benchmark trials
+    Returns
+    -------
+    Name of the fastest algorithm: 'cupy', 'columns', 'atomics', or 'gemm'
+    """
+    rows, cols = shape
+
+    # Create test data
+    X = cp.random.random(shape, dtype=dtype)
+
+    # Ensure it's C-contiguous for fair comparison
+    if not X.flags.c_contiguous:
+        X = cp.ascontiguousarray(X)
+
+    algorithms = {
+        "cupy": lambda x: x.sum(axis=0),
+        "columns": _column_sum,
+        "atomics": _column_sum_atomic,
+        "gemm": _gemm_colsum,
+    }
+
+    results = {}
+
+    for name, func in algorithms.items():
+        # Warmup
+        for _ in range(n_warmup):
+            try:
+                _ = func(X)
+                cp.cuda.Stream.null.synchronize()
+            except Exception:  # noqa: BLE001
+                # If algorithm fails, skip it
+                results[name] = float("inf")
+                break
+        else:
+            # Benchmark
+            times = []
+            for _ in range(n_trials):
+                try:
+                    start_event = cp.cuda.Event()
+                    end_event = cp.cuda.Event()
+
+                    start_event.record()
+                    _ = func(X)
+                    end_event.record()
+                    end_event.synchronize()
+                    elapsed_ms = cp.cuda.get_elapsed_time(start_event, end_event)
+                    times.append(elapsed_ms)
+                except Exception:  # noqa: BLE001
+                    results[name] = float("inf")
+                    break
+            else:
+                # Use median time for robustness
+                results[name] = cp.median(cp.array(times))
+
+    # Return the algorithm with minimum time
+    fastest_algo = min(results.items(), key=lambda x: x[1])[0]
+
+    print(f"Winner: {fastest_algo}")
+
+    return algorithms[fastest_algo]
+
+
+def _auto_choose_colsum_algo(
+    rows: int, cols: int, dtype: cp.dtype = cp.float32
+) -> callable:
+    """
+    Automatically choose the best column sum algorithm by benchmarking.
+
+    Parameters
+    ----------
+    rows
+        Number of rows
+    cols
+        Number of columns
+    dtype
+        Data type
+
+    Returns
+    -------
+    Function of the fastest algorithm
+    """
+    return _benchmark_colsum_algorithms((rows, cols), dtype)

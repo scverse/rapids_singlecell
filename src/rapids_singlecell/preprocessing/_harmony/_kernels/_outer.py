@@ -64,40 +64,38 @@ def _get_harmony_correction_kernel(dtype):
 
 
 _colsum_kernel = r"""
-(const {0}* __restrict__ X,
+(const {0}* __restrict__ A,
             {0}* __restrict__ out,
             size_t rows,
             size_t cols) {
     size_t tid = threadIdx.x;
-    size_t col = blockIdx.x;
-    if (col >= cols) return;
-
-    // grid-stride loop over rows
-    {0} acc = {0}(0);
-    for (size_t i = tid; i < rows; i += blockDim.x) {
-        acc += X[i * cols + col];
-    }
-
-    #pragma unroll
-    for (int offset = 16; offset > 0; offset >>= 1){
-        acc += __shfl_down_sync(0xffffffff, acc, offset);
-    }
-    static __shared__ {0} s[32];
-    if ((threadIdx.x & 31) == 0){
-        s[threadIdx.x>>5] = acc;
-    }
-    __syncthreads();
-
-    if (threadIdx.x < 32) {
-        {0} val = (threadIdx.x < (blockDim.x>>5))
-                        ? s[threadIdx.x]
-                        : {0}(0);
-        #pragma unroll
-        for (int off = 16; off > 0; off >>= 1) {
-            val += __shfl_down_sync(0xffffffff, val, off);
+    for (size_t col = blockIdx.x; col < cols; col += gridDim.x) {
+        {0} acc = {0}(0);
+        for (size_t i = tid; i < rows; i += blockDim.x) {
+            acc += A[i * cols + col];
         }
-        if (threadIdx.x == 0) {
-            out[col] =val;
+
+        #pragma unroll
+        for (int offset = 16; offset > 0; offset >>= 1){
+            acc += __shfl_down_sync(0xffffffff, acc, offset);
+        }
+        static __shared__ {0} s[32];
+        if ((threadIdx.x & 31) == 0){
+            s[threadIdx.x>>5] = acc;
+        }
+        __syncthreads();
+
+        if (threadIdx.x < 32) {
+            {0} val = (threadIdx.x < (blockDim.x>>5))
+                            ? s[threadIdx.x]
+                            : {0}(0);
+            #pragma unroll
+            for (int off = 16; off > 0; off >>= 1) {
+                val += __shfl_down_sync(0xffffffff, val, off);
+            }
+            if (threadIdx.x == 0) {
+                out[col] =val;
+            }
         }
     }
 }
@@ -109,4 +107,47 @@ def _get_colsum_kernel(dtype):
         _colsum_kernel,
         (dtype,),
         "_colsum_kernel",
+    )
+
+
+_colsum_atomic_code = r"""
+(const {0}* __restrict__ A,
+        {0}* __restrict__ out,
+        size_t rows,
+        size_t cols) {
+    // how many 32-wide column tiles
+    size_t tile_cols = (cols + 31) / 32;
+    size_t tid      = blockIdx.x;
+    size_t tile_r   = tid / tile_cols;
+    size_t tile_c   = tid % tile_cols;
+
+    // compute our element coords
+    size_t row = tile_r * 32 + threadIdx.x;
+    size_t col = tile_c * 32 + threadIdx.y;
+
+    {0} v = {0}(0);
+    if (row < rows && col < cols) {
+        // coalesced load: all threads in this warp touch
+        // col = tile_c*32 + warp_lane in [0..31]
+        v = A[row * cols + col];
+    }
+
+    // warp‐level sum over the 32 rows in this tile‐column
+    for (int off = 16; off > 0; off >>= 1) {
+        v += __shfl_down_sync(0xffffffff, v, off);
+    }
+
+    // lane 0 of each warp writes one atomicAdd for this column
+    if (threadIdx.x == 0 && col < cols) {
+        atomicAdd(&out[col], v);
+    }
+}
+"""
+
+
+def _get_colsum_atomic_kernel(dtype):
+    return cuda_kernel_factory(
+        _colsum_atomic_code,
+        (dtype,),
+        "colsum_atomic",
     )
