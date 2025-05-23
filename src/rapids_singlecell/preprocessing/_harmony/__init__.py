@@ -106,7 +106,7 @@ def harmonize(
         If True, use a One-Hot-Encoding Matrix and GEMM to compute Harmony. If False use a label vector. A label vector is more memory efficient and faster for large datasets with a large number of batches.
 
     colsum_algo
-        Choose which algorithm to use for column sum. If auto, choose the best algorithm based on the number of rows and columns. If benchmark, benchmark all algorithms and choose the best one.
+        Choose which algorithm to use for column sum. If `None`, choose the best algorithm based on the number of rows and columns. If `'benchmark'`, benchmark all algorithms and choose the best one.
 
     random_state
         Random seed for reproducing results.
@@ -139,13 +139,12 @@ def harmonize(
     if n_clusters is None:
         n_clusters = int(min(100, n_cells / 30))
     assert colsum_algo in ["columns", "atomics", "gemm", "cupy", "benchmark", None]
+    colsum_func_big = _get_colsum_func(n_cells, n_clusters, None)
     if colsum_algo == "benchmark":
-        colsum_func_big = _auto_choose_colsum_algo(n_cells, n_clusters, Z.dtype)
         colsum_func_small = _auto_choose_colsum_algo(
             int(n_cells * block_proportion), n_clusters, Z.dtype
         )
     else:
-        colsum_func_big = _get_colsum_func(n_cells, n_clusters, colsum_algo)
         colsum_func_small = _get_colsum_func(
             int(n_cells * block_proportion), n_clusters, colsum_algo
         )

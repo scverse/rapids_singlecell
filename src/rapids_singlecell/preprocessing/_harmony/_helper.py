@@ -423,13 +423,14 @@ def _benchmark_colsum_algorithms(
     # Return the algorithm with minimum time
     fastest_algo = min(results.items(), key=lambda x: x[1])[0]
 
-    print(f"Winner: {fastest_algo}")
-
-    return algorithms[fastest_algo]
+    return algorithms[fastest_algo], fastest_algo
 
 
 def _auto_choose_colsum_algo(
-    rows: int, cols: int, dtype: cp.dtype = cp.float32
+    rows: int,
+    cols: int,
+    dtype: cp.dtype = cp.float32,
+    verbose: bool = False,
 ) -> callable:
     """
     Automatically choose the best column sum algorithm by benchmarking.
@@ -447,4 +448,7 @@ def _auto_choose_colsum_algo(
     -------
     Function of the fastest algorithm
     """
-    return _benchmark_colsum_algorithms((rows, cols), dtype)
+    func, algo = _benchmark_colsum_algorithms((rows, cols), dtype)
+    if verbose:
+        print(f"Using {algo} for column sum")
+    return func
