@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
 import numpy as np
@@ -15,9 +15,11 @@ from ._fuses import (
     _log_div_OE,
 )
 from ._helper import (
+    _auto_choose_colsum_algo,
     _create_category_index_mapping,
     _get_aggregated_matrix,
     _get_batch_codes,
+    _get_colsum_func,
     _get_theta_array,
     _kmeans_error,
     _normalize_cp,
@@ -30,6 +32,8 @@ from ._helper import (
 
 if TYPE_CHECKING:
     import pandas as pd
+
+COLSUM_ALGO = Literal["columns", "atomics", "gemm", "cupy", "benchmark"]
 
 
 def harmonize(
@@ -48,8 +52,9 @@ def harmonize(
     theta: float | int | list[float] | np.ndarray | cp.ndarray = 2.0,
     tau: int = 0,
     correction_method: str = "fast",
-    random_state: int = 0,
     use_gemm: bool = False,
+    colsum_algo: COLSUM_ALGO | None = None,
+    random_state: int = 0,
 ) -> cp.array:
     """
     Integrate data using Harmony algorithm.
@@ -101,6 +106,9 @@ def harmonize(
     use_gemm
         If True, use a One-Hot-Encoding Matrix and GEMM to compute Harmony. If False use a label vector. A label vector is more memory efficient and faster for large datasets with a large number of batches.
 
+    colsum_algo
+        Choose which algorithm to use for column sum. If `None`, choose the algorithm based on the number of rows and columns. If `'benchmark'`, benchmark all algorithms and choose the best one.
+
     random_state
         Random seed for reproducing results.
 
@@ -131,8 +139,18 @@ def harmonize(
     # Set up parameters
     if n_clusters is None:
         n_clusters = int(min(100, n_cells / 30))
-    import time
 
+    # TODO: Allow for multiple colsum algorithms in a list
+    assert colsum_algo in ["columns", "atomics", "gemm", "cupy", "benchmark", None]
+    colsum_func_big = _get_colsum_func(n_cells, n_clusters, None)
+    if colsum_algo == "benchmark":
+        colsum_func_small = _auto_choose_colsum_algo(
+            int(n_cells * block_proportion), n_clusters, Z.dtype
+        )
+    else:
+        colsum_func_small = _get_colsum_func(
+            int(n_cells * block_proportion), n_clusters, colsum_algo
+        )
     theta_array = _get_theta_array(theta, n_batches, Z.dtype)
     if tau > 0:
         theta_array = theta_array * (1 - cp.exp(-N_b / (n_clusters * tau)) ** 2)
@@ -157,11 +175,12 @@ def harmonize(
         random_state=random_state,
         cats=cats,
         n_batches=n_batches,
+        colsum_func=colsum_func_big,
     )
 
     # Main harmony iterations
     is_converged = False
-    for _ in range(max_iter_harmony):
+    for i in range(max_iter_harmony):
         # Clustering step
         _clustering(
             Z_norm,
@@ -177,6 +196,7 @@ def harmonize(
             max_iter=max_iter_clustering,
             sigma=sigma,
             block_proportion=block_proportion,
+            colsum_func=colsum_func_small,
         )
 
         # Correction step
@@ -195,10 +215,10 @@ def harmonize(
 
         # Normalize corrected data
         Z_norm = _normalize_cp(Z_hat, p=2)
-
         # Check for convergence
         if _is_convergent_harmony(objectives_harmony, tol=tol_harmony):
             is_converged = True
+            print(f"Harmony converged in {i} iterations")
             break
 
     if not is_converged:
@@ -220,6 +240,7 @@ def _initialize_centroids(
     random_state: int = 0,
     cats: cp.ndarray | None = None,
     n_batches: int = None,
+    colsum_func: callable = None,
 ) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, list]:
     """
     Initialize cluster centroids and related matrices for Harmony algorithm.
@@ -248,7 +269,10 @@ def _initialize_centroids(
     R = _normalize_cp(R, p=1)
 
     # Initialize E (expected) and O (observed) matrices
-    E = cp.dot(Pr_b, cp.sum(R, axis=0, keepdims=True))
+    R_sum = colsum_func(R)
+    E = cp.zeros((n_batches, R.shape[1]), dtype=Z_norm.dtype)
+    _outer_cp(E, Pr_b, R_sum, 1)
+
     if Phi is None:
         O = cp.zeros((n_batches, R.shape[1]), dtype=Z_norm.dtype)
         _scatter_add_cp(R, O, cats, 1)
@@ -286,6 +310,7 @@ def _clustering(
     max_iter: int,
     sigma: float,
     block_proportion: float,
+    colsum_func: callable = None,
 ) -> None:
     """
     Perform iterative clustering updates on normalized input data, adjusting
@@ -315,6 +340,8 @@ def _clustering(
             idx_in = idx_list[pos : (pos + block_size)]
             R_in = R[idx_in]
 
+            R_in_sum = colsum_func(R_in)
+
             # Remove contribution of current block from O
             if Phi is None:
                 cats_in = cats[idx_in]
@@ -323,12 +350,11 @@ def _clustering(
                 Phi_in = Phi[idx_in]
                 cp.cublas.gemm("T", "N", Phi_in, R_in, alpha=-1, beta=1, out=O)
 
-            # Remove contribution of current block from E
-            _outer_cp(E, Pr_b, cp.sum(R_in, axis=0), 0)
+            # Use optimized column sum function
+            _outer_cp(E, Pr_b, R_in_sum, 0)
 
             # Update cluster assignments for current block
             R_out = _calc_R(term, cp.dot(Z_norm[idx_in], Y_norm.T))
-
             # Apply penalty term to cluster assignments
             penalty_term = _get_pen(E, O, theta.T)
             if Phi is None:
@@ -340,6 +366,8 @@ def _clustering(
             # Normalize updated cluster assignments
             R_out = _normalize_cp(R_out, p=1)
             R[idx_in] = R_out
+            # Use optimized column sum function again
+            R_out_sum = colsum_func(R_in)
 
             # Add contribution of updated block back to O
             if Phi is None:
@@ -348,7 +376,7 @@ def _clustering(
                 cp.cublas.gemm("T", "N", Phi_in, R_out, alpha=1, beta=1, out=O)
 
             # Add contribution of updated block back to E
-            _outer_cp(E, Pr_b, cp.sum(R_in, axis=0), 1)
+            _outer_cp(E, Pr_b, R_out_sum, 1)
 
             # Move to next block
             pos += block_size
@@ -474,7 +502,6 @@ def _correction_original(
                 bias=R_col,
                 n_batches=n_batches,
             )
-
         W = cp.dot(inv_mat, Phi_t_diag_R_X)
         W[0, :] = 0
 

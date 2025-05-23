@@ -8,6 +8,8 @@ import numpy as np
 if TYPE_CHECKING:
     from anndata import AnnData
 
+    from ._harmony import COLSUM_ALGO
+
 
 def harmony_integrate(
     adata: AnnData,
@@ -18,6 +20,7 @@ def harmony_integrate(
     dtype: type = np.float64,
     correction_method: Literal["fast", "original"] = "original",
     use_gemm: bool = False,
+    colsum_algo: COLSUM_ALGO | None = None,
     **kwargs,
 ) -> None:
     """
@@ -50,9 +53,11 @@ def harmony_integrate(
             Choose which method for the correction step: ``original`` for original method, ``fast`` for improved method.
         use_gemm
             If True, use a One-Hot-Encoding Matrix and GEMM to compute Harmony. If False use a label vector. A label vector is more memory efficient and faster for large datasets with a large number of batches.
+        colsum_algo
+            Choose which algorithm to use for column sums. If `None`, choose the algorithm based on the number of rows and columns. If `'benchmark'`, benchmark all algorithms and choose the best one.
         kwargs
             Any additional arguments will be passed to
-            ``harmonpy_gpu.run_harmony()``.
+            ``_harmony.harmonize``.
 
     Returns
     -------
