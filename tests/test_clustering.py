@@ -4,6 +4,7 @@ import pytest
 from scanpy.datasets import pbmc68k_reduced
 
 import rapids_singlecell as rsc
+from rapids_singlecell.tools._clustering import _create_graph
 
 
 @pytest.fixture
@@ -29,6 +30,13 @@ def test_louvain_dtype(adata_neighbors, dtype, use_weights):
             rsc.tl.louvain(adata_neighbors, use_weights=use_weights, dtype=dtype)
     else:
         rsc.tl.louvain(adata_neighbors, use_weights=use_weights, dtype=dtype)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_create_graph_dtype(adata_neighbors, dtype):
+    g = _create_graph(adata_neighbors.X, use_weights=True, dtype=dtype)
+    df = g.view_edge_list()
+    assert df.weights.dtype == dtype
 
 
 @pytest.mark.parametrize("key", ["leiden", "louvain"])
