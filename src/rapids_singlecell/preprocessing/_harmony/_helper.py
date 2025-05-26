@@ -432,7 +432,7 @@ def _auto_choose_colsum_algo(
     rows: int,
     cols: int,
     dtype: cp.dtype = cp.float32,
-    verbose: bool = False,
+    verbose: bool = True,
 ) -> callable:
     """
     Automatically choose the best column sum algorithm by benchmarking.
@@ -445,7 +445,8 @@ def _auto_choose_colsum_algo(
         Number of columns
     dtype
         Data type
-
+    verbose
+        Whether to print the chosen algorithm
     Returns
     -------
     Function of the fastest algorithm
