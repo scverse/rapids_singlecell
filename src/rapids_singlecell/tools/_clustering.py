@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Literal, get_args
+from typing import TYPE_CHECKING, Literal
 
 import cudf
 import cupy as cp
@@ -19,8 +19,29 @@ if TYPE_CHECKING:
     from anndata import AnnData
     from scipy import sparse
 
-DTYPES = Literal[np.float32, np.float64, cp.float32, cp.float64, "float32", "float64"]
-DTYPES_LIST = get_args(DTYPES)
+FloatNames = Literal["float32", "float64"]
+FloatTypes = np.float32 | np.float64 | cp.float32 | cp.float64
+DTYPES = FloatNames | FloatTypes
+
+
+def _check_dtype(dtype: DTYPES) -> DTYPES:
+    if isinstance(dtype, str):
+        if dtype not in ["float32", "float64"]:
+            raise ValueError("dtype must be one of ['float32', 'float64']")
+        else:
+            return dtype
+    elif isinstance(dtype, np.dtype):
+        if dtype not in [np.float32, np.float64]:
+            raise ValueError("dtype must be one of [np.float32, np.float64]")
+        else:
+            return dtype
+    elif isinstance(dtype, cp.dtype):
+        if dtype not in [cp.float32, cp.float64]:
+            raise ValueError("dtype must be one of [cp.float32, cp.float64]")
+        else:
+            return dtype
+    else:
+        raise ValueError("dtype must be one of ['float32', 'float64']")
 
 
 def _create_graph(adjacency, use_weights=True, dtype=np.float64):
@@ -129,7 +150,7 @@ def leiden(
 
     adata = adata.copy() if copy else adata
 
-    assert dtype in DTYPES_LIST, f"dtype must be one of {DTYPES_LIST}"
+    dtype = _check_dtype(dtype)
 
     if adjacency is None:
         adjacency = _choose_graph(adata, obsp, neighbors_key)
@@ -142,7 +163,7 @@ def leiden(
             adjacency=adjacency,
         )
 
-    g = _create_graph(adjacency, use_weights)
+    g = _create_graph(adjacency, use_weights, dtype)
     # Cluster
     leiden_parts, _ = culeiden(
         g,
@@ -263,7 +284,7 @@ def louvain(
     # Adjacency graph
     from cugraph import louvain as culouvain
 
-    assert dtype in DTYPES_LIST, f"dtype must be one of {DTYPES_LIST}"
+    dtype = _check_dtype(dtype)
 
     adata = adata.copy() if copy else adata
     if adjacency is None:
@@ -277,7 +298,7 @@ def louvain(
             adjacency=adjacency,
         )
 
-    g = _create_graph(adjacency, use_weights)
+    g = _create_graph(adjacency, use_weights, dtype)
 
     # Cluster
     louvain_parts, _ = culouvain(
