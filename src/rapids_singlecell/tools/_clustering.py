@@ -19,14 +19,15 @@ if TYPE_CHECKING:
     from scipy import sparse
 
 
-def _create_graph(adjacency, use_weights=True):
+def _create_graph(adjacency, use_weights=True, dtype=np.float64):
     from cugraph import Graph
-
+    
     sources, targets = adjacency.nonzero()
     weights = adjacency[sources, targets]
     if isinstance(weights, np.matrix):
         weights = weights.A1
     df = cudf.DataFrame({"source": sources, "destination": targets, "weights": weights})
+    df.weights = df.weights.astype(dtype)
     g = Graph()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
