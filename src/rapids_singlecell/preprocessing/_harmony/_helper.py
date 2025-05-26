@@ -306,7 +306,7 @@ def _gemm_colsum(X: cp.ndarray) -> cp.ndarray:
     return X.T @ cp.ones(X.shape[0], dtype=X.dtype)
 
 
-def _get_colsum_func(rows: int, cols: int, algo: str | None) -> callable:
+def _choose_colsum_algo_heuristic(rows: int, cols: int, algo: str | None) -> callable:
     """
     Returns one of:
     - _colsum_columns
@@ -317,7 +317,7 @@ def _get_colsum_func(rows: int, cols: int, algo: str | None) -> callable:
     # first pick the strategy string
     if algo is None:
         cc = cp.cuda.Device().compute_capability
-        algo = _choose_colsum_algo(rows, cols, cc)
+        algo = _colsum_heuristic(rows, cols, cc)
     if algo == "cupy":
         return lambda X: X.sum(axis=0)
     if algo == "columns":
@@ -331,7 +331,7 @@ def _get_colsum_func(rows: int, cols: int, algo: str | None) -> callable:
 
 
 # TODO: Make this more robust
-def _choose_colsum_algo(rows: int, cols: int, compute_capability: str) -> str:
+def _colsum_heuristic(rows: int, cols: int, compute_capability: str) -> str:
     is_data_center = compute_capability in ["100", "90"]
     if cols < 200 and rows < 20000:
         return "columns"
@@ -428,11 +428,11 @@ def _benchmark_colsum_algorithms(
     return algorithms[fastest_algo], fastest_algo
 
 
-def _auto_choose_colsum_algo(
+def _choose_colsum_algo_benchmark(
     rows: int,
     cols: int,
     dtype: cp.dtype = cp.float32,
-    verbose: bool = False,
+    verbose: bool = True,
 ) -> callable:
     """
     Automatically choose the best column sum algorithm by benchmarking.
@@ -445,7 +445,8 @@ def _auto_choose_colsum_algo(
         Number of columns
     dtype
         Data type
-
+    verbose
+        Whether to print the chosen algorithm
     Returns
     -------
     Function of the fastest algorithm

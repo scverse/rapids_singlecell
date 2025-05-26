@@ -15,11 +15,11 @@ from ._fuses import (
     _log_div_OE,
 )
 from ._helper import (
-    _auto_choose_colsum_algo,
+    _choose_colsum_algo_benchmark,
+    _choose_colsum_algo_heuristic,
     _create_category_index_mapping,
     _get_aggregated_matrix,
     _get_batch_codes,
-    _get_colsum_func,
     _get_theta_array,
     _kmeans_error,
     _normalize_cp,
@@ -142,13 +142,13 @@ def harmonize(
 
     # TODO: Allow for multiple colsum algorithms in a list
     assert colsum_algo in ["columns", "atomics", "gemm", "cupy", "benchmark", None]
-    colsum_func_big = _get_colsum_func(n_cells, n_clusters, None)
+    colsum_func_big = _choose_colsum_algo_heuristic(n_cells, n_clusters, None)
     if colsum_algo == "benchmark":
-        colsum_func_small = _auto_choose_colsum_algo(
+        colsum_func_small = _choose_colsum_algo_benchmark(
             int(n_cells * block_proportion), n_clusters, Z.dtype
         )
     else:
-        colsum_func_small = _get_colsum_func(
+        colsum_func_small = _choose_colsum_algo_heuristic(
             int(n_cells * block_proportion), n_clusters, colsum_algo
         )
     theta_array = _get_theta_array(theta, n_batches, Z.dtype)

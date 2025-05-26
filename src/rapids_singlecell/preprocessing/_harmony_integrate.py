@@ -118,6 +118,7 @@ def harmony_integrate(
         key,
         correction_method=correction_method,
         use_gemm=use_gemm,
+        colsum_algo=colsum_algo,
         **kwargs,
     )
 
