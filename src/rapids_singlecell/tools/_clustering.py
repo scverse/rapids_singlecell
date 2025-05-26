@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import cudf
-import cupy as cp
 import numpy as np
 import pandas as pd
 from natsort import natsorted
@@ -16,15 +15,12 @@ from ._utils import _choose_representation
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    import cupy as cp
     from anndata import AnnData
     from scipy import sparse
 
-FloatNames = Literal["float32", "float64"]
-FloatTypes = np.float32 | np.float64 | cp.float32 | cp.float64
-DTYPES = FloatNames | FloatTypes
 
-
-def _check_dtype(dtype: DTYPES) -> DTYPES:
+def _check_dtype(dtype: str | np.dtype | cp.dtype) -> str | np.dtype | cp.dtype:
     if isinstance(dtype, str):
         if dtype not in ["float32", "float64"]:
             raise ValueError("dtype must be one of ['float32', 'float64']")
@@ -70,7 +66,7 @@ def leiden(
     use_weights: bool = True,
     neighbors_key: str | None = None,
     obsp: str | None = None,
-    dtype: DTYPES = np.float32,
+    dtype: str | np.dtype | cp.dtype = np.float32,
     copy: bool = False,
 ) -> AnnData | None:
     """
@@ -206,7 +202,7 @@ def louvain(
     use_weights: bool = True,
     neighbors_key: int | None = None,
     obsp: str | None = None,
-    dtype: DTYPES = np.float32,
+    dtype: str | np.dtype | cp.dtype = np.float32,
     copy: bool = False,
 ) -> AnnData | None:
     """
