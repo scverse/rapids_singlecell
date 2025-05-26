@@ -11,14 +11,24 @@ def adata_neighbors():
     return pbmc68k_reduced()
 
 
-def test_leiden_basic(adata_neighbors):
-    rsc.tl.leiden(adata_neighbors, use_weights=False)
-    rsc.tl.leiden(adata_neighbors, use_weights=True)
+@pytest.mark.parametrize("dtype", ["float32", "float64", "int32"])
+@pytest.mark.parametrize("use_weights", [True, False])
+def test_leiden_dtype(adata_neighbors, dtype, use_weights):
+    if dtype == "int32":
+        with pytest.raises(ValueError):
+            rsc.tl.leiden(adata_neighbors, use_weights=use_weights, dtype=dtype)
+    else:
+        rsc.tl.leiden(adata_neighbors, use_weights=use_weights, dtype=dtype)
 
 
-def test_louvain_basic(adata_neighbors):
-    rsc.tl.louvain(adata_neighbors, use_weights=False)
-    rsc.tl.louvain(adata_neighbors, use_weights=True)
+@pytest.mark.parametrize("dtype", ["float32", "float64", "int32"])
+@pytest.mark.parametrize("use_weights", [True, False])
+def test_louvain_dtype(adata_neighbors, dtype, use_weights):
+    if dtype == "int32":
+        with pytest.raises(ValueError):
+            rsc.tl.louvain(adata_neighbors, use_weights=use_weights, dtype=dtype)
+    else:
+        rsc.tl.louvain(adata_neighbors, use_weights=use_weights, dtype=dtype)
 
 
 @pytest.mark.parametrize("key", ["leiden", "louvain"])
