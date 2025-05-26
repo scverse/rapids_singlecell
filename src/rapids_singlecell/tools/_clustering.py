@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, get_args
 
 import cudf
+import cupy as cp
 import numpy as np
 import pandas as pd
 from natsort import natsorted
@@ -18,10 +19,13 @@ if TYPE_CHECKING:
     from anndata import AnnData
     from scipy import sparse
 
+DTYPES = Literal[np.float32, np.float64, cp.float32, cp.float64, "float32", "float64"]
+DTYPES_LIST = get_args(DTYPES)
+
 
 def _create_graph(adjacency, use_weights=True, dtype=np.float64):
     from cugraph import Graph
-    
+
     sources, targets = adjacency.nonzero()
     weights = adjacency[sources, targets]
     if isinstance(weights, np.matrix):
@@ -53,6 +57,7 @@ def leiden(
     use_weights: bool = True,
     neighbors_key: str | None = None,
     obsp: str | None = None,
+    dtype: DTYPES = np.float32,
     copy: bool = False,
 ) -> AnnData | None:
     """
@@ -113,6 +118,9 @@ def leiden(
             Use .obsp[obsp] as adjacency. You can't specify both
             `obsp` and `neighbors_key` at the same time.
 
+        dtype
+            Data type to use for the adjacency matrix.
+
         copy
             Whether to copy `adata` or modify it in place.
     """
@@ -120,6 +128,8 @@ def leiden(
     from cugraph import leiden as culeiden
 
     adata = adata.copy() if copy else adata
+
+    assert dtype in DTYPES_LIST, f"dtype must be one of {DTYPES_LIST}"
 
     if adjacency is None:
         adjacency = _choose_graph(adata, obsp, neighbors_key)
@@ -183,6 +193,7 @@ def louvain(
     use_weights: bool = True,
     neighbors_key: int | None = None,
     obsp: str | None = None,
+    dtype: DTYPES = np.float32,
     copy: bool = False,
 ) -> AnnData | None:
     """
@@ -242,12 +253,17 @@ def louvain(
             Use `.obsp[obsp]` as adjacency. You can't specify both `obsp`
             and `neighbors_key` at the same time.
 
+        dtype
+            Data type to use for the adjacency matrix.
+
         copy
             Whether to copy `adata` or modify it in place.
 
     """
     # Adjacency graph
     from cugraph import louvain as culouvain
+
+    assert dtype in DTYPES_LIST, f"dtype must be one of {DTYPES_LIST}"
 
     adata = adata.copy() if copy else adata
     if adjacency is None:
