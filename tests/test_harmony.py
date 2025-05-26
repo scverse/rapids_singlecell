@@ -8,9 +8,9 @@ from scipy.stats import pearsonr
 
 import rapids_singlecell as rsc
 from rapids_singlecell.preprocessing._harmony._helper import (
-    _auto_choose_colsum_algo,
-    _choose_colsum_algo,
-    _get_colsum_func,
+    _choose_colsum_algo_benchmark,
+    _choose_colsum_algo_heuristic,
+    _colsum_heuristic,
 )
 
 
@@ -71,7 +71,7 @@ def test_colsum_algo(algo, dtype):
         X = cp.random.randint(0, 10, size=(20, 10), dtype=dtype)
     else:
         X = cp.random.randn(20, 10, dtype=dtype)
-    algo_func = _get_colsum_func(X.shape[0], X.shape[1], algo)
+    algo_func = _choose_colsum_algo_heuristic(X.shape[0], X.shape[1], algo)
     algo_out = algo_func(X)
     cupy_out = X.sum(axis=0)
     if dtype == cp.int32:
@@ -88,7 +88,7 @@ def test_choose_colsum_algo(compute_capability):
     # for the given shape of the matrix
     for rows in np.arange(1000, 300000, 1000):
         for columns in np.arange(10, 5000, 50):
-            algo = _choose_colsum_algo(rows, columns, compute_capability)
+            algo = _colsum_heuristic(rows, columns, compute_capability)
             assert algo in ["columns", "atomics", "gemm", "cupy"]
             if columns < 1024 or rows >= 5000:
                 assert algo != "cupy"
@@ -99,5 +99,5 @@ def test_benchmark_colsum_algorithms(dtype):
     # Test that the benchmark_colsum_algorithms function returns the correct algorithm
     # for the given shape of the matrix
     test_shape = (1000, 100)
-    algo_func = _auto_choose_colsum_algo(test_shape[0], test_shape[1], dtype)
+    algo_func = _choose_colsum_algo_benchmark(test_shape[0], test_shape[1], dtype)
     assert callable(algo_func)
