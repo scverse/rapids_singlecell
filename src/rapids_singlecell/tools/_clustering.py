@@ -30,16 +30,8 @@ def _check_dtype(dtype: DTYPES) -> DTYPES:
             raise ValueError("dtype must be one of ['float32', 'float64']")
         else:
             return dtype
-    elif isinstance(dtype, np.dtype):
-        if dtype not in [np.float32, np.float64]:
-            raise ValueError("dtype must be one of [np.float32, np.float64]")
-        else:
-            return dtype
-    elif isinstance(dtype, cp.dtype):
-        if dtype not in [cp.float32, cp.float64]:
-            raise ValueError("dtype must be one of [cp.float32, cp.float64]")
-        else:
-            return dtype
+    elif dtype is np.float32 or dtype is np.float64:
+        return dtype
     else:
         raise ValueError("dtype must be one of ['float32', 'float64']")
 
