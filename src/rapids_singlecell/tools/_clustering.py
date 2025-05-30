@@ -181,8 +181,8 @@ def leiden(
         categories=natsorted(map(str, np.unique(groups))),
     )
     # store information on the clustering parameters
-    adata.uns["leiden"] = {}
-    adata.uns["leiden"]["params"] = {
+    adata.uns[key_added] = {}
+    adata.uns[key_added]["params"] = {
         "resolution": resolution,
         "random_state": random_state,
         "n_iterations": n_iterations,
@@ -319,8 +319,8 @@ def louvain(
         values=groups.astype("U"),
         categories=natsorted(map(str, np.unique(groups))),
     )
-    adata.uns["louvain"] = {}
-    adata.uns["louvain"]["params"] = {
+    adata.uns[key_added] = {}
+    adata.uns[key_added]["params"] = {
         "resolution": resolution,
         "n_iterations": n_iterations,
         "threshold": threshold,
