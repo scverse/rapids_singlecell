@@ -184,11 +184,9 @@ def harmonize(
 
     # Main harmony iterations
     is_converged = False
-    import time
 
     for i in range(max_iter_harmony):
         # Clustering step
-        start_time = time.time()
         _clustering(
             Z_norm,
             Pr_b=Pr_b,
@@ -205,10 +203,7 @@ def harmonize(
             block_proportion=block_proportion,
             colsum_func=colsum_func_small,
         )
-        cp.cuda.Stream.null.synchronize()
-        clustering_time = time.time() - start_time
         # Correction step
-        start_time = time.time()
         Z_hat = _correction(
             Z,
             R=R,
@@ -220,11 +215,6 @@ def harmonize(
             n_batches=n_batches,
             cat_offsets=cat_offsets,
             cell_indices=cell_indices,
-        )
-        cp.cuda.Stream.null.synchronize()
-        correction_time = time.time() - start_time
-        print(
-            f"Clustering time: {clustering_time:.3f}s, Correction time: {correction_time:.3f}s"
         )
         # Normalize corrected data
         Z_norm = _normalize_cp(Z_hat, p=2)
