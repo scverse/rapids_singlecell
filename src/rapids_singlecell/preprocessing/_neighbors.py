@@ -73,8 +73,10 @@ def _brute_knn(
     X: cp_sparse.spmatrix | cp.ndarray,
     Y: cp_sparse.spmatrix | cp.ndarray,
     k: int,
+    *,
     metric: _Metrics,
     metric_kwds: Mapping,
+    algorithm_kwds: Mapping,
 ) -> tuple[cp.ndarray, cp.ndarray]:
     from cuml.neighbors import NearestNeighbors
 
@@ -91,7 +93,13 @@ def _brute_knn(
 
 
 def _cagra_knn(
-    X: cp.ndarray, Y: cp.ndarray, k: int, metric: _Metrics, metric_kwds: Mapping
+    X: cp.ndarray,
+    Y: cp.ndarray,
+    k: int,
+    *,
+    metric: _Metrics,
+    metric_kwds: Mapping,
+    algorithm_kwds: Mapping,
 ) -> tuple[cp.ndarray, cp.ndarray]:
     if not _cuvs_switch():
         try:
@@ -135,8 +143,20 @@ def _cagra_knn(
     return neighbors, distances
 
 
+def _compute_nlist(N):
+    base = math.sqrt(N)
+    next_pow2 = 2 ** math.ceil(math.log2(base))
+    return int(next_pow2 * 2)
+
+
 def _ivf_flat_knn(
-    X: cp.ndarray, Y: cp.ndarray, k: int, metric: _Metrics, metric_kwds: Mapping
+    X: cp.ndarray,
+    Y: cp.ndarray,
+    k: int,
+    *,
+    metric: _Metrics,
+    metric_kwds: Mapping,
+    algorithm_kwds: Mapping,
 ) -> tuple[cp.ndarray, cp.ndarray]:
     if not _cuvs_switch():
         from pylibraft.neighbors import ivf_flat
@@ -151,12 +171,16 @@ def _ivf_flat_knn(
         build_kwargs = {}  # cuvs does not need handle/resources
         search_kwargs = {}
 
-    n_lists = int(math.sqrt(X.shape[0]))
+    # Extract n_lists and nprobes from algorithm_kwds, with defaults
+    n_lists = algorithm_kwds.get("n_lists", _compute_nlist(X.shape[0]))
+    n_probes = algorithm_kwds.get("n_probes", 20)
+    print(f"n_lists: {n_lists}, n_probes: {n_probes}")
     index_params = ivf_flat.IndexParams(n_lists=n_lists, metric=metric)
     index = ivf_flat.build(index_params, X, **build_kwargs)
-    distances, neighbors = ivf_flat.search(
-        ivf_flat.SearchParams(), index, Y, k, **search_kwargs
-    )
+
+    # Create SearchParams with nprobes if provided
+    search_params = ivf_flat.SearchParams(n_probes=n_probes)
+    distances, neighbors = ivf_flat.search(search_params, index, Y, k, **search_kwargs)
 
     if resources is not None:
         resources.sync()
@@ -168,7 +192,13 @@ def _ivf_flat_knn(
 
 
 def _ivf_pq_knn(
-    X: cp.ndarray, Y: cp.ndarray, k: int, metric: _Metrics, metric_kwds: Mapping
+    X: cp.ndarray,
+    Y: cp.ndarray,
+    k: int,
+    *,
+    metric: _Metrics,
+    metric_kwds: Mapping,
+    algorithm_kwds: Mapping,
 ) -> tuple[cp.ndarray, cp.ndarray]:
     if not _cuvs_switch():
         from pylibraft.neighbors import ivf_pq
@@ -183,12 +213,16 @@ def _ivf_pq_knn(
         build_kwargs = {}
         search_kwargs = {}
 
-    n_lists = int(math.sqrt(X.shape[0]))
+    # Extract n_lists and nprobes from algorithm_kwds, with defaults
+    n_lists = algorithm_kwds.get("n_lists", _compute_nlist(X.shape[0]))
+    n_probes = algorithm_kwds.get("n_probes", 20)
+
     index_params = ivf_pq.IndexParams(n_lists=n_lists, metric=metric)
     index = ivf_pq.build(index_params, X, **build_kwargs)
-    distances, neighbors = ivf_pq.search(
-        ivf_pq.SearchParams(), index, Y, k, **search_kwargs
-    )
+    print(f"n_lists: {n_lists}, n_probes: {n_probes}")
+    # Create SearchParams with nprobes if provided
+    search_params = ivf_pq.SearchParams(n_probes=n_probes)
+    distances, neighbors = ivf_pq.search(search_params, index, Y, k, **search_kwargs)
     if resources is not None:
         resources.sync()
 
@@ -199,7 +233,13 @@ def _ivf_pq_knn(
 
 
 def _nn_descent_knn(
-    X: cp.ndarray, Y: cp.ndarray, k: int, metric: _Metrics, metric_kwds: Mapping
+    X: cp.ndarray,
+    Y: cp.ndarray,
+    k: int,
+    *,
+    metric: _Metrics,
+    metric_kwds: Mapping,
+    algorithm_kwds: Mapping,
 ) -> tuple[cp.ndarray, cp.ndarray]:
     from cuvs import __version__ as cuvs_version
 
@@ -210,8 +250,13 @@ def _nn_descent_knn(
         )
     from cuvs.neighbors import nn_descent
 
+    # Extract intermediate_graph_degree from algorithm_kwds, with default
+    intermediate_graph_degree = algorithm_kwds.get("intermediate_graph_degree", None)
+
     idxparams = nn_descent.IndexParams(
-        graph_degree=k, metric="sqeuclidean" if metric == "euclidean" else metric
+        graph_degree=k,
+        intermediate_graph_degree=intermediate_graph_degree,
+        metric="sqeuclidean" if metric == "euclidean" else metric,
     )
     idx = nn_descent.build(
         idxparams,
@@ -392,6 +437,7 @@ def neighbors(
     algorithm: _Algorithms = "brute",
     metric: _Metrics = "euclidean",
     metric_kwds: Mapping[str, Any] = MappingProxyType({}),
+    algorithm_kwds: Mapping[str, Any] = MappingProxyType({}),
     key_added: str | None = None,
     copy: bool = False,
 ) -> AnnData | None:
@@ -437,6 +483,16 @@ def neighbors(
         A known metric's name or a callable that returns a distance.
     metric_kwds
         Options for the metric.
+    algorithm_kwds
+        Options for the algorithm. For 'ivfflat' and 'ivfpq' algorithms, the following
+        parameters can be specified:
+        * 'n_lists': Number of inverted lists for IVF indexing. Default is sqrt(n_samples).
+        * 'n_probes': Number of lists to probe during search. Default is 20. Higher values
+        increase accuracy but reduce speed.
+        For 'nn_descent' algorithm, the following parameters can be specified:
+        * 'intermediate_graph_degree': The degree of the intermediate graph. Default is None.
+        It is recommended to set it to `>= 1.5 * n_neighbors`.
+
     key_added
         If not specified, the neighbors data is stored in .uns['neighbors'],
         distances and connectivities are stored in .obsp['distances'] and
@@ -484,6 +540,7 @@ def neighbors(
         k=n_neighbors,
         metric=metric,
         metric_kwds=metric_kwds,
+        algorithm_kwds=algorithm_kwds,
     )
 
     n_nonzero = n_obs * n_neighbors
@@ -516,6 +573,7 @@ def neighbors(
         random_state=random_state,
         metric=metric,
         **({"metric_kwds": metric_kwds} if metric_kwds else {}),
+        **({"algorithm_kwds": algorithm_kwds} if algorithm_kwds else {}),
         **({"use_rep": use_rep} if use_rep is not None else {}),
         **({"n_pcs": n_pcs} if n_pcs is not None else {}),
     )
@@ -543,6 +601,7 @@ def bbknn(
     algorithm: _Algorithms_bbknn = "brute",
     metric: _Metrics = "euclidean",
     metric_kwds: Mapping[str, Any] = MappingProxyType({}),
+    algorithm_kwds: Mapping[str, Any] = MappingProxyType({}),
     trim: int | None = None,
     key_added: str | None = None,
     copy: bool = False,
@@ -588,6 +647,13 @@ def bbknn(
         A known metric's name or a callable that returns a distance.
     metric_kwds
         Options for the metric.
+    algorithm_kwds
+        Options for the algorithm. For 'ivfflat' and 'ivfpq' algorithms, the following
+        parameters can be specified:
+
+        * 'n_lists': Number of inverted lists for IVF indexing. Default is sqrt(n_samples).
+        * 'nprobes': Number of lists to probe during search. Default is 1. Higher values
+          increase accuracy but reduce speed.
     trim
         Trim the neighbours of each cell to these many top connectivities.
         May help with population independence and improve the tidiness of clustering.
@@ -660,6 +726,7 @@ def bbknn(
             k=neighbors_within_batch,
             metric=metric,
             metric_kwds=metric_kwds,
+            algorithm_kwds=algorithm_kwds,
         )
 
         col_range = cp.arange(
@@ -705,6 +772,7 @@ def bbknn(
         metric=metric,
         trim=trim,
         **({"metric_kwds": metric_kwds} if metric_kwds else {}),
+        **({"algorithm_kwds": algorithm_kwds} if algorithm_kwds else {}),
         **({"use_rep": use_rep} if use_rep is not None else {}),
         **({"n_pcs": n_pcs} if n_pcs is not None else {}),
     )
