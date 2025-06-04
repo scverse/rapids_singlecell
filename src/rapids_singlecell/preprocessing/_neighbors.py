@@ -486,7 +486,7 @@ def neighbors(
     algorithm_kwds
         Options for the algorithm. For 'ivfflat' and 'ivfpq' algorithms, the following
         parameters can be specified:
-        * 'n_lists': Number of inverted lists for IVF indexing. Default is sqrt(n_samples).
+        * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
         * 'n_probes': Number of lists to probe during search. Default is 20. Higher values
         increase accuracy but reduce speed.
         For 'nn_descent' algorithm, the following parameters can be specified:
@@ -651,7 +651,7 @@ def bbknn(
         Options for the algorithm. For 'ivfflat' and 'ivfpq' algorithms, the following
         parameters can be specified:
 
-        * 'n_lists': Number of inverted lists for IVF indexing. Default is sqrt(n_samples).
+        * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
         * 'nprobes': Number of lists to probe during search. Default is 1. Higher values
           increase accuracy but reduce speed.
     trim
