@@ -5,7 +5,7 @@ FROM nvidia/cuda:${CUDA_VER}-base-${LINUX_VER}
 
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 
-ARG PYTHON_VER=3.12
+ARG PYTHON_VER=3.13
 
 ENV PATH=/opt/conda/bin:$PATH
 ENV PYTHON_VERSION=${PYTHON_VER}

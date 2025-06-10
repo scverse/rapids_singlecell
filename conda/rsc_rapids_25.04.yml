@@ -11,8 +11,6 @@ dependencies:
  - cudnn
  - cutensor
  - cusparselt
- - leidenalg
- - louvain
  - jupyterlab
  - pip
  - pip:
@@ -20,6 +18,4 @@ dependencies:
     - omnipath
     - gdown
     - wget
-    - scikit-misc
-    - harmonypy
     - rapids-singlecell
