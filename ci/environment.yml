@@ -4,7 +4,7 @@ channels:
  - nvidia
  - conda-forge
 dependencies:
- - rapids=25.04
- - python=3.12
+ - rapids=25.06
+ - python=3.13
  - cuda-version=12.8
  - cudnn
