@@ -55,6 +55,7 @@ def harmonize(
     use_gemm: bool = False,
     colsum_algo: COLSUM_ALGO | None = None,
     random_state: int = 0,
+    verbose: bool = False,
 ) -> cp.array:
     """
     Integrate data using Harmony algorithm.
@@ -112,6 +113,9 @@ def harmonize(
     random_state
         Random seed for reproducing results.
 
+    verbose
+        Whether to print benchmarking results for the column sum algorithm and the number of iterations until convergence.
+
     Returns
     -------
     The integrated embedding by Harmony, of the same shape as the input embedding.
@@ -145,7 +149,7 @@ def harmonize(
     colsum_func_big = _choose_colsum_algo_heuristic(n_cells, n_clusters, None)
     if colsum_algo == "benchmark":
         colsum_func_small = _choose_colsum_algo_benchmark(
-            int(n_cells * block_proportion), n_clusters, Z.dtype
+            int(n_cells * block_proportion), n_clusters, Z.dtype, verbose=verbose
         )
     else:
         colsum_func_small = _choose_colsum_algo_heuristic(
@@ -180,6 +184,7 @@ def harmonize(
 
     # Main harmony iterations
     is_converged = False
+
     for i in range(max_iter_harmony):
         # Clustering step
         _clustering(
@@ -198,7 +203,6 @@ def harmonize(
             block_proportion=block_proportion,
             colsum_func=colsum_func_small,
         )
-
         # Correction step
         Z_hat = _correction(
             Z,
@@ -212,13 +216,13 @@ def harmonize(
             cat_offsets=cat_offsets,
             cell_indices=cell_indices,
         )
-
         # Normalize corrected data
         Z_norm = _normalize_cp(Z_hat, p=2)
         # Check for convergence
         if _is_convergent_harmony(objectives_harmony, tol=tol_harmony):
             is_converged = True
-            print(f"Harmony converged in {i} iterations")
+            if verbose:
+                print(f"Harmony converged in {i + 1} iterations")
             break
 
     if not is_converged:
@@ -479,7 +483,6 @@ def _correction_original(
     id_mat = cp.eye(n_batches + 1, n_batches + 1, dtype=X.dtype)
     id_mat[0, 0] = 0
     Lambda = ridge_lambda * id_mat
-
     for k in range(n_clusters):
         if Phi is not None:
             Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
@@ -504,12 +507,10 @@ def _correction_original(
             )
         W = cp.dot(inv_mat, Phi_t_diag_R_X)
         W[0, :] = 0
-
         if Phi is not None:
-            Z -= cp.dot(Phi_t_diag_R.T, W)
+            cp.cublas.gemm("T", "N", Phi_t_diag_R, W, alpha=-1, beta=1, out=Z)
         else:
             _Z_correction(Z, W, cats, R_col)
-
     return Z
 
 
@@ -537,7 +538,6 @@ def _correction_fast(
 
     Z = X.copy()
     P = cp.eye(n_batches + 1, n_batches + 1, dtype=X.dtype)
-
     for k in range(n_clusters):
         O_k = O[:, k]
         N_k = cp.sum(O_k)
@@ -557,7 +557,6 @@ def _correction_fast(
         # Set off-diagonal entries
         P_t_B_inv[1:, 0] = P[0, 1:] * c_inv
         inv_mat = cp.dot(P_t_B_inv, P)
-
         if Phi is not None:
             Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
             Phi_t_diag_R_X = cp.dot(Phi_t_diag_R, X)
@@ -577,10 +576,9 @@ def _correction_fast(
         W[0, :] = 0
 
         if Phi is not None:
-            Z -= cp.dot(Phi_t_diag_R.T, W)
+            cp.cublas.gemm("T", "N", Phi_t_diag_R, W, alpha=-1, beta=1, out=Z)
         else:
             _Z_correction(Z, W, cats, R_col)
-
     return Z
 
 

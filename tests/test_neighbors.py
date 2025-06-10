@@ -46,6 +46,27 @@ def test_algo(algo):
     neighbors(adata, n_neighbors=5, algorithm=algo)
 
 
+def test_nn_descent_intermediate_graph_degree():
+    adata = pbmc68k_reduced()
+    neighbors(
+        adata,
+        n_neighbors=5,
+        algorithm="nn_descent",
+        algorithm_kwds={"intermediate_graph_degree": 10},
+    )
+
+
+@pytest.mark.parametrize("algo", ["ivfflat", "ivfpq"])
+def test_ivf_algorithm_kwds(algo):
+    adata = pbmc68k_reduced()
+    neighbors(
+        adata,
+        n_neighbors=5,
+        algorithm=algo,
+        algorithm_kwds={"n_lists": 10, "n_probes": 10},
+    )
+
+
 @pytest.mark.parametrize("algo", ["nn_descent", "ivfpq"])
 def test_indices_approx_nn(algo):
     adata = pbmc68k_reduced()
