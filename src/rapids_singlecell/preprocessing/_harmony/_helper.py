@@ -12,12 +12,12 @@ from ._kernels._outer import (
     _get_colsum_kernel,
     _get_harmony_correction_kernel,
     _get_outer_kernel,
-    _get_scatter_add_kernel_with_bias_cat0,
 )
 from ._kernels._scatter_add import (
     _get_aggregated_matrix_kernel,
     _get_scatter_add_kernel_optimized,
     _get_scatter_add_kernel_with_bias_block,
+    _get_scatter_add_kernel_with_bias_cat0,
 )
 
 if TYPE_CHECKING:
