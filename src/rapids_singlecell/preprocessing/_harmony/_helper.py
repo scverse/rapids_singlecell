@@ -12,6 +12,7 @@ from ._kernels._outer import (
     _get_colsum_kernel,
     _get_harmony_correction_kernel,
     _get_outer_kernel,
+    _get_scatter_add_kernel_with_bias_cat0,
 )
 from ._kernels._scatter_add import (
     _get_aggregated_matrix_kernel,
@@ -195,10 +196,12 @@ def _scatter_add_cp_bias_csr(
     n_pcs = X.shape[1]
 
     threads_per_block = 1024
-    # blocks = int((n_pcs + 1) / 2)
-    # scatter_kernel0 = _get_scatter_add_kernel_with_bias_cat0(X.dtype)
-    # scatter_kernel0((blocks, 8), (threads_per_block,), (X, n_cells, n_pcs, out, bias))
-    out[0] = X.T @ bias
+    if n_cells < 100_000:
+        blocks = int((n_pcs + 1) / 2)
+        scatter_kernel0 = _get_scatter_add_kernel_with_bias_cat0(X.dtype)
+        scatter_kernel0((blocks, 8), (threads_per_block,), (X, n_cells, n_pcs, out, bias))
+    else:
+        out[0] = X.T @ bias
     blocks = int((n_batches) * (n_pcs + 1) / 2)
     scatter_kernel = _get_scatter_add_kernel_with_bias_block(X.dtype)
     scatter_kernel(
