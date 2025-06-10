@@ -36,7 +36,7 @@ def test_louvain_dtype(adata_neighbors, dtype, use_weights):
 def test_create_graph_dtype(adata_neighbors, dtype):
     g = _create_graph(adata_neighbors.X, use_weights=True, dtype=dtype)
     df = g.view_edge_list()
-    assert df.weights.dtype == dtype
+    assert df.weight.dtype == dtype
 
 
 @pytest.mark.parametrize("key", ["leiden", "louvain"])
