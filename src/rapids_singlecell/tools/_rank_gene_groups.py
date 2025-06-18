@@ -93,12 +93,6 @@ def rank_genes_groups_logreg(
                 Structured array to be indexed by group id storing the z-score
                 underlying the computation of a p-value for each gene for each
                 group. Ordered according to scores.
-
-            **pvals** : structured `np.ndarray` (`.uns['rank_genes_groups']`)
-                p-values.
-
-            **pvals_adj** : structured `np.ndarray` (`.uns['rank_genes_groups']`)
-                Corrected p-values.
     """
     #### Wherever we see "adata.obs[groupby], we should just replace w/ the groups"
 
