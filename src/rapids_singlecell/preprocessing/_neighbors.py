@@ -174,7 +174,6 @@ def _ivf_flat_knn(
     # Extract n_lists and nprobes from algorithm_kwds, with defaults
     n_lists = algorithm_kwds.get("n_lists", _compute_nlist(X.shape[0]))
     n_probes = algorithm_kwds.get("n_probes", 20)
-    print(f"n_lists: {n_lists}, n_probes: {n_probes}")
     index_params = ivf_flat.IndexParams(n_lists=n_lists, metric=metric)
     index = ivf_flat.build(index_params, X, **build_kwargs)
 
@@ -219,7 +218,6 @@ def _ivf_pq_knn(
 
     index_params = ivf_pq.IndexParams(n_lists=n_lists, metric=metric)
     index = ivf_pq.build(index_params, X, **build_kwargs)
-    print(f"n_lists: {n_lists}, n_probes: {n_probes}")
     # Create SearchParams with nprobes if provided
     search_params = ivf_pq.SearchParams(n_probes=n_probes)
     distances, neighbors = ivf_pq.search(search_params, index, Y, k, **search_kwargs)
