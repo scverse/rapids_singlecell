@@ -4,6 +4,7 @@ import pytest
 from scanpy.datasets import pbmc68k_reduced
 
 import rapids_singlecell as rsc
+from rapids_singlecell.tools._clustering import _create_graph
 
 
 @pytest.fixture
@@ -11,14 +12,31 @@ def adata_neighbors():
     return pbmc68k_reduced()
 
 
-def test_leiden_basic(adata_neighbors):
-    rsc.tl.leiden(adata_neighbors, use_weights=False)
-    rsc.tl.leiden(adata_neighbors, use_weights=True)
+@pytest.mark.parametrize("dtype", ["float32", "float64", "int32"])
+@pytest.mark.parametrize("use_weights", [True, False])
+def test_leiden_dtype(adata_neighbors, dtype, use_weights):
+    if dtype == "int32":
+        with pytest.raises(ValueError):
+            rsc.tl.leiden(adata_neighbors, use_weights=use_weights, dtype=dtype)
+    else:
+        rsc.tl.leiden(adata_neighbors, use_weights=use_weights, dtype=dtype)
 
 
-def test_louvain_basic(adata_neighbors):
-    rsc.tl.louvain(adata_neighbors, use_weights=False)
-    rsc.tl.louvain(adata_neighbors, use_weights=True)
+@pytest.mark.parametrize("dtype", ["float32", "float64", "int32"])
+@pytest.mark.parametrize("use_weights", [True, False])
+def test_louvain_dtype(adata_neighbors, dtype, use_weights):
+    if dtype == "int32":
+        with pytest.raises(ValueError):
+            rsc.tl.louvain(adata_neighbors, use_weights=use_weights, dtype=dtype)
+    else:
+        rsc.tl.louvain(adata_neighbors, use_weights=use_weights, dtype=dtype)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_create_graph_dtype(adata_neighbors, dtype):
+    g = _create_graph(adata_neighbors.X, use_weights=True, dtype=dtype)
+    df = g.view_edge_list()
+    assert df.weight.dtype == dtype
 
 
 @pytest.mark.parametrize("key", ["leiden", "louvain"])

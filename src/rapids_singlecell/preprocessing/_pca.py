@@ -197,7 +197,6 @@ def pca(
             pca_func = PCA(
                 n_components=n_comps,
                 svd_solver=svd_solver,
-                random_state=random_state,
                 output_type="numpy",
             )
             X_pca = pca_func.fit_transform(X)
@@ -207,7 +206,6 @@ def pca(
 
         pca_func = TruncatedSVD(
             n_components=n_comps,
-            random_state=random_state,
             algorithm=svd_solver,
             output_type="numpy",
         )

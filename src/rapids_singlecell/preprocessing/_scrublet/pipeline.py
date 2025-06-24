@@ -59,7 +59,7 @@ def truncated_svd(
     self._counts_obs_norm = self._counts_obs_norm.astype(cp.float32)
     self._counts_sim_norm = self._counts_sim_norm.astype(cp.float32)
     X_obs = _sparse_to_dense(self._counts_obs_norm)
-    svd = TruncatedSVD(n_components=n_prin_comps, random_state=random_state).fit(X_obs)
+    svd = TruncatedSVD(n_components=n_prin_comps).fit(X_obs)
     X_obs = svd.transform(X_obs)
     X_sim = svd.transform(_sparse_to_dense(self._counts_sim_norm))
     self.set_manifold(X_obs, X_sim)
@@ -80,7 +80,7 @@ def pca(
     self._counts_sim_norm = self._counts_sim_norm.astype(cp.float32)
     X_obs = _sparse_to_dense(self._counts_obs_norm)
 
-    pca = PCA(n_components=n_prin_comps, random_state=random_state).fit(X_obs)
+    pca = PCA(n_components=n_prin_comps).fit(X_obs)
     X_obs = pca.transform(X_obs)
     X_sim = pca.transform(_sparse_to_dense(self._counts_sim_norm))
     self.set_manifold(X_obs, X_sim)

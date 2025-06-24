@@ -75,7 +75,9 @@ def anndata_to_GPU(
         return adata
 
 
-def X_to_GPU(X: CPU_ARRAY_TYPE, warning: str = "X") -> GPU_ARRAY_TYPE:
+def X_to_GPU(
+    X: CPU_ARRAY_TYPE | DaskArray, warning: str = "X"
+) -> GPU_ARRAY_TYPE | DaskArray:
     """
     Transfers matrices and arrays to the GPU
 
@@ -151,7 +153,7 @@ def anndata_to_CPU(
         return adata
 
 
-def X_to_CPU(X: GPU_ARRAY_TYPE) -> CPU_ARRAY_TYPE:
+def X_to_CPU(X: GPU_ARRAY_TYPE | DaskArray) -> CPU_ARRAY_TYPE | DaskArray:
     """
     Transfers matrices and arrays from the GPU
 

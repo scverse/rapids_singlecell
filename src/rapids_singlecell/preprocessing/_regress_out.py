@@ -71,15 +71,14 @@ def regress_out(
     if isinstance(keys, list):
         dim_regressor = len(keys) + 1
 
-    regressors = cp.ones(X.shape[0] * dim_regressor).reshape(
+    regressors = cp.ones(X.shape[0] * dim_regressor, dtype=X.dtype).reshape(
         (X.shape[0], dim_regressor), order="F"
     )
     if dim_regressor == 2:
         regressors[:, 1] = cp.array(adata.obs[keys]).ravel()
     else:
         for i in range(dim_regressor - 1):
-            regressors[:, i + 1] = cp.array(adata.obs[keys[i]]).ravel()
-
+            regressors[:, i + 1] = cp.array(adata.obs[keys[i]], dtype=X.dtype).ravel()
     # Set default batch size based on the number of samples in X
     if batchsize is None:
         batchsize = 100 if X.shape[0] > 100000 else "all"
@@ -97,7 +96,8 @@ def regress_out(
             X = cp.ascontiguousarray(X)
         inv_gram_matrix = cp.linalg.inv(regressors.T @ regressors)
         coeff = inv_gram_matrix @ (regressors.T @ X)
-        X -= regressors @ coeff
+        cp.cublas.gemm("N", "N", regressors, coeff, alpha=-1, beta=1, out=X)
+        # X -= regressors @ coeff
 
     else:
         if sparse.issparse(X):
@@ -116,7 +116,7 @@ def regress_out(
             lr.fit(regressors, arr_batch, convert_dtype=True)
             X[:, start_idx:stop_idx] = arr_batch - lr.predict(regressors)
 
-    X = cp.ascontiguousarray(X)
+    # X = cp.ascontiguousarray(X)
     if inplace:
         _set_obs_rep(adata, X, layer=layer)
     else:

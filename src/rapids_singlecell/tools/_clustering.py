@@ -15,11 +15,24 @@ from ._utils import _choose_representation
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    import cupy as cp
     from anndata import AnnData
     from scipy import sparse
 
 
-def _create_graph(adjacency, use_weights=True):
+def _check_dtype(dtype: str | np.dtype | cp.dtype) -> str | np.dtype | cp.dtype:
+    if isinstance(dtype, str):
+        if dtype not in ["float32", "float64"]:
+            raise ValueError("dtype must be one of ['float32', 'float64']")
+        else:
+            return dtype
+    elif dtype is np.float32 or dtype is np.float64:
+        return dtype
+    else:
+        raise ValueError("dtype must be one of ['float32', 'float64']")
+
+
+def _create_graph(adjacency, use_weights=True, dtype=np.float64):
     from cugraph import Graph
 
     sources, targets = adjacency.nonzero()
@@ -27,6 +40,7 @@ def _create_graph(adjacency, use_weights=True):
     if isinstance(weights, np.matrix):
         weights = weights.A1
     df = cudf.DataFrame({"source": sources, "destination": targets, "weights": weights})
+    df.weights = df.weights.astype(dtype)
     g = Graph()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -52,6 +66,7 @@ def leiden(
     use_weights: bool = True,
     neighbors_key: str | None = None,
     obsp: str | None = None,
+    dtype: str | np.dtype | cp.dtype = np.float32,
     copy: bool = False,
 ) -> AnnData | None:
     """
@@ -112,6 +127,9 @@ def leiden(
             Use .obsp[obsp] as adjacency. You can't specify both
             `obsp` and `neighbors_key` at the same time.
 
+        dtype
+            Data type to use for the adjacency matrix.
+
         copy
             Whether to copy `adata` or modify it in place.
     """
@@ -119,6 +137,8 @@ def leiden(
     from cugraph import leiden as culeiden
 
     adata = adata.copy() if copy else adata
+
+    dtype = _check_dtype(dtype)
 
     if adjacency is None:
         adjacency = _choose_graph(adata, obsp, neighbors_key)
@@ -131,7 +151,7 @@ def leiden(
             adjacency=adjacency,
         )
 
-    g = _create_graph(adjacency, use_weights)
+    g = _create_graph(adjacency, use_weights, dtype)
     # Cluster
     leiden_parts, _ = culeiden(
         g,
@@ -161,8 +181,8 @@ def leiden(
         categories=natsorted(map(str, np.unique(groups))),
     )
     # store information on the clustering parameters
-    adata.uns["leiden"] = {}
-    adata.uns["leiden"]["params"] = {
+    adata.uns[key_added] = {}
+    adata.uns[key_added]["params"] = {
         "resolution": resolution,
         "random_state": random_state,
         "n_iterations": n_iterations,
@@ -182,6 +202,7 @@ def louvain(
     use_weights: bool = True,
     neighbors_key: int | None = None,
     obsp: str | None = None,
+    dtype: str | np.dtype | cp.dtype = np.float32,
     copy: bool = False,
 ) -> AnnData | None:
     """
@@ -241,12 +262,17 @@ def louvain(
             Use `.obsp[obsp]` as adjacency. You can't specify both `obsp`
             and `neighbors_key` at the same time.
 
+        dtype
+            Data type to use for the adjacency matrix.
+
         copy
             Whether to copy `adata` or modify it in place.
 
     """
     # Adjacency graph
     from cugraph import louvain as culouvain
+
+    dtype = _check_dtype(dtype)
 
     adata = adata.copy() if copy else adata
     if adjacency is None:
@@ -260,7 +286,7 @@ def louvain(
             adjacency=adjacency,
         )
 
-    g = _create_graph(adjacency, use_weights)
+    g = _create_graph(adjacency, use_weights, dtype)
 
     # Cluster
     louvain_parts, _ = culouvain(
@@ -293,8 +319,8 @@ def louvain(
         values=groups.astype("U"),
         categories=natsorted(map(str, np.unique(groups))),
     )
-    adata.uns["louvain"] = {}
-    adata.uns["louvain"]["params"] = {
+    adata.uns[key_added] = {}
+    adata.uns[key_added]["params"] = {
         "resolution": resolution,
         "n_iterations": n_iterations,
         "threshold": threshold,
