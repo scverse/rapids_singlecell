@@ -9,10 +9,6 @@ repos:
     -   name: ruff preview rules
         id: ruff
         args: ["--preview", "--select=PLR0917"]
--   repo: https://github.com/biomejs/pre-commit
-    rev: v2.0.2
-    hooks:
-    -   id: biome-format
 -   repo: https://github.com/ComPWA/taplo-pre-commit
     rev: v0.9.3
     hooks:
