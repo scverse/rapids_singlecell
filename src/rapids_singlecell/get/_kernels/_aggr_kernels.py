@@ -24,6 +24,34 @@ sparse_dense_aggr_kernel = r"""
 }
 """
 
+
+sparse_dense_aggr_kernel_csc = r"""
+    (const int *indptr, const int *index,const {0} *data,
+    int* counts,double* sums, double* means, double* vars, int* cats, double* numcells,bool* mask,int n_cells, int n_genes){
+    int gene = blockIdx.x;
+    if(gene >= n_genes){
+        return;
+    }
+    int gene_start = indptr[gene];
+    int gene_end = indptr[gene+1];
+
+    for (int cell_idx = gene_start+threadIdx.x; cell_idx<gene_end; cell_idx+= blockDim.x){
+        int cell = index[cell_idx];
+        if(!mask[cell]){
+            continue;
+        }
+        int group = cats[cell];
+        double major = numcells[group];
+        double value = (double)data[cell_idx];
+        atomicAdd(&sums[group*n_genes+gene], value);
+        atomicAdd(&counts[group*n_genes+gene], 1);
+        atomicAdd(&means[group*n_genes+gene], value/major);
+        atomicAdd(&vars[group*n_genes+gene], value*value/major);
+    }
+}
+"""
+
+
 sparse_sparse_aggr_kernel = r"""
     (const int *indptr, const int *index, const {0}* data,
     int* row, int* col, double* ndata,
@@ -91,6 +119,12 @@ dense_aggr_kernel = r"""
 def _get_aggr_sparse_kernel(dtype):
     return cuda_kernel_factory(
         sparse_dense_aggr_kernel, (dtype,), "sparse_dense_aggr_kernel"
+    )
+
+
+def _get_aggr_sparse_kernel_csc(dtype):
+    return cuda_kernel_factory(
+        sparse_dense_aggr_kernel_csc, (dtype,), "sparse_dense_aggr_kernel_csc"
     )
 
 

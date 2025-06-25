@@ -73,17 +73,22 @@ class Aggregate:
         """
 
         assert dof >= 0
-        from ._kernels._aggr_kernels import _get_aggr_sparse_kernel
+        from ._kernels._aggr_kernels import (
+            _get_aggr_sparse_kernel,
+            _get_aggr_sparse_kernel_csc,
+        )
 
-        if self.data.format == "csc":
-            self.data = self.data.tocsr()
         means = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
         var = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
         sums = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
         counts = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.int32)
-        block = (128,)
-        grid = (self.data.shape[0],)
-        aggr_kernel = _get_aggr_sparse_kernel(self.data.dtype)
+        block = (512,)
+        if self.data.format == "csc":
+            grid = (self.data.shape[1],)
+            aggr_kernel = _get_aggr_sparse_kernel_csc(self.data.dtype)
+        else:
+            grid = (self.data.shape[0],)
+            aggr_kernel = _get_aggr_sparse_kernel(self.data.dtype)
         mask = self._get_mask()
         aggr_kernel(
             grid,
