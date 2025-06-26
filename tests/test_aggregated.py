@@ -363,3 +363,26 @@ def test_sparse_vs_dense():
         a = rsc_get_sparse.layers[c].toarray()
         b = rsc_get.layers[c]
         cp.testing.assert_allclose(a, b)
+
+def test_c_contiguous_vs_fortran_contiguous():
+    adata = pbmc3k_processed()
+    rsc.get.anndata_to_GPU(adata)
+    adata.X = cp.asfortranarray(adata.X)
+    mask = adata.obs.louvain == "Megakaryocytes"
+    rsc_get_F = rsc.get.aggregate(
+        adata, by="louvain", func=["sum", "mean", "var", "count_nonzero"], mask=mask
+    )
+    adata.X = cp.ascontiguousarray(adata.X)
+    rsc_get_C = rsc.get.aggregate(
+        adata,
+        by="louvain",
+        func=["sum", "mean", "var", "count_nonzero"],
+        mask=mask,
+        return_sparse=True,
+    )
+
+    for i in range(4):
+        c = ["sum", "mean", "var", "count_nonzero"][i]
+        a = rsc_get_C.layers[c]
+        b = rsc_get_F.layers[c]
+        cp.testing.assert_allclose(a, b)

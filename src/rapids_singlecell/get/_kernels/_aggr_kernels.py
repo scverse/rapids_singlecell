@@ -92,28 +92,58 @@ sparse_var_kernel = r"""
 """
 
 
-dense_aggr_kernel = r"""
+dense_aggr_kernel_C = r"""
     (const {0} *data, int* counts, double* sums, double* means, double* vars,
-    int* cats, double* numcells, bool* mask, int n_cells, int n_genes){
-    int cell = blockIdx.x;
-    if(cell >= n_cells || !mask[cell]){
+    int* cats, double* numcells, bool* mask, size_t n_cells, size_t n_genes){
+    
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t N = n_cells * n_genes;
+    if (i >= N) return;
+    size_t cell = i / n_genes;
+    size_t gene = i % n_genes;
+    if(!mask[cell]){
         return;
     }
 
-    int group = cats[cell];
+    size_t group = (size_t)cats[cell];
     double major = numcells[group];
 
-    for (int gene = threadIdx.x; gene < n_genes; gene += blockDim.x){
-        double value = (double)data[cell * n_genes + gene];
-        if (value != 0){
-            atomicAdd(&sums[group * n_genes + gene], value);
-            atomicAdd(&counts[group * n_genes + gene], 1);
-            atomicAdd(&means[group * n_genes + gene], value / major);
-            atomicAdd(&vars[group * n_genes + gene], value * value / major);;
-        }
+    double value = (double)data[cell * n_genes + gene];
+    if (value != 0){
+        atomicAdd(&sums[group * n_genes + gene], value);
+        atomicAdd(&counts[group * n_genes + gene], 1);
+        atomicAdd(&means[group * n_genes + gene], value / major);
+        atomicAdd(&vars[group * n_genes + gene], value * value / major);
     }
 }
 """
+
+dense_aggr_kernel_F = r"""
+    (const {0} *data, int* counts, double* sums, double* means, double* vars,
+    int* cats, double* numcells, bool* mask, size_t n_cells, size_t n_genes){
+    
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t N = n_cells * n_genes;
+    if (i >= N) return;
+    size_t cell = i % n_cells;
+    size_t gene = i / n_cells;
+    if(!mask[cell]){
+        return;
+    }
+
+    size_t group = (size_t) cats[cell];
+    double major = numcells[group];
+
+    double value = (double)data[gene * n_cells + cell];
+    if (value != 0){
+        atomicAdd(&sums[group * n_genes + gene], value);
+        atomicAdd(&counts[group * n_genes + gene], 1);
+        atomicAdd(&means[group * n_genes + gene], value / major);
+        atomicAdd(&vars[group * n_genes + gene], value * value / major);
+    }
+}
+"""
+
 
 
 def _get_aggr_sparse_kernel(dtype):
@@ -138,5 +168,8 @@ def _get_sparse_var_kernel(dtype):
     return cuda_kernel_factory(sparse_var_kernel, (dtype,), "sparse_var_kernel")
 
 
-def _get_aggr_dense_kernel(dtype):
-    return cuda_kernel_factory(dense_aggr_kernel, (dtype,), "dense_aggr_kernel")
+def _get_aggr_dense_kernel_C(dtype):
+    return cuda_kernel_factory(dense_aggr_kernel_C, (dtype,), "dense_aggr_kernel_C")
+
+def _get_aggr_dense_kernel_F(dtype):
+    return cuda_kernel_factory(dense_aggr_kernel_F, (dtype,), "dense_aggr_kernel_F")

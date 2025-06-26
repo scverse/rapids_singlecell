@@ -280,19 +280,24 @@ class Aggregate:
         """
 
         assert dof >= 0
-        from ._kernels._aggr_kernels import _get_aggr_dense_kernel
+        from ._kernels._aggr_kernels import _get_aggr_dense_kernel_C, _get_aggr_dense_kernel_F
 
         means = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
         var = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
         sums = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
         counts = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.int32)
-        block = (128,)
-        grid = (self.data.shape[0],)
-        aggr_kernel = _get_aggr_dense_kernel(self.data.dtype)
+        N = self.data.shape[0] * self.data.shape[1]
+        threads_per_block = 256
+        blocks = (N + threads_per_block - 1) // threads_per_block
+
+        if self.data.flags.c_contiguous:
+            aggr_kernel = _get_aggr_dense_kernel_C(self.data.dtype)
+        else:
+            aggr_kernel = _get_aggr_dense_kernel_F(self.data.dtype)
         mask = self._get_mask()
         aggr_kernel(
-            grid,
-            block,
+            (blocks,),
+            (threads_per_block,),
             (
                 self.data.data,
                 counts,
