@@ -4,7 +4,7 @@ from cuml.common.kernel_utils import cuda_kernel_factory
 
 sparse_dense_aggr_kernel = r"""
     (const int *indptr, const int *index,const {0} *data,
-    int* counts,double* sums, double* means, double* vars, int* cats, double* numcells,bool* mask,int n_cells, int n_genes){
+    int* counts,double* sums, double* sq_sums, int* cats,bool* mask,int n_cells, int n_genes){
     int cell = blockIdx.x;
     if(cell >= n_cells || !mask[cell]){
         return;
@@ -18,8 +18,7 @@ sparse_dense_aggr_kernel = r"""
         double value = (double)data[gene];
         atomicAdd(&sums[group*n_genes+gene_pos], value);
         atomicAdd(&counts[group*n_genes+gene_pos], 1);
-        atomicAdd(&means[group*n_genes+gene_pos], value/major);
-        atomicAdd(&vars[group*n_genes+gene_pos], value*value/major);
+        atomicAdd(&sq_sums[group*n_genes+gene_pos], value);
     }
 }
 """
@@ -27,7 +26,7 @@ sparse_dense_aggr_kernel = r"""
 
 sparse_dense_aggr_kernel_csc = r"""
     (const int *indptr, const int *index,const {0} *data,
-    int* counts,double* sums, double* means, double* vars, int* cats, double* numcells,bool* mask,int n_cells, int n_genes){
+    int* counts,double* sums, double* sq_sums, int* cats, double* numcells,bool* mask,int n_cells, int n_genes){
     int gene = blockIdx.x;
     if(gene >= n_genes){
         return;
@@ -45,8 +44,7 @@ sparse_dense_aggr_kernel_csc = r"""
         double value = (double)data[cell_idx];
         atomicAdd(&sums[group*n_genes+gene], value);
         atomicAdd(&counts[group*n_genes+gene], 1);
-        atomicAdd(&means[group*n_genes+gene], value/major);
-        atomicAdd(&vars[group*n_genes+gene], value*value/major);
+        atomicAdd(&sq_sums[group*n_genes+gene], value*value);
     }
 }
 """
