@@ -17,7 +17,7 @@ sparse_dense_aggr_kernel = r"""
         double value = (double)data[gene];
         atomicAdd(&sums[group*n_genes+gene_pos], value);
         atomicAdd(&counts[group*n_genes+gene_pos], 1);
-        atomicAdd(&sq_sums[group*n_genes+gene_pos], value);
+        atomicAdd(&sq_sums[group*n_genes+gene_pos], value*value);
     }
 }
 """
@@ -25,7 +25,7 @@ sparse_dense_aggr_kernel = r"""
 
 sparse_dense_aggr_kernel_csc = r"""
     (const int *indptr, const int *index,const {0} *data,
-    int* counts,double* sums, double* sq_sums, int* cats, double* numcells,bool* mask,int n_cells, int n_genes){
+    int* counts,double* sums, double* sq_sums, int* cats,bool* mask,int n_cells, int n_genes){
     int gene = blockIdx.x;
     if(gene >= n_genes){
         return;

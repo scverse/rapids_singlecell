@@ -88,7 +88,9 @@ class Aggregate:
 
         def __aggregate_dask(X_part, mask_part, groupby_part):
             sums = cp.zeros((self.n_cells.shape[0], X_part.shape[1]), dtype=cp.float64)
-            sq_sums = cp.zeros((self.n_cells.shape[0], X_part.shape[1]), dtype=cp.float64)
+            sq_sums = cp.zeros(
+                (self.n_cells.shape[0], X_part.shape[1]), dtype=cp.float64
+            )
             counts = cp.zeros((self.n_cells.shape[0], X_part.shape[1]), dtype=cp.int32)
             block = (512,)
             grid = (self.data.shape[0],)
@@ -109,7 +111,7 @@ class Aggregate:
                 ),
             )
             counts = counts.astype(cp.float64)
-            out = cp.vstack([ sums.ravel(), sq_sums.ravel(), counts.ravel()])
+            out = cp.vstack([sums.ravel(), sq_sums.ravel(), counts.ravel()])
             return out[None, ...]
 
         mask = self._get_mask()
@@ -135,7 +137,7 @@ class Aggregate:
         sums, sq_sums, counts = out[0], out[1], out[2]
         sums, sq_sums, counts = dask.compute(sums, sq_sums, counts)
         means = sums / self.n_cells
-        var = sq_sums/ self.n_cells - cp.power(means, 2)
+        var = sq_sums / self.n_cells - cp.power(means, 2)
         var *= self.n_cells / (self.n_cells - dof)
         return {"mean": means, "var": var, "sum": sums, "count_nonzero": counts}
 
@@ -151,7 +153,9 @@ class Aggregate:
             _get_aggr_sparse_kernel_csc,
         )
 
-        sq_sums = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
+        sq_sums = cp.zeros(
+            (self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64
+        )
         sums = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
         counts = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.int32)
         block = (512,)
@@ -173,14 +177,13 @@ class Aggregate:
                 sums,
                 sq_sums,
                 self.groupby,
-                self.n_cells,
                 mask,
                 self.data.shape[0],
                 self.data.shape[1],
             ),
         )
         means = sums / self.n_cells
-        var = sq_sums/ self.n_cells - cp.power(means, 2)
+        var = sq_sums / self.n_cells - means**2
         var *= self.n_cells / (self.n_cells - dof)
 
         results = {"sum": sums, "count_nonzero": counts, "mean": means, "var": var}
