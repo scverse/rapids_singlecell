@@ -8,18 +8,22 @@ from typing import (
 )
 
 import cupy as cp
-import numpy as np
 from anndata import AnnData
 from cupyx.scipy import sparse as cp_sparse
 from scanpy._utils import _resolve_axis
 from scanpy.get._aggregated import _combine_categories
 
+from rapids_singlecell._compat import (
+    DaskArray,
+    _meta_dense,
+)
 from rapids_singlecell.get import _check_mask
 from rapids_singlecell.preprocessing._utils import _check_gpu_X
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable
 
+    import numpy as np
     import pandas as pd
     from numpy.typing import NDArray
 
@@ -52,7 +56,7 @@ class Aggregate:
     ) -> None:
         self.mask = mask
         self.groupby = cp.array(groupby.codes, dtype=cp.int32)
-        self.n_cells = cp.array(np.bincount(groupby.codes), dtype=cp.float64).reshape(
+        self.n_cells = cp.array(cp.bincount(self.groupby), dtype=cp.float64).reshape(
             -1, 1
         )
         self.data = data
@@ -65,6 +69,84 @@ class Aggregate:
             return cp.array(self.mask)
         else:
             return cp.ones(self.data.shape[0], dtype=bool)
+
+    def count_mean_var_sparse_dask(self, dof: int = 1):
+        """
+        This function is used to calculate the sum, mean, and variance of the sparse data matrix.
+        It uses a custom cuda-kernel to perform the aggregation.
+        """
+        import dask
+        import dask.array as da
+
+        assert dof >= 0
+        from ._kernels._aggr_kernels import (
+            _get_aggr_sparse_kernel,
+        )
+
+        kernel = _get_aggr_sparse_kernel(self.data.dtype)
+        kernel.compile()
+
+        def __aggregate_dask(X_part, mask_part, groupby_part):
+            means = cp.zeros((self.n_cells.shape[0], X_part.shape[1]), dtype=cp.float64)
+            var = cp.zeros((self.n_cells.shape[0], X_part.shape[1]), dtype=cp.float64)
+            sums = cp.zeros((self.n_cells.shape[0], X_part.shape[1]), dtype=cp.float64)
+            counts = cp.zeros((self.n_cells.shape[0], X_part.shape[1]), dtype=cp.int32)
+            block = (512,)
+            grid = (self.data.shape[0],)
+            kernel(
+                grid,
+                block,
+                (
+                    X_part.indptr,
+                    X_part.indices,
+                    X_part.data,
+                    counts,
+                    sums,
+                    means,
+                    var,
+                    groupby_part,
+                    self.n_cells,
+                    mask_part,
+                    X_part.shape[0],
+                    X_part.shape[1],
+                ),
+            )
+            counts = counts.astype(cp.float64)
+            out = cp.stack([means, var, sums, counts], axis=0)
+            return out
+
+        mask = self._get_mask()
+        mask_dask = da.from_array(
+            mask, chunks=(self.data.chunks[0],), meta=_meta_dense(mask.dtype)
+        )
+        groupby_dask = da.from_array(
+            self.groupby,
+            chunks=(self.data.chunks[0],),
+            meta=_meta_dense(self.groupby.dtype),
+        )
+        out = da.blockwise(
+            __aggregate_dask,
+            "ij",
+            self.data,
+            "ij",
+            mask_dask,
+            "i",
+            groupby_dask,
+            "i",
+            meta=_meta_dense(self.data.dtype),
+        )
+        out = out.sum(axis=0)
+        means = out[0]
+        var = out[1]
+        sums = out[2]
+        counts = out[3]
+        means, var, sums, counts = dask.compute(means, var, sums, counts)
+        print(means.shape, var.shape, sums.shape, counts.shape)
+        counts = counts.astype(cp.int32)
+        var = var - cp.power(means, 2)
+        var *= self.n_cells / (self.n_cells - dof)
+
+        return {"mean": means, "var": var, "sum": sums, "count_nonzero": counts}
 
     def count_mean_var_sparse(self, dof: int = 1):
         """
@@ -280,7 +362,10 @@ class Aggregate:
         """
 
         assert dof >= 0
-        from ._kernels._aggr_kernels import _get_aggr_dense_kernel_C, _get_aggr_dense_kernel_F
+        from ._kernels._aggr_kernels import (
+            _get_aggr_dense_kernel_C,
+            _get_aggr_dense_kernel_F,
+        )
 
         means = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
         var = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
@@ -426,7 +511,7 @@ def aggregate(
     elif axis == 1:
         # i.e., all of `varm`, `obsm`, `layers` are None so we use `X` which must be transposed
         data = data.T
-    _check_gpu_X(data)
+    _check_gpu_X(data, allow_dask=True)
     dim_df = getattr(adata, axis_name)
     categorical, new_label_df = _combine_categories(dim_df, by)
     # Actual computation
@@ -439,6 +524,8 @@ def aggregate(
 
     if isinstance(data, cp.ndarray):
         result = groupby.count_mean_var_dense(dof)
+    elif isinstance(data, DaskArray):
+        result = groupby.count_mean_var_sparse_dask(dof)
     else:
         if return_sparse:
             result = groupby.count_mean_var_sparse_sparse(funcs, dof)
