@@ -136,6 +136,10 @@ class Aggregate:
         ).sum(axis=0)
         sums, sq_sums, counts = out[0], out[1], out[2]
         sums, sq_sums, counts = dask.compute(sums, sq_sums, counts)
+        sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])
+        sq_sums = sq_sums.reshape(self.n_cells.shape[0], self.data.shape[1])
+        counts = counts.reshape(self.n_cells.shape[0], self.data.shape[1])
+        counts = counts.astype(cp.int32)
         means = sums / self.n_cells
         var = sq_sums / self.n_cells - cp.power(means, 2)
         var *= self.n_cells / (self.n_cells - dof)
