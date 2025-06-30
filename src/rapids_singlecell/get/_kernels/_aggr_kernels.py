@@ -12,7 +12,6 @@ sparse_dense_aggr_kernel = r"""
     int cell_start = indptr[cell];
     int cell_end = indptr[cell+1];
     int group = cats[cell];
-    double major = numcells[group];
     for (int gene = cell_start+threadIdx.x; gene<cell_end; gene+= blockDim.x){
         int gene_pos = index[gene];
         double value = (double)data[gene];
@@ -40,7 +39,6 @@ sparse_dense_aggr_kernel_csc = r"""
             continue;
         }
         int group = cats[cell];
-        double major = numcells[group];
         double value = (double)data[cell_idx];
         atomicAdd(&sums[group*n_genes+gene], value);
         atomicAdd(&counts[group*n_genes+gene], 1);
@@ -93,7 +91,7 @@ sparse_var_kernel = r"""
 dense_aggr_kernel_C = r"""
     (const {0} *data, int* counts, double* sums, double* means, double* vars,
     int* cats, double* numcells, bool* mask, size_t n_cells, size_t n_genes){
-    
+
     size_t i = blockIdx.x * blockDim.x + threadIdx.x;
     size_t N = n_cells * n_genes;
     if (i >= N) return;
@@ -119,7 +117,7 @@ dense_aggr_kernel_C = r"""
 dense_aggr_kernel_F = r"""
     (const {0} *data, int* counts, double* sums, double* means, double* vars,
     int* cats, double* numcells, bool* mask, size_t n_cells, size_t n_genes){
-    
+
     size_t i = blockIdx.x * blockDim.x + threadIdx.x;
     size_t N = n_cells * n_genes;
     if (i >= N) return;
@@ -141,7 +139,6 @@ dense_aggr_kernel_F = r"""
     }
 }
 """
-
 
 
 def _get_aggr_sparse_kernel(dtype):
@@ -168,6 +165,7 @@ def _get_sparse_var_kernel(dtype):
 
 def _get_aggr_dense_kernel_C(dtype):
     return cuda_kernel_factory(dense_aggr_kernel_C, (dtype,), "dense_aggr_kernel_C")
+
 
 def _get_aggr_dense_kernel_F(dtype):
     return cuda_kernel_factory(dense_aggr_kernel_F, (dtype,), "dense_aggr_kernel_F")
