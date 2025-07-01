@@ -140,7 +140,7 @@ html_theme_options = {
     "navigation_with_keys": False,
 }
 html_show_sphinx = False
-html_logo = "_static/logo3.svg"
+html_logo = "_static/logo_RTD.svg"
 html_static_path = ["_static"]
 html_css_files = ["_static/css/override.css"]
 html_title = "rapids-singlecell"
