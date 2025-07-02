@@ -15,7 +15,7 @@ RAPIDS currently doesn't support `channel_priority: strict`; use `channel_priori
 ```
 pip install rapids-singlecell
 ```
-The default installer doesn't cover RAPIDS nor cupy. Information on how to install RAPIDS & cupy can be found [here](https://rapids.ai/start.html).
+The default installer doesn't cover RAPIDS nor CuPy. Information on how to install RAPIDS & CuPy can be found [here](https://rapids.ai/start.html).
 
 If you want to use RAPIDS new PyPI packages, the whole library with all dependencies can be install with:
 ```
@@ -23,7 +23,7 @@ pip install 'rapids-singlecell[rapids11]' --extra-index-url=https://pypi.nvidia.
 pip install 'rapids-singlecell[rapids12]' --extra-index-url=https://pypi.nvidia.com #CUDA12
 
 ```
-It is important to ensure that the CUDA environment is set up correctly so that RAPIDS and Cupy can locate the necessary libraries.
+It is important to ensure that the CUDA environment is set up correctly so that RAPIDS and CuPy can locate the necessary libraries.
 
 ```{note}
 If you are using `python=3.12` with `uv`, you might need to add the `--index-strategy=unsafe-best-match` flag to ensure compatibility.

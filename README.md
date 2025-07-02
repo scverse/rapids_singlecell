@@ -7,7 +7,7 @@
 
 # rapids-singlecell: GPU-Accelerated Single-Cell Analysis within scverse®
 
-rapids-singlecell offers enhanced single-cell data analysis as a near drop-in replacement predominantly for scanpy, while also incorporating select functionalities from squidpy and decoupler. Utilizing GPU computing with cupy and Nvidia’s RAPIDS, it emphasizes high computational efficiency. As part of the scverse ecosystem, rapids-singlecell continuously aims to maintain compatibility, adapting and growing through community collaboration.
+rapids-singlecell offers enhanced single-cell data analysis as a near drop-in replacement predominantly for scanpy, while also incorporating select functionalities from squidpy and decoupler. Utilizing GPU computing with CuPy and NVIDIA RAPIDS, it emphasizes high computational efficiency. As part of the scverse ecosystem, rapids-singlecell continuously aims to maintain compatibility, adapting and growing through community collaboration.
 
 * **Broad GPU Optimization:** Facilitates accelerated processing of large datasets, with GPU-enabled AnnData objects.
 * **Selective scverse Library Integration:** Incorporates key functionalities from scanpy, with additional features from squidpy and decoupler.
