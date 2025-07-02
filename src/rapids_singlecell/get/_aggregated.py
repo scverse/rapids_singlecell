@@ -93,7 +93,7 @@ class Aggregate:
             )
             counts = cp.zeros((self.n_cells.shape[0], X_part.shape[1]), dtype=cp.int32)
             block = (512,)
-            grid = (self.data.shape[0],)
+            grid = (X_part.shape[1],)
             kernel(
                 grid,
                 block,
@@ -132,7 +132,8 @@ class Aggregate:
             "i",
             groupby_dask,
             "i",
-            meta=_meta_dense(self.data.dtype),
+            meta=_meta_dense(cp.float64),
+            dtype=cp.float64,
         ).sum(axis=0)
         sums, sq_sums, counts = out[0], out[1], out[2]
         sums, sq_sums, counts = dask.compute(sums, sq_sums, counts)
