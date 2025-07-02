@@ -4,20 +4,20 @@ from cuml.common.kernel_utils import cuda_kernel_factory
 
 sparse_dense_aggr_kernel = r"""
     (const int *indptr, const int *index,const {0} *data,
-    int* counts,double* sums, double* sq_sums, int* cats,bool* mask,int n_cells, int n_genes){
-    int cell = blockIdx.x;
+    double* out, int* cats,bool* mask,size_t n_cells, size_t n_genes, size_t n_groups){
+    size_t cell = blockIdx.x;
     if(cell >= n_cells || !mask[cell]){
         return;
     }
     int cell_start = indptr[cell];
     int cell_end = indptr[cell+1];
-    int group = cats[cell];
+    size_t group = (size_t)cats[cell];
     for (int gene = cell_start+threadIdx.x; gene<cell_end; gene+= blockDim.x){
-        int gene_pos = index[gene];
+        size_t gene_pos = (size_t)index[gene];
         double value = (double)data[gene];
-        atomicAdd(&sums[group*n_genes+gene_pos], value);
-        atomicAdd(&counts[group*n_genes+gene_pos], 1);
-        atomicAdd(&sq_sums[group*n_genes+gene_pos], value*value);
+        atomicAdd(&out[group*n_genes+gene_pos], value);
+        atomicAdd(&out[group*n_genes+gene_pos+n_genes*n_groups], 1);
+        atomicAdd(&out[group*n_genes+gene_pos+2*n_genes*n_groups], value*value);
     }
 }
 """
@@ -25,8 +25,8 @@ sparse_dense_aggr_kernel = r"""
 
 sparse_dense_aggr_kernel_csc = r"""
     (const int *indptr, const int *index,const {0} *data,
-    int* counts,double* sums, double* sq_sums, int* cats,bool* mask,int n_cells, int n_genes){
-    int gene = blockIdx.x;
+    double* out, int* cats,bool* mask,int n_cells, int n_genes, size_t n_groups){
+    size_t gene = blockIdx.x;
     if(gene >= n_genes){
         return;
     }
@@ -34,15 +34,15 @@ sparse_dense_aggr_kernel_csc = r"""
     int gene_end = indptr[gene+1];
 
     for (int cell_idx = gene_start+threadIdx.x; cell_idx<gene_end; cell_idx+= blockDim.x){
-        int cell = index[cell_idx];
+        size_t cell = (size_t)index[cell_idx];
         if(!mask[cell]){
             continue;
         }
-        int group = cats[cell];
+        size_t group = (size_t)cats[cell];
         double value = (double)data[cell_idx];
-        atomicAdd(&sums[group*n_genes+gene], value);
-        atomicAdd(&counts[group*n_genes+gene], 1);
-        atomicAdd(&sq_sums[group*n_genes+gene], value*value);
+        atomicAdd(&out[group*n_genes+gene], value);
+        atomicAdd(&out[group*n_genes+gene+n_genes*n_groups], 1);
+        atomicAdd(&out[group*n_genes+gene+2*n_genes*n_groups], value*value);
     }
 }
 """

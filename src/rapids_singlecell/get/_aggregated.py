@@ -87,13 +87,9 @@ class Aggregate:
         kernel.compile()
 
         def __aggregate_dask(X_part, mask_part, groupby_part):
-            sums = cp.zeros((self.n_cells.shape[0], X_part.shape[1]), dtype=cp.float64)
-            sq_sums = cp.zeros(
-                (self.n_cells.shape[0], X_part.shape[1]), dtype=cp.float64
-            )
-            counts = cp.zeros((self.n_cells.shape[0], X_part.shape[1]), dtype=cp.int32)
+            out = cp.zeros((1,3 * self.n_cells.shape[0]* self.data.shape[1]), dtype=cp.float64)
             block = (512,)
-            grid = (self.data.shape[0],)
+            grid = (X_part.shape[0],)
             kernel(
                 grid,
                 block,
@@ -101,19 +97,18 @@ class Aggregate:
                     X_part.indptr,
                     X_part.indices,
                     X_part.data,
-                    counts,
-                    sums,
-                    sq_sums,
+                    out,
                     groupby_part,
                     mask_part,
                     X_part.shape[0],
                     X_part.shape[1],
+                    self.n_cells.shape[0],
                 ),
             )
-            counts = counts.astype(cp.float64)
-            out = cp.vstack([sums.ravel(), sq_sums.ravel(), counts.ravel()])
-            return out[None, ...]
-
+            return out
+        
+        import time
+        start_time = time.time()
         mask = self._get_mask()
         mask_dask = da.from_array(
             mask, chunks=(self.data.chunks[0],), meta=_meta_dense(mask.dtype)
@@ -123,22 +118,29 @@ class Aggregate:
             chunks=(self.data.chunks[0],),
             meta=_meta_dense(self.groupby.dtype),
         )
-        out = da.blockwise(
+        print(f"Time taken to get mask and groupby DASK: {time.time() - start_time}")
+        start_time = time.time()
+        # Use map_blocks instead of blockwise
+        n_blocks = self.data.blocks.size
+        out = da.map_blocks(
             __aggregate_dask,
-            "ij",
             self.data,
-            "ij",
             mask_dask,
-            "i",
             groupby_dask,
-            "i",
-            meta=_meta_dense(self.data.dtype),
+            dtype=cp.float64,
+            chunks=(n_blocks,3 *self.n_cells.shape[0] * self.data.shape[1],),
+            new_axis=(0,1,),
+            drop_axis=(0,1,),
         ).sum(axis=0)
-        sums, sq_sums, counts = out[0], out[1], out[2]
-        sums, sq_sums, counts = dask.compute(sums, sq_sums, counts)
-        sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])
-        sq_sums = sq_sums.reshape(self.n_cells.shape[0], self.data.shape[1])
-        counts = counts.reshape(self.n_cells.shape[0], self.data.shape[1])
+        print(out.shape, 3 * self.n_cells.shape[0] * self.data.shape[1])
+        print(f"Time taken to blockwise: {time.time() - start_time}")
+        start_time = time.time()
+        out = out.compute()
+        print(f"Time taken to compute: {time.time() - start_time}")
+        #sums, sq_sums, counts = out[0,:], out[1,:], out[2,:]
+        sums = out[:self.n_cells.shape[0]* self.data.shape[1]].copy().reshape(self.n_cells.shape[0], self.data.shape[1])
+        counts = out[self.n_cells.shape[0]* self.data.shape[1]:2*self.n_cells.shape[0]* self.data.shape[1]].copy().reshape(self.n_cells.shape[0], self.data.shape[1])
+        sq_sums = out[2*self.n_cells.shape[0]* self.data.shape[1]:].copy().reshape(self.n_cells.shape[0], self.data.shape[1])
         counts = counts.astype(cp.int32)
         means = sums / self.n_cells
         var = sq_sums / self.n_cells - cp.power(means, 2)
@@ -157,11 +159,8 @@ class Aggregate:
             _get_aggr_sparse_kernel_csc,
         )
 
-        sq_sums = cp.zeros(
-            (self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64
-        )
-        sums = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
-        counts = cp.zeros((self.n_cells.shape[0], self.data.shape[1]), dtype=cp.int32)
+        out = cp.zeros((3, self.n_cells.shape[0] * self.data.shape[1]), dtype=cp.float64)
+
         block = (512,)
         if self.data.format == "csc":
             grid = (self.data.shape[1],)
@@ -177,15 +176,19 @@ class Aggregate:
                 self.data.indptr,
                 self.data.indices,
                 self.data.data,
-                counts,
-                sums,
-                sq_sums,
+                out,
                 self.groupby,
                 mask,
                 self.data.shape[0],
                 self.data.shape[1],
+                self.n_cells.shape[0],
             ),
         )
+        sums, counts, sq_sums = out[0,:], out[1,:], out[2,:]
+        sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])
+        sq_sums = sq_sums.reshape(self.n_cells.shape[0], self.data.shape[1])
+        counts = counts.reshape(self.n_cells.shape[0], self.data.shape[1])
+        counts = counts.astype(cp.int32)
         means = sums / self.n_cells
         var = sq_sums / self.n_cells - means**2
         var *= self.n_cells / (self.n_cells - dof)
@@ -508,9 +511,12 @@ def aggregate(
         data = data.T
     _check_gpu_X(data, allow_dask=True)
     dim_df = getattr(adata, axis_name)
+    import time
+    start_time = time.time()
     categorical, new_label_df = _combine_categories(dim_df, by)
+    print(new_label_df.shape)
+    print(f"Time taken to combine categories: {time.time() - start_time}")
     # Actual computation
-
     groupby = Aggregate(groupby=categorical, data=data, mask=mask)
 
     funcs = set([func] if isinstance(func, str) else func)
