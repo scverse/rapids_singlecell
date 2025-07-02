@@ -89,8 +89,8 @@ sparse_var_kernel = r"""
 
 
 dense_aggr_kernel_C = r"""
-    (const {0} *data, int* counts, double* sums, double* means, double* vars,
-    int* cats, double* numcells, bool* mask, size_t n_cells, size_t n_genes){
+    (const {0} *data, double* out, 
+    int* cats, double* numcells, bool* mask, size_t n_cells, size_t n_genes, size_t n_groups){
 
     size_t i = blockIdx.x * blockDim.x + threadIdx.x;
     size_t N = n_cells * n_genes;
@@ -106,17 +106,16 @@ dense_aggr_kernel_C = r"""
 
     double value = (double)data[cell * n_genes + gene];
     if (value != 0){
-        atomicAdd(&sums[group * n_genes + gene], value);
-        atomicAdd(&counts[group * n_genes + gene], 1);
-        atomicAdd(&means[group * n_genes + gene], value / major);
-        atomicAdd(&vars[group * n_genes + gene], value * value / major);
+        atomicAdd(&out[group*n_genes+gene], value);
+        atomicAdd(&out[group*n_genes+gene+n_genes*n_groups], 1);
+        atomicAdd(&out[group*n_genes+gene+2*n_genes*n_groups], value*value);
     }
 }
 """
 
 dense_aggr_kernel_F = r"""
-    (const {0} *data, int* counts, double* sums, double* means, double* vars,
-    int* cats, double* numcells, bool* mask, size_t n_cells, size_t n_genes){
+    (const {0} *data, double* out, 
+    int* cats, double* numcells, bool* mask, size_t n_cells, size_t n_genes, size_t n_groups){
 
     size_t i = blockIdx.x * blockDim.x + threadIdx.x;
     size_t N = n_cells * n_genes;
@@ -132,10 +131,9 @@ dense_aggr_kernel_F = r"""
 
     double value = (double)data[gene * n_cells + cell];
     if (value != 0){
-        atomicAdd(&sums[group * n_genes + gene], value);
-        atomicAdd(&counts[group * n_genes + gene], 1);
-        atomicAdd(&means[group * n_genes + gene], value / major);
-        atomicAdd(&vars[group * n_genes + gene], value * value / major);
+        atomicAdd(&out[group*n_genes+gene], value);
+        atomicAdd(&out[group*n_genes+gene+n_genes*n_groups], 1);
+        atomicAdd(&out[group*n_genes+gene+2*n_genes*n_groups], value*value);
     }
 }
 """
