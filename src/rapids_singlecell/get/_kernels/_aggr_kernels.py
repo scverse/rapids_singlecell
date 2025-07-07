@@ -90,7 +90,7 @@ sparse_var_kernel = r"""
 
 dense_aggr_kernel_C = r"""
     (const {0} *data, double* out, 
-    int* cats, double* numcells, bool* mask, size_t n_cells, size_t n_genes, size_t n_groups){
+    int* cats, bool* mask, size_t n_cells, size_t n_genes, size_t n_groups){
 
     size_t i = blockIdx.x * blockDim.x + threadIdx.x;
     size_t N = n_cells * n_genes;
@@ -102,7 +102,6 @@ dense_aggr_kernel_C = r"""
     }
 
     size_t group = (size_t)cats[cell];
-    double major = numcells[group];
 
     double value = (double)data[cell * n_genes + gene];
     if (value != 0){
@@ -115,8 +114,7 @@ dense_aggr_kernel_C = r"""
 
 dense_aggr_kernel_F = r"""
     (const {0} *data, double* out, 
-    int* cats, double* numcells, bool* mask, size_t n_cells, size_t n_genes, size_t n_groups){
-
+    int* cats, bool* mask, size_t n_cells, size_t n_genes, size_t n_groups){
     size_t i = blockIdx.x * blockDim.x + threadIdx.x;
     size_t N = n_cells * n_genes;
     if (i >= N) return;
@@ -127,7 +125,6 @@ dense_aggr_kernel_F = r"""
     }
 
     size_t group = (size_t) cats[cell];
-    double major = numcells[group];
 
     double value = (double)data[gene * n_cells + cell];
     if (value != 0){

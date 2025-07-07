@@ -75,7 +75,6 @@ class Aggregate:
         This function is used to calculate the sum, mean, and variance of the sparse data matrix.
         It uses a custom cuda-kernel to perform the aggregation.
         """
-        import dask
         import dask.array as da
 
         assert dof >= 0
@@ -107,8 +106,6 @@ class Aggregate:
             )
             return out
         
-        import time
-        start_time = time.time()
         mask = self._get_mask()
         mask_dask = da.from_array(
             mask, chunks=(self.data.chunks[0],), meta=_meta_dense(mask.dtype)
@@ -118,8 +115,6 @@ class Aggregate:
             chunks=(self.data.chunks[0],),
             meta=_meta_dense(self.groupby.dtype),
         )
-        print(f"Time taken to get mask and groupby DASK: {time.time() - start_time}")
-        start_time = time.time()
         # Use map_blocks instead of blockwise
         out = da.blockwise(
             __aggregate_dask,
@@ -133,8 +128,8 @@ class Aggregate:
             meta=_meta_dense(cp.float64),
             dtype=cp.float64,
         ).sum(axis=0)
+        out = out.compute()
         sums, counts, sq_sums = out[0], out[1], out[2]
-        sums, sq_sums, counts = dask.compute(sums, sq_sums, counts)
         sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])
         counts = counts.reshape(self.n_cells.shape[0], self.data.shape[1])
         sq_sums = sq_sums.reshape(self.n_cells.shape[0], self.data.shape[1])
@@ -150,9 +145,7 @@ class Aggregate:
         This function is used to calculate the sum, mean, and variance of the dense data matrix.
         It uses a custom cuda-kernel to perform the aggregation.
         """
-        import dask
         import dask.array as da
-        print("Starting dense dask aggregation")
         assert dof >= 0
         from ._kernels._aggr_kernels import (
             _get_aggr_dense_kernel_C,
@@ -162,7 +155,7 @@ class Aggregate:
         kernel_dense.compile()
 
         def __aggregate_dask_dense(X_part, mask_part, groupby_part):
-            out = cp.zeros((1,3* self.n_cells.shape[0]* self.data.shape[1]), dtype=cp.float64)
+            out = cp.zeros((1,3, self.n_cells.shape[0]* self.data.shape[1]), dtype=cp.float64)
             N = X_part.shape[0] * X_part.shape[1]
             threads_per_block = 256
             blocks = (N + threads_per_block - 1) // threads_per_block
@@ -192,23 +185,20 @@ class Aggregate:
             meta=_meta_dense(self.groupby.dtype),
         )
         # Use map_blocks instead of blockwise
-        print(self.data.blocks.size)
-        out = da.map_blocks(
+        out = da.blockwise(
             __aggregate_dask_dense,
+            "ij",
             self.data,
+            "ij",
             mask_dask,
+            "i",
             groupby_dask,
+            "i",
             meta=_meta_dense(cp.float64),
-            chunks=(self.data.blocks.size, (3* self.n_cells.shape[0]* self.data.shape[1])),
-            drop_axis=0,
             dtype=cp.float64,
         ).sum(axis=0)
-        print(out.shape)
         out = out.compute()
         sums, counts, sq_sums = out[0], out[1], out[2]
-        print("Sum, counts, sq_sums computed")
-        print(sums.shape, sq_sums.shape, counts.shape)
-        #sums, sq_sums, counts = dask.compute(sums, sq_sums, counts)
         sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])
         counts = counts.reshape(self.n_cells.shape[0], self.data.shape[1])
         sq_sums = sq_sums.reshape(self.n_cells.shape[0], self.data.shape[1])
@@ -437,32 +427,33 @@ class Aggregate:
             _get_aggr_dense_kernel_F,
         )
 
-        out = cp.zeros((3, self.n_cells.shape[0]* self.data.shape[1]), dtype=cp.float64)
+        out = cp.zeros((3, self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
 
         N = self.data.shape[0] * self.data.shape[1]
         threads_per_block = 256
         blocks = (N + threads_per_block - 1) // threads_per_block
-
+        print(blocks)
         if self.data.flags.c_contiguous:
+            print("C")
             aggr_kernel = _get_aggr_dense_kernel_C(self.data.dtype)
         else:
+            print("F")
             aggr_kernel = _get_aggr_dense_kernel_F(self.data.dtype)
         mask = self._get_mask()
         aggr_kernel(
             (blocks,),
             (threads_per_block,),
             (
-                self.data.data,
+                self.data,
                 out,
                 self.groupby,
-                self.n_cells,
                 mask,
                 self.data.shape[0],
                 self.data.shape[1],
                 self.n_cells.shape[0],
             ),
         )
-        sums, counts, sq_sums = out[0,:], out[1,:], out[2,:]
+        sums, counts, sq_sums = out[0], out[1], out[2]
         sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])
         counts = counts.reshape(self.n_cells.shape[0], self.data.shape[1])
         sq_sums = sq_sums.reshape(self.n_cells.shape[0], self.data.shape[1])
@@ -584,12 +575,7 @@ def aggregate(
         data = data.T
     _check_gpu_X(data, allow_dask=True)
     dim_df = getattr(adata, axis_name)
-    import time
-    start_time = time.time()
     categorical, new_label_df = _combine_categories(dim_df, by)
-    print(new_label_df.shape)
-    print(f"Time taken to combine categories: {time.time() - start_time}")
-    # Actual computation
     groupby = Aggregate(groupby=categorical, data=data, mask=mask)
 
     funcs = set([func] if isinstance(func, str) else func)
