@@ -161,8 +161,8 @@ class Aggregate:
                 (1, 3, self.n_cells.shape[0] * self.data.shape[1]), dtype=cp.float64
             )
             N = X_part.shape[0] * X_part.shape[1]
-            threads_per_block = 256
-            blocks = (N + threads_per_block - 1) // threads_per_block
+            threads_per_block = 512
+            blocks = min((N + threads_per_block - 1) // threads_per_block, cp.cuda.Device().attributes["MultiProcessorCount"] * 8)
             kernel_dense(
                 (blocks,),
                 (threads_per_block,),
@@ -434,14 +434,11 @@ class Aggregate:
         out = cp.zeros((3, self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
 
         N = self.data.shape[0] * self.data.shape[1]
-        threads_per_block = 256
-        blocks = (N + threads_per_block - 1) // threads_per_block
-        print(blocks)
+        threads_per_block = 512
+        blocks = min((N + threads_per_block - 1) // threads_per_block, cp.cuda.Device().attributes["MultiProcessorCount"] * 8)
         if self.data.flags.c_contiguous:
-            print("C")
             aggr_kernel = _get_aggr_dense_kernel_C(self.data.dtype)
         else:
-            print("F")
             aggr_kernel = _get_aggr_dense_kernel_F(self.data.dtype)
         mask = self._get_mask()
         aggr_kernel(

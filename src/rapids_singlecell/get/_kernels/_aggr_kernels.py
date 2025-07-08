@@ -93,21 +93,25 @@ dense_aggr_kernel_C = r"""
     int* cats, bool* mask, size_t n_cells, size_t n_genes, size_t n_groups){
 
     size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t stride = gridDim.x * blockDim.x;
     size_t N = n_cells * n_genes;
-    if (i >= N) return;
-    size_t cell = i / n_genes;
-    size_t gene = i % n_genes;
-    if(!mask[cell]){
-        return;
-    }
+    while (i < N){
+        if (i >= N) return;
+        size_t cell = i / n_genes;
+        size_t gene = i % n_genes;
+        if(!mask[cell]){
+            return;
+        }
 
-    size_t group = (size_t)cats[cell];
+        size_t group = (size_t) cats[cell];
 
-    double value = (double)data[cell * n_genes + gene];
-    if (value != 0){
-        atomicAdd(&out[group*n_genes+gene], value);
-        atomicAdd(&out[group*n_genes+gene+n_genes*n_groups], 1);
-        atomicAdd(&out[group*n_genes+gene+2*n_genes*n_groups], value*value);
+        double value = (double)data[cell * n_genes + gene];
+        if (value != 0){
+            atomicAdd(&out[group*n_genes+gene], value);
+            atomicAdd(&out[group*n_genes+gene+n_genes*n_groups], 1);
+            atomicAdd(&out[group*n_genes+gene+2*n_genes*n_groups], value*value);
+        }
+        i += stride;
     }
 }
 """
@@ -116,21 +120,25 @@ dense_aggr_kernel_F = r"""
     (const {0} *data, double* out, 
     int* cats, bool* mask, size_t n_cells, size_t n_genes, size_t n_groups){
     size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t stride = gridDim.x * blockDim.x;
     size_t N = n_cells * n_genes;
-    if (i >= N) return;
-    size_t cell = i % n_cells;
-    size_t gene = i / n_cells;
-    if(!mask[cell]){
-        return;
-    }
+    while (i < N){
+        if (i >= N) return;
+        size_t cell = i % n_cells;
+        size_t gene = i / n_cells;
+        if(!mask[cell]){
+            return;
+        }
 
-    size_t group = (size_t) cats[cell];
+        size_t group = (size_t) cats[cell];
 
-    double value = (double)data[gene * n_cells + cell];
-    if (value != 0){
-        atomicAdd(&out[group*n_genes+gene], value);
-        atomicAdd(&out[group*n_genes+gene+n_genes*n_groups], 1);
-        atomicAdd(&out[group*n_genes+gene+2*n_genes*n_groups], value*value);
+        double value = (double)data[gene * n_cells + cell];
+        if (value != 0){
+            atomicAdd(&out[group*n_genes+gene], value);
+            atomicAdd(&out[group*n_genes+gene+n_genes*n_groups], 1);
+            atomicAdd(&out[group*n_genes+gene+2*n_genes*n_groups], value*value);
+        }
+        i += stride;
     }
 }
 """
