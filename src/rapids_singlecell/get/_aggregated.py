@@ -84,10 +84,10 @@ class Aggregate:
 
         kernel = _get_aggr_sparse_kernel(self.data.dtype)
         kernel.compile()
-
+        n_groups = self.n_cells.shape[0]
         def __aggregate_dask(X_part, mask_part, groupby_part):
             out = cp.zeros(
-                (1, 3, self.n_cells.shape[0] * self.data.shape[1]), dtype=cp.float64
+                (1,3, n_groups, self.data.shape[1]), dtype=cp.float64
             )
             block = (512,)
             grid = (X_part.shape[0],)
@@ -104,7 +104,7 @@ class Aggregate:
                     mask_part,
                     X_part.shape[0],
                     X_part.shape[1],
-                    self.n_cells.shape[0],
+                    n_groups,
                 ),
             )
             return out
@@ -121,21 +121,21 @@ class Aggregate:
         # Use map_blocks instead of blockwise
         out = da.blockwise(
             __aggregate_dask,
-            "ij",
+            "ikgj",
             self.data,
             "ij",
             mask_dask,
             "i",
             groupby_dask,
             "i",
-            meta=_meta_dense(cp.float64),
+            meta=cp.empty((3, n_groups, 0), dtype=cp.float64),
             dtype=cp.float64,
+            new_axes={'k': (3,),'g':(n_groups,)},
+            align_arrays=True,
         ).sum(axis=0)
         out = out.compute()
         sums, counts, sq_sums = out[0], out[1], out[2]
-        sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])
-        counts = counts.reshape(self.n_cells.shape[0], self.data.shape[1])
-        sq_sums = sq_sums.reshape(self.n_cells.shape[0], self.data.shape[1])
+        print(sums.shape, counts.shape, sq_sums.shape)
         counts = counts.astype(cp.int32)
         means = sums / self.n_cells
         var = sq_sums / self.n_cells - cp.power(means, 2)
@@ -156,10 +156,11 @@ class Aggregate:
 
         kernel_dense = _get_aggr_dense_kernel_C(self.data.dtype)
         kernel_dense.compile()
+        n_groups = self.n_cells.shape[0]
 
         def __aggregate_dask_dense(X_part, mask_part, groupby_part):
             out = cp.zeros(
-                (1, 3, self.n_cells.shape[0] * self.data.shape[1]), dtype=cp.float64
+                (1, 3, n_groups, self.data.shape[1]), dtype=cp.float64
             )
             N = X_part.shape[0] * X_part.shape[1]
             threads_per_block = 512
@@ -177,7 +178,7 @@ class Aggregate:
                     mask_part,
                     X_part.shape[0],
                     X_part.shape[1],
-                    self.n_cells.shape[0],
+                    n_groups,
                 ),
             )
             return out
@@ -194,21 +195,21 @@ class Aggregate:
         # Use map_blocks instead of blockwise
         out = da.blockwise(
             __aggregate_dask_dense,
-            "ij",
+            "ikgj",
             self.data,
             "ij",
             mask_dask,
             "i",
             groupby_dask,
             "i",
-            meta=_meta_dense(cp.float64),
+            meta=cp.empty((3, n_groups, 0), dtype=cp.float64),
             dtype=cp.float64,
+            new_axes={'k': (3,),'g':(n_groups,)},
+            align_arrays=True,
         ).sum(axis=0)
         out = out.compute()
         sums, counts, sq_sums = out[0], out[1], out[2]
-        sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])
-        counts = counts.reshape(self.n_cells.shape[0], self.data.shape[1])
-        sq_sums = sq_sums.reshape(self.n_cells.shape[0], self.data.shape[1])
+        print(sums.shape, counts.shape, sq_sums.shape)
         counts = counts.astype(cp.int32)
         means = sums / self.n_cells
         var = sq_sums / self.n_cells - cp.power(means, 2)
