@@ -91,6 +91,7 @@ class Aggregate:
             )
             block = (512,)
             grid = (X_part.shape[0],)
+
             kernel(
                 grid,
                 block,
