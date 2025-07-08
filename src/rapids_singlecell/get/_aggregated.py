@@ -85,10 +85,9 @@ class Aggregate:
         kernel = _get_aggr_sparse_kernel(self.data.dtype)
         kernel.compile()
         n_groups = self.n_cells.shape[0]
+
         def __aggregate_dask(X_part, mask_part, groupby_part):
-            out = cp.zeros(
-                (1,3, n_groups, self.data.shape[1]), dtype=cp.float64
-            )
+            out = cp.zeros((1, 3, n_groups, self.data.shape[1]), dtype=cp.float64)
             block = (512,)
             grid = (X_part.shape[0],)
 
@@ -130,7 +129,7 @@ class Aggregate:
             "i",
             meta=cp.empty((3, n_groups, 0), dtype=cp.float64),
             dtype=cp.float64,
-            new_axes={'k': (3,),'g':(n_groups,)},
+            new_axes={"k": (3,), "g": (n_groups,)},
             align_arrays=True,
         ).sum(axis=0)
         out = out.compute()
@@ -159,9 +158,7 @@ class Aggregate:
         n_groups = self.n_cells.shape[0]
 
         def __aggregate_dask_dense(X_part, mask_part, groupby_part):
-            out = cp.zeros(
-                (1, 3, n_groups, self.data.shape[1]), dtype=cp.float64
-            )
+            out = cp.zeros((1, 3, n_groups, self.data.shape[1]), dtype=cp.float64)
             N = X_part.shape[0] * X_part.shape[1]
             threads_per_block = 512
             blocks = min(
@@ -204,7 +201,7 @@ class Aggregate:
             "i",
             meta=cp.empty((3, n_groups, 0), dtype=cp.float64),
             dtype=cp.float64,
-            new_axes={'k': (3,),'g':(n_groups,)},
+            new_axes={"k": (3,), "g": (n_groups,)},
             align_arrays=True,
         ).sum(axis=0)
         out = out.compute()
