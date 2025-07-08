@@ -89,7 +89,7 @@ sparse_var_kernel = r"""
 
 
 dense_aggr_kernel_C = r"""
-    (const {0} *data, double* out, 
+    (const {0} *data, double* out,
     int* cats, bool* mask, size_t n_cells, size_t n_genes, size_t n_groups){
 
     size_t i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -117,7 +117,7 @@ dense_aggr_kernel_C = r"""
 """
 
 dense_aggr_kernel_F = r"""
-    (const {0} *data, double* out, 
+    (const {0} *data, double* out,
     int* cats, bool* mask, size_t n_cells, size_t n_genes, size_t n_groups){
     size_t i = blockIdx.x * blockDim.x + threadIdx.x;
     size_t stride = gridDim.x * blockDim.x;
