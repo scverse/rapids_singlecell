@@ -86,7 +86,9 @@ class Aggregate:
         kernel.compile()
 
         def __aggregate_dask(X_part, mask_part, groupby_part):
-            out = cp.zeros((1,3, self.n_cells.shape[0]* self.data.shape[1]), dtype=cp.float64)
+            out = cp.zeros(
+                (1, 3, self.n_cells.shape[0] * self.data.shape[1]), dtype=cp.float64
+            )
             block = (512,)
             grid = (X_part.shape[0],)
             kernel(
@@ -105,7 +107,7 @@ class Aggregate:
                 ),
             )
             return out
-        
+
         mask = self._get_mask()
         mask_dask = da.from_array(
             mask, chunks=(self.data.chunks[0],), meta=_meta_dense(mask.dtype)
@@ -139,13 +141,13 @@ class Aggregate:
         var *= self.n_cells / (self.n_cells - dof)
         return {"mean": means, "var": var, "sum": sums, "count_nonzero": counts}
 
-
     def count_mean_var_dense_dask(self, dof: int = 1):
         """
         This function is used to calculate the sum, mean, and variance of the dense data matrix.
         It uses a custom cuda-kernel to perform the aggregation.
         """
         import dask.array as da
+
         assert dof >= 0
         from ._kernels._aggr_kernels import (
             _get_aggr_dense_kernel_C,
@@ -155,7 +157,9 @@ class Aggregate:
         kernel_dense.compile()
 
         def __aggregate_dask_dense(X_part, mask_part, groupby_part):
-            out = cp.zeros((1,3, self.n_cells.shape[0]* self.data.shape[1]), dtype=cp.float64)
+            out = cp.zeros(
+                (1, 3, self.n_cells.shape[0] * self.data.shape[1]), dtype=cp.float64
+            )
             N = X_part.shape[0] * X_part.shape[1]
             threads_per_block = 256
             blocks = (N + threads_per_block - 1) // threads_per_block
@@ -173,7 +177,6 @@ class Aggregate:
                 ),
             )
             return out
-
 
         mask = self._get_mask()
         mask_dask = da.from_array(
@@ -208,7 +211,6 @@ class Aggregate:
         var *= self.n_cells / (self.n_cells - dof)
         return {"mean": means, "var": var, "sum": sums, "count_nonzero": counts}
 
-
     def count_mean_var_sparse(self, dof: int = 1):
         """
         This function is used to calculate the sum, mean, and variance of the sparse data matrix.
@@ -221,7 +223,9 @@ class Aggregate:
             _get_aggr_sparse_kernel_csc,
         )
 
-        out = cp.zeros((3, self.n_cells.shape[0] * self.data.shape[1]), dtype=cp.float64)
+        out = cp.zeros(
+            (3, self.n_cells.shape[0] * self.data.shape[1]), dtype=cp.float64
+        )
 
         block = (512,)
         if self.data.format == "csc":
@@ -246,7 +250,7 @@ class Aggregate:
                 self.n_cells.shape[0],
             ),
         )
-        sums, counts, sq_sums = out[0,:], out[1,:], out[2,:]
+        sums, counts, sq_sums = out[0, :], out[1, :], out[2, :]
         sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])
         sq_sums = sq_sums.reshape(self.n_cells.shape[0], self.data.shape[1])
         counts = counts.reshape(self.n_cells.shape[0], self.data.shape[1])
