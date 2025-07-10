@@ -110,28 +110,35 @@ class Aggregate:
 
         mask = self._get_mask()
         mask_dask = da.from_array(
-            mask, chunks=(self.data.chunks[0],), meta=_meta_dense(mask.dtype)
+            mask, chunks=(self.data.chunks[0]), meta=_meta_dense(mask.dtype)
         )
         groupby_dask = da.from_array(
             self.groupby,
-            chunks=(self.data.chunks[0],),
+            chunks=(self.data.chunks[0]),
             meta=_meta_dense(self.groupby.dtype),
         )
         # Use map_blocks instead of blockwise
-        out = da.blockwise(
+        out = da.map_blocks(
             __aggregate_dask,
-            "ikgj",
             self.data,
-            "ij",
-            mask_dask,
-            "i",
-            groupby_dask,
-            "i",
-            meta=cp.empty((3, n_groups, 0), dtype=cp.float64),
+            mask_dask[..., None],
+            groupby_dask[..., None],
+            meta=cp.empty([], dtype=cp.float64),
             dtype=cp.float64,
-            new_axes={"k": (3,), "g": (n_groups,)},
-            align_arrays=True,
-        ).sum(axis=0)
+            new_axis=(
+                1,
+                2,
+            ),
+            chunks=(
+                (1,) * self.data.blocks.size,
+                (3,),
+                (n_groups,),
+                (self.data.shape[1],),
+            ),
+        )
+        print(out.shape)
+        out = out.sum(axis=0)
+        print(out.shape)
         out = out.compute()
         sums, counts, sq_sums = out[0], out[1], out[2]
         print(sums.shape, counts.shape, sq_sums.shape)
@@ -190,20 +197,25 @@ class Aggregate:
             meta=_meta_dense(self.groupby.dtype),
         )
         # Use map_blocks instead of blockwise
-        out = da.blockwise(
+        out = da.map_blocks(
             __aggregate_dask_dense,
-            "ikgj",
             self.data,
-            "ij",
-            mask_dask,
-            "i",
-            groupby_dask,
-            "i",
-            meta=cp.empty((3, n_groups, 0), dtype=cp.float64),
+            mask_dask[..., None],
+            groupby_dask[..., None],
+            meta=cp.empty([], dtype=cp.float64),
             dtype=cp.float64,
-            new_axes={"k": (3,), "g": (n_groups,)},
-            align_arrays=True,
-        ).sum(axis=0)
+            new_axis=(
+                1,
+                2,
+            ),
+            chunks=(
+                (1,) * self.data.blocks.size,
+                (3,),
+                (n_groups,),
+                (self.data.shape[1],),
+            ),
+        )
+        out = out.sum(axis=0)
         out = out.compute()
         sums, counts, sq_sums = out[0], out[1], out[2]
         print(sums.shape, counts.shape, sq_sums.shape)
