@@ -363,7 +363,9 @@ def test_sparse_vs_dense(metric):
 
 
 def test_c_contiguous_vs_fortran_contiguous():
-    adata = pbmc3k_processed()
+    adata = pbmc3k_processed().raw.to_adata()
+    adata = adata[:, :1000].copy()
+    adata.X = adata.X.toarray()
     rsc.get.anndata_to_GPU(adata)
     adata.X = cp.asfortranarray(adata.X)
     mask = adata.obs.louvain == "Megakaryocytes"
@@ -376,7 +378,6 @@ def test_c_contiguous_vs_fortran_contiguous():
         by="louvain",
         func=["sum", "mean", "var", "count_nonzero"],
         mask=mask,
-        return_sparse=True,
     )
 
     for i in range(4):

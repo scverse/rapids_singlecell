@@ -14,7 +14,8 @@ from rapids_singlecell._testing import (
 
 
 @pytest.mark.parametrize("data_kind", ["sparse", "dense"])
-def test_dask_aggr(client, data_kind):
+@pytest.mark.parametrize("use_mask", [True, False])
+def test_dask_aggr(client, data_kind, use_mask):
     adata_1 = pbmc3k_processed()
     adata_2 = pbmc3k_processed()
 
@@ -28,16 +29,22 @@ def test_dask_aggr(client, data_kind):
         adata_2.X = as_dense_cupy_dask_array(adata_2.X.astype(np.float64))
     else:
         raise ValueError(f"Unknown data_kind {data_kind}")
+    if use_mask:
+        mask = adata_1.obs.louvain == "Megakaryocytes"
+    else:
+        mask = None
 
     out_in_memory = rsc.get.aggregate(
         adata_2,
         by="louvain",
         func=["sum", "mean", "var", "count_nonzero"],
+        mask=mask,
     )
     out_dask = rsc.get.aggregate(
         adata_1,
         by="louvain",
         func=["sum", "mean", "var", "count_nonzero"],
+        mask=mask,
     )
     for i in range(4):
         c = ["sum", "mean", "var", "count_nonzero"][i]
