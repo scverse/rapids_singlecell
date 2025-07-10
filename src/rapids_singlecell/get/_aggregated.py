@@ -70,7 +70,7 @@ class Aggregate:
         else:
             return cp.ones(self.data.shape[0], dtype=bool)
 
-    def count_mean_var_sparse_dask(self, dof: int = 1):
+    def count_mean_var_sparse_dask(self, dof: int = 1, split_every: int = 2):
         """
         This function is used to calculate the sum, mean, and variance of the sparse data matrix.
         It uses a custom cuda-kernel to perform the aggregation.
@@ -136,19 +136,16 @@ class Aggregate:
                 (self.data.shape[1],),
             ),
         )
-        print(out.shape)
-        out = out.sum(axis=0)
-        print(out.shape)
+        out = out.sum(axis=0, split_every=split_every)
         out = out.compute()
         sums, counts, sq_sums = out[0], out[1], out[2]
-        print(sums.shape, counts.shape, sq_sums.shape)
         counts = counts.astype(cp.int32)
         means = sums / self.n_cells
         var = sq_sums / self.n_cells - cp.power(means, 2)
         var *= self.n_cells / (self.n_cells - dof)
         return {"mean": means, "var": var, "sum": sums, "count_nonzero": counts}
 
-    def count_mean_var_dense_dask(self, dof: int = 1):
+    def count_mean_var_dense_dask(self, dof: int = 1, split_every: int = 2):
         """
         This function is used to calculate the sum, mean, and variance of the dense data matrix.
         It uses a custom cuda-kernel to perform the aggregation.
@@ -215,7 +212,7 @@ class Aggregate:
                 (self.data.shape[1],),
             ),
         )
-        out = out.sum(axis=0)
+        out = out.sum(axis=0, split_every=split_every)
         out = out.compute()
         sums, counts, sq_sums = out[0], out[1], out[2]
         print(sums.shape, counts.shape, sq_sums.shape)
@@ -497,6 +494,7 @@ def aggregate(
     obsm: str | None = None,
     varm: str | None = None,
     return_sparse: bool = False,
+    **kwargs,
 ) -> AnnData:
     """\
     Aggregate data matrix based on some categorical grouping.
@@ -603,10 +601,16 @@ def aggregate(
     if isinstance(data, cp.ndarray):
         result = groupby.count_mean_var_dense(dof)
     elif isinstance(data, DaskArray):
-        if isinstance(data._meta, cp.ndarray):
-            result = groupby.count_mean_var_dense_dask(dof)
+        if "split_every" in kwargs:
+            assert isinstance(kwargs["split_every"], int)
+            assert kwargs["split_every"] > 0
+            split_every = kwargs["split_every"]
         else:
-            result = groupby.count_mean_var_sparse_dask(dof)
+            split_every = 2
+        if isinstance(data._meta, cp.ndarray):
+            result = groupby.count_mean_var_dense_dask(dof, split_every=split_every)
+        else:
+            result = groupby.count_mean_var_sparse_dask(dof, split_every=split_every)
     else:
         if return_sparse:
             result = groupby.count_mean_var_sparse_sparse(funcs, dof)
