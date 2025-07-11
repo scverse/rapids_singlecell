@@ -70,31 +70,38 @@ class Aggregate:
         else:
             return cp.ones(self.data.shape[0], dtype=bool)
 
-    def count_mean_var_sparse_dask(self, dof: int = 1, split_every: int = 2):
+    def count_mean_var_dask(self, dof: int = 1, split_every: int = 2):
         """
-        This function is used to calculate the sum, mean, and variance of the sparse data matrix.
-        It uses a custom cuda-kernel to perform the aggregation.
+        This function is used to calculate the sum, mean, and variance of the data matrix.
+        It automatically detects sparse vs dense matrices and uses the appropriate
+        CUDA kernel for aggregation.
         """
         import dask.array as da
 
         assert dof >= 0
         from ._kernels._aggr_kernels import (
+            _get_aggr_dense_kernel_C,
             _get_aggr_sparse_kernel,
         )
 
-        kernel = _get_aggr_sparse_kernel(self.data.dtype)
+        if isinstance(self.data._meta, cp.ndarray):
+            kernel = _get_aggr_dense_kernel_C(self.data.dtype)
+            is_sparse = False
+        else:
+            kernel = _get_aggr_sparse_kernel(self.data.dtype)
+            is_sparse = True
+
         kernel.compile()
         n_groups = self.n_cells.shape[0]
 
         def __aggregate_dask(X_part, mask_part, groupby_part):
             out = cp.zeros((1, 3, n_groups, self.data.shape[1]), dtype=cp.float64)
-            block = (512,)
-            grid = (X_part.shape[0],)
 
-            kernel(
-                grid,
-                block,
-                (
+            if is_sparse:
+                # Sparse matrix kernel parameters
+                block = (512,)
+                grid = (X_part.shape[0],)
+                kernel_args = (
                     X_part.indptr,
                     X_part.indices,
                     X_part.data,
@@ -104,8 +111,28 @@ class Aggregate:
                     X_part.shape[0],
                     X_part.shape[1],
                     n_groups,
-                ),
-            )
+                )
+            else:
+                # Dense matrix kernel parameters
+                N = X_part.shape[0] * X_part.shape[1]
+                threads_per_block = 512
+                blocks = min(
+                    (N + threads_per_block - 1) // threads_per_block,
+                    cp.cuda.Device().attributes["MultiProcessorCount"] * 8,
+                )
+                block = (threads_per_block,)
+                grid = (blocks,)
+                kernel_args = (
+                    X_part,
+                    out,
+                    groupby_part,
+                    mask_part,
+                    X_part.shape[0],
+                    X_part.shape[1],
+                    n_groups,
+                )
+
+            kernel(grid, block, kernel_args)
             return out
 
         mask = self._get_mask()
@@ -117,6 +144,7 @@ class Aggregate:
             chunks=(self.data.chunks[0]),
             meta=_meta_dense(self.groupby.dtype),
         )
+
         # Use map_blocks instead of blockwise
         out = da.map_blocks(
             __aggregate_dask,
@@ -125,10 +153,7 @@ class Aggregate:
             groupby_dask[..., None],
             meta=cp.empty([], dtype=cp.float64),
             dtype=cp.float64,
-            new_axis=(
-                1,
-                2,
-            ),
+            new_axis=(1, 2),
             chunks=(
                 (1,) * self.data.blocks.size,
                 (3,),
@@ -136,86 +161,10 @@ class Aggregate:
                 (self.data.shape[1],),
             ),
         )
+
         out = out.sum(axis=0, split_every=split_every)
         out = out.compute()
         sums, counts, sq_sums = out[0], out[1], out[2]
-        counts = counts.astype(cp.int32)
-        means = sums / self.n_cells
-        var = sq_sums / self.n_cells - cp.power(means, 2)
-        var *= self.n_cells / (self.n_cells - dof)
-        return {"mean": means, "var": var, "sum": sums, "count_nonzero": counts}
-
-    def count_mean_var_dense_dask(self, dof: int = 1, split_every: int = 2):
-        """
-        This function is used to calculate the sum, mean, and variance of the dense data matrix.
-        It uses a custom cuda-kernel to perform the aggregation.
-        """
-        import dask.array as da
-
-        assert dof >= 0
-        from ._kernels._aggr_kernels import (
-            _get_aggr_dense_kernel_C,
-        )
-
-        kernel_dense = _get_aggr_dense_kernel_C(self.data.dtype)
-        kernel_dense.compile()
-        n_groups = self.n_cells.shape[0]
-
-        def __aggregate_dask_dense(X_part, mask_part, groupby_part):
-            out = cp.zeros((1, 3, n_groups, self.data.shape[1]), dtype=cp.float64)
-            N = X_part.shape[0] * X_part.shape[1]
-            threads_per_block = 512
-            blocks = min(
-                (N + threads_per_block - 1) // threads_per_block,
-                cp.cuda.Device().attributes["MultiProcessorCount"] * 8,
-            )
-            kernel_dense(
-                (blocks,),
-                (threads_per_block,),
-                (
-                    X_part,
-                    out,
-                    groupby_part,
-                    mask_part,
-                    X_part.shape[0],
-                    X_part.shape[1],
-                    n_groups,
-                ),
-            )
-            return out
-
-        mask = self._get_mask()
-        mask_dask = da.from_array(
-            mask, chunks=(self.data.chunks[0],), meta=_meta_dense(mask.dtype)
-        )
-        groupby_dask = da.from_array(
-            self.groupby,
-            chunks=(self.data.chunks[0],),
-            meta=_meta_dense(self.groupby.dtype),
-        )
-        # Use map_blocks instead of blockwise
-        out = da.map_blocks(
-            __aggregate_dask_dense,
-            self.data,
-            mask_dask[..., None],
-            groupby_dask[..., None],
-            meta=cp.empty([], dtype=cp.float64),
-            dtype=cp.float64,
-            new_axis=(
-                1,
-                2,
-            ),
-            chunks=(
-                (1,) * self.data.blocks.size,
-                (3,),
-                (n_groups,),
-                (self.data.shape[1],),
-            ),
-        )
-        out = out.sum(axis=0, split_every=split_every)
-        out = out.compute()
-        sums, counts, sq_sums = out[0], out[1], out[2]
-        print(sums.shape, counts.shape, sq_sums.shape)
         counts = counts.astype(cp.int32)
         means = sums / self.n_cells
         var = sq_sums / self.n_cells - cp.power(means, 2)
@@ -607,10 +556,8 @@ def aggregate(
             split_every = kwargs["split_every"]
         else:
             split_every = 2
-        if isinstance(data._meta, cp.ndarray):
-            result = groupby.count_mean_var_dense_dask(dof, split_every=split_every)
-        else:
-            result = groupby.count_mean_var_sparse_dask(dof, split_every=split_every)
+        result = groupby.count_mean_var_dask(dof, split_every=split_every)
+
     else:
         if return_sparse:
             result = groupby.count_mean_var_sparse_sparse(funcs, dof)
