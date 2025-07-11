@@ -96,45 +96,43 @@ class Aggregate:
 
         def __aggregate_dask(X_part, mask_part, groupby_part):
             out = cp.zeros((1, 3, n_groups, self.data.shape[1]), dtype=cp.float64)
+            threads_per_block = 512
 
             if is_sparse:
                 # Sparse matrix kernel parameters
-                block = (512,)
                 grid = (X_part.shape[0],)
                 kernel_args = (
                     X_part.indptr,
                     X_part.indices,
                     X_part.data,
-                    out,
-                    groupby_part,
-                    mask_part,
-                    X_part.shape[0],
-                    X_part.shape[1],
-                    n_groups,
                 )
             else:
                 # Dense matrix kernel parameters
                 N = X_part.shape[0] * X_part.shape[1]
-                threads_per_block = 512
+
                 blocks = min(
                     (N + threads_per_block - 1) // threads_per_block,
                     cp.cuda.Device().attributes["MultiProcessorCount"] * 8,
                 )
-                block = (threads_per_block,)
                 grid = (blocks,)
-                kernel_args = (
-                    X_part,
+                kernel_args = (X_part,)
+
+            kernel(
+                grid,
+                (threads_per_block,),
+                (
+                    *kernel_args,
                     out,
                     groupby_part,
                     mask_part,
                     X_part.shape[0],
                     X_part.shape[1],
                     n_groups,
-                )
-
-            kernel(grid, block, kernel_args)
+                ),
+            )
             return out
 
+        # Prepare Dask arrays
         mask = self._get_mask()
         mask_dask = da.from_array(
             mask, chunks=(self.data.chunks[0]), meta=_meta_dense(mask.dtype)
@@ -145,7 +143,7 @@ class Aggregate:
             meta=_meta_dense(self.groupby.dtype),
         )
 
-        # Use map_blocks instead of blockwise
+        # Apply aggregation across all blocks
         out = da.map_blocks(
             __aggregate_dask,
             self.data,
@@ -162,13 +160,16 @@ class Aggregate:
             ),
         )
 
-        out = out.sum(axis=0, split_every=split_every)
-        out = out.compute()
+        # Compute final aggregated results
+        out = out.sum(axis=0, split_every=split_every).compute()
         sums, counts, sq_sums = out[0], out[1], out[2]
+
+        # Calculate statistics
         counts = counts.astype(cp.int32)
         means = sums / self.n_cells
         var = sq_sums / self.n_cells - cp.power(means, 2)
         var *= self.n_cells / (self.n_cells - dof)
+
         return {"mean": means, "var": var, "sum": sums, "count_nonzero": counts}
 
     def count_mean_var_sparse(self, dof: int = 1):
