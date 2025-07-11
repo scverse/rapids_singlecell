@@ -126,7 +126,9 @@ def pca(
 
     X = _get_obs_rep(adata, layer=layer)
 
-    mask_var_param, mask_var = _handle_mask_var(adata, mask_var, use_highly_variable)
+    mask_var_param, mask_var = _handle_mask_var(
+        adata, mask_var, use_highly_variable=use_highly_variable
+    )
     del use_highly_variable
     X = X[:, mask_var] if mask_var is not None else X
 

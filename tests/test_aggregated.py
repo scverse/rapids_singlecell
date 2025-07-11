@@ -343,23 +343,45 @@ def test_factors():
     cp.testing.assert_array_equal(res.layers["sum"], adata.X)
 
 
-def test_sparse_vs_dense():
+@pytest.mark.parametrize("metric", ["sum", "mean", "var", "count_nonzero"])
+def test_sparse_vs_dense(metric):
     adata = pbmc3k_processed().raw.to_adata()
     rsc.get.anndata_to_GPU(adata)
     mask = adata.obs.louvain == "Megakaryocytes"
-    rsc_get = rsc.get.aggregate(
-        adata, by="louvain", func=["sum", "mean", "var", "count_nonzero"], mask=mask
-    )
+    rsc_get = rsc.get.aggregate(adata, by="louvain", func=metric, mask=mask)
     rsc_get_sparse = rsc.get.aggregate(
         adata,
         by="louvain",
-        func=["sum", "mean", "var", "count_nonzero"],
+        func=metric,
         mask=mask,
         return_sparse=True,
     )
 
+    a = rsc_get_sparse.layers[metric].toarray()
+    b = rsc_get.layers[metric]
+    cp.testing.assert_allclose(a, b)
+
+
+def test_c_contiguous_vs_fortran_contiguous():
+    adata = pbmc3k_processed().raw.to_adata()
+    adata = adata[:, :1000].copy()
+    adata.X = adata.X.toarray()
+    rsc.get.anndata_to_GPU(adata)
+    adata.X = cp.asfortranarray(adata.X)
+    mask = adata.obs.louvain == "Megakaryocytes"
+    rsc_get_F = rsc.get.aggregate(
+        adata, by="louvain", func=["sum", "mean", "var", "count_nonzero"], mask=mask
+    )
+    adata.X = cp.ascontiguousarray(adata.X)
+    rsc_get_C = rsc.get.aggregate(
+        adata,
+        by="louvain",
+        func=["sum", "mean", "var", "count_nonzero"],
+        mask=mask,
+    )
+
     for i in range(4):
         c = ["sum", "mean", "var", "count_nonzero"][i]
-        a = rsc_get_sparse.layers[c].toarray()
-        b = rsc_get.layers[c]
+        a = rsc_get_C.layers[c]
+        b = rsc_get_F.layers[c]
         cp.testing.assert_allclose(a, b)
