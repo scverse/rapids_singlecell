@@ -4,7 +4,8 @@ from cuml.common.kernel_utils import cuda_kernel_factory
 
 sparse_dense_aggr_kernel = r"""
     (const int *indptr, const int *index,const {0} *data,
-    double* out, int* cats,bool* mask,size_t n_cells, size_t n_genes, size_t n_groups){
+    double* out, int* cats,bool* mask,
+    size_t n_cells, size_t n_genes, size_t n_groups){
     size_t cell = blockIdx.x;
     if(cell >= n_cells || !mask[cell]){
         return;
@@ -25,7 +26,8 @@ sparse_dense_aggr_kernel = r"""
 
 sparse_dense_aggr_kernel_csc = r"""
     (const int *indptr, const int *index,const {0} *data,
-    double* out, int* cats,bool* mask,int n_cells, int n_genes, size_t n_groups){
+    double* out, int* cats,bool* mask,
+    size_t n_cells, size_t n_genes, size_t n_groups){
     size_t gene = blockIdx.x;
     if(gene >= n_genes){
         return;
