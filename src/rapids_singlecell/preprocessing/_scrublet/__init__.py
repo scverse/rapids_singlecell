@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
 import cupy as cp
@@ -12,6 +13,8 @@ from scanpy._compat import old_positionals
 from scanpy.get import _get_obs_rep
 
 from rapids_singlecell import preprocessing as pp
+from rapids_singlecell._compat import DaskArray
+from rapids_singlecell.preprocessing._utils import _check_gpu_X
 
 from . import pipeline
 from .core import Scrublet
@@ -180,11 +183,11 @@ def scrublet(
 
     start = logg.info("Running Scrublet")
 
-    adata_obs = adata.copy()
-
     def _run_scrublet(ad_obs: AnnData, ad_sim: AnnData | None = None):
         # With no adata_sim we assume the regular use case, starting with raw
         # counts and simulating doublets
+        if isinstance(ad_obs.X, DaskArray):
+            ad_obs.X = ad_obs.X.compute()
 
         if ad_sim is None:
             pp.filter_genes(ad_obs, min_cells=3, verbose=False)
@@ -243,6 +246,8 @@ def scrublet(
 
         return {"obs": ad_obs.obs, "uns": ad_obs.uns["scrublet"]}
 
+    _check_gpu_X(adata.X, allow_dask=True)
+
     if batch_key is not None:
         if batch_key not in adata.obs.keys():
             raise ValueError(
@@ -253,13 +258,26 @@ def scrublet(
         # scrublet-relevant parts of the objects to add to the input object
 
         batches = np.unique(adata.obs[batch_key])
-        scrubbed = [
-            _run_scrublet(
-                adata_obs[adata_obs.obs[batch_key] == batch].copy(),
-                adata_sim,
-            )
-            for batch in batches
-        ]
+        if isinstance(adata.X, DaskArray):
+            from dask.distributed import get_client
+
+            client = get_client()
+            futures = [
+                client.submit(
+                    _run_scrublet, adata[adata.obs[batch_key] == batch].copy(), None
+                )
+                for batch in batches
+            ]
+            scrubbed = client.gather(futures)
+        else:
+            scrubbed = [
+                _run_scrublet(
+                    adata[adata.obs[batch_key] == batch].copy(),
+                    adata_sim,
+                )
+                for batch in batches
+            ]
+
         scrubbed_obs = pd.concat([scrub["obs"] for scrub in scrubbed])
 
         # Now reset the obs to get the scrublet scores
@@ -279,6 +297,11 @@ def scrublet(
         adata.uns["scrublet"]["batched_by"] = batch_key
 
     else:
+        adata_obs = adata.copy()
+        if isinstance(adata_obs.X, DaskArray):
+            warnings.warn(
+                "Dask arrays are only supported for Scrublet with a batch key. We are computing the object to run Scrublet."
+            )
         scrubbed = _run_scrublet(adata_obs, adata_sim)
 
         # Copy outcomes to input object from our processed version
