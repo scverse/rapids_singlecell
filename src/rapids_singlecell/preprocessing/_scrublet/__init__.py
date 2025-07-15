@@ -77,6 +77,7 @@ def scrublet(
     preprocessing, simulate doublets with
     :func:`~rapids_singlecell.pp.scrublet_simulate_doublets`, and run the core scrublet
     function :func:`~rapids_singlecell.pp.scrublet` with ``adata_sim`` set.
+    Scrublet can also be run with a `dask array` if a batch key is provided. Please make sure that each batch can fit into memory. In addition to that scrublet will not return the full scrublet results, but only the `doublet score` and `predicted doublet`, not `.uns['scrublet']`. `adata_sim` is not supported for`dask arrays`.
 
     Parameters
     ----------
@@ -92,6 +93,7 @@ def scrublet(
         :func:`~rapids_singlecell.pp.scrublet_simulate_doublets`, with same number of vars
         as adata. This should have been built from adata_obs after
         filtering genes and cells and selecting highly-variable genes.
+        Not supported for dask arrays.
     batch_key
         Optional :attr:`~anndata.AnnData.obs` column name discriminating between batches.
     sim_doublet_ratio
@@ -257,19 +259,48 @@ def scrublet(
         # Run Scrublet independently on batches and return just the
         # scrublet-relevant parts of the objects to add to the input object
 
-        batches = np.unique(adata.obs[batch_key])
         if isinstance(adata.X, DaskArray):
-            from dask.distributed import get_client
+            # Define function to process each batch chunk
+            def _process_batch_chunk(X_chunk):
+                """Process a single batch chunk through Scrublet."""
+                batch_adata = AnnData(X_chunk)
+                batch_results = _run_scrublet(batch_adata, None)
+                return np.array(
+                    batch_results["obs"][["doublet_score", "predicted_doublet"]]
+                ).astype(np.float64)
 
-            client = get_client()
-            futures = [
-                client.submit(
-                    _run_scrublet, adata[adata.obs[batch_key] == batch].copy(), None
-                )
-                for batch in batches
-            ]
-            scrubbed = client.gather(futures)
+            # Get batch information and sort data by batch
+            batch_codes = adata.obs[batch_key].astype("category").cat.codes
+            sort_indices = np.argsort(batch_codes)
+            X_sorted = adata.X[sort_indices]
+
+            # Calculate chunk sizes based on batch sizes
+            batch_sizes = np.bincount(batch_codes.iloc[sort_indices])
+            X_rechunked = X_sorted.rechunk((tuple(batch_sizes), adata.X.shape[1]))
+
+            # Process all batches in parallel using map_blocks
+            batch_results = X_rechunked.map_blocks(
+                _process_batch_chunk,
+                meta=np.array([], dtype=np.float64),
+                dtype=np.float64,
+                chunks=(X_rechunked.chunks[0], 2),
+            )
+
+            # Convert results to DataFrame and restore original order
+            results_df = pd.DataFrame(
+                batch_results.compute(), columns=["doublet_score", "predicted_doublet"]
+            )
+            final_results = results_df.iloc[np.argsort(sort_indices)]
+
+            # Update the original AnnData object with results
+            adata.obs["doublet_score"] = final_results["doublet_score"].values
+            adata.obs["predicted_doublet"] = final_results[
+                "predicted_doublet"
+            ].values.astype(bool)
+            adata.uns["scrublet"] = {"batched_by": batch_key}
+
         else:
+            batches = np.unique(adata.obs[batch_key])
             scrubbed = [
                 _run_scrublet(
                     adata[adata.obs[batch_key] == batch].copy(),
@@ -278,29 +309,23 @@ def scrublet(
                 for batch in batches
             ]
 
-        scrubbed_obs = pd.concat([scrub["obs"] for scrub in scrubbed])
+            scrubbed_obs = pd.concat([scrub["obs"] for scrub in scrubbed])
+            # Now reset the obs to get the scrublet scores
+            adata.obs = scrubbed_obs.loc[adata.obs_names.values]
 
-        # Now reset the obs to get the scrublet scores
+            # Save the .uns from each batch separately
 
-        adata.obs = scrubbed_obs.loc[adata.obs_names.values]
-
-        # Save the .uns from each batch separately
-
-        adata.uns["scrublet"] = {}
-        adata.uns["scrublet"]["batches"] = dict(
-            zip(batches, [scrub["uns"] for scrub in scrubbed])
-        )
-
-        # Record that we've done batched analysis, so e.g. the plotting
-        # function knows what to do.
-
-        adata.uns["scrublet"]["batched_by"] = batch_key
+            adata.uns["scrublet"] = {}
+            adata.uns["scrublet"]["batches"] = dict(
+                zip(batches, [scrub["uns"] for scrub in scrubbed])
+            )
+            adata.uns["scrublet"]["batched_by"] = batch_key
 
     else:
         adata_obs = adata.copy()
         if isinstance(adata_obs.X, DaskArray):
-            warnings.warn(
-                "Dask arrays are only supported for Scrublet with a batch key. We are computing the object to run Scrublet."
+            raise ValueError(
+                "Dask arrays are not supported for Scrublet without a batch key. Please provide a batch key."
             )
         scrubbed = _run_scrublet(adata_obs, adata_sim)
 
