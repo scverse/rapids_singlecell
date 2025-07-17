@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Literal
 import cupy as cp
 import numpy as np
 import pandas as pd
-from cuml.internals.memory_utils import with_cupy_rmm
 from cupyx.scipy.sparse import issparse, isspmatrix_csc, isspmatrix_csr, spmatrix
 from natsort import natsorted
 from pandas.api.types import infer_dtype
@@ -98,7 +97,6 @@ def _mean_var_minor(X, major, minor):
     return mean, var
 
 
-@with_cupy_rmm
 def _mean_var_minor_dask(X, major, minor):
     """
     Implements sum operation for dask array when the backend is cupy sparse csr matrix
@@ -134,7 +132,6 @@ def _mean_var_minor_dask(X, major, minor):
 
 
 # todo: Implement this dynamically for csc matrix as well
-@with_cupy_rmm
 def _mean_var_major_dask(X, major, minor):
     """
     Implements sum operation for dask array when the backend is cupy sparse csr matrix
@@ -165,23 +162,23 @@ def _mean_var_major_dask(X, major, minor):
                 minor,
             ),
         )
-        return cp.vstack([mean, var])
+        return cp.stack([mean, var], axis=1)
 
-    mean, var = X.map_blocks(
+    output = X.map_blocks(
         __mean_var,
-        chunks=((2,), X.chunks[0]),
+        chunks=(X.chunks[0], (2,)),
         dtype=cp.float64,
         meta=cp.array([]),
     )
-
+    mean = output[:, 0]
+    var = output[:, 1]
     mean = mean / minor
     var = var / minor
-    var -= cp.power(mean, 2)
+    var -= mean**2
     var *= minor / (minor - 1)
     return mean, var
 
 
-@with_cupy_rmm
 def _mean_var_dense_dask(X, axis):
     """
     Implements sum operation for dask array when the backend is cupy dense matrix
@@ -192,17 +189,15 @@ def _mean_var_dense_dask(X, axis):
         var = sq_sum(X_part, axis=axis)
         mean = mean_sum(X_part, axis=axis)
         if axis == 0:
-            mean = mean.reshape(-1, 1)
-            var = var.reshape(-1, 1)
-        return cp.vstack([mean.ravel(), var.ravel()])[
-            None if 1 - axis else slice(None, None), ...
-        ]
+            return cp.vstack([mean, var])[None, ...]
+        else:
+            return cp.stack([mean, var], axis=1)
 
     n_blocks = X.blocks.size
     mean_var = X.map_blocks(
         __mean_var,
         new_axis=(1,) if axis - 1 else None,
-        chunks=((2,), X.chunks[0]) if axis else ((1,) * n_blocks, (2,), (X.shape[1],)),
+        chunks=(X.chunks[0], (2,)) if axis else ((1,) * n_blocks, (2,), (X.shape[1],)),
         dtype=cp.float64,
         meta=cp.array([]),
     )
@@ -210,7 +205,8 @@ def _mean_var_dense_dask(X, axis):
     if axis == 0:
         mean, var = mean_var.sum(axis=0)
     else:
-        mean, var = mean_var
+        mean = mean_var[:, 0]
+        var = mean_var[:, 1]
 
     mean = mean / X.shape[axis]
     var = var / X.shape[axis]
