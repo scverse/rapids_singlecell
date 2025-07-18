@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import warnings
 from typing import TYPE_CHECKING
 
@@ -14,6 +15,7 @@ from scanpy.get import _get_obs_rep
 
 from rapids_singlecell import preprocessing as pp
 from rapids_singlecell._compat import DaskArray
+from rapids_singlecell.get import X_to_GPU
 from rapids_singlecell.preprocessing._utils import _check_gpu_X
 
 from . import pipeline
@@ -188,8 +190,7 @@ def scrublet(
     def _run_scrublet(ad_obs: AnnData, ad_sim: AnnData | None = None):
         # With no adata_sim we assume the regular use case, starting with raw
         # counts and simulating doublets
-        if isinstance(ad_obs.X, DaskArray):
-            ad_obs.X = ad_obs.X.compute()
+        ad_obs.X = X_to_GPU(ad_obs.X)
 
         if ad_sim is None:
             pp.filter_genes(ad_obs, min_cells=3, verbose=False)
@@ -246,9 +247,8 @@ def scrublet(
             verbose=verbose,
         )
 
-        return {"obs": ad_obs.obs, "uns": ad_obs.uns["scrublet"]}
-
-    _check_gpu_X(adata.X, allow_dask=True)
+        out = {"obs": ad_obs.obs, "uns": ad_obs.uns["scrublet"]}
+        return out
 
     if batch_key is not None:
         if batch_key not in adata.obs.keys():
