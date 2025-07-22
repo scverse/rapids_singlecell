@@ -4,9 +4,11 @@ import warnings
 from typing import TYPE_CHECKING
 
 import cupy as cp
+import dask
 import numpy as np
 import pandas as pd
 
+from rapids_singlecell._compat import DaskArray
 from rapids_singlecell.get import X_to_GPU, _get_obs_rep
 from rapids_singlecell.preprocessing._utils import _check_gpu_X, _check_use_raw
 
@@ -77,8 +79,7 @@ def score_genes(
     use_raw = _check_use_raw(adata, use_raw, layer=layer)
     X = _get_obs_rep(adata, layer=layer, use_raw=use_raw)
     X = X_to_GPU(X)
-    _check_gpu_X(X)
-
+    _check_gpu_X(X, allow_dask=True)
     if random_state is not None:
         np.random.seed(random_state)
 
@@ -108,6 +109,8 @@ def score_genes(
     means_control = _nan_mean(
         X, axis=1, mask=control_array, n_features=len(control_genes)
     )
+    if isinstance(X, DaskArray):
+        means_list, means_control = dask.compute(means_list, means_control)
 
     score = means_list - means_control
 
@@ -157,7 +160,10 @@ def _score_genes_bins(
 ) -> Generator[pd.Index[str], None, None]:
     # average expression of genes
     idx = cp.array(var_names.isin(gene_pool), dtype=cp.bool_)
-    nanmeans = _nan_mean(X, axis=0, mask=idx, n_features=len(gene_pool)).get()
+    nanmeans = _nan_mean(X, axis=0, mask=idx, n_features=len(gene_pool))
+    if isinstance(X, DaskArray):
+        nanmeans = nanmeans.compute()
+    nanmeans = nanmeans.get()
     obs_avg = pd.Series(nanmeans, index=gene_pool)
     # Sometimes (and I don’t know how) missing data may be there, with NaNs for missing entries
     obs_avg = obs_avg[np.isfinite(obs_avg)]
