@@ -91,7 +91,7 @@ def X_to_GPU(
     if isinstance(X, GPU_ARRAY_TYPE):
         pass
     elif isinstance(X, DaskArray):
-        if isinstance(X._meta, csr_matrix_cpu) or isinstance(X._meta, np.ndarray):
+        if isinstance(X._meta, csr_matrix_cpu | np.ndarray):
             meta = _meta_sparse if isinstance(X._meta, csr_matrix_cpu) else _meta_dense
             X = X.map_blocks(X_to_GPU, meta=meta(X.dtype))
     elif isspmatrix_csr_cpu(X):
