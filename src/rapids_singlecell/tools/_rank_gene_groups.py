@@ -168,7 +168,7 @@ def rank_genes_groups_logreg(
     X = X[grouping_mask.values, :]
     # Indexing with a series causes issues, possibly segfault
 
-    grouping_logreg = grouping.cat.codes.to_numpy().astype("float32")
+    grouping_logreg = grouping.cat.codes.to_numpy().astype(X.dtype)
     uniques = np.unique(grouping_logreg)
     for idx, cat in enumerate(uniques):
         grouping_logreg[np.where(grouping_logreg == cat)] = idx
