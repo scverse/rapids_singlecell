@@ -6,6 +6,8 @@ import cupy as cp
 import numpy as np
 import pandas as pd
 
+from rapids_singlecell._compat import DaskArray, _meta_dense
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
@@ -52,7 +54,7 @@ def rank_genes_groups_logreg(
     groupby: str,
     *,
     groups: Literal["all"] | Iterable[str] = "all",
-    use_raw: bool = None,
+    use_raw: bool | None = None,
     reference: str = "rest",
     n_genes: int = None,
     layer: str = None,
@@ -155,7 +157,6 @@ def rank_genes_groups_logreg(
     # if reference is not set, then the groups listed will be compared to the rest
     # if reference is set, then the groups listed will be compared only to the other groups listed
     refname = reference
-    from cuml.linear_model import LogisticRegression
 
     reference = groups_order[0]
     if len(groups) == 1:
@@ -172,10 +173,23 @@ def rank_genes_groups_logreg(
     for idx, cat in enumerate(uniques):
         grouping_logreg[np.where(grouping_logreg == cat)] = idx
 
+    if isinstance(X, DaskArray):
+        import dask.array as da
+        from cuml.dask.linear_model import LogisticRegression
+
+        grouping_logreg = da.from_array(
+            grouping_logreg,
+            chunks=(X.chunks[0]),
+            meta=_meta_dense(grouping_logreg.dtype),
+        )
+    else:
+        from cuml.linear_model import LogisticRegression
+
+        clf = LogisticRegression(**kwds)
+
     clf = LogisticRegression(**kwds)
     clf.fit(X, grouping_logreg)
     scores_all = cp.array(clf.coef_)
-
     if len(groups_order) == scores_all.shape[1]:
         scores_all = scores_all.T
     for igroup, _group in enumerate(groups_order):
