@@ -44,7 +44,6 @@ jobs:
           environment-file: ci/environment_alpha.yml
           init-shell: >-
             bash
-          cache-environment: true
           post-cleanup: 'all'
 
       - name: Install rapids-singlecell
