@@ -2,152 +2,122 @@ from __future__ import annotations
 
 import cupy as cp
 import numpy as np
-import pandas as pd
-from anndata import AnnData
-from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
-from scipy.sparse import csr_matrix
-from tqdm.auto import tqdm
 
-from rapids_singlecell.preprocessing._utils import _sparse_to_dense
-
-from ._pre import __stdtr, extract, filt_min_n, get_net_mat, match, rename_net
+from ._docs import docs
+from ._Method import Method, MethodMeta
+from ._pre import __stdtr
 
 
-def mat_cov(A, b):
+def _cov(A: cp.ndarray, b: cp.ndarray) -> cp.ndarray:
     return cp.dot(b.T - b.mean(), A - A.mean(axis=0)) / (b.shape[0] - 1)
 
 
-def mat_cor(A, b):
-    cov = mat_cov(A, b)
+def _cor(A: cp.ndarray, b: cp.ndarray) -> cp.ndarray:
+    cov = _cov(A, b)
     ssd = cp.std(A, axis=0, ddof=1) * cp.std(b, axis=0, ddof=1).reshape(-1, 1)
     return cov / ssd
 
 
-def t_val(r, df):
+def _tval(r: cp.ndarray, df: float) -> cp.ndarray:
     return r * cp.sqrt(df / ((1.0 - r + 1.0e-16) * (1.0 + r + 1.0e-16)))
 
 
-def ulm(mat, net, batch_size=10000, verbose=False):
-    # Get dims
-    n_samples = mat.shape[0]
-    n_features, n_fsets = net.shape
-    df = n_features - 2
-    net = cp.array(net)
-    if isinstance(mat, csr_matrix) or isinstance(mat, cp_csr_matrix):
-        n_batches = int(np.ceil(n_samples / batch_size))
-        es = cp.zeros((n_samples, n_fsets), dtype=np.float32)
-        for i in tqdm(range(n_batches), disable=not verbose):
-            # Subset batch
-            srt, end = i * batch_size, i * batch_size + batch_size
-            if isinstance(mat, cp_csr_matrix):
-                batch = _sparse_to_dense(mat[srt:end], order="F").T
-            else:
-                batch = _sparse_to_dense(cp_csr_matrix(mat[srt:end]), order="F").T
-
-            # Compute R for batch
-            r = mat_cor(net, batch)
-
-            # Compute t-value
-            es[srt:end] = t_val(r, df)
-    else:
-        # Compute R value for all
-        r = mat_cor(net, mat.T)
-
-        # Compute t-value
-        es = t_val(r, df)
-
-    # Compute p-value
-    pvals = (2 * (1 - __stdtr(df, cp.abs(es)))).get()
-    es = es.get()
-
-    return es, pvals
-
-
-def run_ulm(
-    mat: AnnData | pd.DataFrame | list,
-    net: pd.DataFrame,
-    *,
-    source: str = "source",
-    target: str = "target",
-    weight: str = "weight",
-    batch_size: int = 10000,
-    min_n: int = 5,
+@docs.dedent
+def _func_ulm(
+    mat: np.ndarray,
+    adj: np.ndarray,
+    tval: bool = True,
     verbose: bool = False,
-    use_raw: bool | None = None,
-    layer: str | None = None,
-    pre_load: bool | None = None,
-):
-    """
-    Univariate Linear Model (ULM).
+) -> tuple[np.ndarray, np.ndarray]:
+    r"""
+    Univariate Linear Model (ULM) :cite:`decoupler`.
 
-    ULM fits a linear model for each sample and regulator, where the observed molecular readouts in `mat` are the response
-    variable and the regulator weights in `net` are the explanatory one. Target features with no associated weight are set to
-    zero. The obtained t-value from the fitted model is the activity (`ulm_estimate`) of a given regulator.
+    This approach uses the molecular features from one observation as the population of samples
+    and it fits a linear model with a single covariate, which is the feature weights of a set :math:`F`.
 
-    Parameters
-    ----------
-    mat
-        List of [features, matrix], dataframe (samples x features) or an AnnData instance.
-    net
-        Network in long format.
-    source
-        Column name in net with source nodes.
-    target
-        Column name in net with target nodes.
-    weight
-        Column name in net with weights.
-    batch_size
-        Size of the samples to use for each batch. Increasing this will consume more memory but it will run faster.
-    min_n
-        Minimum of targets per source. If less, sources are removed.
-    verbose
-        Whether to show progress.
-    use_raw
-        Use raw attribute of mat.
-    layer
-        Layer to use in AnnData object.
-    pre_load
-        Whether to pre-load the data into memory. This can be faster for small datasets.
+    .. math::
 
-    Returns
+        y_i = \beta_0 + \beta_1 x_i + \varepsilon, \quad i = 1, 2, \ldots, n
+
+    Where:
+
+    - :math:`y_i` is the observed feature statistic (e.g. gene expression, :math:`log_{2}FC`, etc.) for feature :math:`i`
+    - :math:`x_i` is the weight of feature :math:`i` in feature set :math:`F`. For unweighted sets, membership in the set is indicated by 1, and non-membership by 0.
+    - :math:`\beta_0` is the intercept
+    - :math:`\beta_1` is the slope coefficient
+    - :math:`\varepsilon` is the error term for feature :math:`i`
+
+       Univariate Linear Model (ULM) scheme.
+       In this example, the observed gene expression of :math:`Sample_1` is predicted using
+       the interaction weights of :math:`TF_1`.
+       Since the target genes that have negative weights are lowly expressed,
+       and the positive target genes are highly expressed,
+       the relationship between the two variables is positive so the obtained :math:`ES` score is positive.
+       Scores can be interpreted as active when positive, repressive when negative, and inconclusive when close to 0.
+
+    The enrichment score :math:`ES` is then calculated as the t-value of the slope coefficient.
+
+    .. math::
+
+        ES = t_{\beta_1} = \frac{\hat{\beta}_1}{\mathrm{SE}(\hat{\beta}_1)}
+
+    Where:
+
+    - :math:`t_{\beta_1}` is the t-value of the slope
+    - :math:`\mathrm{SE}(\hat{\beta}_1)` is the standard error of the slope
+
+    Next, :math:`p_{value}` are obtained by evaluating the two-sided survival function
+    (:math:`sf`) of the Student’s t-distribution.
+
+    .. math::
+
+        p_{value} = 2 \times \mathrm{sf}(|ES|, \text{df})
+
+    %(yestest)s
+
+    %(params)s
+    %(tval)s
+
+    %(returns)s
+
+    Example
     -------
-    estimate : DataFrame
-        ULM scores. Stored in `.obsm['ulm_estimate']` if `mat` is AnnData.
-    pvals : DataFrame
-        Obtained p-values. Stored in `.obsm['ulm_pvals']` if `mat` is AnnData.
+    .. code-block:: python
+
+        import decoupler as dc
+
+        adata, net = dc.ds.toy()
+        dc.mt.ulm(adata, net, tmin=3)
     """
+    # Get degrees of freedom
+    n_var, n_src = adj.shape
+    df = n_var - 2
 
-    # Extract sparse matrix and array of genes
-    m, r, c = extract(
-        mat, use_raw=use_raw, layer=layer, verbose=verbose, pre_load=pre_load
-    )
-
-    # Transform net
-    net = rename_net(net, source=source, target=target, weight=weight)
-    net = filt_min_n(c, net, min_n=min_n)
-    sources, targets, net = get_net_mat(net)
-
-    # Match arrays
-    net = match(c, targets, net)
-
-    if verbose:
-        print(
-            f"Running ulm on mat with {m.shape[0]} samples and {len(c)} targets for {net.shape[1]} sources."
-        )
-
-    # Run ULM
-    estimate, pvals = ulm(m, net, batch_size=batch_size, verbose=verbose)
-
-    # Transform to df
-    estimate = pd.DataFrame(estimate, index=r, columns=sources)
-    estimate.name = "ulm_estimate"
-    pvals = pd.DataFrame(pvals, index=r, columns=sources)
-    pvals.name = "ulm_pvals"
-
-    # AnnData support
-    if isinstance(mat, AnnData):
-        # Update obsm AnnData object
-        mat.obsm[estimate.name] = estimate
-        mat.obsm[pvals.name] = pvals
+    # Compute R value for all
+    r = _cor(adj, mat.T)
+    # Compute t-value
+    t = _tval(r, df)
+    # Compute p-value
+    pv = 2 * (1 - __stdtr(df, cp.abs(t)))
+    if tval:
+        es = t
     else:
-        return estimate, pvals
+        # Compute coef
+        es = r * (
+            cp.std(mat.T, ddof=1, axis=0).reshape(-1, 1) / cp.std(adj, ddof=1, axis=0)
+        )
+    return es, pv
+
+
+_ulm = MethodMeta(
+    name="ulm",
+    desc="Univariate Linear Model (ULM)",
+    func=_func_ulm,
+    stype="numerical",
+    adj=True,
+    weight=True,
+    test=True,
+    limits=(-np.inf, +np.inf),
+    reference="https://doi.org/10.1093/bioadv/vbac016",
+)
+ulm = Method(_method=_ulm)

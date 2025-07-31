@@ -2,19 +2,13 @@ from __future__ import annotations
 
 import cupy as cp
 import numpy as np
-import pandas as pd
-from anndata import AnnData
-from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
-from cupyx.scipy.sparse import issparse as cp_issparse
-from scipy.sparse import issparse
-from tqdm.auto import tqdm
 
-from rapids_singlecell.preprocessing._utils import _sparse_to_dense
-
-from ._pre import __stdtr, extract, filt_min_n, get_net_mat, match, rename_net
+from ._docs import docs
+from ._Method import Method, MethodMeta
+from ._pre import __stdtr
 
 
-def fit_mlm(X, y, inv, df):
+def _fit(X: cp.ndarray, y: cp.ndarray, inv: cp.ndarray, df: float) -> cp.ndarray:
     X = cp.ascontiguousarray(X)
     y.shape[1]
     X.shape[1]
@@ -30,130 +24,108 @@ def fit_mlm(X, y, inv, df):
     sse = cp.reshape(sse, (sse.shape[0], 1))
     inv = cp.reshape(inv, (1, inv.shape[0]))
     se = cp.sqrt(sse * inv)
-    t = coef.T / se
-    return t.astype(np.float32)
+    coef = coef.T
+    tval = coef / se
+    return coef[:, 1:], tval[:, 1:]
 
 
-def mlm(mat, net, batch_size=10000, verbose=False):
-    # Get number of batches
-    n_samples = mat.shape[0]
-    n_features, n_fsets = net.shape
-    n_batches = int(np.ceil(n_samples / batch_size))
+@docs.dedent
+def _func_mlm(
+    mat: cp.ndarray,
+    adj: cp.ndarray,
+    tval: bool = True,
+    verbose: bool = False,
+) -> tuple[cp.ndarray, cp.ndarray]:
+    r"""
+    Multivariate Linear Model (MLM) :cite:`decoupler`.
 
-    # Add intercept to network
-    net = cp.column_stack((cp.ones((n_features,), dtype=np.float32), cp.array(net)))
+    This approach uses the molecular features from one observation as the population of samples
+    and it fits a linear model with with multiple covariates, which are the weights of all feature sets :math:`F`.
 
+    .. math::
+
+        y^i = \beta_0 + \beta_1 x_{1}^{i} + \beta_2 x_{2}^{i} + \cdots + \beta_p x_{p}^{i} + \varepsilon
+
+    Where:
+
+    - :math:`y^i` is the observed feature statistic (e.g. gene expression, :math:`log_{2}FC`, etc.) for feature :math:`i`
+    - :math:`x_{p}^{i}` is the weight of feature :math:`i` in feature set :math:`F_p`. For unweighted sets, membership in the set is indicated by 1, and non-membership by 0.
+    - :math:`\beta_0` is the intercept
+    - :math:`\beta_p` is the slope coefficient for feature set :math:`F_p`
+    - :math:`\varepsilon` is the error term for feature :math:`i`
+
+
+       Multivariate Linear Model (MLM) scheme.
+       In this example, the observed gene expression of :math:`Sample_1` is predicted using
+       the interaction weights of two pathways, :math:`P_1` and :math:`P_2`.
+       For :math:`P2`, since its target genes that have negative weights are lowly expressed,
+       and its positive target genes are highly expressed,
+       the relationship between the two variables is positive so the obtained :math:`ES` score is positive.
+       Scores can be interpreted as active when positive, repressive when negative, and inconclusive when close to 0.
+
+    The enrichment score :math:`ES` for each :math:`F` is then calculated as the t-value of the slope coefficients.
+
+    .. math::
+
+        ES = t_{\beta_1} = \frac{\hat{\beta}_1}{\mathrm{SE}(\hat{\beta}_1)}
+
+    Where:
+
+    - :math:`t_{\beta_1}` is the t-value of the slope
+    - :math:`\mathrm{SE}(\hat{\beta}_1)` is the standard error of the slope
+
+    Next, :math:`p_{value}` are obtained by evaluating the two-sided survival function
+    (:math:`sf`) of the Student’s t-distribution.
+
+    .. math::
+
+        p_{value} = 2 \times \mathrm{sf}(|ES|, \text{df})
+
+
+    %(params)s
+    %(tval)s
+
+    %(returns)s
+
+    Example
+    -------
+    .. code-block:: python
+
+        import decoupler as dc
+
+        adata, net = dc.ds.toy()
+        dc.mt.mlm(adata, net, tmin=3)
+    """
+    # Get dims
+    n_features, n_fsets = adj.shape
+    # Add intercept
+    adj = cp.column_stack((cp.ones((n_features,)), adj))
     # Compute inv and df for lm
-    inv = cp.linalg.inv(cp.dot(net.T, net))
+    inv = cp.linalg.inv(cp.dot(adj.T, adj))
     df = n_features - n_fsets - 1
 
-    if issparse(mat) or cp_issparse(mat):
-        # Init empty acts
-        n_batches = int(np.ceil(n_samples / batch_size))
-        es = cp.zeros((n_samples, n_fsets), dtype=np.float32)
-        for i in tqdm(range(n_batches), disable=not verbose):
-            srt, end = i * batch_size, i * batch_size + batch_size
-            if cp_issparse(mat):
-                y = _sparse_to_dense(mat[srt:end]).T
-            else:
-                y = _sparse_to_dense(cp_csr_matrix(mat[srt:end])).T
-            # Compute MLM for batch
-            es[srt:end] = fit_mlm(net, y, inv, df)[:, 1:]
-
+    # Compute tval
+    coef, t = _fit(adj, mat.T, inv, df)
+    # Compute pval
+    pv = 2 * (1 - __stdtr(df, cp.abs(t)))
+    # Return coef or tval
+    if tval:
+        es = t
     else:
-        # Compute MLM for all
-        es = fit_mlm(net, mat.T, inv, df)[:, 1:]
-
-    # Get p-values
-
-    pvals = (2 * (1 - __stdtr(df, cp.abs(es)))).get()
-    es = es.get()
-
-    return es, pvals
+        es = coef
+    return es, pv
 
 
-def run_mlm(
-    mat: AnnData | pd.DataFrame | list,
-    net: pd.DataFrame,
-    *,
-    source: str = "source",
-    target: str = "target",
-    weight: str = "weight",
-    batch_size: int = 10000,
-    min_n: int = 5,
-    verbose: bool = False,
-    use_raw: bool | None = None,
-    layer: str | None = None,
-    pre_load: bool | None = False,
-) -> tuple | None:
-    """
-    Multivariate Linear Model (MLM).
-    MLM fits a multivariate linear model for each sample, where the observed molecular readouts in `mat` are the response
-    variable and the regulator weights in `net` are the covariates. Target features with no associated weight are set to
-    zero. The obtained t-values from the fitted model are the activities (`mlm_estimate`) of the regulators in `net`.
+_mlm = MethodMeta(
+    name="mlm",
+    desc="Multivariate Linear Model (MLM)",
+    func=_func_mlm,
+    stype="numerical",
+    adj=True,
+    weight=True,
+    test=True,
+    limits=(-np.inf, +np.inf),
+    reference="https://doi.org/10.1093/bioadv/vbac016",
+)
 
-    Parameters
-    ----------
-        mat
-            List of [features, matrix], dataframe (samples x features) or an AnnData instance.
-        net
-            Network in long format.
-        source
-            Column name in net with source nodes.
-        target
-            Column name in net with target nodes.
-        weight
-            Column name in net with weights.
-        batch_size
-            Size of the samples to use for each batch. Increasing this will consume more memory but it will run faster.
-        min_n
-            Minimum of targets per source. If less, sources are removed.
-        verbose
-            Whether to show progress.
-        use_raw
-            Use raw attribute of mat.
-        layer
-            Layer to use in AnnData object.
-        pre_load
-            Whether to pre-load the data into memory. This can be faster for small datasets.
-
-    Returns
-    -------
-        Updates `adata` with the following fields.
-
-            **estimate** : DataFrame
-                MLM scores. Stored in `.obsm['mlm_estimate']` if `mat` is AnnData.
-            **pvals** : DataFrame
-                Obtained p-values. Stored in `.obsm['mlm_pvals']` if `mat` is AnnData.
-    """
-    # Extract sparse matrix and array of genes
-    m, r, c = extract(
-        mat, use_raw=use_raw, layer=layer, verbose=verbose, pre_load=pre_load
-    )
-    # Transform net
-    net = rename_net(net, source=source, target=target, weight=weight)
-    net = filt_min_n(c, net, min_n=min_n)
-    sources, targets, net = get_net_mat(net)
-    # Match arrays
-    net = match(c, targets, net)
-    if verbose:
-        print(
-            f"Running mlm on mat with {m.shape[0]} samples and {len(c)} targets for {net.shape[1]} sources."
-        )
-
-    # Run MLM
-    estimate, pvals = mlm(m, net, batch_size=batch_size, verbose=verbose)
-
-    # Transform to df
-    estimate = pd.DataFrame(estimate, index=r, columns=sources)
-    estimate.name = "mlm_estimate"
-    pvals = pd.DataFrame(pvals, index=r, columns=sources)
-    pvals.name = "mlm_pvals"
-
-    # AnnData support
-    if isinstance(mat, AnnData):
-        # Update obsm AnnData object
-        mat.obsm[estimate.name] = estimate
-        mat.obsm[pvals.name] = pvals
-    else:
-        return estimate, pvals
+mlm = Method(_method=_mlm)
