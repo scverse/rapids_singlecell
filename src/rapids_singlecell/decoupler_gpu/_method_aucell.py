@@ -106,7 +106,7 @@ def _func_aucell(
     offsets: cp.ndarray,
     n_up: int | float | None = None,
     verbose: bool = False,
-) -> tuple[cp.ndarray, None]:
+) -> tuple[np.ndarray, None]:
     r"""
     Area Under the Curve for set enrichment within single cells (AUCell) :cite:`aucell`.
 

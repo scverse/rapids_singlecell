@@ -53,7 +53,6 @@ class MethodMeta:
         return meta
 
 
-# @docs.dedent
 class Method(MethodMeta):
     def __init__(
         self,
@@ -83,6 +82,7 @@ class Method(MethodMeta):
         empty: bool = True,
         bsize: int | float = 5000,
         verbose: bool = False,
+        pre_load: bool = False,
         **kwargs,
     ):
         return _run(
@@ -97,6 +97,7 @@ class Method(MethodMeta):
             empty=empty,
             bsize=bsize,
             verbose=verbose,
+            pre_load=pre_load,
             **kwargs,
         )
 

@@ -83,12 +83,19 @@ def _run(
     empty: bool = True,
     bsize: int | float = 250_000,
     verbose: bool = False,
+    pre_load: bool = False,
     **kwargs,
 ) -> tuple[pd.DataFrame, pd.DataFrame] | AnnData | None:
     _log(f"{name} - Running {name}", level="info", verbose=verbose)
     # Process data
     mat, obs, var = extract(
-        data, layer=layer, raw=raw, empty=empty, verbose=verbose, bsize=bsize
+        data,
+        layer=layer,
+        raw=raw,
+        empty=empty,
+        verbose=verbose,
+        bsize=bsize,
+        pre_load=pre_load,
     )
     issparse = sps.issparse(mat) or csps.issparse(mat)
     isbacked = isinstance(mat, tuple)

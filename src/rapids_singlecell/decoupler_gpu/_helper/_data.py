@@ -63,6 +63,8 @@ def _validate_mat(
     if n_empty_col > 0 and empty:
         m = f"{n_empty_col} features of mat are empty, they will be removed"
         _log(m, level="warn", verbose=verbose)
+        if isinstance(msk_col, cp.ndarray):
+            msk_col = msk_col.get()
         col = col[~msk_col]
         mat = mat[:, ~msk_col]
     # Check for repeated features
@@ -84,12 +86,17 @@ def _validate_mat(
     if n_empty_row > 0 and empty:
         m = f"{n_empty_row} observations of mat are empty, they will be removed"
         _log(m, level="warn", verbose=verbose)
+        if isinstance(msk_row, cp.ndarray):
+            msk_row = msk_row.get()
         row = row[~msk_row]
         mat = mat[~msk_row]
 
     # Check for non finite values
     check = False
     if isinstance(mat, cp.ndarray):
+        if cp.any(~cp.isfinite(mat)):
+            check = True
+    elif isinstance(mat, np.ndarray):
         if np.any(~np.isfinite(mat)):
             check = True
     else:
@@ -218,6 +225,7 @@ def extract(
     empty: bool = True,
     verbose: bool = False,
     bsize: int = 250_000,
+    pre_load: bool = False,
 ) -> (
     tuple[np.ndarray, np.ndarray, np.ndarray]
     | tuple[tuple[np.ndarray, np.ndarray], np.ndarray, np.ndarray]
@@ -232,6 +240,7 @@ def extract(
     %(raw)s
     %(empty)s
     %(verbose)s
+    %(pre_load)s
 
     Returns
     -------
@@ -247,7 +256,7 @@ def extract(
         X, obs_names, var_names = dc.pp.extract(adata)
     """
     # Extract
-    mat, row, col = _extract(data=data, layer=layer, raw=raw)
+    mat, row, col = _extract(data=data, layer=layer, raw=raw, pre_load=pre_load)
     # Validate
     isbacked = hasattr(data, "isbacked") and data.isbacked
     mat_tuple: (
