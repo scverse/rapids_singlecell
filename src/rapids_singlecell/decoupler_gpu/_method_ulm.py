@@ -48,14 +48,6 @@ def _func_ulm(
     - :math:`\beta_1` is the slope coefficient
     - :math:`\varepsilon` is the error term for feature :math:`i`
 
-       Univariate Linear Model (ULM) scheme.
-       In this example, the observed gene expression of :math:`Sample_1` is predicted using
-       the interaction weights of :math:`TF_1`.
-       Since the target genes that have negative weights are lowly expressed,
-       and the positive target genes are highly expressed,
-       the relationship between the two variables is positive so the obtained :math:`ES` score is positive.
-       Scores can be interpreted as active when positive, repressive when negative, and inconclusive when close to 0.
-
     The enrichment score :math:`ES` is then calculated as the t-value of the slope coefficient.
 
     .. math::

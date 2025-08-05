@@ -1,6 +1,8 @@
 # adapted from decoupler/_pre.py
 from __future__ import annotations
 
+from typing import Union
+
 import cudf
 import cupy as cp
 import numpy as np
@@ -17,11 +19,11 @@ from rapids_singlecell.decoupler_gpu._helper._docs import docs
 from rapids_singlecell.decoupler_gpu._helper._log import _log
 from rapids_singlecell.preprocessing._utils import _check_use_raw
 
-DataType = (
-    AnnData | pd.DataFrame | cudf.DataFrame | tuple[np.ndarray, np.ndarray, np.ndarray]
-)
+DataType = Union[  # noqa: UP007
+    AnnData, pd.DataFrame, cudf.DataFrame, tuple[np.ndarray, np.ndarray, np.ndarray]
+]
 
-DataType_matrix = np.ndarray | cp.ndarray | csr_matrix | cp_csr_matrix
+DataType_matrix = Union[np.ndarray, cp.ndarray, csr_matrix, cp_csr_matrix]  # noqa: UP007
 
 getnnz_0 = cp.ElementwiseKernel(
     "int32 idx",
