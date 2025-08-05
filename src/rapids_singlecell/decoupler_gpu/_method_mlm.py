@@ -55,15 +55,6 @@ def _func_mlm(
     - :math:`\beta_p` is the slope coefficient for feature set :math:`F_p`
     - :math:`\varepsilon` is the error term for feature :math:`i`
 
-
-       Multivariate Linear Model (MLM) scheme.
-       In this example, the observed gene expression of :math:`Sample_1` is predicted using
-       the interaction weights of two pathways, :math:`P_1` and :math:`P_2`.
-       For :math:`P2`, since its target genes that have negative weights are lowly expressed,
-       and its positive target genes are highly expressed,
-       the relationship between the two variables is positive so the obtained :math:`ES` score is positive.
-       Scores can be interpreted as active when positive, repressive when negative, and inconclusive when close to 0.
-
     The enrichment score :math:`ES` for each :math:`F` is then calculated as the t-value of the slope coefficients.
 
     .. math::
