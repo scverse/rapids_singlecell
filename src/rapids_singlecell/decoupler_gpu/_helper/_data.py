@@ -21,6 +21,8 @@ DataType = (
     AnnData | pd.DataFrame | cudf.DataFrame | tuple[np.ndarray, np.ndarray, np.ndarray]
 )
 
+DataType_matrix = np.ndarray | cp.ndarray | csr_matrix | cp_csr_matrix
+
 getnnz_0 = cp.ElementwiseKernel(
     "int32 idx",
     "raw int32 sum",
@@ -38,12 +40,12 @@ def __stdtr(df, t):
 
 
 def _validate_mat(
-    mat: np.ndarray,
+    mat: DataType_matrix,
     row: np.ndarray,
     col: np.ndarray,
     empty: bool = True,
     verbose: bool = False,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[DataType_matrix, np.ndarray, np.ndarray]:
     assert isinstance(empty, bool), "empty must be bool"
     # Accept any sparse format but transform to csr
     if issparse(mat) and not isinstance(mat, csr_matrix):
@@ -110,7 +112,7 @@ def _validate_mat(
 
 
 def _validate_backed(
-    mat,
+    mat: DataType_matrix,
     row: np.ndarray,
     col: np.ndarray,
     *,
@@ -142,9 +144,9 @@ def _validate_backed(
 
 
 def _break_ties(
-    mat: np.ndarray,
+    mat: DataType_matrix,
     features: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[DataType_matrix, np.ndarray]:
     # Randomize feature order to break ties randomly
     rng = np.random.default_rng(seed=0)
     idx = np.arange(features.size)
@@ -153,7 +155,7 @@ def _break_ties(
     return mat, features
 
 
-def _extract(data, *, raw=None, layer=None, pre_load=False):
+def _extract(data: DataType, *, raw=None, layer=None, pre_load=False):
     """
     Processes different input types so that they can be used downstream.
 
@@ -227,8 +229,8 @@ def extract(
     bsize: int = 250_000,
     pre_load: bool = False,
 ) -> (
-    tuple[np.ndarray, np.ndarray, np.ndarray]
-    | tuple[tuple[np.ndarray, np.ndarray], np.ndarray, np.ndarray]
+    tuple[DataType_matrix, np.ndarray, np.ndarray]
+    | tuple[tuple[DataType_matrix, np.ndarray], np.ndarray, np.ndarray]
 ):
     """
     Extracts matrix, rownames and colnames from data.
@@ -245,15 +247,6 @@ def extract(
     Returns
     -------
     Matrix, rownames and colnames from data.
-
-    Example
-    -------
-    .. code-block:: python
-
-        import decoupler as dc
-
-        adata, net = dc.ds.toy()
-        X, obs_names, var_names = dc.pp.extract(adata)
     """
     # Extract
     mat, row, col = _extract(data=data, layer=layer, raw=raw, pre_load=pre_load)

@@ -25,13 +25,13 @@ def _tval(r: cp.ndarray, df: float) -> cp.ndarray:
 
 @docs.dedent
 def _func_ulm(
-    mat: np.ndarray,
-    adj: np.ndarray,
+    mat: cp.ndarray,
+    adj: cp.ndarray,
     tval: bool = True,
     verbose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     r"""
-    Univariate Linear Model (ULM) :cite:`decoupler`.
+    Univariate Linear Model (ULM).
 
     This approach uses the molecular features from one observation as the population of samples
     and it fits a linear model with a single covariate, which is the feature weights of a set :math:`F`.
@@ -88,7 +88,7 @@ def _func_ulm(
         import decoupler as dc
 
         adata, net = dc.ds.toy()
-        dc.mt.ulm(adata, net, tmin=3)
+        rsc.dcg.ulm(adata, net, tmin=3)
     """
     # Get degrees of freedom
     n_var, n_src = adj.shape

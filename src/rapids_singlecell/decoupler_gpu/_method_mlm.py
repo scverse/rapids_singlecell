@@ -38,7 +38,7 @@ def _func_mlm(
     verbose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     r"""
-    Multivariate Linear Model (MLM) :cite:`decoupler`.
+    Multivariate Linear Model (MLM).
 
     This approach uses the molecular features from one observation as the population of samples
     and it fits a linear model with with multiple covariates, which are the weights of all feature sets :math:`F`.
@@ -95,7 +95,7 @@ def _func_mlm(
         import decoupler as dc
 
         adata, net = dc.ds.toy()
-        dc.mt.mlm(adata, net, tmin=3)
+        rsc.dcg.mlm(adata, net, tmin=3)
     """
     # Get dims
     n_features, n_fsets = adj.shape

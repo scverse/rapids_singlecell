@@ -23,6 +23,7 @@ dependencies = [
     "tqdm",
     "statsmodels>=0.12.0",
     "scikit-image",
+    "docrep",
 ]
 
 [project.optional-dependencies]

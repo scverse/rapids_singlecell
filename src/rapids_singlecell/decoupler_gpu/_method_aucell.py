@@ -108,7 +108,7 @@ def _func_aucell(
     verbose: bool = False,
 ) -> tuple[np.ndarray, None]:
     r"""
-    Area Under the Curve for set enrichment within single cells (AUCell) :cite:`aucell`.
+    Area Under the Curve for set enrichment within single cells (AUCell).
 
     Given a ranked list of features per observation, AUCell calculates the AUC by measuring how early the features in
     the set appear in this ranking. Specifically, the enrichment score :math:`ES` is:
@@ -139,7 +139,7 @@ def _func_aucell(
         import decoupler as dc
 
         adata, net = dc.ds.toy()
-        dc.mt.aucell(adata, net, tmin=3)
+        rsc.dcg.aucell(adata, net, tmin=3)
     """
     nobs, nvar = mat.shape
     nsrc = starts.size

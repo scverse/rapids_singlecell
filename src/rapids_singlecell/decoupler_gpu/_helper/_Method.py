@@ -100,7 +100,3 @@ class Method(MethodMeta):
             pre_load=pre_load,
             **kwargs,
         )
-
-
-def _show_methods(methods):
-    return pd.concat([method.meta() for method in methods]).reset_index(drop=True)
