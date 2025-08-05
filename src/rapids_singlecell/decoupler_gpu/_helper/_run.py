@@ -2,20 +2,24 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import cupy as cp
+import cupyx.scipy.sparse as csps
 import numpy as np
 import pandas as pd
 import scipy.sparse as sps
 import scipy.stats as sts
 from anndata import AnnData
-from decoupler._log import _log
-from decoupler.pp.data import extract
-from decoupler.pp.net import adjmat, idxmat, prune
 from tqdm.auto import tqdm
+
+from rapids_singlecell.decoupler_gpu._helper._data import extract
+from rapids_singlecell.decoupler_gpu._helper._log import _log
+from rapids_singlecell.decoupler_gpu._helper._net import adjmat, idxmat, prune
+from rapids_singlecell.preprocessing._utils import _sparse_to_dense
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from decoupler._datatype import DataType
+    from rapids_singlecell.decoupler_gpu._helper._data import DataType
 
 
 def _return(
@@ -43,6 +47,28 @@ def _return(
         return es, pv
 
 
+def _get_batch(mat, srt, end):
+    if sps.issparse(mat):
+        bmat = csps.csr_matrix(mat[srt:end])
+        bmat = _sparse_to_dense(bmat)
+    elif csps.issparse(mat):
+        bmat = _sparse_to_dense(mat[srt:end])
+    elif isinstance(mat, np.ndarray):
+        bmat = cp.array(mat[srt:end, :])
+    elif isinstance(mat, cp.ndarray):
+        bmat = mat[srt:end, :]
+    else:
+        bmat, msk_col = mat
+        bmat = bmat[srt:end, :]
+        if sps.issparse(bmat):
+            bmat = csps.csr_matrix(bmat)
+            bmat = _sparse_to_dense(bmat)
+        else:
+            bmat = cp.array(bmat)
+        bmat = bmat[:, msk_col]
+    return bmat.astype(cp.float32)
+
+
 def _run(
     name: str,
     func: Callable,
@@ -64,13 +90,14 @@ def _run(
     mat, obs, var = extract(
         data, layer=layer, raw=raw, empty=empty, verbose=verbose, bsize=bsize
     )
-    issparse = sps.issparse(mat)
+    issparse = sps.issparse(mat) or csps.issparse(mat)
     isbacked = isinstance(mat, tuple)
     # Process net
     net = prune(features=var, net=net, tmin=tmin, verbose=verbose)
     # Handle stat type
     if adj:
         sources, targets, adjm = adjmat(features=var, net=net, verbose=verbose)
+        adjm = cp.array(adjm, dtype=cp.float32)
         # Handle batches
         if issparse or isbacked:
             nbatch = int(np.ceil(obs.size / bsize))
@@ -81,14 +108,7 @@ def _run(
                 else:
                     batch_verbose = False
                 srt, end = i * bsize, i * bsize + bsize
-                if sps.issparse(mat):
-                    bmat = mat[srt:end].toarray()
-                else:
-                    bmat, msk_col = mat
-                    bmat = bmat[srt:end, :]
-                    if sps.issparse(bmat):
-                        bmat = bmat.toarray()
-                    bmat = bmat[:, msk_col]
+                bmat = _get_batch(mat, srt, end)
                 bes, bpv = func(bmat, adjm, verbose=batch_verbose, **kwargs)
                 es.append(bes)
                 pv.append(bpv)
@@ -99,25 +119,29 @@ def _run(
             es = pd.DataFrame(es, index=obs, columns=sources)
     else:
         sources, cnct, starts, offsets = idxmat(features=var, net=net, verbose=verbose)
-        if isbacked:
-            nbatch = int(np.ceil(obs.size / bsize))
-            es, pv = [], []
-            for i in tqdm(range(nbatch), disable=not verbose):
-                if i == 0 and verbose:
-                    batch_verbose = True
-                else:
-                    batch_verbose = False
-                srt, end = i * bsize, i * bsize + bsize
-                bmat, msk_col = mat
-                bmat = bmat[srt:end, msk_col]
-                bes, bpv = func(
-                    bmat, cnct, starts, offsets, verbose=batch_verbose, **kwargs
-                )
-                es.append(bes)
-                pv.append(bpv)
-            es = np.vstack(es)
-        else:
-            es, pv = func(mat, cnct, starts, offsets, verbose=verbose, **kwargs)
+        cnct = cp.array(cnct, dtype=cp.int32)
+        starts = cp.array(starts, dtype=cp.int32)
+        offsets = cp.array(offsets, dtype=cp.int32)
+        nbatch = int(np.ceil(obs.size / bsize))
+        es, pv = [], []
+        for i in tqdm(range(nbatch), disable=not verbose):
+            srt, end = i * bsize, i * bsize + bsize
+            bmat = _get_batch(mat, srt, end)
+            if i == 0 and verbose:
+                batch_verbose = True
+            else:
+                batch_verbose = False
+            bes, bpv = func(
+                bmat,
+                cnct=cnct,
+                starts=starts,
+                offsets=offsets,
+                verbose=batch_verbose,
+                **kwargs,
+            )
+            es.append(bes)
+            pv.append(bpv)
+        es = np.vstack(es)
         es = pd.DataFrame(es, index=obs, columns=sources)
     # Handle pvals and FDR correction
     if test:

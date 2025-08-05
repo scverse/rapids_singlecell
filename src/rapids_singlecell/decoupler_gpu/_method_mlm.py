@@ -3,9 +3,10 @@ from __future__ import annotations
 import cupy as cp
 import numpy as np
 
-from ._docs import docs
-from ._Method import Method, MethodMeta
-from ._pre import __stdtr
+from rapids_singlecell.decoupler_gpu._helper._data import __stdtr
+from rapids_singlecell.decoupler_gpu._helper._docs import docs
+from rapids_singlecell.decoupler_gpu._helper._log import _log
+from rapids_singlecell.decoupler_gpu._helper._Method import Method, MethodMeta
 
 
 def _fit(X: cp.ndarray, y: cp.ndarray, inv: cp.ndarray, df: float) -> cp.ndarray:
@@ -99,10 +100,13 @@ def _func_mlm(
     # Get dims
     n_features, n_fsets = adj.shape
     # Add intercept
-    adj = cp.column_stack((cp.ones((n_features,)), adj))
+    adj = cp.column_stack((cp.ones((n_features,), dtype=cp.float32), adj))
     # Compute inv and df for lm
     inv = cp.linalg.inv(cp.dot(adj.T, adj))
     df = n_features - n_fsets - 1
+
+    m = f"mlm - fitting {n_fsets} multivariate models of {n_features} observations with {df} degrees of freedom"
+    _log(m, level="info", verbose=verbose)
 
     # Compute tval
     coef, t = _fit(adj, mat.T, inv, df)
@@ -113,7 +117,7 @@ def _func_mlm(
         es = t
     else:
         es = coef
-    return es, pv
+    return es.get(), pv.get()
 
 
 _mlm = MethodMeta(

@@ -3,9 +3,10 @@ from __future__ import annotations
 import cupy as cp
 import numpy as np
 
-from ._docs import docs
-from ._Method import Method, MethodMeta
-from ._pre import __stdtr
+from rapids_singlecell.decoupler_gpu._helper._data import __stdtr
+from rapids_singlecell.decoupler_gpu._helper._docs import docs
+from rapids_singlecell.decoupler_gpu._helper._log import _log
+from rapids_singlecell.decoupler_gpu._helper._Method import Method, MethodMeta
 
 
 def _cov(A: cp.ndarray, b: cp.ndarray) -> cp.ndarray:
@@ -92,7 +93,8 @@ def _func_ulm(
     # Get degrees of freedom
     n_var, n_src = adj.shape
     df = n_var - 2
-
+    m = f"ulm - fitting {n_src} univariate models of {n_var} observations (targets) with {df} degrees of freedom"
+    _log(m, level="info", verbose=verbose)
     # Compute R value for all
     r = _cor(adj, mat.T)
     # Compute t-value
@@ -106,7 +108,7 @@ def _func_ulm(
         es = r * (
             cp.std(mat.T, ddof=1, axis=0).reshape(-1, 1) / cp.std(adj, ddof=1, axis=0)
         )
-    return es, pv
+    return es.get(), pv.get()
 
 
 _ulm = MethodMeta(

@@ -4,13 +4,10 @@ import math
 
 import cupy as cp
 import numpy as np
-from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
-from scipy.sparse import csr_matrix
 
-from rapids_singlecell.preprocessing._utils import _sparse_to_dense
-
-from ._docs import docs
-from ._Method import Method, MethodMeta
+from rapids_singlecell.decoupler_gpu._helper._docs import docs
+from rapids_singlecell.decoupler_gpu._helper._log import _log
+from rapids_singlecell.decoupler_gpu._helper._Method import Method, MethodMeta
 
 # Kernel definition
 reduce_sum_2D_kernel = cp.RawKernel(
@@ -50,7 +47,7 @@ reduce_sum_2D_kernel = cp.RawKernel(
 
 
 def _auc(
-    row, net, *, starts=None, offsets=None, n_up=None, n_fsets=None, max_aucs=None
+    row, cnct, *, starts=None, offsets=None, n_up=None, n_fsets=None, max_aucs=None
 ):
     # Rank row
     row = cp.argsort(cp.argsort(-row), axis=1) + 1
@@ -66,7 +63,7 @@ def _auc(
         # Extract feature set
         srt = starts[j]
         off = offsets[j] + srt
-        fset = net[srt:off]
+        fset = cnct[srt:off]
         # Compute AUC
         x = row[:, fset]
         x.sort(axis=1)
@@ -79,7 +76,7 @@ def _auc(
         # Update acts matrix
         es[:, j] = (es_inter / max_aucs[j]).astype(cp.float32)
         es_inter[:] = 0
-    return es.get()
+    return es
 
 
 def _validate_n_up(
@@ -102,11 +99,11 @@ def _validate_n_up(
 
 @docs.dedent
 def _func_aucell(
-    mat: np.ndarray | cp.ndarray | csr_matrix | cp_csr_matrix,
+    mat: cp.ndarray,
     *,
-    cnct: np.ndarray | cp.ndarray,
-    starts: np.ndarray | cp.ndarray,
-    offsets: np.ndarray | cp.ndarray,
+    cnct: cp.ndarray,
+    starts: cp.ndarray,
+    offsets: cp.ndarray,
     n_up: int | float | None = None,
     verbose: bool = False,
 ) -> tuple[cp.ndarray, None]:
@@ -147,17 +144,20 @@ def _func_aucell(
     nobs, nvar = mat.shape
     nsrc = starts.size
     n_up = _validate_n_up(nvar, n_up)
-    if isinstance(mat, csr_matrix):
-        mat = cp_csr_matrix(mat)
-        mat = _sparse_to_dense(mat)
-    elif isinstance(mat, cp_csr_matrix):
-        mat = _sparse_to_dense(mat)
-    elif isinstance(mat, cp.ndarray):
-        pass
-    else:
-        mat = cp.array(mat)
-    es = _auc(row=mat, cnct=cnct, starts=starts, offsets=offsets, n_up=n_up, nsrc=nsrc)
-    return es, None
+    m = f"aucell - calculating {nsrc} AUCs for {nvar} targets across {nobs} observations, categorizing features at rank={n_up}"
+    _log(m, level="info", verbose=verbose)
+    k = cp.minimum(offsets, n_up - 1)
+    max_aucs = (k * (k - 1) / 2 + (n_up - k) * k).astype(cp.int32)
+    es = _auc(
+        row=mat,
+        cnct=cnct,
+        starts=starts,
+        offsets=offsets,
+        n_up=n_up,
+        n_fsets=nsrc,
+        max_aucs=max_aucs,
+    )
+    return es.get(), None
 
 
 _aucell = MethodMeta(

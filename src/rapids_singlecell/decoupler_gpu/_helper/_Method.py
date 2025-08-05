@@ -4,15 +4,12 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
-# from decoupler._datatype import DataType
-from decoupler.mt._run import _run
+from rapids_singlecell.decoupler_gpu._helper._run import _run
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    import cupy as cp
-    from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
-    from scipy.sparse import csr_matrix
+    from rapids_singlecell.decoupler_gpu._helper._data import DataType
 
 
 class MethodMeta:
@@ -78,7 +75,7 @@ class Method(MethodMeta):
 
     def __call__(
         self,
-        data: cp.ndarray | csr_matrix | cp_csr_matrix,
+        data: DataType,
         net: pd.DataFrame,
         *,
         tmin: int | float = 5,
