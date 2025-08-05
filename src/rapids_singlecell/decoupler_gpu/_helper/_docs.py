@@ -4,11 +4,11 @@ from docrep import DocstringProcessor
 
 _features = """\
 features
-    Column names of ``mat``."""
+    Column names of `mat`."""
 
 _net = """\
 net
-    Dataframe in long format. Must include ``source`` and ``target`` columns, and optionally a ``weight`` column."""
+    Dataframe in long format. Must include `source` and `target` columns, and optionally a `weight` column."""
 
 _tmin = """\
 tmin
@@ -29,11 +29,11 @@ data
 
 _layer = """\
 layer
-    Layer key name of an ``anndata.AnnData`` instance."""
+    Layer key name of an `anndata.AnnData` instance."""
 
 _raw = """\
 raw
-    Whether to use the ``.raw`` attribute of ``anndata.AnnData``."""
+    Whether to use the `.raw` attribute of `anndata.AnnData`."""
 
 _empty = """\
 empty
@@ -65,7 +65,7 @@ min_counts
 
 _key = """\
 key
-    ``adata.obsm`` key to use."""
+    `adata.obsm` key to use."""
 
 _yestest = """\
 Finally, the obtained :math:`p_{value}` are adjusted by Benjamini-Hochberg correction."""
@@ -86,7 +86,7 @@ Enrichment scores :math:`ES` and, if applicable, adjusted :math:`p_{value}` by B
 
 _tval = """\
 tval
-    Whether to return the t-value (``tval=True``) the coefficient of the fitted model (``tval=False``)."""
+    Whether to return the t-value (`tval=True`) the coefficient of the fitted model (`tval=False`)."""
 
 _params = f"""\
 Parameters
