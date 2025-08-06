@@ -207,10 +207,9 @@ def _extract(data: DataType, *, raw=None, layer=None, pre_load=False):
         pre_load = False
     if pre_load:
         if issparse(m):
-            m = cp_csr_matrix(m)
-
-    if isinstance(m, np.ndarray):
-        m = cp.array(m)
+            m = cp_csr_matrix(m, dtype=cp.float32)
+        elif isinstance(m, np.ndarray):
+            m = cp.array(m, dtype=cp.float32)
 
     if isinstance(r, cp.ndarray):
         r = cp.asnumpy(r)
