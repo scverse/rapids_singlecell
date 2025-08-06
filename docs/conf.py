@@ -113,7 +113,7 @@ intersphinx_mapping = {
     "scanpy": ("https://scanpy.readthedocs.io/en/stable/", None),
     "squidpy": ("https://squidpy.readthedocs.io/en/stable/", None),
     "seaborn": ("https://seaborn.pydata.org/", None),
-    "decoupler": ("https://decoupler-py.readthedocs.io/en/latest/", None),
+    "decoupler": ("https://decoupler.readthedocs.io/en/latest/", None),
     "rmm": ("https://docs.rapids.ai/api/rmm/stable/", None),
     "statsmodels": ("https://www.statsmodels.org/stable/", None),
     "omnipath": ("https://omnipath.readthedocs.io/en/latest/", None),

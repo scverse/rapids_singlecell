@@ -54,13 +54,13 @@ sc.pl.tsne(adata, color="leiden")
 
 ### Decoupler-GPU
 
-`dcg` offers accelerated drop in replacements for {func}`~rapids_singlecell.dcg.run_mlm` and {func}`~rapids_singlecell.dcg.run_wsum`
+`dcg` offers accelerated drop in replacements for {func}`~rapids_singlecell.dcg.mlm`, {func}`~rapids_singlecell.dcg.ulm` and {func}`~rapids_singlecell.dcg.aucell`
 
 Example:
 ```
 import decoupler as dc
-model = dc.get_progeny(organism='human', top=100)
-rsc.dcg.run_mlm(mat=adata, net=net, source='source', target='target', weight='weight', verbose=True)
-acts_mlm = dc.get_acts(adata, obsm_key='mlm_estimate')
-sc.pl.umap(acts_mlm, color=['KLF5',"FOXA1", 'CellType'], cmap='coolwarm', vcenter=0)
+model = dc.op.resource("PanglaoDB", organism="human")
+rsc.dcg.ulm(adata, model , tmin=3)
+acts_mlm = dc.pp.get_obsm(adata, key="score_ulm")
+sc.pl.umap(acts_mlm, color=['NK cells'], cmap='coolwarm', vcenter=0)
 ```

@@ -23,6 +23,7 @@ dependencies = [
     "tqdm",
     "statsmodels>=0.12.0",
     "scikit-image",
+    "docrep",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +45,7 @@ test = [
     "profimp",
     "scanpy>=1.10.0",
     "bbknn",
+    "decoupler",
 ]
 
 [project.urls]
