@@ -196,7 +196,7 @@ def _scatter_add_cp_bias_csr(
     n_pcs = X.shape[1]
 
     threads_per_block = 1024
-    if n_cells < 100_000:
+    if n_cells < 300_000:
         blocks = int((n_pcs + 1) / 2)
         scatter_kernel0 = _get_scatter_add_kernel_with_bias_cat0(X.dtype)
         scatter_kernel0(
