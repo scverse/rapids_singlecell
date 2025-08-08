@@ -58,6 +58,71 @@ _get_mean_var_minor_kernel = r"""
         }
     """
 
+_get_mean_var_minor_fast_kernel = r"""
+(const long long nnz,
+const int* __restrict__ indices,
+const {0}* __restrict__ data,
+double* __restrict__ g_sum,
+double* __restrict__ g_sumsq)
+{
+    extern __shared__ unsigned shmem[];
+    unsigned HASH_SIZE = 1024;
+    // layout in shared:
+    // keys[HASH_SIZE] (uint32, 0xFFFFFFFF = empty)
+    // sum[HASH_SIZE]  (double)
+    // sq[HASH_SIZE]   (double)
+    unsigned* keys = shmem;
+    double*   sum  = (double*)(keys + HASH_SIZE);
+    double*   sq   = (double*)(sum + HASH_SIZE);
+
+    // init table
+    for (int i = threadIdx.x; i < HASH_SIZE; i += blockDim.x) {
+        keys[i] = 0xFFFFFFFFu;
+        sum[i]  = 0.0;
+        sq[i]   = 0.0;
+    }
+    __syncthreads();
+
+    const size_t stride = (size_t)gridDim.x * blockDim.x;
+    for (size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+         i < nnz; i += stride)
+    {
+        unsigned col = (unsigned)__ldg(indices + i);
+        double dv = (double)__ldg(data + i);
+        double d2 = dv * dv;
+
+        unsigned h = (col * 2654435761u) & (HASH_SIZE - 1);
+        bool done = false;
+
+        #pragma unroll 8
+        for (int probe = 0; probe < 8; ++probe) {
+            unsigned pos = (h + probe) & (HASH_SIZE - 1);
+            unsigned key = atomicCAS(&keys[pos], 0xFFFFFFFFu, col);
+            if (key == 0xFFFFFFFFu || key == col) {
+                atomicAdd(&sum[pos], dv);
+                atomicAdd(&sq[pos],  d2);
+                done = true;
+                break;
+            }
+        }
+        if (!done) {
+            atomicAdd(&g_sum[col],   dv);
+            atomicAdd(&g_sumsq[col], d2);
+        }
+    }
+    __syncthreads();
+
+    // flush
+    for (int i = threadIdx.x; i < HASH_SIZE; i += blockDim.x) {
+        unsigned key = keys[i];
+        if (key != 0xFFFFFFFFu) {
+            atomicAdd(&g_sum[key],   sum[i]);
+            atomicAdd(&g_sumsq[key], sq[i]);
+        }
+    }
+}
+"""
+
 
 sq_sum = cp.ReductionKernel(
     "T x",  # input params
@@ -89,4 +154,10 @@ def _get_mean_var_major(dtype):
 def _get_mean_var_minor(dtype):
     return cuda_kernel_factory(
         _get_mean_var_minor_kernel, (dtype,), "_get_mean_var_minor_kernel"
+    )
+
+
+def _get_mean_var_minor_fast(dtype):
+    return cuda_kernel_factory(
+        _get_mean_var_minor_fast_kernel, (dtype,), "_get_mean_var_minor_fast_kernel"
     )
