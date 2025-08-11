@@ -20,8 +20,6 @@ from .kernels._co_oc import (
 
 if TYPE_CHECKING:
     from anndata import AnnData
-    from cupy import NDArray as NDArrayC
-    from numpy import NDArray as NDArrayA
 
 
 def co_occurrence(
@@ -29,9 +27,9 @@ def co_occurrence(
     cluster_key: str,
     *,
     spatial_key: str = "spatial",
-    interval: int | NDArrayA | NDArrayC = 50,
+    interval: int | np.ndarray | cp.ndarray = 50,
     copy: bool = False,
-) -> tuple[NDArrayA, NDArrayA] | None:
+) -> tuple[np.ndarray, np.ndarray] | None:
     """
     Compute co-occurrence probability of clusters.
 
@@ -85,7 +83,7 @@ def co_occurrence(
     adata.uns[f"{cluster_key}_co_occurrence"] = {"occ": out, "interval": interval}
 
 
-def _find_min_max(spatial: NDArrayC) -> tuple[float, float]:
+def _find_min_max(spatial: cp.ndarray) -> tuple[float, float]:
     coord_sum = cp.sum(spatial, axis=1)
     min_idx, min_idx2 = cp.argpartition(coord_sum, 2)[:2]
     max_idx = cp.argmax(coord_sum)
@@ -101,29 +99,9 @@ def _find_min_max(spatial: NDArrayC) -> tuple[float, float]:
     return thres_min.astype(np.float32), thres_max.astype(np.float32)
 
 
-def calculate_optimal_k(target_occupancy=0.4):
-    props = cp.cuda.runtime.getDeviceProperties(0)
-
-    # Get key SM properties
-    shared_mem_per_sm = props["sharedMemPerMultiprocessor"]  # bytes
-    max_warps_per_sm = props["maxThreadsPerMultiProcessor"] // 32
-    block_size = 128  # Your current block size
-    warps_per_block = block_size // 32  # 4 warps per block
-
-    # Target blocks per SM based on desired occupancy
-    target_blocks = int(max_warps_per_sm * target_occupancy) // warps_per_block
-
-    # Maximum shared memory per block to achieve target occupancy
-    max_shared_per_block = shared_mem_per_sm // target_blocks
-
-    # Calculate max k value
-    max_k = max_shared_per_block // (block_size * cp.dtype("float32").itemsize)
-    return max_k
-
-
 def _co_occurrence_helper(
-    spatial: NDArrayC, v_radium: NDArrayC, labs: NDArrayC, fast: bool = True
-) -> NDArrayC:
+    spatial: cp.ndarray, v_radium: cp.ndarray, labs: cp.ndarray, fast: bool = True
+) -> cp.ndarray:
     """
     Fast co-occurrence probability computation using cuda kernels.
 
