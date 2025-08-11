@@ -6,10 +6,14 @@ import cupy as cp
 import numpy as np
 from cuml.metrics import pairwise_distances
 
+from rapids_singlecell.preprocessing._harmony._helper import (
+    _create_category_index_mapping,
+)
+
 from ._utils import _assert_categorical_obs, _assert_spatial_basis
 from .kernels._co_oc import (
+    occur_count_kernel_csr_catpairs,
     occur_count_kernel_pairwise,
-    occur_count_kernel_pairwise_fast,
     occur_reduction_kernel_global,
     occur_reduction_kernel_shared,
 )
@@ -27,6 +31,7 @@ def co_occurrence(
     spatial_key: str = "spatial",
     interval: int | NDArrayA | NDArrayC = 50,
     copy: bool = False,
+    fast: bool = True,
 ) -> tuple[NDArrayA, NDArrayA] | None:
     """
     Compute co-occurrence probability of clusters.
@@ -59,7 +64,6 @@ def co_occurrence(
 
     _assert_categorical_obs(adata, key=cluster_key)
     _assert_spatial_basis(adata, key=spatial_key)
-
     spatial = cp.array(adata.obsm[spatial_key]).astype(np.float32)
     original_clust = adata.obs[cluster_key]
     clust_map = {v: i for i, v in enumerate(original_clust.cat.categories.values)}
@@ -74,8 +78,7 @@ def co_occurrence(
         raise ValueError(
             f"Expected interval to be of length `>= 2`, found `{len(interval)}`."
         )
-
-    out = _co_occurrence_helper(spatial, interval, labs)
+    out = _co_occurrence_helper(spatial, interval, labs, fast)
     out, interval = out.get(), interval.get()
     if copy:
         return out, interval
@@ -141,26 +144,60 @@ def _co_occurrence_helper(
 
     """
     n = spatial.shape[0]
-    labs_unique = cp.unique(labs)
-    k = len(labs_unique)
+    # labels are dense [0, k)
+    k = int(cp.asnumpy(labs.max())) + 1
     l_val = len(v_radium) - 1
     thresholds = (v_radium[1:]) ** 2
     use_fast_kernel = False  # Flag to track which kernel path was taken
     if fast:
-        # Optimize occupancy vs speed
-        can_use_fast_kernel = calculate_optimal_k(0.4) > k
-        # If shared memory is sufficient, use the fast kernel
-        if can_use_fast_kernel:
-            shared_mem_size_fast = (k * 128) * cp.dtype("float32").itemsize
-            counts = cp.zeros((l_val, k, k), dtype=cp.int32)
-            grid = (n, l_val)
-            block = (128, 1)
-            occur_count_kernel_pairwise_fast(
+        # New CSR-based per-category-pair kernel using per-warp shared histograms (size l_val)
+        # 1 block per (cat_a, cat_b) with a<=b
+        # Prepare category CSR structures
+        cat_offsets, cell_indices = _create_category_index_mapping(labs, k)
+        # Build pair list (upper triangle including diagonal)
+        pair_left = []
+        pair_right = []
+        for a in range(k):
+            for b in range(a, k):
+                pair_left.append(a)
+                pair_right.append(b)
+        pair_left = cp.asarray(pair_left, dtype=cp.int32)
+        pair_right = cp.asarray(pair_right, dtype=cp.int32)
+        # Choose the largest block size that fits shared memory
+        props = cp.cuda.runtime.getDeviceProperties(0)
+        max_smem = int(props.get("sharedMemPerBlock", 48 * 1024))
+
+        chosen_threads = None
+        for tpb in (1024, 512, 256, 128, 64, 32):
+            warps = tpb // 32
+            l_pad = ((l_val + 31) // 32) * 32
+            required = warps * l_pad * cp.dtype(cp.int32).itemsize
+            if required <= max_smem:
+                chosen_threads = tpb
+                shared_mem_size_fast = required
+                break
+
+        if chosen_threads is not None:
+            counts = cp.zeros((k, k, l_val), dtype=cp.int32)
+            grid = (pair_left.size,)
+            block = (chosen_threads,)
+            occur_count_kernel_csr_catpairs(
                 grid,
                 block,
-                (spatial, thresholds, labs, counts, n, k, l_val),
+                (
+                    spatial,
+                    thresholds,
+                    cat_offsets,
+                    cell_indices,
+                    pair_left,
+                    pair_right,
+                    counts,
+                    k,
+                    l_val,
+                ),
                 shared_mem=shared_mem_size_fast,
             )
+            # CSR kernel now writes counts in (k, k, l_val) layout
             reader = 1
             use_fast_kernel = True
 
