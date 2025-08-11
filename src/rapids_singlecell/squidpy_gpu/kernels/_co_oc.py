@@ -58,60 +58,6 @@ occur_count_kernel_pairwise = cp.RawKernel(
     kernel_code_pairwise, "occur_count_kernel_pairwise"
 )
 
-kernel_code_pairwise_fast = r"""
-extern "C" __global__
-void occur_count_kernel_pairwise_fast(const float* __restrict__ spatial,
-                            const float* __restrict__ thresholds,
-                            const int* __restrict__ label_idx,
-                            int* __restrict__ result,
-                            int n,
-                            int k,
-                            int l_val)
-{
-    extern __shared__ float shared[];
-    float* Y = shared;
-    int i = blockIdx.x;
-    int r = blockIdx.y;
-    for (int j = threadIdx.x; j < k * blockDim.x ; j+= blockDim.x){
-        Y[j] = 0;
-    }
-    __syncthreads();
-
-    float spx = spatial[i * 2];
-    int low = label_idx[i];
-    float spy = spatial[i * 2 + 1];
-    for(int j = i+1+ threadIdx.x; j< n; j+= blockDim.x){
-        float dx = spx - spatial[j * 2];
-        float dy = spy - spatial[j * 2 + 1];
-        float dist_sq = dx * dx + dy * dy;
-        int high = label_idx[j];
-        if (dist_sq <= thresholds[r]) {
-            int index = k * threadIdx.x + high;
-            Y[index] += 1;
-        }
-    }
-    __syncthreads();
-
-    for (int j = threadIdx.x; j < k; j+= blockDim.x){
-        float sum = 0;
-        for (int t = 0; t < blockDim.x; t++){
-            int index = k * t + j;
-            sum += Y[index];
-        }
-        if (low < j){
-            if (sum>0) atomicAdd(&result[r*(k*k)+low*k+j], sum);
-        }
-        else{
-            if (sum>0) atomicAdd(&result[r*(k*k)+j*k+low], sum);
-        }
-    }
-    __syncthreads();
-}
-"""
-occur_count_kernel_pairwise_fast = cp.RawKernel(
-    kernel_code_pairwise_fast, "occur_count_kernel_pairwise_fast"
-)
-
 
 occur_reduction_kernel_code_shared = r"""
 extern "C" __global__
@@ -151,8 +97,9 @@ void occur_reduction_kernel_shared(const int* __restrict__ result,
     else{
         for (int i = threadIdx.x; i < k; i += blockDim.x){
             for (int j = 0; j<k;j++){
-                Y[i * k + j] += float(result[r_th * (k * k) + i * k + j]);
-                Y[j * k + i] += float(result[r_th * (k * k) + i * k + j]);
+                float v = float(result[i * (k * l_val) + j * l_val + r_th]);
+                Y[i * k + j] += v;
+                Y[j * k + i] += v;
             }
         }
     }
@@ -264,8 +211,9 @@ void occur_reduction_kernel_global(const int* __restrict__ result,
     else{
         for (int i = threadIdx.x; i < k; i += blockDim.x){
             for (int j = 0; j<k;j++){
-                Y[i * k + j] += float(result[r_th * (k * k) + i * k + j]);
-                Y[j * k + i] += float(result[r_th * (k * k) + i * k + j]);
+                float v = float(result[i * (k * l_val) + j * l_val + r_th]);
+                Y[i * k + j] += v;
+                Y[j * k + i] += v;
             }
         }
     }
@@ -341,4 +289,121 @@ void occur_reduction_kernel_global(const int* __restrict__ result,
 """
 occur_reduction_kernel_global = cp.RawKernel(
     occur_reduction_kernel_code_global, "occur_reduction_kernel_global"
+)
+
+
+kernel_code_csr_catpairs = r"""
+extern "C" __global__
+void occur_count_kernel_csr_catpairs(
+    const float* __restrict__ spatial,
+    const float* __restrict__ thresholds,
+    const int* __restrict__ cat_offsets,
+    const int* __restrict__ cell_indices,
+    const int* __restrict__ pair_left,
+    const int* __restrict__ pair_right,
+    int* __restrict__ counts_delta,
+    int k,
+    int l_val)
+{
+    // Shared memory layout: per-warp histograms of length l_pad
+    const int l_pad = ((l_val + 31) / 32) * 32;
+    extern __shared__ int shared_hist[]; // size: warps_per_block * l_pad
+    const int lane = threadIdx.x & 31;
+    const int warp_id = threadIdx.x >> 5; // /32
+    const int warps_per_block = blockDim.x >> 5;
+    int* warp_hist = shared_hist + warp_id * l_pad;
+
+    // Zero per-warp histograms (only the first l_val bins)
+    for (int r = lane; r < l_pad; r += 32) {
+        warp_hist[r] = 0;
+    }
+    __syncthreads();
+
+    const int a = pair_left[blockIdx.x];
+    const int b = pair_right[blockIdx.x];
+
+    const int start_a = cat_offsets[a];
+    const int end_a   = cat_offsets[a + 1];
+    const int start_b = cat_offsets[b];
+    const int end_b   = cat_offsets[b + 1];
+
+    if (a == b) {
+        // Same-category: enumerate i<j within [start_a, end_a)
+        for (int ia = start_a + threadIdx.x; ia < end_a; ia += blockDim.x) {
+            const int idx_i = cell_indices[ia];
+            const float xi = spatial[idx_i * 2];
+            const float yi = spatial[idx_i * 2 + 1];
+            for (int jb = ia + 1; jb < end_a; ++jb) {
+                const int idx_j = cell_indices[jb];
+                const float dx = xi - spatial[idx_j * 2];
+                const float dy = yi - spatial[idx_j * 2 + 1];
+                const float dist_sq = dx * dx + dy * dy;
+                // lower_bound on thresholds
+                int lo = 0; int hi = l_val;
+                while (lo < hi) {
+                    int mid = (lo + hi) >> 1;
+                    if (dist_sq <= thresholds[mid]) { hi = mid; }
+                    else { lo = mid + 1; }
+                }
+                if (lo < l_val) {
+                    atomicAdd(&warp_hist[lo], 1);
+                }
+            }
+        }
+    } else {
+        // Cross-category: enumerate full cartesian product
+        for (int ia = start_a + threadIdx.x; ia < end_a; ia += blockDim.x) {
+            const int idx_i = cell_indices[ia];
+            const float xi = spatial[idx_i * 2];
+            const float yi = spatial[idx_i * 2 + 1];
+            for (int jb = start_b; jb < end_b; ++jb) {
+                const int idx_j = cell_indices[jb];
+                const float dx = xi - spatial[idx_j * 2];
+                const float dy = yi - spatial[idx_j * 2 + 1];
+                const float dist_sq = dx * dx + dy * dy;
+                // lower_bound on thresholds
+                int lo = 0; int hi = l_val;
+                while (lo < hi) {
+                    int mid = (lo + hi) >> 1;
+                    if (dist_sq <= thresholds[mid]) { hi = mid; }
+                    else { lo = mid + 1; }
+                }
+                if (lo < l_val) {
+                    atomicAdd(&warp_hist[lo], 1);
+                }
+            }
+        }
+    }
+    __syncthreads();
+
+    // Reduce warp histograms into block result and write cumulative to global counts
+    if (warp_id == 0) {
+        // First, sum each bin across warps into warp0's histogram
+        for (int r = lane; r < l_pad; r += 32) {
+            int sum = 0;
+            for (int w = 0; w < warps_per_block; ++w) {
+                sum += shared_hist[w * l_pad + r];
+            }
+            shared_hist[r] = sum; // warp0 region reused as accumulator
+        }
+        __syncwarp();
+        // Inclusive scan (cumulative) along thresholds in warp0 region
+        // Do a simple sequential scan by a single thread to avoid warp divergence
+        if (threadIdx.x == 0) {
+            int acc = 0;
+            for (int r = 0; r < l_val; ++r) {
+                acc += shared_hist[r];
+                shared_hist[r] = acc;
+            }
+        }
+        __syncthreads();
+        // Write cumulative counts to global (k, k, l_val) layout
+        for (int r = lane; r < l_val; r += 32) {
+            counts_delta[a * (k * l_val) + b * l_val + r] = shared_hist[r];
+        }
+    }
+}
+"""
+occur_count_kernel_csr_catpairs = cp.RawKernel(
+    kernel_code_csr_catpairs, "occur_count_kernel_csr_catpairs"
 )

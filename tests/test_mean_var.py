@@ -20,6 +20,7 @@ def test_mean_var(data_kind, axis, dtype):
         adata = pbmc3k()
         if data_kind == "csc":
             adata.X = adata.X.tocsc()
+
     adata.X = adata.X.astype(dtype)
     cudata = rsc.get.anndata_to_GPU(adata, copy=True)
 
