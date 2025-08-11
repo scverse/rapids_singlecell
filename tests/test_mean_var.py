@@ -16,14 +16,12 @@ from rapids_singlecell.preprocessing._utils import _get_mean_var as rsc_get_mean
 def test_mean_var(data_kind, axis, dtype):
     if data_kind == "dense":
         adata = pbmc68k_reduced()
-        adata.X = adata.X.astype(dtype)
-        cudata = rsc.get.anndata_to_GPU(adata, copy=True)
     else:
         adata = pbmc3k()
         if data_kind == "csc":
             adata.X = adata.X.tocsc()
-        adata.X = adata.X.astype(dtype)
-        cudata = rsc.get.anndata_to_GPU(adata, copy=True)
+    adata.X = adata.X.astype(dtype)
+    cudata = rsc.get.anndata_to_GPU(adata, copy=True)
 
     mean, var = sc_get_mean_var(adata.X, axis=axis, correction=1)
     rsc_mean, rsc_var = rsc_get_mean_var(cudata.X, axis=axis)
