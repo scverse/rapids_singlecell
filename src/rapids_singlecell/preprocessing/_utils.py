@@ -84,16 +84,23 @@ def _mean_var_major(X, major, minor):
 
 
 def _mean_var_minor(X, major, minor):
-    from ._kernels._mean_var_kernel import _get_mean_var_minor
+    from ._kernels._mean_var_kernel import _get_mean_var_minor_fast
 
     mean = cp.zeros(minor, dtype=cp.float64)
     var = cp.zeros(minor, dtype=cp.float64)
-    block = (32,)
-    grid = (int(math.ceil(X.nnz / block[0])),)
-    get_mean_var_minor = _get_mean_var_minor(X.data.dtype)
-    get_mean_var_minor(grid, block, (X.indices, X.data, mean, var, major, X.nnz))
+    block = 256
+    sm = cp.cuda.runtime.getDeviceProperties(cp.cuda.Device().id)["multiProcessorCount"]
+    grid = (min(max((X.nnz + block - 1) // block, sm * 4), 65535),)
+    shmem_bytes = 1024 * 4 + 1024 * 8 * 2  # keys + two double arrays
 
-    var = (var - mean**2) * (major / (major - 1))
+    get_mean_var_minor = _get_mean_var_minor_fast(X.data.dtype)
+    get_mean_var_minor(
+        grid, (block,), (X.nnz, X.indices, X.data, mean, var), shared_mem=shmem_bytes
+    )
+    mean /= major
+    var /= major
+    var -= mean**2
+    var *= major / (major - 1)
     return mean, var
 
 

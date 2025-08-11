@@ -46,6 +46,7 @@ test = [
     "scanpy>=1.10.0",
     "bbknn",
     "decoupler",
+    "fast-array-utils",
 ]
 
 [project.urls]
