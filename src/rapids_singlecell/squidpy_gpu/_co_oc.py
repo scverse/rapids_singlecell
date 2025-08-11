@@ -31,7 +31,6 @@ def co_occurrence(
     spatial_key: str = "spatial",
     interval: int | NDArrayA | NDArrayC = 50,
     copy: bool = False,
-    fast: bool = True,
 ) -> tuple[NDArrayA, NDArrayA] | None:
     """
     Compute co-occurrence probability of clusters.
@@ -78,7 +77,7 @@ def co_occurrence(
         raise ValueError(
             f"Expected interval to be of length `>= 2`, found `{len(interval)}`."
         )
-    out = _co_occurrence_helper(spatial, interval, labs, fast)
+    out = _co_occurrence_helper(spatial, interval, labs, fast=True)
     out, interval = out.get(), interval.get()
     if copy:
         return out, interval
