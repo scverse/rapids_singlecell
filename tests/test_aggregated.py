@@ -13,7 +13,7 @@ from scanpy.datasets import pbmc3k_processed
 from scipy.sparse import csr_matrix
 
 import rapids_singlecell as rsc
-from rapids_singlecell._testing import ARRAY_TYPES_MEM
+from testing.rapids_singlecell._helper import ARRAY_TYPES_MEM
 
 
 @pytest.fixture

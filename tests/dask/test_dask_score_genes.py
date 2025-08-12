@@ -5,7 +5,7 @@ import pytest
 from scanpy.datasets import pbmc3k, pbmc68k_reduced
 
 import rapids_singlecell as rsc
-from rapids_singlecell._testing import (
+from testing.rapids_singlecell._helper import (
     as_dense_cupy_dask_array,
     as_sparse_cupy_dask_array,
 )

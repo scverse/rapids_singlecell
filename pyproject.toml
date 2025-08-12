@@ -40,13 +40,17 @@ doc = [
     "dask",
     "pytest",
 ]
-test = [
+test-minimal = [
     "pytest",
     "profimp",
     "scanpy>=1.10.0",
     "bbknn",
     "decoupler",
     "fast-array-utils",
+]
+test = [
+    "rapids_singlecell[test-minimal]",
+    "igraph",
 ]
 
 [project.urls]
@@ -88,8 +92,6 @@ lint.ignore = [
 "docs/*" = [ "I" ]
 "tests/*" = [ "D" ]
 "*/__init__.py" = [ "F401" ]
-"src/rapids_singlecell/decoupler_gpu/_method_mlm.py" = [ "PLR0917" ]
-"src/rapids_singlecell/decoupler_gpu/_method_wsum.py" = [ "PLR0917" ]
 [tool.ruff.lint.isort]
 known-first-party = [ "rapids_singlecell" ]
 required-imports = [ "from __future__ import annotations" ]
@@ -106,7 +108,6 @@ markers = [
 [tool.hatch.build]
 # exclude big files that don’t need to be installed
 exclude = [
-    "src/rapids_singlecell/_testing.py",
     "tests",
     "docs",
     "notebooks",
@@ -118,7 +119,7 @@ version-file = "src/rapids_singlecell/_version.py"
 source = "vcs"
 
 [tool.hatch.build.targets.wheel]
-packages = [ 'src/rapids_singlecell' ]
+packages = [ 'src/rapids_singlecell', 'src/testing' ]
 
 [tool.codespell]
 skip = '*.ipynb,*.csv'

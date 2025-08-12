@@ -49,7 +49,7 @@ jobs:
 
       - name: Install rapids-singlecell
         run: >-
-          pip install -e .[test]
+          pip install -e .[test-minimal]
           "scanpy @ git+https://github.com/scverse/scanpy.git"
           "anndata @ git+https://github.com/scverse/anndata.git"
 
