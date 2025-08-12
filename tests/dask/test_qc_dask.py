@@ -7,7 +7,7 @@ from cupyx.scipy import sparse as cusparse
 from scanpy.datasets import pbmc3k
 
 import rapids_singlecell as rsc
-from rapids_singlecell._testing import (
+from testing.rapids_singlecell._helper import (
     as_dense_cupy_dask_array,
     as_sparse_cupy_dask_array,
 )

@@ -7,6 +7,7 @@ import scanpy as sc
 from scanpy.datasets import pbmc68k_reduced
 
 from rapids_singlecell.tools import tsne, umap
+from testing.rapids_singlecell._pytest import needs
 
 
 def test_umap():
@@ -22,7 +23,7 @@ def test_tsne():
     assert pbmc.obsm["X_tsne"].shape == (700, 2)
 
 
-@pytest.mark.needs.igraph
+@needs.igraph
 def test_umap_init_paga():
     pbmc = pbmc68k_reduced()[:100, :].copy()
     sc.tl.paga(pbmc)
