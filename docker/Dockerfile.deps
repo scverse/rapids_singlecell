@@ -1,4 +1,4 @@
-ARG CUDA_VER=12.8.0
+ARG CUDA_VER=12.9.0
 ARG LINUX_VER=ubuntu24.04
 
 FROM nvidia/cuda:${CUDA_VER}-base-${LINUX_VER}
@@ -10,7 +10,7 @@ ARG PYTHON_VER=3.13
 ENV PATH=/opt/conda/bin:$PATH
 ENV PYTHON_VERSION=${PYTHON_VER}
 
-COPY --from=condaforge/miniforge3:24.9.2-0 /opt/conda /opt/conda
+COPY --from=condaforge/miniforge3:25.3.1-0 /opt/conda /opt/conda
 
 COPY rsc_rapids.yml rsc_rapids.yml
 

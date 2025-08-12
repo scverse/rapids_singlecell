@@ -2,9 +2,9 @@
 ## Conda
 The easiest way to install *rapids-singlecell* is to use one of the *yaml* file provided in the [conda](https://github.com/scverse/rapids_singlecell/tree/main/conda) folder. These *yaml* files install everything needed to run the example notebooks and get you started.
 ```
-conda env create -f conda/rsc_rapids_25.04.yml #default CUDA-12.8 PYTHON-3.12
+conda env create -f conda/rsc_rapids_25.06.yml #default CUDA-12.9 PYTHON-3.13
 # or
-mamba env create -f conda/rsc_rapids_25.06.yml #default CUDA-12.8 PYTHON-3.13
+mamba env create -f conda/rsc_rapids_25.08.yml #default CUDA-12.9 PYTHON-3.13
 ```
 ```{note}
 RAPIDS currently doesn't support `channel_priority: strict`; use `channel_priority: flexible` instead
