@@ -204,16 +204,17 @@ def umap(
     else:
         pre_knn = neighbors["connectivities"]
 
-        if isinstance(init_pos, str) and init_pos in adata.obsm:
-            init_coords = adata.obsm[init_pos]
-        elif isinstance(init_pos, str) and init_pos == "paga":
-            init_coords = get_init_pos_from_paga(
-                adata, random_state=random_state, neighbors_key=neighbors_key
-            )
-        elif isinstance(init_pos, str) and init_pos == "auto":
-            init_coords = "spectral" if n_obs < 1000000 else "random"
-        else:
-            init_coords = init_pos
+        match init_pos:
+            case str() if init_pos in adata.obsm:
+                init_coords = adata.obsm[init_pos]
+            case "paga":
+                init_coords = get_init_pos_from_paga(
+                    adata, random_state=random_state, neighbors_key=neighbors_key
+                )
+            case "auto":
+                init_coords = "spectral" if n_obs < 1000000 else "random"
+            case _:
+                init_coords = init_pos
 
         if hasattr(init_coords, "dtype"):
             init_coords = check_array_cuml(
