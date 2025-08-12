@@ -7,13 +7,13 @@ import cupyx.scipy.sparse as csps
 import numpy as np
 import pandas as pd
 import scipy.sparse as sps
-import scipy.stats as sts
 from anndata import AnnData
 from tqdm.auto import tqdm
 
 from rapids_singlecell.decoupler_gpu._helper._data import extract
 from rapids_singlecell.decoupler_gpu._helper._log import _log
 from rapids_singlecell.decoupler_gpu._helper._net import adjmat, idxmat, prune
+from rapids_singlecell.decoupler_gpu._helper._pv import fdr_bh_axis1
 from rapids_singlecell.preprocessing._utils import _sparse_to_dense
 
 if TYPE_CHECKING:
@@ -69,6 +69,21 @@ def _get_batch(mat, srt, end):
     return bmat.astype(cp.float32)
 
 
+def _mat_to_array(mat):
+    if sps.issparse(mat):
+        mat = csps.csr_matrix(mat)
+        mat = _sparse_to_dense(mat)
+    elif csps.issparse(mat):
+        mat = _sparse_to_dense(mat)
+    elif isinstance(mat, np.ndarray):
+        mat = cp.array(mat)
+    elif isinstance(mat, cp.ndarray):
+        mat = mat
+    else:
+        raise ValueError(f"Unsupported matrix type: {type(mat)}")
+    return mat.astype(cp.float32)
+
+
 def _run(
     name: str,
     func: Callable,
@@ -122,6 +137,7 @@ def _run(
             es = np.vstack(es)
             es = pd.DataFrame(es, index=obs, columns=sources)
         else:
+            mat = _mat_to_array(mat)
             es, pv = func(mat, adjm, verbose=verbose, **kwargs)
             es = pd.DataFrame(es, index=obs, columns=sources)
     else:
@@ -156,7 +172,7 @@ def _run(
         pv = pd.DataFrame(pv, index=obs, columns=sources)
         if name != "mlm":
             _log(f"{name} - adjusting p-values by FDR", level="info", verbose=verbose)
-            pv.loc[:, :] = sts.false_discovery_control(pv.values, axis=1, method="bh")
+            pv.loc[:, :] = fdr_bh_axis1(pv.values)
     else:
         pv = None
     _log(f"{name} - done", level="info", verbose=verbose)
