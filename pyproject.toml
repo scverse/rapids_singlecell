@@ -47,6 +47,9 @@ test = [
     "bbknn",
     "decoupler",
     "fast-array-utils",
+]
+test_cloud = [
+    "rapids_singlecell[test]",
     "igraph",
 ]
 

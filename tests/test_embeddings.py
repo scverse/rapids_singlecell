@@ -22,6 +22,7 @@ def test_tsne():
     assert pbmc.obsm["X_tsne"].shape == (700, 2)
 
 
+@pytest.mark.needs.igraph
 def test_umap_init_paga():
     pbmc = pbmc68k_reduced()[:100, :].copy()
     sc.tl.paga(pbmc)
