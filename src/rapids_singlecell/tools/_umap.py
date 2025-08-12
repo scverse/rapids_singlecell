@@ -5,12 +5,15 @@ from typing import TYPE_CHECKING, Literal
 import cuml
 import cuml.internals.logger as logger
 import cupy as cp
+import numpy as np
 from cuml.manifold.simpl_set import simplicial_set_embedding
 from cuml.manifold.umap import UMAP
 from cuml.manifold.umap_utils import find_ab_params
+from cuml.thirdparty_adapters import check_array as check_array_cuml
 from cupyx.scipy import sparse
 from packaging.version import parse as parse_version
 from scanpy._utils import NeighborsView
+from scanpy.tools._utils import get_init_pos_from_paga
 from sklearn.utils import check_random_state
 
 from rapids_singlecell._utils import _get_logger_level
@@ -20,7 +23,7 @@ from ._utils import _choose_representation
 if TYPE_CHECKING:
     from anndata import AnnData
 
-_InitPos = Literal["auto", "spectral", "random"]
+_InitPos = Literal["auto", "spectral", "random", "paga"]
 
 
 def umap(
@@ -32,7 +35,7 @@ def umap(
     maxiter: int | None = None,
     alpha: float = 1.0,
     negative_sample_rate: int = 5,
-    init_pos: _InitPos = "auto",
+    init_pos: _InitPos | np.ndarray | cp.ndarray | str | None = "auto",
     random_state: int = 0,
     a: float | None = None,
     b: float | None = None,
@@ -82,6 +85,9 @@ def umap(
             * 'auto': chooses 'spectral' for `'n_samples' < 1000000`, 'random' otherwise.
             * 'spectral': use a spectral embedding of the graph.
             * 'random': assign initial embedding positions at random.
+            * 'paga': use the :func:`~scanpy.tl.paga` layout as initial embedding positions.
+            * Array of shape (n_obs, 2)
+            * Any key for :attr:`~anndata.AnnData.obsm`
 
         .. note::
             If your embedding looks odd it's recommended setting `init_pos` to 'random'.
@@ -143,8 +149,6 @@ def umap(
         **({"random_state": random_state} if random_state != 0 else {}),
     }
 
-    random_state = check_random_state(random_state)
-
     neigh_params = neighbors["params"]
     X = _choose_representation(
         adata,
@@ -166,6 +170,14 @@ def umap(
             pre_knn = (knn_indices, knn_dist)
         else:
             pre_knn = None
+
+        if init_pos not in ["auto", "spectral", "random"]:
+            raise ValueError(
+                f"Invalid init_pos: {init_pos}",
+                "Valid options are: auto, spectral, random, paga for RAPIDS < 24.10",
+            )
+
+        random_state = check_random_state(random_state)
 
         if init_pos == "auto":
             init_pos = "spectral" if n_obs < 1000000 else "random"
@@ -192,8 +204,24 @@ def umap(
     else:
         pre_knn = neighbors["connectivities"]
 
-        if init_pos == "auto":
-            init_pos = "spectral" if n_obs < 1000000 else "random"
+        if isinstance(init_pos, str) and init_pos in adata.obsm:
+            init_coords = adata.obsm[init_pos]
+        elif isinstance(init_pos, str) and init_pos == "paga":
+            init_coords = get_init_pos_from_paga(
+                adata, random_state=random_state, neighbors_key=neighbors_key
+            )
+        elif isinstance(init_pos, str) and init_pos == "auto":
+            init_coords = "spectral" if n_obs < 1000000 else "random"
+        else:
+            init_coords = init_pos
+
+        if hasattr(init_coords, "dtype"):
+            init_coords = check_array_cuml(
+                init_coords, dtype=np.float32, accept_sparse=False
+            )
+
+        random_state = check_random_state(random_state)
+
         logger_level = _get_logger_level(logger)
         X_umap = simplicial_set_embedding(
             data=cp.array(X),
@@ -204,7 +232,7 @@ def umap(
             b=b,
             negative_sample_rate=negative_sample_rate,
             n_epochs=n_epochs,
-            init=init_pos,
+            init=init_coords,
             random_state=random_state,
             metric=neigh_params.get("metric", "euclidean"),
             metric_kwds=neigh_params.get("metric_kwds", None),
