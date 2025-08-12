@@ -39,4 +39,4 @@ def fdr_bh_axis1(ps):
     inv_order = cp.argsort(order, axis=1)
     ps_adj = cp.take_along_axis(ps_monotone, inv_order, axis=1)
 
-    return cp.clip(ps_adj, 0, 1).get()
+    return cp.clip(ps_adj, 0, 1).get().astype(cp.float32)
