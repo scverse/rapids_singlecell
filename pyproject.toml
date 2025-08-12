@@ -47,6 +47,7 @@ test = [
     "bbknn",
     "decoupler",
     "fast-array-utils",
+    "igraph",
 ]
 
 [project.urls]
@@ -88,8 +89,6 @@ lint.ignore = [
 "docs/*" = [ "I" ]
 "tests/*" = [ "D" ]
 "*/__init__.py" = [ "F401" ]
-"src/rapids_singlecell/decoupler_gpu/_method_mlm.py" = [ "PLR0917" ]
-"src/rapids_singlecell/decoupler_gpu/_method_wsum.py" = [ "PLR0917" ]
 [tool.ruff.lint.isort]
 known-first-party = [ "rapids_singlecell" ]
 required-imports = [ "from __future__ import annotations" ]
