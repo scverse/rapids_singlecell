@@ -207,11 +207,11 @@ def umap(
         match init_pos:
             case str() if init_pos in adata.obsm:
                 init_coords = adata.obsm[init_pos]
-            case "paga":
+            case str() if init_pos == "paga":
                 init_coords = get_init_pos_from_paga(
                     adata, random_state=random_state, neighbors_key=neighbors_key
                 )
-            case "auto":
+            case str() if init_pos == "auto":
                 init_coords = "spectral" if n_obs < 1000000 else "random"
             case _:
                 init_coords = init_pos
