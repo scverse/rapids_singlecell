@@ -21,6 +21,10 @@ If you like scverse® and want to support our mission, please consider making a 
 </a>
 </div>
 
+```{div}
+:style: height: 0.5rem
+```
+
 ::::{grid} 1 2 2 2
 :gutter: 2
 
