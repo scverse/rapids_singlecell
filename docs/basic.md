@@ -60,8 +60,8 @@ Find a bug? Interested in improving rapids-singlecell? Checkout our GitHub for t
 
 ## News
 
-* 28.07.25 *rapids-singlecell* is now an [scverse® core package](https://scverse.org/blog/2025-core-expansion/)
-* 1.07.25 *rapids-singlecell* was highlighted in an other NVIDIA [technical blog post](https://developer.nvidia.com/blog/driving-toward-billion-cell-analysis-and-biological-breakthroughs-with-rapids-singlecell/)
+* 01.07.25 *rapids-singlecell* is now an [scverse® core package](https://scverse.org/blog/2025-core-expansion/)
+* 12.06.25 *rapids-singlecell* was highlighted in an other NVIDIA [technical blog post](https://developer.nvidia.com/blog/driving-toward-billion-cell-analysis-and-biological-breakthroughs-with-rapids-singlecell/)
 * 07.08.23 *rapids-singlecell* is now part of scverse® ecosystem.
 * 04.08.23 Thanks to the great team at [scverse](https://www.scverse.org)® *rapids-singlecell* is now automatically tested with CI
 * 27.06.23 I'm very honored to announce that I was invited to co-author a [technical blog post](https://developer.nvidia.com/blog/gpu-accelerated-single-cell-rna-analysis-with-rapids-singlecell/) that demonstrates the capabilities and performance of *rapids-singlecell* for NVIDIA.
