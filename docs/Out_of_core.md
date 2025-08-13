@@ -125,15 +125,15 @@ Persisting loads data into GPU memory across workers. This can quickly cause OOM
 
 The functions below are implemented to run on Dask‑backed `AnnData` with GPU arrays. Most steps are lazy; reduction steps may synchronize internally. This covers the most common out‑of‑core workflows and will expand over time.
 
-- `pp.calculate_qc_metrics`
-- `pp.normalize_total`
-- `pp.log1p`
-- `pp.highly_variable_genes` (flavors: `cell_ranger`, `seurat_v3`)
-- `pp.scale`
-- `pp.pca`
-- `tl.score_genes`
-- `tl.rank_genes_groups_logreg`
-- `get.aggregate`
+- {func}`~.pp.calculate_qc_metrics`
+- {func}`~.pp.normalize_total`
+- {func}`~.pp.log1p`
+- {func}`~.pp.highly_variable_genes` (flavors: `cell_ranger`, `seurat_v3`)
+- {func}`~.pp.scale`
+- {func}`~.pp.pca`
+- {func}`~.tl.score_genes`
+- {func}`~.tl.rank_genes_groups_logreg`
+- {func}`~rapids_singlecell.get.aggregate`
 
 ## Troubleshooting
 
@@ -142,6 +142,6 @@ The functions below are implemented to run on Dask‑backed `AnnData` with GPU a
 
 ## References
 
-- Dask-CUDA docs: https://docs.rapids.ai/api/dask-cuda/stable/
-- Dask Array: https://docs.dask.org/en/stable/array.html
-- CuPy Sparse: https://docs.cupy.dev/en/stable/reference/sparse.html
+- [Dask-CUDA](https://docs.rapids.ai/api/dask-cuda/stable/)
+- [Dask Array](https://docs.dask.org/en/stable/array.html)
+- [CuPy Sparse](https://docs.cupy.dev/en/stable/reference/sparse.html)
