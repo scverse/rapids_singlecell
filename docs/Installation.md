@@ -57,9 +57,8 @@ apptainer run --nv rsc.sif
 ```
 
 
-# GPU-Memory and System Requirements
+# System requirements
 
-*rapids-singlecell* relays for most computation on the GPU. A GPU with sufficient VRAM is therefore required to handle large datasets.
-With a RTX 3090 it's possible to analyze 200000 cells without any issues. With an A100 80GB it is even possible to analyze more than 1000000. For even larger datasets, {mod}`~rmm` is required to oversubscribe GPU memory into host memory, similar to SWAP memory. However, using `managed_memory` can result in a performance penalty, but this is still preferable to CPU runtimes.
+Most computations run on the GPU. See the Memory Management page for hardware guidance, managed memory, and known limits:
 
-The upper limit for GPU-based {class}`~anndata.AnnData` is a `.nnz` (non-zero elements) value of 2**31-1 (2147483647). This constraint is due to the maximum `indptr` (index pointer array for compressed sparse format) size that {mod}`~cupy` currently supports for sparse matrices.
+- {doc}`MM`

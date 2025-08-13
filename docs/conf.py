@@ -41,6 +41,7 @@ suppress_warnings = [
 # They can be extensions coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
 extensions = [
     "myst_nb",
+    "sphinx_design",
     "sphinx.ext.autodoc",
     "sphinx.ext.doctest",
     "sphinx.ext.coverage",
