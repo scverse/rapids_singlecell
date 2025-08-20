@@ -61,15 +61,16 @@ def pca(
             Solver to use for the PCA computation. \
             Must be one of {'full', 'jacobi', 'auto', 'covariance_eigh'}. \
             Defaults to 'auto'. Sparse matrices will always use `'covariance_eigh'`.
+
             `'covariance_eigh'`
                 Classic eigendecomposition of the covariance matrix, suited for tall-and-skinny matrices.
                 Works with dask, array must be CSR or dense and chunked as `(N, adata.shape[1])`.
             `'full'`
-                From cuml for dense arrays uses a eigendecomposition of the covariance matrix then discards components.
+                From `cuml` for dense arrays uses a eigendecomposition of the covariance matrix then discards components.
             `'jacobi'`
-                From cuml for dense arrays. Jacobi is much faster as it iteratively corrects, but is less accurate.
+                From `cuml` for dense arrays. Jacobi is much faster as it iteratively corrects, but is less accurate.
             `'auto'`
-                Automatically chooses the best solver based on the shape of the data matrix. Will choose `'covariance_eigh'` for dask arrays.
+                Automatically chooses the best solver based on the shape of the data matrix. Will choose `'covariance_eigh'` for dense dask arrays.
 
         random_state
             Change to use different initial states for the optimization.
