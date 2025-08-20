@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 import cupy as cp
 import numpy as np
 from cuml.internals.input_utils import sparse_scipy_to_cp
-from cupyx.scipy.sparse import csr_matrix, isspmatrix_csr
 from cupyx.scipy.sparse import issparse as cpissparse
+from cupyx.scipy.sparse import isspmatrix_csr
 from scanpy._utils import Empty, _empty
 from scanpy.preprocessing._pca import _handle_mask_var
 from scipy.sparse import issparse
@@ -158,9 +158,12 @@ def pca(
         _check_gpu_X(X, allow_dask=True)
         if svd_solver == "auto":
             svd_solver = "covariance_eigh"
-        if isinstance(X._meta, cp.ndarray) and svd_solver != "covariance_eigh" and zero_center:
+        if (
+            isinstance(X._meta, cp.ndarray)
+            and svd_solver != "covariance_eigh"
+            and zero_center
+        ):
             from cuml.dask.decomposition import PCA
-
 
             pca_func = PCA(n_components=n_comps, svd_solver=svd_solver, whiten=False)
             X_pca = pca_func.fit_transform(X)
@@ -180,6 +183,7 @@ def pca(
             pca_func, X_pca = _run_sparse_pca(X, n_comps, zero_center)
         else:
             from cuml.decomposition import PCA
+
             if svd_solver == "covariance_eigh":
                 svd_solver = "auto"
             pca_func = PCA(
@@ -235,6 +239,7 @@ def _as_numpy(X):
     else:
         return X
 
+
 def _run_sparse_pca(X, n_comps, zero_center):
     if issparse(X):
         X = sparse_scipy_to_cp(X, dtype=X.dtype)
@@ -246,6 +251,7 @@ def _run_sparse_pca(X, n_comps, zero_center):
     pca_func = PCA_sparse(n_components=n_comps, zero_center=zero_center)
     X_pca = pca_func.fit_transform(X)
     return pca_func, X_pca
+
 
 def _run_chunked_pca(X, n_comps, chunk_size):
     from cuml.decomposition import IncrementalPCA

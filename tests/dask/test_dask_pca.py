@@ -54,15 +54,13 @@ def test_pca_dask(client, data_kind, zero_center):
     )
 
 
-@pytest.mark.parametrize("svd_solver", ["full","jacobi", "covariance_eigh"])
+@pytest.mark.parametrize("svd_solver", ["full", "jacobi", "covariance_eigh"])
 def test_pca_dask_dense_svd_solver(client, svd_solver):
     adata_1 = pbmc3k_processed()
     adata_2 = pbmc3k_processed()
 
-
     adata_1.X = cp.array(adata_1.X.astype(np.float64))
     adata_2.X = as_dense_cupy_dask_array(adata_2.X.astype(np.float64))
-
 
     rsc.pp.pca(adata_1, svd_solver="full", zero_center=True)
     rsc.pp.pca(adata_2, svd_solver=svd_solver, zero_center=True)

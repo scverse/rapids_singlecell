@@ -52,6 +52,7 @@ def _pbmc3k_normalized() -> AnnData:
     sc.pp.highly_variable_genes(pbmc)
     return pbmc
 
+
 @pytest.mark.parametrize("run_sparse", [True, False])
 def test_pca_transform(run_sparse):
     A = np.array(A_list).astype("float32")
@@ -123,6 +124,7 @@ def test_pca_reproducible():
     rsc.tl.pca(cpbmc)
     c = pbmc.obsm["X_pca"]
     np.array_equal(a, c)
+
 
 @pytest.mark.parametrize("zero_center", [True, False])
 def test_pca_sparse(zero_center):

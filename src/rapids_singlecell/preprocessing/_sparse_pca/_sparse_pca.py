@@ -145,11 +145,10 @@ def _cov_sparse(x, return_gram=False, return_mean=False):
     if return_gram:
         return gram_matrix
     else:
-        mean_x,_ = _get_mean_var(x, axis=0)
+        mean_x, _ = _get_mean_var(x, axis=0)
         mean_x = mean_x.astype(x.data.dtype)
         gram_matrix *= 1 / x.shape[0]
 
         cov_result = gram_matrix
         cov_result = _compute_cov(cov_result, gram_matrix, mean_x)
         return cov_result, mean_x
-

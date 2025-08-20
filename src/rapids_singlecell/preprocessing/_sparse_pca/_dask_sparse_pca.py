@@ -62,6 +62,7 @@ class PCA_sparse_dask:
 
     def transform(self, X):
         if self.zero_center:
+
             def _transform(X_part, mean_, components_):
                 pre_mean = mean_ @ components_.T
                 mean_impact = cp.ones(
@@ -70,7 +71,8 @@ class PCA_sparse_dask:
                 X_transformed = X_part.dot(components_.T) - mean_impact
                 return X_transformed
         else:
-            def _transform(X_part,  mean_, components_):
+
+            def _transform(X_part, mean_, components_):
                 X_transformed = X_part.dot(components_.T)
                 return X_transformed
 
@@ -140,6 +142,7 @@ def _cov_sparse_dask(x, return_gram=False, return_mean=False):
     compute_mean_cov.compile()
     n_cols = x.shape[1]
     if isinstance(x._meta, csr_matrix):
+
         def __gram_block(x_part):
             gram_matrix = cp.zeros((n_cols, n_cols), dtype=x.dtype)
 
@@ -159,6 +162,7 @@ def _cov_sparse_dask(x, return_gram=False, return_mean=False):
             )
             return gram_matrix[None, ...]  # need new axis for summing
     else:
+
         def __gram_block(x_part):
             gram_matrix = x_part.T.dot(x_part)
             return gram_matrix[None, ...]
@@ -191,4 +195,3 @@ def _cov_sparse_dask(x, return_gram=False, return_mean=False):
 
         cov_result = _compute_cov(cov_result, gram_matrix, mean_x)
         return cov_result, mean_x
-

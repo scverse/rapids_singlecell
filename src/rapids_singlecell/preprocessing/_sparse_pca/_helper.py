@@ -1,7 +1,11 @@
-import cupy as cp
+from __future__ import annotations
+
 import math
 
+import cupy as cp
+
 from ._kernels._pca_sparse_kernel import _copy_kernel, _cov_kernel
+
 
 def _copy_gram(gram_matrix, n_cols):
     copy_gram = _copy_kernel(gram_matrix.dtype)
@@ -10,9 +14,10 @@ def _copy_gram(gram_matrix, n_cols):
     copy_gram(
         grid,
         block,
-            (gram_matrix, n_cols),
-        )
+        (gram_matrix, n_cols),
+    )
     return gram_matrix
+
 
 def _compute_cov(cov_result, gram_matrix, mean_x):
     compute_cov = _cov_kernel(gram_matrix.dtype)
@@ -25,6 +30,7 @@ def _compute_cov(cov_result, gram_matrix, mean_x):
         (cov_result, gram_matrix, mean_x, mean_x, gram_matrix.shape[0]),
     )
     return cov_result
+
 
 def _check_matrix_for_zero_genes(X):
     gene_ex = cp.zeros(X.shape[1], dtype=cp.int32)
