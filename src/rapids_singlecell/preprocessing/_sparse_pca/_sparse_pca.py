@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-import math
-
 import cupy as cp
+
+from rapids_singlecell.preprocessing._utils import _get_mean_var
+
+from ._helper import _check_matrix_for_zero_genes, _compute_cov, _copy_gram
 
 
 class PCA_sparse:
-    def __init__(self, n_components) -> None:
+    def __init__(self, n_components, zero_center: bool = True) -> None:
         self.n_components = n_components
+        self.zero_center = zero_center
 
     def fit(self, x):
         if self.n_components is None:
@@ -24,7 +27,13 @@ class PCA_sparse:
         self.n_features_in_ = x.shape[1] if x.ndim == 2 else 1
         self.dtype = x.data.dtype
 
-        covariance, self.mean_, _ = _cov_sparse(x=x, return_mean=True)
+        if self.zero_center:
+            covariance, self.mean_ = _cov_sparse(x=x, return_mean=True)
+        else:
+            # For truncated SVD (uncentered), operate on the Gram matrix (1/n * X^T X)
+            # We don't subtract the mean in this path
+            covariance = _cov_sparse(x=x, return_gram=True)
+            self.mean_ = None
 
         self.explained_variance_, self.components_ = cp.linalg.eigh(
             covariance, UPLO="U"
@@ -53,13 +62,16 @@ class PCA_sparse:
         return self
 
     def transform(self, X):
-        precomputed_mean_impact = self.mean_ @ self.components_.T
-        mean_impact = cp.ones(
-            (X.shape[0], 1), dtype=cp.float32
-        ) @ precomputed_mean_impact.reshape(1, -1)
-        X_transformed = X.dot(self.components_.T) - mean_impact
-        # X = X - self.mean_
-        # X_transformed = X.dot(self.components_.T)
+        if self.zero_center:
+            precomputed_mean_impact = self.mean_ @ self.components_.T
+            mean_impact = cp.ones(
+                (X.shape[0], 1), dtype=cp.float32
+            ) @ precomputed_mean_impact.reshape(1, -1)
+            X_transformed = X.dot(self.components_.T) - mean_impact
+        else:
+            # Uncentered projection for truncated SVD
+            X_transformed = X.dot(self.components_.T)
+
         self.components_ = self.components_.get()
         self.explained_variance_ = self.explained_variance_.get()
         self.explained_variance_ratio_ = self.explained_variance_ratio_.get()
@@ -108,8 +120,6 @@ def _cov_sparse(x, return_gram=False, return_mean=False):
     """
 
     from ._kernels._pca_sparse_kernel import (
-        _copy_kernel,
-        _cov_kernel,
         _gramm_kernel_csr,
     )
 
@@ -131,64 +141,15 @@ def _cov_sparse(x, return_gram=False, return_mean=False):
         ),
     )
 
-    copy_gram = _copy_kernel(x.data.dtype)
-    block = (32, 32)
-    grid = (math.ceil(x.shape[1] / block[0]), math.ceil(x.shape[1] / block[1]))
-    copy_gram(
-        grid,
-        block,
-        (gram_matrix, x.shape[1]),
-    )
-
-    mean_x = x.sum(axis=0) * (1 / x.shape[0])
-    gram_matrix *= 1 / x.shape[0]
-
+    gram_matrix = _copy_gram(gram_matrix, x.shape[1])
     if return_gram:
-        cov_result = cp.zeros(
-            (gram_matrix.shape[0], gram_matrix.shape[0]),
-            dtype=gram_matrix.dtype,
-        )
+        return gram_matrix
     else:
+        mean_x,_ = _get_mean_var(x, axis=0)
+        mean_x = mean_x.astype(x.data.dtype)
+        gram_matrix *= 1 / x.shape[0]
+
         cov_result = gram_matrix
+        cov_result = _compute_cov(cov_result, gram_matrix, mean_x)
+        return cov_result, mean_x
 
-    compute_cov = _cov_kernel(x.dtype)
-
-    block_size = (32, 32)
-    grid_size = (math.ceil(gram_matrix.shape[0] / 8),) * 2
-    compute_cov(
-        grid_size,
-        block_size,
-        (cov_result, gram_matrix, mean_x, mean_x, gram_matrix.shape[0]),
-    )
-
-    if not return_gram and not return_mean:
-        return cov_result
-    elif return_gram and not return_mean:
-        return cov_result, gram_matrix
-    elif not return_gram and return_mean:
-        return cov_result, mean_x, mean_x
-    elif return_gram and return_mean:
-        return cov_result, gram_matrix, mean_x, mean_x
-
-
-def _check_matrix_for_zero_genes(X):
-    gene_ex = cp.zeros(X.shape[1], dtype=cp.int32)
-
-    from ._kernels._pca_sparse_kernel import _zero_genes_kernel
-
-    block = (32,)
-    grid = (int(math.ceil(X.nnz / block[0])),)
-    _zero_genes_kernel(
-        grid,
-        block,
-        (
-            X.indices,
-            gene_ex,
-            X.nnz,
-        ),
-    )
-    if cp.any(gene_ex == 0):
-        raise ValueError(
-            "There are genes with zero expression. "
-            "Please remove them before running PCA."
-        )

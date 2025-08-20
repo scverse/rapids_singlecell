@@ -52,9 +52,11 @@ def _pbmc3k_normalized() -> AnnData:
     sc.pp.highly_variable_genes(pbmc)
     return pbmc
 
-
-def test_pca_transform():
+@pytest.mark.parametrize("run_sparse", [True, False])
+def test_pca_transform(run_sparse):
     A = np.array(A_list).astype("float32")
+    if run_sparse:
+        A = sparse.csr_matrix(A)
     A_pca_abs = np.abs(A_pca)
     A_svd_abs = np.abs(A_svd)
 
@@ -122,8 +124,8 @@ def test_pca_reproducible():
     c = pbmc.obsm["X_pca"]
     np.array_equal(a, c)
 
-
-def test_pca_sparse():
+@pytest.mark.parametrize("zero_center", [True, False])
+def test_pca_sparse(zero_center):
     sparse_ad = pbmc3k_processed()
     default = pbmc3k_processed()
     sparse_ad.X = sparse.csr_matrix(sparse_ad.X.astype(np.float64))
@@ -141,12 +143,17 @@ def test_pca_sparse():
     np.testing.assert_allclose(
         np.abs(sparse_ad.varm["PCs"]), np.abs(default.varm["PCs"]), rtol=1e-7, atol=1e-6
     )
-
+    if zero_center:
+        rtol = 1e-7
+        atol = 1e-6
+    else:
+        rtol = 1e-5
+        atol = 1e-5
     np.testing.assert_allclose(
         np.abs(sparse_ad.uns["pca"]["variance_ratio"]),
         np.abs(default.uns["pca"]["variance_ratio"]),
-        rtol=1e-7,
-        atol=1e-6,
+        rtol=rtol,
+        atol=atol,
     )
 
 
