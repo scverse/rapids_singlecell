@@ -28,7 +28,7 @@ overrides.matrix.deps.env-vars = [
 
 overrides.matrix.deps.python = [
     { if = [ "stable" ], value = "3.11" },
-    { if = [ "dev" ], value = "3.13" },
+    { if = [ "dev", "pre-rapids" ], value = "3.13" },
 ]
 
 overrides.matrix.deps.extra-dependencies = [
