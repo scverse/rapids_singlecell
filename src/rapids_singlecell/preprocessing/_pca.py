@@ -7,6 +7,7 @@ import cupy as cp
 import numpy as np
 from cuml.internals.input_utils import sparse_scipy_to_cp
 from cupyx.scipy.sparse import issparse as cpissparse
+from cupyx.scipy.sparse import issparse as issparse_cupy
 from cupyx.scipy.sparse import isspmatrix_csr
 from scanpy._utils import Empty, _empty
 from scanpy.preprocessing._pca import _handle_mask_var
@@ -164,48 +165,23 @@ def pca(
             and svd_solver != "covariance_eigh"
             and zero_center
         ):
-            from cuml.dask.decomposition import PCA
-
-            pca_func = PCA(n_components=n_comps, svd_solver=svd_solver, whiten=False)
-            X_pca = pca_func.fit_transform(X)
-            # cuml-issue #5883
-            X_pca = X_pca.compute_chunk_sizes()
+            pca_func, X_pca = _run_cuml_pca_dask(X, n_comps, svd_solver=svd_solver)
         else:
-            from ._sparse_pca._dask_sparse_pca import PCA_sparse_dask
-
-            pca_func = PCA_sparse_dask(n_components=n_comps, zero_center=zero_center)
-            pca_func = pca_func.fit(X)
-            X_pca = pca_func.transform(X)
+            pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
 
     elif zero_center:
         if chunked:
             pca_func, X_pca = _run_chunked_pca(X, n_comps, chunk_size)
         elif cpissparse(X) or issparse(X):
-            pca_func, X_pca = _run_sparse_pca(X, n_comps, zero_center)
+            pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
         else:
-            from cuml.decomposition import PCA
-
-            if svd_solver == "covariance_eigh":
-                svd_solver = "auto"
-            pca_func = PCA(
-                n_components=n_comps,
-                svd_solver=svd_solver,
-                output_type="numpy",
-            )
-            X_pca = pca_func.fit_transform(X)
+            pca_func, X_pca = _run_cuml_pca(X, n_comps, svd_solver=svd_solver)
 
     else:  # not zero_center
         if cpissparse(X) or issparse(X):
-            pca_func, X_pca = _run_sparse_pca(X, n_comps, zero_center)
+            pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
         else:
-            from cuml.decomposition import TruncatedSVD
-
-            pca_func = TruncatedSVD(
-                n_components=n_comps,
-                algorithm=svd_solver,
-                output_type="numpy",
-            )
-            X_pca = pca_func.fit_transform(X)
+            pca_func, X_pca = _run_cuml_tsvd(X, n_comps, svd_solver=svd_solver)
 
     if X_pca.dtype.descr != np.dtype(dtype).descr:
         X_pca = X_pca.astype(dtype)
@@ -241,14 +217,15 @@ def _as_numpy(X):
         return X
 
 
-def _run_sparse_pca(X, n_comps, zero_center):
+def _run_covariance_pca(X, n_comps, zero_center):
     if issparse(X):
         X = sparse_scipy_to_cp(X, dtype=X.dtype)
     from ._sparse_pca._sparse_pca import PCA_sparse
 
-    if not isspmatrix_csr(X):
+    if not isspmatrix_csr(X) and not isinstance(X, DaskArray):
         X = X.tocsr()
-    X.sort_indices()
+    if issparse_cupy(X):
+        X.sort_indices()
     pca_func = PCA_sparse(n_components=n_comps, zero_center=zero_center)
     X_pca = pca_func.fit_transform(X)
     return pca_func, X_pca
@@ -273,4 +250,40 @@ def _run_chunked_pca(X, n_comps, chunk_size):
             chunk = chunk.toarray()
         X_pca[start_idx:stop_idx] = pca_func.transform(chunk)
 
+    return pca_func, X_pca
+
+
+def _run_cuml_pca(X, n_comps, *, svd_solver: str):
+    from cuml.decomposition import PCA
+
+    if svd_solver == "covariance_eigh":
+        svd_solver = "auto"
+    pca_func = PCA(
+        n_components=n_comps,
+        svd_solver=svd_solver,
+        output_type="numpy",
+    )
+    X_pca = pca_func.fit_transform(X)
+    return pca_func, X_pca
+
+
+def _run_cuml_tsvd(X, n_comps, *, svd_solver: str = "auto"):
+    from cuml.decomposition import TruncatedSVD
+
+    pca_func = TruncatedSVD(
+        n_components=n_comps,
+        algorithm=svd_solver,
+        output_type="numpy",
+    )
+    X_pca = pca_func.fit_transform(X)
+    return pca_func, X_pca
+
+
+def _run_cuml_pca_dask(X, n_comps, *, svd_solver: str):
+    from cuml.dask.decomposition import PCA
+
+    pca_func = PCA(n_components=n_comps, svd_solver=svd_solver, whiten=False)
+    X_pca = pca_func.fit_transform(X)
+    # cuml-issue #5883
+    X_pca = X_pca.compute_chunk_sizes()
     return pca_func, X_pca

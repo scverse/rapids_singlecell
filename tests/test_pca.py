@@ -126,8 +126,10 @@ def test_pca_reproducible():
     np.array_equal(a, c)
 
 
-@pytest.mark.parametrize("zero_center", [True, False])
-def test_pca_sparse(zero_center):
+@pytest.mark.parametrize(
+    ("zero_center", "rtol", "atol"), [(True, 1e-7, 1e-6), (False, 1e-5, 1e-5)]
+)
+def test_pca_sparse(zero_center, rtol, atol):
     sparse_ad = pbmc3k_processed()
     default = pbmc3k_processed()
     sparse_ad.X = sparse.csr_matrix(sparse_ad.X.astype(np.float64))
@@ -145,12 +147,6 @@ def test_pca_sparse(zero_center):
     np.testing.assert_allclose(
         np.abs(sparse_ad.varm["PCs"]), np.abs(default.varm["PCs"]), rtol=1e-7, atol=1e-6
     )
-    if zero_center:
-        rtol = 1e-7
-        atol = 1e-6
-    else:
-        rtol = 1e-5
-        atol = 1e-5
     np.testing.assert_allclose(
         np.abs(sparse_ad.uns["pca"]["variance_ratio"]),
         np.abs(default.uns["pca"]["variance_ratio"]),

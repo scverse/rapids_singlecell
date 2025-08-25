@@ -8,6 +8,9 @@ from ._kernels._pca_sparse_kernel import _copy_kernel, _cov_kernel
 
 
 def _copy_gram(gram_matrix, n_cols):
+    """
+    Flips the upper triangle of the gram matrix to the lower triangle. This is necessary because the kernel only computes the upper triangle.
+    """
     copy_gram = _copy_kernel(gram_matrix.dtype)
     block = (32, 32)
     grid = (math.ceil(n_cols / block[0]), math.ceil(n_cols / block[1]))

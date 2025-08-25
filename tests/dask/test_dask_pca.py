@@ -54,23 +54,21 @@ def test_pca_dask(client, data_kind, zero_center):
     )
 
 
-@pytest.mark.parametrize("svd_solver", ["full", "jacobi", "covariance_eigh"])
-def test_pca_dask_dense_svd_solver(client, svd_solver):
+@pytest.mark.parametrize(
+    ("svd_solver", "rtol", "atol"),
+    [("full", 1e-7, 1e-6), ("jacobi", 1e-5, 1e-5), ("covariance_eigh", 1e-7, 1e-6)],
+)
+def test_pca_dask_dense_svd_solver(client, svd_solver, rtol, atol):
     adata_1 = pbmc3k_processed()
     adata_2 = pbmc3k_processed()
 
     adata_1.X = cp.array(adata_1.X.astype(np.float64))
     adata_2.X = as_dense_cupy_dask_array(adata_2.X.astype(np.float64))
 
+    # Test results of full Dense PCA against DaskDensePCA with different svd solvers
     rsc.pp.pca(adata_1, svd_solver="full", zero_center=True)
     rsc.pp.pca(adata_2, svd_solver=svd_solver, zero_center=True)
 
-    if svd_solver == "full" or svd_solver == "covariance_eigh":
-        rtol = 1e-7
-        atol = 1e-6
-    else:
-        rtol = 1e-5
-        atol = 1e-5
     cp.testing.assert_allclose(
         np.abs(adata_1.obsm["X_pca"]),
         cp.abs(adata_2.obsm["X_pca"].compute()),
