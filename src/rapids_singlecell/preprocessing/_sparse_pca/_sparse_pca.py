@@ -69,9 +69,14 @@ class PCA_sparse:
 
     def transform(self, X):
         if isinstance(X, DaskArray):
-            return self._transform_dask(X)
+            X_pca = self._transform_dask(X)
         else:
-            return self._transform_cupy(X)
+            X_pca = self._transform_cupy(X)
+
+        self.components_ = self.components_.get()
+        self.explained_variance_ = self.explained_variance_.get()
+        self.explained_variance_ratio_ = self.explained_variance_ratio_.get()
+        return X_pca
 
     def _transform_cupy(self, X):
         if self.zero_center:
@@ -84,9 +89,6 @@ class PCA_sparse:
             # Uncentered projection for truncated SVD
             X_transformed = X.dot(self.components_.T)
 
-        self.components_ = self.components_.get()
-        self.explained_variance_ = self.explained_variance_.get()
-        self.explained_variance_ratio_ = self.explained_variance_ratio_.get()
         return X_transformed.get()
 
     def _transform_dask(self, X):
@@ -114,9 +116,6 @@ class PCA_sparse:
             meta=_meta_dense(X.dtype),
         )
 
-        self.components_ = self.components_.get()
-        self.explained_variance_ = self.explained_variance_.get()
-        self.explained_variance_ratio_ = self.explained_variance_ratio_.get()
         return X_pca
 
     def fit_transform(self, X, y=None):
