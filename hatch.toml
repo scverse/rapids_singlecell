@@ -28,8 +28,10 @@ overrides.matrix.deps.python = [
 overrides.matrix.deps.extra-dependencies = [
     { if = [
         "dev",
-    ], value = "anndata[dev,test] @ git+https://github.com/scverse/anndata.git scanpy @ git+https://github.com/scverse/scanpy.git" },
-
+    ], value = "anndata[dev,test] @ git+https://github.com/scverse/anndata.git" },
+    { if = [
+        "dev",
+    ], value = "scanpy @ git+https://github.com/scverse/scanpy.git" },
 ]
 
 [[envs.hatch-test.matrix]]
