@@ -44,7 +44,7 @@ jobs:
               select(.key | startswith("hatch-test"))
               | {
                 name: .key,
-                python: (if (.key | test("dev")) then "3.13.3" else .value.python end)
+                python: .value.python | sub("3[.]13"; "3.13.3"),
               }
             )')
           echo "envs=${ENVS_JSON}" | tee $GITHUB_OUTPUT
@@ -74,7 +74,7 @@ jobs:
         run: uvx hatch -v env create ${{ matrix.env.name }}
 
       - name: Run tests
-        run: uvx hatch run ${{ matrix.env.name }} -- pytest
+        run: uvx hatch run ${{ matrix.env.name }}:run
 
   remove-label:
     name: Remove 'run-gpu-ci' Label
