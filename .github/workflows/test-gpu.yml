@@ -38,14 +38,7 @@ jobs:
           enable-cache: false
       - id: get-envs
         run: |
-          ENVS_JSON=$(NO_COLOR=1 uvx hatch env show --json | jq -c 'to_entries
-            | map(
-              select(.key | startswith("hatch-test"))
-              | {
-                name: .key,
-                python: (.value.python | sub("3[.]13$"; "3.13.3")),  # https://github.com/numba/numba/issues/10101
-              }
-            )')
+          ENVS_JSON=$(NO_COLOR=1 uvx hatch env show --json | jq -c 'to_entries | map(select(.key | startswith("hatch-test")) | {name: .key, python: (.value.python | sub("3[.]13$"; "3.13.3"))})')
           echo "envs=${ENVS_JSON}" | tee $GITHUB_OUTPUT
   test:
     needs: get-envs
@@ -75,9 +68,13 @@ jobs:
       - name: Run tests
         run: uvx hatch run ${{ matrix.env.name }} -- pytest
 
-      - name: Remove 'run-gpu-ci' Label
-        if: always()
-        uses: actions-ecosystem/action-remove-labels@v1
+  remove-label:
+    name: Remove 'run-gpu-ci' Label
+    runs-on: ubuntu-latest
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions-ecosystem/action-remove-labels@v1
+        if: contains(github.event.pull_request.labels.*.name, 'run-gpu-ci')
         with:
           labels: 'run-gpu-ci'
           github_token: ${{ secrets.GITHUB_TOKEN }}
