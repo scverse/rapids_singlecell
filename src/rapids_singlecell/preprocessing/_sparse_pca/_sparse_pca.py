@@ -10,7 +10,7 @@ from ._helper import _check_matrix_for_zero_genes, _compute_cov, _copy_gram
 
 
 class PCA_sparse:
-    def __init__(self, n_components, zero_center: bool = True) -> None:
+    def __init__(self, n_components: int, *, zero_center: bool = True) -> None:
         self.n_components = n_components
         self.zero_center = zero_center
 
