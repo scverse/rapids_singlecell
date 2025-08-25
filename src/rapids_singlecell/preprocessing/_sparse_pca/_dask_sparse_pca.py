@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING, Literal, overload
 
 import cupy as cp
 from cuml.internals.memory_utils import with_cupy_rmm
 
-from rapids_singlecell._compat import (
-    _meta_dense,
-)
+from rapids_singlecell._compat import _meta_dense
 from rapids_singlecell.preprocessing._utils import _get_mean_var
+
+if TYPE_CHECKING:
+    from rapids_singlecell._compat import (
+        DaskArray,
+    )
 
 
 class PCA_sparse_dask:
@@ -26,7 +30,7 @@ class PCA_sparse_dask:
         self.n_samples_ = x.shape[0]
         self.n_features_in_ = x.shape[1] if x.ndim == 2 else 1
         self.dtype = x.dtype
-        covariance, self.mean_, _ = _cov_sparse_dask(x, return_mean=True)
+        covariance, self.mean_ = _cov_sparse_dask(x, return_mean=True)
         self.explained_variance_, self.components_ = cp.linalg.eigh(
             covariance, UPLO="U"
         )
@@ -81,8 +85,31 @@ class PCA_sparse_dask:
         return self.fit(X).transform(X)
 
 
+@overload
+def _cov_sparse_dask(
+    x: DaskArray,
+    *,
+    return_gram: Literal[False] = False,
+    return_mean: Literal[False] = False,
+) -> cp.ndarray: ...
+@overload
+def _cov_sparse_dask(
+    x: DaskArray, *, return_gram: Literal[True], return_mean: Literal[False] = False
+) -> tuple[cp.ndarray, cp.ndarray]: ...
+@overload
+def _cov_sparse_dask(
+    x: DaskArray, *, return_gram: Literal[False] = False, return_mean: Literal[True]
+) -> tuple[cp.ndarray, cp.ndarray]: ...
+@overload
+def _cov_sparse_dask(
+    x: DaskArray, *, return_gram: Literal[True], return_mean: Literal[True]
+) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray]: ...
+
+
 @with_cupy_rmm
-def _cov_sparse_dask(x, *, return_gram=False, return_mean=False):
+def _cov_sparse_dask(
+    x: DaskArray, *, return_gram: bool = False, return_mean: bool = False
+):
     """
     Computes the mean and the covariance of matrix X of
     the form Cov(X, X) = E(XX) - E(X)E(X)
@@ -195,6 +222,6 @@ def _cov_sparse_dask(x, *, return_gram=False, return_mean=False):
     elif return_gram and not return_mean:
         return cov_result, gram_matrix
     elif not return_gram and return_mean:
-        return cov_result, mean_x, mean_x
+        return cov_result, mean_x
     elif return_gram and return_mean:
-        return cov_result, gram_matrix, mean_x, mean_x
+        return cov_result, gram_matrix, mean_x
