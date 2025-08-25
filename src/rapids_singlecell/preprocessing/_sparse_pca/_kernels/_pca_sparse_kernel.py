@@ -32,7 +32,7 @@ gramm_kernel_csr = r"""
         for(int idx2 = idx1 + col; idx2 < end; idx2 += blockDim.x){
             int index2 = index[idx2];
             {0} data2 = data[idx2];
-            atomicAdd(&out[index1 * ncols + index2], data1 * data2);
+            atomicAdd(&out[(size_t)index1 * ncols + index2], data1 * data2);
         }
     }
 }
@@ -40,14 +40,14 @@ gramm_kernel_csr = r"""
 
 
 copy_kernel = r"""
-({0} *out, int ncols) {
+({0} *output, int ncols) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (row >= ncols || col >= ncols) return;
 
     if (row > col) {
-        out[row * ncols + col] = out[col * ncols + row];
+        output[row * ncols + col] = output[col * ncols + row];
     }
 }
 """

@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING
 import cupy as cp
 import numpy as np
 from cuml.internals.input_utils import sparse_scipy_to_cp
-from cupyx.scipy.sparse import csr_matrix, isspmatrix_csr
 from cupyx.scipy.sparse import issparse as cpissparse
+from cupyx.scipy.sparse import issparse as issparse_cupy
+from cupyx.scipy.sparse import isspmatrix_csr
 from scanpy._utils import Empty, _empty
 from scanpy.preprocessing._pca import _handle_mask_var
 from scipy.sparse import issparse
@@ -59,8 +60,18 @@ def pca(
 
         svd_solver
             Solver to use for the PCA computation. \
-            Must be one of {'full', 'jacobi', 'auto'}. \
-            Defaults to 'auto'.
+            Must be one of {'full', 'jacobi', 'auto', 'covariance_eigh'}. \
+            Defaults to 'auto'. Sparse matrices will always use `'covariance_eigh'`.
+
+            `'covariance_eigh'`
+                Classic eigendecomposition of the covariance matrix, suited for tall-and-skinny matrices.
+                Works with dask, array must be CSR or dense and chunked as `(N, adata.shape[1])`.
+            `'full'`
+                From `cuml` for dense arrays uses a eigendecomposition of the covariance matrix then discards components.
+            `'jacobi'`
+                From `cuml` for dense arrays. Jacobi is much faster as it iteratively corrects, but is less accurate.
+            `'auto'`
+                Automatically chooses the best solver based on the shape of the data matrix. Will choose `'covariance_eigh'` for dense dask arrays.
 
         random_state
             Change to use different initial states for the optimization.
@@ -147,71 +158,30 @@ def pca(
                 "Dask arrays are not supported for chunked PCA computation."
             )
         _check_gpu_X(X, allow_dask=True)
-        if not zero_center:
-            raise ValueError("Dask arrays do not support non-zero centered PCA.")
-        if isinstance(X._meta, cp.ndarray):
-            from cuml.dask.decomposition import PCA
-
-            if svd_solver == "auto":
-                svd_solver = "jacobi"
-            pca_func = PCA(n_components=n_comps, svd_solver=svd_solver, whiten=False)
-            X_pca = pca_func.fit_transform(X)
-            # cuml-issue #5883
-            X_pca = X_pca.compute_chunk_sizes()
-        elif isinstance(X._meta, csr_matrix):
-            from ._sparse_pca._dask_sparse_pca import PCA_sparse_dask
-
-            pca_func = PCA_sparse_dask(n_components=n_comps)
-            pca_func = pca_func.fit(X)
-            X_pca = pca_func.transform(X)
+        if svd_solver == "auto":
+            svd_solver = "covariance_eigh"
+        if (
+            isinstance(X._meta, cp.ndarray)
+            and svd_solver != "covariance_eigh"
+            and zero_center
+        ):
+            pca_func, X_pca = _run_cuml_pca_dask(X, n_comps, svd_solver=svd_solver)
+        else:
+            pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
 
     elif zero_center:
         if chunked:
-            from cuml.decomposition import IncrementalPCA
-
-            X_pca = np.zeros((X.shape[0], n_comps), X.dtype)
-
-            pca_func = IncrementalPCA(
-                n_components=n_comps, output_type="numpy", batch_size=chunk_size
-            )
-            pca_func.fit(X)
-
-            n_batches = math.ceil(X.shape[0] / chunk_size)
-            for batch in range(n_batches):
-                start_idx = batch * chunk_size
-                stop_idx = min(batch * chunk_size + chunk_size, X.shape[0])
-                chunk = X[start_idx:stop_idx, :]
-                if issparse(chunk) or cpissparse(chunk):
-                    chunk = chunk.toarray()
-                X_pca[start_idx:stop_idx] = pca_func.transform(chunk)
+            pca_func, X_pca = _run_chunked_pca(X, n_comps, chunk_size)
         elif cpissparse(X) or issparse(X):
-            if issparse(X):
-                X = sparse_scipy_to_cp(X, dtype=X.dtype)
-            from ._sparse_pca._sparse_pca import PCA_sparse
-
-            if not isspmatrix_csr(X):
-                X = X.tocsr()
-            pca_func = PCA_sparse(n_components=n_comps)
-            X_pca = pca_func.fit_transform(X)
+            pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
         else:
-            from cuml.decomposition import PCA
-
-            pca_func = PCA(
-                n_components=n_comps,
-                svd_solver=svd_solver,
-                output_type="numpy",
-            )
-            X_pca = pca_func.fit_transform(X)
+            pca_func, X_pca = _run_cuml_pca(X, n_comps, svd_solver=svd_solver)
 
     else:  # not zero_center
-        from cuml.decomposition import TruncatedSVD
-
-        pca_func = TruncatedSVD(
-            n_components=n_comps,
-            algorithm=svd_solver,
-            output_type="numpy",
-        )
-        X_pca = pca_func.fit_transform(X)
+        if cpissparse(X) or issparse(X):
+            pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
+        else:
+            pca_func, X_pca = _run_cuml_tsvd(X, n_comps, svd_solver=svd_solver)
 
     if X_pca.dtype.descr != np.dtype(dtype).descr:
         X_pca = X_pca.astype(dtype)
@@ -245,3 +215,75 @@ def _as_numpy(X):
         return X.get()
     else:
         return X
+
+
+def _run_covariance_pca(X, n_comps, zero_center):
+    if issparse(X):
+        X = sparse_scipy_to_cp(X, dtype=X.dtype)
+    from ._sparse_pca._sparse_pca import PCA_sparse
+
+    if not isspmatrix_csr(X) and not isinstance(X, DaskArray):
+        X = X.tocsr()
+    if issparse_cupy(X):
+        X.sort_indices()
+    pca_func = PCA_sparse(n_components=n_comps, zero_center=zero_center)
+    X_pca = pca_func.fit_transform(X)
+    return pca_func, X_pca
+
+
+def _run_chunked_pca(X, n_comps, chunk_size):
+    from cuml.decomposition import IncrementalPCA
+
+    X_pca = np.zeros((X.shape[0], n_comps), X.dtype)
+
+    pca_func = IncrementalPCA(
+        n_components=n_comps, output_type="numpy", batch_size=chunk_size
+    )
+    pca_func.fit(X)
+
+    n_batches = math.ceil(X.shape[0] / chunk_size)
+    for batch in range(n_batches):
+        start_idx = batch * chunk_size
+        stop_idx = min(batch * chunk_size + chunk_size, X.shape[0])
+        chunk = X[start_idx:stop_idx, :]
+        if issparse(chunk) or cpissparse(chunk):
+            chunk = chunk.toarray()
+        X_pca[start_idx:stop_idx] = pca_func.transform(chunk)
+
+    return pca_func, X_pca
+
+
+def _run_cuml_pca(X, n_comps, *, svd_solver: str):
+    from cuml.decomposition import PCA
+
+    if svd_solver == "covariance_eigh":
+        svd_solver = "auto"
+    pca_func = PCA(
+        n_components=n_comps,
+        svd_solver=svd_solver,
+        output_type="numpy",
+    )
+    X_pca = pca_func.fit_transform(X)
+    return pca_func, X_pca
+
+
+def _run_cuml_tsvd(X, n_comps, *, svd_solver: str = "auto"):
+    from cuml.decomposition import TruncatedSVD
+
+    pca_func = TruncatedSVD(
+        n_components=n_comps,
+        algorithm=svd_solver,
+        output_type="numpy",
+    )
+    X_pca = pca_func.fit_transform(X)
+    return pca_func, X_pca
+
+
+def _run_cuml_pca_dask(X, n_comps, *, svd_solver: str):
+    from cuml.dask.decomposition import PCA
+
+    pca_func = PCA(n_components=n_comps, svd_solver=svd_solver, whiten=False)
+    X_pca = pca_func.fit_transform(X)
+    # cuml-issue #5883
+    X_pca = X_pca.compute_chunk_sizes()
+    return pca_func, X_pca
