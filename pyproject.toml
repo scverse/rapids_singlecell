@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "rapids_singlecell"
 description = "running single cell analysis on Nvidia GPUs"
-requires-python = ">=3.10, <3.14"
+requires-python = ">=3.11, <3.14"
 license = { file = "LICENSE" }
 authors = [ { name = "Severin Dicks" } ]
 readme = { file = "README.md", content-type = "text/markdown" }
@@ -69,12 +69,13 @@ lint.select = [
     "TID",     # flake8-tidy-imports
     "C4",      # flake8-comprehensions
     "BLE",     # flake8-blind-except
+    "FBT",     # No boolean positional parameters
     "UP",      # pyupgrade
     "TID251",  # Banned imports
     "RUF100",  # Report unused noqa directives
     "ICN",     # Follow import conventions
     "PTH",     # Pathlib instead of os.path
-    "TCH",     # manage type checking blocks
+    "TC",      # manage type checking blocks
     "PLR0917", # Ban APIs with too many positional parameters
 ]
 
@@ -91,7 +92,7 @@ lint.ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "docs/*" = [ "I" ]
-"tests/*" = [ "D" ]
+"tests/*" = [ "D", "FBT" ]
 "*/__init__.py" = [ "F401" ]
 [tool.ruff.lint.isort]
 known-first-party = [ "rapids_singlecell" ]

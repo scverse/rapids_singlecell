@@ -34,6 +34,7 @@ def _fit(X: cp.ndarray, y: cp.ndarray, inv: cp.ndarray, df: float) -> cp.ndarray
 def _func_mlm(
     mat: cp.ndarray,
     adj: cp.ndarray,
+    *,
     tval: bool = True,
     verbose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:

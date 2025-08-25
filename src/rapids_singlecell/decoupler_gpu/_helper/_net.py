@@ -12,6 +12,7 @@ def prune(
     features: np.ndarray,
     net: pd.DataFrame,
     tmin: int = 5,
+    *,
     verbose: bool = False,
 ) -> pd.DataFrame:
     """
@@ -50,10 +51,7 @@ def prune(
     return vnet
 
 
-def _validate_net(
-    net=pd.DataFrame,
-    verbose: bool = False,
-) -> pd.DataFrame:
+def _validate_net(net, *, verbose: bool = False) -> pd.DataFrame:
     assert isinstance(net, pd.DataFrame), "net must be a DataFrame"
     assert {"source", "target"}.issubset(net.columns), (
         "DataFrame must have 'source' and 'target' columns\n \
@@ -109,6 +107,7 @@ def _order(
 def adjmat(
     features: np.ndarray,
     net: pd.DataFrame,
+    *,
     verbose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -135,6 +134,7 @@ def adjmat(
 def idxmat(
     features: np.ndarray,
     net: pd.DataFrame,
+    *,
     verbose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """

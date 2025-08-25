@@ -15,7 +15,7 @@ def test_validate_net(
     caplog,
 ):
     with caplog.at_level(logging.WARNING):
-        vnet = dc._helper._net._validate_net(net=net, verbose=verbose)
+        vnet = dc._helper._net._validate_net(net, verbose=verbose)
     assert caplog.text == ""
     assert net.shape == vnet.shape
     assert "source" in vnet.columns
@@ -25,7 +25,7 @@ def test_validate_net(
     net.drop(columns=["weight"], inplace=True)
     assert "weight" not in net.columns
     with caplog.at_level(logging.WARNING):
-        vnet = dc._helper._net._validate_net(net=net, verbose=verbose)
+        vnet = dc._helper._net._validate_net(net, verbose=verbose)
     if verbose:
         assert len(caplog.text) > 0
     assert "weight" in vnet.columns
@@ -120,7 +120,7 @@ def test_adjmat(
         assert len(caplog.text) > 0
     else:
         assert caplog.text == ""
-    unwnet = dc._helper._net._validate_net(net=unwnet)
+    unwnet = dc._helper._net._validate_net(unwnet)
     sources, targets, adjmat = dc._helper._net.adjmat(features=features, net=unwnet)
     adjmat = adjmat.ravel()
     non_zero_adjmat = adjmat[adjmat != 0.0]

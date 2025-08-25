@@ -27,6 +27,7 @@ def _tval(r: cp.ndarray, df: float) -> cp.ndarray:
 def _func_ulm(
     mat: cp.ndarray,
     adj: cp.ndarray,
+    *,
     tval: bool = True,
     verbose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:

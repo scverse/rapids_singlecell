@@ -45,6 +45,7 @@ def _validate_mat(
     mat: DataType_matrix,
     row: np.ndarray,
     col: np.ndarray,
+    *,
     empty: bool = True,
     verbose: bool = False,
 ) -> tuple[DataType_matrix, np.ndarray, np.ndarray]:
@@ -190,7 +191,7 @@ def _extract(data: DataType, *, raw=None, layer=None, pre_load=False):
         r = data.index.to_numpy(dtype="U")
         c = data.columns.to_numpy(dtype="U")
     elif type(data) is AnnData:
-        use_raw = _check_use_raw(data, raw, layer)
+        use_raw = _check_use_raw(data, layer, use_raw=raw)
         m = _get_obs_rep(data, layer=layer, use_raw=raw)
         c = (
             data.raw.var.index.values.astype("U")
@@ -223,8 +224,8 @@ def _extract(data: DataType, *, raw=None, layer=None, pre_load=False):
 def extract(
     data: DataType,
     layer: str | None = None,
-    raw: bool = False,
     *,
+    raw: bool = False,
     empty: bool = True,
     verbose: bool = False,
     bsize: int = 250_000,
@@ -250,7 +251,7 @@ def extract(
     Matrix, rownames and colnames from data.
     """
     # Extract
-    mat, row, col = _extract(data=data, layer=layer, raw=raw, pre_load=pre_load)
+    mat, row, col = _extract(data, layer=layer, raw=raw, pre_load=pre_load)
     # Validate
     isbacked = hasattr(data, "isbacked") and data.isbacked
     mat_tuple: (
@@ -258,9 +259,7 @@ def extract(
         | tuple[tuple[np.ndarray, np.ndarray], np.ndarray, np.ndarray]
     )
     if not isbacked:
-        mat, row, col = _validate_mat(
-            mat=mat, row=row, col=col, empty=empty, verbose=verbose
-        )
+        mat, row, col = _validate_mat(mat, row, col, empty=empty, verbose=verbose)
         # Randomly sort features
         mat, col = _break_ties(mat=mat, features=col)
         mat_tuple = (mat, row, col)

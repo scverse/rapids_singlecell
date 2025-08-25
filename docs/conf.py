@@ -1,10 +1,16 @@
+from __future__ import annotations
+
 # -- Path setup --------------------------------------------------------------
 import sys
 import os
 from datetime import datetime
 from importlib.metadata import metadata
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 import anndata  # noqa
+
+if TYPE_CHECKING:
+    from sphinx.application import Sphinx
 
 
 HERE = Path(__file__).parent
@@ -165,19 +171,19 @@ nitpick_ignore = [
 ]
 
 
-def setup(app):
+def setup(app: Sphinx) -> None:
     """App setup hook."""
     app.warningiserror = True
     app.add_config_value(
         "recommonmark_config",
-        {
+        default={
             "auto_toc_tree_section": "Contents",
             "enable_auto_toc_tree": True,
             "enable_math": True,
             "enable_inline_math": False,
             "enable_eval_rst": True,
         },
-        True,
+        rebuild=True,
     )
 
 

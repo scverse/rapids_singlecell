@@ -24,7 +24,7 @@ class PCA_sparse:
         self.n_features_in_ = x.shape[1] if x.ndim == 2 else 1
         self.dtype = x.data.dtype
 
-        covariance, self.mean_, _ = _cov_sparse(x=x, return_mean=True)
+        covariance, self.mean_, _ = _cov_sparse(x, return_mean=True)
 
         self.explained_variance_, self.components_ = cp.linalg.eigh(
             covariance, UPLO="U"
@@ -69,7 +69,7 @@ class PCA_sparse:
         return self.fit(X).transform(X)
 
 
-def _cov_sparse(x, return_gram=False, return_mean=False):
+def _cov_sparse(x, *, return_gram=False, return_mean=False):
     """
     Computes the mean and the covariance of matrix X of
     the form Cov(X, X) = E(XX) - E(X)E(X)

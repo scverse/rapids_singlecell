@@ -76,7 +76,7 @@ def score_genes(
         Scores of each cell.
     """
     adata = adata.copy() if copy else adata
-    use_raw = _check_use_raw(adata, use_raw, layer=layer)
+    use_raw = _check_use_raw(adata, layer, use_raw=use_raw)
     X = _get_obs_rep(adata, layer=layer, use_raw=use_raw)
     X = X_to_GPU(X)
     _check_gpu_X(X, allow_dask=True)

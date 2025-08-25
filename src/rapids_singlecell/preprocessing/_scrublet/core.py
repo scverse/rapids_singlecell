@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from dataclasses import InitVar, dataclass, field
 from typing import TYPE_CHECKING, cast
 
@@ -24,13 +23,7 @@ if TYPE_CHECKING:
 __all__ = ["Scrublet"]
 
 
-if sys.version_info > (3, 10):
-    kw_only = lambda yes: {"kw_only": yes}
-else:
-    kw_only = lambda _: {}
-
-
-@dataclass(**kw_only(True))
+@dataclass(kw_only=True)
 class Scrublet:
     """\
     Initialize Scrublet object with counts matrix and doublet prediction parameters
@@ -69,7 +62,7 @@ class Scrublet:
     # init fields
 
     counts_obs: InitVar[sparse.csr_matrix | sparse.csc_matrix | NDArray[np.integer]] = (
-        field(**kw_only(False))
+        field(kw_only=False)
     )
     total_counts_obs: InitVar[NDArray[np.integer] | None] = None
     sim_doublet_ratio: float = 2.0
@@ -274,6 +267,7 @@ class Scrublet:
 
     def calculate_doublet_scores(
         self,
+        *,
         use_approx_neighbors: bool = True,
         distance_metric="euclidean",
         get_doublet_neighbor_parents: bool = False,
