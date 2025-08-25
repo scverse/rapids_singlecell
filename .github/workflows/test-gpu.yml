@@ -44,7 +44,7 @@ jobs:
               select(.key | startswith("hatch-test"))
               | {
                 name: .key,
-                python: (.value.python | sub("3[.]13"; "3.13.3"))
+                python: (if (.key | test("dev")) then "3.13.3" else .value.python end)
               }
             )')
           echo "envs=${ENVS_JSON}" | tee $GITHUB_OUTPUT
