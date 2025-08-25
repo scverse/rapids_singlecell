@@ -13,7 +13,7 @@ from ._helper import _compute_cov, _copy_gram
 
 
 class PCA_sparse_dask:
-    def __init__(self, n_components, zero_center: bool = True) -> None:
+    def __init__(self, n_components, *, zero_center: bool = True) -> None:
         self.n_components = n_components
         self.zero_center = zero_center
 
