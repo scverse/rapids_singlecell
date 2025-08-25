@@ -27,8 +27,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-rapids11 = [ "cupy-cuda11x", "cudf-cu11==25.04.*", "cuml-cu11==25.04.*", "cugraph-cu11==25.04.*" ]
-rapids12 = [ "cupy-cuda12x", "cudf-cu12==25.04.*", "cuml-cu12==25.04.*", "cugraph-cu12==25.04.*" ]
+rapids12 = [ "cupy-cuda12x", "cudf-cu12==25.08.*", "cuml-cu12==25.08.*", "cugraph-cu12==25.08.*" ]
+rapids = [ "rapids_singlecell[rapids12]" ]
 doc = [
     "sphinx>=4.5.0",
     "sphinx-copybutton",
@@ -52,6 +52,11 @@ test-minimal = [
 test = [
     "rapids_singlecell[test-minimal]",
     "igraph",
+]
+
+dev = [
+    "hatch-vcs",
+    "pre-commit",
 ]
 
 [project.urls]
