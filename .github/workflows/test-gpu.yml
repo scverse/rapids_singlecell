@@ -38,7 +38,16 @@ jobs:
           enable-cache: false
       - id: get-envs
         run: |
-          ENVS_JSON=$(NO_COLOR=1 uvx hatch env show --json | jq -c 'to_entries | map(select(.key | startswith("hatch-test")) | {name: .key, python: .value.python})')
+          ENVS_JSON=$(NO_COLOR=1 uvx hatch env show --json | jq -c '
+            to_entries
+            | map(
+              select(.key | startswith("hatch-test"))
+              | {
+                name: .key,
+                "test-type": (if (.key | test("pre|min")) then "coverage" else null end),
+                python: (.value.python | sub("3[.]13"; "3.13.3"))
+              }
+            )')
           echo "envs=${ENVS_JSON}" | tee $GITHUB_OUTPUT
   test:
     needs: get-envs
