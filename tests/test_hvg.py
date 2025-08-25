@@ -29,6 +29,7 @@ def test_highly_variable_genes_basic(dtype, sparse):
     else:
         cudata.X = cp.array(cudata.X)
     np.random.seed(0)
+    cp.random.seed(0)
     cudata.obs["batch"] = np.random.binomial(3, 0.5, size=(cudata.n_obs))
     cudata.obs["batch"] = cudata.obs["batch"].astype("category")
     rsc.pp.highly_variable_genes(cudata, batch_key="batch")

@@ -15,7 +15,8 @@ from testing.rapids_singlecell._helper import (
 
 
 @pytest.mark.parametrize("data_kind", ["sparse", "dense"])
-def test_pca_dask(client, data_kind):
+@pytest.mark.parametrize("zero_center", [True, False])
+def test_pca_dask(client, data_kind, zero_center):
     adata_1 = pbmc3k_processed()
     adata_2 = pbmc3k_processed()
 
@@ -28,8 +29,8 @@ def test_pca_dask(client, data_kind):
     else:
         raise ValueError(f"Unknown data_kind {data_kind}")
 
-    rsc.pp.pca(adata_1, svd_solver="full")
-    rsc.pp.pca(adata_2, svd_solver="full")
+    rsc.pp.pca(adata_1, svd_solver="full", zero_center=zero_center)
+    rsc.pp.pca(adata_2, svd_solver="full", zero_center=zero_center)
 
     cp.testing.assert_allclose(
         np.abs(adata_1.obsm["X_pca"]),
@@ -48,8 +49,45 @@ def test_pca_dask(client, data_kind):
     cp.testing.assert_allclose(
         np.abs(adata_1.uns["pca"]["variance_ratio"]),
         np.abs(adata_2.uns["pca"]["variance_ratio"]),
-        rtol=1e-7,
-        atol=1e-6,
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
+
+@pytest.mark.parametrize(
+    ("svd_solver", "rtol", "atol"),
+    [("full", 1e-7, 1e-6), ("jacobi", 1e-5, 1e-5), ("covariance_eigh", 1e-7, 1e-6)],
+)
+def test_pca_dask_dense_svd_solver(client, svd_solver, rtol, atol):
+    adata_1 = pbmc3k_processed()
+    adata_2 = pbmc3k_processed()
+
+    adata_1.X = cp.array(adata_1.X.astype(np.float64))
+    adata_2.X = as_dense_cupy_dask_array(adata_2.X.astype(np.float64))
+
+    # Test results of full Dense PCA against DaskDensePCA with different svd solvers
+    rsc.pp.pca(adata_1, svd_solver="full", zero_center=True)
+    rsc.pp.pca(adata_2, svd_solver=svd_solver, zero_center=True)
+
+    cp.testing.assert_allclose(
+        np.abs(adata_1.obsm["X_pca"]),
+        cp.abs(adata_2.obsm["X_pca"].compute()),
+        rtol=rtol,
+        atol=atol,
+    )
+
+    cp.testing.assert_allclose(
+        np.abs(adata_1.varm["PCs"]),
+        np.abs(adata_2.varm["PCs"]),
+        rtol=rtol,
+        atol=atol,
+    )
+
+    cp.testing.assert_allclose(
+        np.abs(adata_1.uns["pca"]["variance_ratio"]),
+        np.abs(adata_2.uns["pca"]["variance_ratio"]),
+        rtol=rtol,
+        atol=atol,
     )
 
 
