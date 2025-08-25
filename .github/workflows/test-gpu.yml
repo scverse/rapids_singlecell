@@ -22,39 +22,58 @@ jobs:
       - uses: flying-sheep/check@v1
         with:
           success: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-gpu-ci') }}
-  test:
-    name: GPU Tests
+
+  get-envs:
+    runs-on: ubuntu-latest
     needs: check
+    outputs:
+      envs: ${{ steps.get-envs.outputs.envs }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          filter: blob:none
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
+      - id: get-envs
+        run: |
+          ENVS_JSON=$(NO_COLOR=1 uvx hatch env show --json | jq -c 'to_entries
+            | map(
+              select(.key | startswith("hatch-test"))
+              | {
+                name: .key,
+                python: (.value.python | sub("3[.]13$"; "3.13.3")),  # https://github.com/numba/numba/issues/10101
+              }
+            )')
+          echo "envs=${ENVS_JSON}" | tee $GITHUB_OUTPUT
+  test:
+    needs: get-envs
     runs-on: "cirun-aws-gpu--${{ github.run_id }}"
     timeout-minutes: 30
+    strategy:
+      matrix:
+        env: ${{ fromJson(needs.get-envs.outputs.envs) }}
+    env:
+      ENV_NAME: ${{ matrix.env.name }}
 
-    defaults:
-      run:
-        shell: bash -el {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          filter: blob:none
 
-      - name: Nvidia SMI sanity check
-        run: nvidia-smi
-
-      - uses: mamba-org/setup-micromamba@v2
+      - uses: astral-sh/setup-uv@v6
         with:
-          environment-file: ci/environment.yml
-          init-shell: >-
-            bash
-          cache-environment: true
-          post-cleanup: 'all'
+          enable-cache: true
+          python-version: ${{ matrix.env.python }}
+          cache-dependency-glob: pyproject.toml
 
-      - name: Install rapids-singlecell
-        run: pip install -e .[test]
+      - name: Install dependencies
+        run: uvx hatch -v env create ${{ matrix.env.name }}
 
-      - name: Pip list
-        run: pip list
-
-      - name: Run test
-        run: pytest
+      - name: Run tests
+        run: uvx hatch run ${{ matrix.env.name }} -- pytest
 
       - name: Remove 'run-gpu-ci' Label
         if: always()
