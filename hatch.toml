@@ -14,48 +14,27 @@ extra_index_urls = [
 
 [envs.hatch-test]
 default-args = [  ]
-features = [ "test" ]
+features = [ "test", "rapids12" ]
 
 overrides.matrix.deps.env-vars = [
     { if = [
         "dev",
-        "pre-rapids",
     ], key = "UV_PRERELEASE", value = "allow" },
-    { if = [
-        "pre-rapids",
-    ], key = "UV_EXTRA_INDEX_URL", value = "https://pypi.anaconda.org/rapidsai-wheels-nightly/simple" },
 ]
 
 overrides.matrix.deps.python = [
     { if = [ "stable" ], value = "3.11" },
-    { if = [ "dev", "pre-rapids" ], value = "3.13" },
+    { if = [ "dev" ], value = "3.13" },
 ]
 
 overrides.matrix.deps.extra-dependencies = [
     { if = [
-        "dev, pre-rapids",
-    ], value = "anndata[dev,test] @ git+https://github.com/scverse/anndata.git" },
+        "dev",
+    ], value = "anndata @ git+https://github.com/scverse/anndata.git" },
     { if = [
-        "dev,pre-rapids",
+        "dev",
     ], value = "scanpy @ git+https://github.com/scverse/scanpy.git" },
-    { if = [
-        "pre-rapids",
-    ], value = "cugraph-cu12>=25.10.0a0,<=25.10" },
-    { if = [
-        "pre-rapids",
-    ], value = "cudf-cu12>=25.10.0a0,<=25.10" },
-    { if = [
-        "pre-rapids",
-    ], value = "cuml-cu12>=25.10.0a0,<=25.10" },
-    { if = [
-        "pre-rapids",
-    ], value = "dask-cuda>=25.10.0a0,<=25.10" },
-]
-
-overrides.matrix.deps.features = [
-    { if = [ "stable", "dev" ], value = "rapids12" },
-
 ]
 
 [[envs.hatch-test.matrix]]
-deps = [ "stable", "dev", "pre-rapids" ]
+deps = [ "stable", "dev" ]
