@@ -26,7 +26,7 @@ class PCA_sparse_dask:
         self.n_samples_ = x.shape[0]
         self.n_features_in_ = x.shape[1] if x.ndim == 2 else 1
         self.dtype = x.dtype
-        covariance, self.mean_, _ = _cov_sparse_dask(x=x, return_mean=True)
+        covariance, self.mean_, _ = _cov_sparse_dask(x, return_mean=True)
         self.explained_variance_, self.components_ = cp.linalg.eigh(
             covariance, UPLO="U"
         )
@@ -82,7 +82,7 @@ class PCA_sparse_dask:
 
 
 @with_cupy_rmm
-def _cov_sparse_dask(x, return_gram=False, return_mean=False):
+def _cov_sparse_dask(x, *, return_gram=False, return_mean=False):
     """
     Computes the mean and the covariance of matrix X of
     the form Cov(X, X) = E(XX) - E(X)E(X)

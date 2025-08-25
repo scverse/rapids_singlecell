@@ -292,7 +292,7 @@ def _check_nonnegative_integers(X):
         return True
 
 
-def _check_gpu_X(X, require_cf=False, allow_dask=False, allow_csc=True):
+def _check_gpu_X(X, *, require_cf=False, allow_dask=False, allow_csc=True):
     if isinstance(X, DaskArray):
         if allow_dask:
             return _check_gpu_X(X._meta, allow_csc=False)
@@ -327,7 +327,7 @@ def _check_gpu_X(X, require_cf=False, allow_dask=False, allow_csc=True):
         )
 
 
-def _check_use_raw(adata: AnnData, use_raw: None | bool, layer: str | None) -> bool:
+def _check_use_raw(adata: AnnData, layer: str | None, *, use_raw: None | bool) -> bool:
     """
     Normalize checking `use_raw`.
 

@@ -85,27 +85,19 @@ def unwnet(net):
 
 
 @pytest.fixture
-def mat(
-    adata,
-):
-    return dc.pp.extract(data=adata)
+def mat(adata):
+    return dc.pp.extract(adata)
 
 
 @pytest.fixture
-def idxmat(
-    mat,
-    net,
-):
+def idxmat(mat, net):
     X, obs, var = mat
     sources, cnct, starts, offsets = dc.pp.idxmat(features=var, net=net, verbose=False)
     return cnct, starts, offsets
 
 
 @pytest.fixture
-def adjmat(
-    mat,
-    net,
-):
+def adjmat(mat, net):
     X, obs, var = mat
     sources, targets, adjmat = dc.pp.adjmat(features=var, net=net, verbose=False)
     return adjmat
