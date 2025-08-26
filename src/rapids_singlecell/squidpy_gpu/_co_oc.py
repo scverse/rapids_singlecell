@@ -100,7 +100,7 @@ def _find_min_max(spatial: cp.ndarray) -> tuple[float, float]:
 
 
 def _co_occurrence_helper(
-    spatial: cp.ndarray, v_radium: cp.ndarray, labs: cp.ndarray, fast: bool = True
+    spatial: cp.ndarray, v_radium: cp.ndarray, labs: cp.ndarray, *, fast: bool = True
 ) -> cp.ndarray:
     """
     Fast co-occurrence probability computation using cuda kernels.

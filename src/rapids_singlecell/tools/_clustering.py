@@ -32,7 +32,7 @@ def _check_dtype(dtype: str | np.dtype | cp.dtype) -> str | np.dtype | cp.dtype:
         raise ValueError("dtype must be one of ['float32', 'float64']")
 
 
-def _create_graph(adjacency, use_weights=True, dtype=np.float64):
+def _create_graph(adjacency, dtype=np.float64, *, use_weights=True):
     from cugraph import Graph
 
     sources, targets = adjacency.nonzero()
@@ -151,7 +151,7 @@ def leiden(
             adjacency=adjacency,
         )
 
-    g = _create_graph(adjacency, use_weights, dtype)
+    g = _create_graph(adjacency, dtype, use_weights=use_weights)
     # Cluster
     leiden_parts, _ = culeiden(
         g,
@@ -286,7 +286,7 @@ def louvain(
             adjacency=adjacency,
         )
 
-    g = _create_graph(adjacency, use_weights, dtype)
+    g = _create_graph(adjacency, dtype, use_weights=use_weights)
 
     # Cluster
     louvain_parts, _ = culouvain(
