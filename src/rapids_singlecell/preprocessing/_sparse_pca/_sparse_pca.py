@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Literal, Self, overload
+
 import cupy as cp
 import dask
-from cupyx.scipy.sparse import csr_matrix
+from cupyx.scipy.sparse import csr_matrix, spmatrix
 
 from rapids_singlecell._compat import (
     DaskArray,
@@ -16,11 +18,11 @@ from ._helper import _check_matrix_for_zero_genes, _compute_cov, _copy_gram
 
 
 class PCA_sparse:
-    def __init__(self, n_components: int, *, zero_center: bool = True) -> None:
+    def __init__(self, n_components: int | None, *, zero_center: bool = True) -> None:
         self.n_components = n_components
         self.zero_center = zero_center
 
-    def fit(self, x):
+    def fit(self, x: spmatrix | DaskArray) -> Self:
         if self.n_components is None:
             n_rows = x.shape[0]
             n_cols = x.shape[1]
@@ -67,7 +69,7 @@ class PCA_sparse:
 
         return self
 
-    def transform(self, X):
+    def transform(self, X: spmatrix | DaskArray) -> spmatrix | DaskArray:
         if isinstance(X, DaskArray):
             X_pca = self._transform_dask(X)
         else:
@@ -78,7 +80,7 @@ class PCA_sparse:
         self.explained_variance_ratio_ = self.explained_variance_ratio_.get()
         return X_pca
 
-    def _transform_cupy(self, X):
+    def _transform_cupy(self, X: spmatrix) -> spmatrix:
         if self.zero_center:
             precomputed_mean_impact = self.mean_ @ self.components_.T
             mean_impact = cp.ones(
@@ -91,7 +93,7 @@ class PCA_sparse:
 
         return X_transformed.get()
 
-    def _transform_dask(self, X):
+    def _transform_dask(self, X: DaskArray) -> DaskArray:
         if self.zero_center:
 
             def _transform(X_part, mean_, components_):
@@ -122,7 +124,19 @@ class PCA_sparse:
         return self.fit(X).transform(X)
 
 
-def _cov_sparse(x, *, return_gram: bool = False):
+@overload
+def _cov_sparse(
+    x: spmatrix | DaskArray, *, return_gram: Literal[False] = False
+) -> tuple[cp.ndarray, cp.ndarray]: ...
+@overload
+def _cov_sparse(
+    x: spmatrix | DaskArray, *, return_gram: Literal[True]
+) -> cp.ndarray: ...
+
+
+def _cov_sparse(
+    x: spmatrix | DaskArray, *, return_gram: bool = False
+) -> cp.ndarray | tuple[cp.ndarray, cp.ndarray]:
     """
     Computes the mean and the covariance of matrix X of
     the form Cov(X, X) = E(XX) - E(X)E(X)
