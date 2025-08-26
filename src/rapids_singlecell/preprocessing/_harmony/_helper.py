@@ -437,6 +437,7 @@ def _choose_colsum_algo_benchmark(
     rows: int,
     cols: int,
     dtype: cp.dtype = cp.float32,
+    *,
     verbose: bool = True,
 ) -> callable:
     """

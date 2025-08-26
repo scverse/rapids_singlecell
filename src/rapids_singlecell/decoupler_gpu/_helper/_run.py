@@ -27,6 +27,7 @@ def _return(
     data: DataType,
     es: pd.DataFrame,
     pv: pd.DataFrame,
+    *,
     verbose: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame] | AnnData | None:
     if isinstance(data, AnnData):

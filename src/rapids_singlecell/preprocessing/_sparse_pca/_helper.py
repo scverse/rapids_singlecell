@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
 import cupy as cp
 
 from ._kernels._pca_sparse_kernel import _copy_kernel, _cov_kernel
+
+if TYPE_CHECKING:
+    from cupyx.scipy.sparse import spmatrix
 
 
 def _copy_gram(gram_matrix, n_cols):
@@ -35,7 +39,7 @@ def _compute_cov(cov_result, gram_matrix, mean_x):
     return cov_result
 
 
-def _check_matrix_for_zero_genes(X):
+def _check_matrix_for_zero_genes(X: spmatrix) -> None:
     gene_ex = cp.zeros(X.shape[1], dtype=cp.int32)
 
     from ._kernels._pca_sparse_kernel import _zero_genes_kernel

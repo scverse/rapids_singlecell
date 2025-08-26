@@ -92,12 +92,7 @@ def _fdr_correct(
     return pvals
 
 
-def _check_tuple_needles(
-    needles,
-    haystack,
-    msg: str,
-    reraise: bool = True,
-):
+def _check_tuple_needles(needles, haystack, *, msg: str, reraise: bool = True):
     filtered = []
 
     for needle in needles:

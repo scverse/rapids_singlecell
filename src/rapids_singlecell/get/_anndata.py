@@ -32,6 +32,7 @@ CPU_ARRAY_TYPE = Union[np.ndarray, csr_matrix_cpu, csc_matrix_cpu]  # noqa: UP00
 def anndata_to_GPU(
     adata: AnnData,
     layer: str | None = None,
+    *,
     convert_all: bool = False,
     copy: bool = False,
 ) -> AnnData | None:
@@ -110,6 +111,7 @@ def X_to_GPU(
 def anndata_to_CPU(
     adata: AnnData,
     layer: str | None = None,
+    *,
     convert_all: bool = False,
     copy: bool = False,
 ) -> AnnData | None:

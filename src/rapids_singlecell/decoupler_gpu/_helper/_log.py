@@ -9,7 +9,7 @@ logging.basicConfig(
 )
 
 
-def _log(message: str, level: str = "info", verbose: bool = False) -> None:
+def _log(message: str, level: str = "info", *, verbose: bool = False) -> None:
     """
     Log a message with a specified logging level.
 
