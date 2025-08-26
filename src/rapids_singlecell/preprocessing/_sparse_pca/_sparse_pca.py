@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
-import math
-
 import cupy as cp
+import dask
+from cupyx.scipy.sparse import csr_matrix
+
+from rapids_singlecell._compat import (
+    DaskArray,
+    _meta_dense,
+)
+from rapids_singlecell.preprocessing._utils import _get_mean_var
+
+from ._helper import _check_matrix_for_zero_genes, _compute_cov, _copy_gram
 
 
 class PCA_sparse:
-    def __init__(self, n_components) -> None:
+    def __init__(self, n_components: int, *, zero_center: bool = True) -> None:
         self.n_components = n_components
+        self.zero_center = zero_center
 
     def fit(self, x):
         if self.n_components is None:
@@ -18,13 +27,19 @@ class PCA_sparse:
             self.n_components_ = min(n_rows, n_cols)
         else:
             self.n_components_ = self.n_components
-
-        _check_matrix_for_zero_genes(x)
+        if not isinstance(x, DaskArray):
+            _check_matrix_for_zero_genes(x)
         self.n_samples_ = x.shape[0]
         self.n_features_in_ = x.shape[1] if x.ndim == 2 else 1
-        self.dtype = x.data.dtype
+        self.dtype = x.dtype
 
-        covariance, self.mean_, _ = _cov_sparse(x, return_mean=True)
+        if self.zero_center:
+            covariance, self.mean_ = _cov_sparse(x)
+        else:
+            # For truncated SVD (uncentered), operate on the Gram matrix (1/n * X^T X)
+            # We don't subtract the mean in this path
+            covariance = _cov_sparse(x, return_gram=True)
+            self.mean_ = None
 
         self.explained_variance_, self.components_ = cp.linalg.eigh(
             covariance, UPLO="U"
@@ -53,23 +68,61 @@ class PCA_sparse:
         return self
 
     def transform(self, X):
-        precomputed_mean_impact = self.mean_ @ self.components_.T
-        mean_impact = cp.ones(
-            (X.shape[0], 1), dtype=cp.float32
-        ) @ precomputed_mean_impact.reshape(1, -1)
-        X_transformed = X.dot(self.components_.T) - mean_impact
-        # X = X - self.mean_
-        # X_transformed = X.dot(self.components_.T)
+        if isinstance(X, DaskArray):
+            X_pca = self._transform_dask(X)
+        else:
+            X_pca = self._transform_cupy(X)
+
         self.components_ = self.components_.get()
         self.explained_variance_ = self.explained_variance_.get()
         self.explained_variance_ratio_ = self.explained_variance_ratio_.get()
+        return X_pca
+
+    def _transform_cupy(self, X):
+        if self.zero_center:
+            precomputed_mean_impact = self.mean_ @ self.components_.T
+            mean_impact = cp.ones(
+                (X.shape[0], 1), dtype=cp.float32
+            ) @ precomputed_mean_impact.reshape(1, -1)
+            X_transformed = X.dot(self.components_.T) - mean_impact
+        else:
+            # Uncentered projection for truncated SVD
+            X_transformed = X.dot(self.components_.T)
+
         return X_transformed.get()
+
+    def _transform_dask(self, X):
+        if self.zero_center:
+
+            def _transform(X_part, mean_, components_):
+                pre_mean = mean_ @ components_.T
+                mean_impact = cp.ones(
+                    (X_part.shape[0], 1), dtype=X_part.dtype
+                ) @ pre_mean.reshape(1, -1)
+                X_transformed = X_part.dot(components_.T) - mean_impact
+                return X_transformed
+        else:
+
+            def _transform(X_part, mean_, components_):
+                X_transformed = X_part.dot(components_.T)
+                return X_transformed
+
+        X_pca = X.map_blocks(
+            _transform,
+            mean_=self.mean_,
+            components_=self.components_,
+            dtype=X.dtype,
+            chunks=(X.chunks[0], self.n_components_),
+            meta=_meta_dense(X.dtype),
+        )
+
+        return X_pca
 
     def fit_transform(self, X, y=None):
         return self.fit(X).transform(X)
 
 
-def _cov_sparse(x, *, return_gram=False, return_mean=False):
+def _cov_sparse(x, *, return_gram: bool = False):
     """
     Computes the mean and the covariance of matrix X of
     the form Cov(X, X) = E(XX) - E(X)E(X)
@@ -107,88 +160,99 @@ def _cov_sparse(x, *, return_gram=False, return_mean=False):
             when return_gram is True and return_mean is True
     """
 
+    gram_matrix = _create_gram_matrix(x)
+
+    if return_gram:
+        if isinstance(x, DaskArray):
+            gram_matrix = gram_matrix.compute()
+        if _check_csr_meta(x) or isinstance(x, csr_matrix):
+            return _copy_gram(gram_matrix, x.shape[1])
+        else:
+            return gram_matrix
+    else:
+        mean_x, _ = _get_mean_var(x, axis=0)
+        if isinstance(x, DaskArray):
+            gram_matrix, mean_x = dask.compute(gram_matrix, mean_x)
+        if _check_csr_meta(x) or isinstance(x, csr_matrix):
+            gram_matrix = _copy_gram(gram_matrix, x.shape[1])
+
+        mean_x = mean_x.astype(x.dtype)
+        gram_matrix *= 1 / x.shape[0]
+
+        cov_result = gram_matrix
+        cov_result = _compute_cov(cov_result, gram_matrix, mean_x)
+        return cov_result, mean_x
+
+
+def _create_gram_matrix(x):
     from ._kernels._pca_sparse_kernel import (
-        _copy_kernel,
-        _cov_kernel,
         _gramm_kernel_csr,
     )
 
-    gram_matrix = cp.zeros((x.shape[1], x.shape[1]), dtype=x.data.dtype)
+    if isinstance(x, csr_matrix):
+        gram_matrix = cp.zeros((x.shape[1], x.shape[1]), dtype=x.data.dtype)
 
-    block = (128,)
-    grid = (x.shape[0],)
-    compute_mean_cov = _gramm_kernel_csr(x.data.dtype)
-    compute_mean_cov(
-        grid,
-        block,
-        (
-            x.indptr,
-            x.indices,
-            x.data,
-            x.shape[0],
-            x.shape[1],
-            gram_matrix,
-        ),
-    )
-
-    copy_gram = _copy_kernel(x.data.dtype)
-    block = (32, 32)
-    grid = (math.ceil(x.shape[1] / block[0]), math.ceil(x.shape[1] / block[1]))
-    copy_gram(
-        grid,
-        block,
-        (gram_matrix, x.shape[1]),
-    )
-
-    mean_x = x.sum(axis=0) * (1 / x.shape[0])
-    gram_matrix *= 1 / x.shape[0]
-
-    if return_gram:
-        cov_result = cp.zeros(
-            (gram_matrix.shape[0], gram_matrix.shape[0]),
-            dtype=gram_matrix.dtype,
+        block = (128,)
+        grid = (x.shape[0],)
+        compute_mean_cov = _gramm_kernel_csr(x.dtype)
+        compute_mean_cov(
+            grid,
+            block,
+            (
+                x.indptr,
+                x.indices,
+                x.data,
+                x.shape[0],
+                x.shape[1],
+                gram_matrix,
+            ),
         )
+    elif isinstance(x, DaskArray):
+        compute_mean_cov = _gramm_kernel_csr(x.dtype)
+        compute_mean_cov.compile()
+        n_cols = x.shape[1]
+        if isinstance(x._meta, csr_matrix):
+            # Gram matrix for CSR matrix
+            def __gram_block(x_part):
+                gram_matrix = cp.zeros((n_cols, n_cols), dtype=x.dtype)
+
+                block = (128,)
+                grid = (x_part.shape[0],)
+                compute_mean_cov(
+                    grid,
+                    block,
+                    (
+                        x_part.indptr,
+                        x_part.indices,
+                        x_part.data,
+                        x_part.shape[0],
+                        n_cols,
+                        gram_matrix,
+                    ),
+                )
+                return gram_matrix[None, ...]  # need new axis for summing
+        else:
+            # Gram matrix for DaskArray of CuPy NDArray
+            def __gram_block(x_part):
+                gram_matrix = x_part.T.dot(x_part)
+                return gram_matrix[None, ...]
+
+        n_blocks = x.blocks.size
+        gram_matrix = x.map_blocks(
+            __gram_block,
+            new_axis=(1,),
+            chunks=((1,) * n_blocks, (x.shape[1],), (x.shape[1],)),
+            meta=cp.array([]),
+            dtype=x.dtype,
+        ).sum(axis=0)
     else:
-        cov_result = gram_matrix
-
-    compute_cov = _cov_kernel(x.dtype)
-
-    block_size = (32, 32)
-    grid_size = (math.ceil(gram_matrix.shape[0] / 8),) * 2
-    compute_cov(
-        grid_size,
-        block_size,
-        (cov_result, gram_matrix, mean_x, mean_x, gram_matrix.shape[0]),
-    )
-
-    if not return_gram and not return_mean:
-        return cov_result
-    elif return_gram and not return_mean:
-        return cov_result, gram_matrix
-    elif not return_gram and return_mean:
-        return cov_result, mean_x, mean_x
-    elif return_gram and return_mean:
-        return cov_result, gram_matrix, mean_x, mean_x
+        raise ValueError(f"Unsupported matrix type: {type(x)}")
+    return gram_matrix
 
 
-def _check_matrix_for_zero_genes(X):
-    gene_ex = cp.zeros(X.shape[1], dtype=cp.int32)
-
-    from ._kernels._pca_sparse_kernel import _zero_genes_kernel
-
-    block = (32,)
-    grid = (int(math.ceil(X.nnz / block[0])),)
-    _zero_genes_kernel(
-        grid,
-        block,
-        (
-            X.indices,
-            gene_ex,
-            X.nnz,
-        ),
-    )
-    if cp.any(gene_ex == 0):
-        raise ValueError(
-            "There are genes with zero expression. "
-            "Please remove them before running PCA."
-        )
+def _check_csr_meta(x):
+    # Check if the meta of the DaskArray is a CSR matrix
+    if isinstance(x, DaskArray):
+        return isinstance(x._meta, csr_matrix)
+    else:
+        return False
