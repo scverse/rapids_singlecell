@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 import warnings
 from typing import TYPE_CHECKING, Literal
 
@@ -169,7 +168,7 @@ def harmonize(
 
     # Set random seed
     cp.random.seed(random_state)
-    t1 = time.time()
+
     # Initialize algorithm
     R, E, O, objectives_harmony = _initialize_centroids(
         Z_norm,
@@ -183,8 +182,7 @@ def harmonize(
         n_batches=n_batches,
         colsum_func=colsum_func_big,
     )
-    t2 = time.time()
-    print(f"Initialization time: {t2 - t1} seconds")
+
     # Main harmony iterations
     is_converged = False
 
