@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import anndata as ad
 import cupy as cp
 import numpy as np
+import pandas as pd
 import pytest
 import scanpy as sc
 from scipy.stats import pearsonr
@@ -22,6 +24,28 @@ def _get_measure(x, base, norm):
         return corr
     else:
         return np.linalg.norm(x - base) / np.linalg.norm(base)
+
+
+@pytest.fixture
+def adata_reference():
+    X_pca = pd.read_csv(
+        "https://github.com/slowkow/harmonypy/raw/refs/heads/master/data/pbmc_3500_pcs.tsv.gz",
+        delimiter="\t",
+    )
+    X_pca_harmony = pd.read_csv(
+        "https://github.com/slowkow/harmonypy/raw/refs/heads/master/data/pbmc_3500_pcs_harmonized.tsv.gz",
+        delimiter="\t",
+    )
+    meta = pd.read_csv(
+        "https://github.com/slowkow/harmonypy/raw/refs/heads/master/data/pbmc_3500_meta.tsv.gz",
+        delimiter="\t",
+    )
+    adata = ad.AnnData(
+        X=None,
+        obs=meta,
+        obsm={"X_pca": X_pca.values, "harmony_org": X_pca_harmony.values},
+    )
+    return adata
 
 
 @pytest.mark.parametrize("correction_method", ["fast", "original"])
@@ -101,3 +125,41 @@ def test_benchmark_colsum_algorithms(dtype):
     test_shape = (1000, 100)
     algo_func = _choose_colsum_algo_benchmark(test_shape[0], test_shape[1], dtype)
     assert callable(algo_func)
+
+
+@pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
+@pytest.mark.parametrize("use_gemm", [True, False])
+@pytest.mark.parametrize("column", ["gemm", "columns", "atomics", "cupy"])
+@pytest.mark.parametrize("correction_method", ["fast", "original"])
+def test_harmony_integrate_reference(
+    adata_reference, *, dtype, use_gemm, column, correction_method
+):
+    """
+    Test that Harmony integrate works.
+    """
+    rsc.pp.harmony_integrate(
+        adata_reference,
+        "donor",
+        correction_method=correction_method,
+        use_gemm=use_gemm,
+        dtype=dtype,
+        colsum_algo=column,
+        max_iter_harmony=20,
+    )
+
+    assert (
+        _get_measure(
+            adata_reference.obsm["harmony_org"],
+            adata_reference.obsm["X_pca_harmony"],
+            "L2",
+        ).max()
+        < 0.05
+    )
+    assert (
+        _get_measure(
+            adata_reference.obsm["harmony_org"],
+            adata_reference.obsm["X_pca_harmony"],
+            "r",
+        ).min()
+        > 0.95
+    )

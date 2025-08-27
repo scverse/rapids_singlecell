@@ -359,7 +359,7 @@ def _clustering(
             _outer_cp(E, Pr_b, R_in_sum, 0)
 
             # Update cluster assignments for current block
-            R_out = _calc_R(term, cp.cublas.gemm("N", "T", Z_norm[idx_in], Y_norm))
+            R_out = _calc_R(term, cp.dot(Z_norm[idx_in], Y_norm.T))
             # Apply penalty term to cluster assignments
             penalty_term = _get_pen(E, O, theta.T)
             if Phi is None:
