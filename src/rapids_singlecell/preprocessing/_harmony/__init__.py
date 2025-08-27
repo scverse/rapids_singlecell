@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import warnings
 from typing import TYPE_CHECKING, Literal
 
@@ -25,6 +26,7 @@ from ._helper import (
     _normalize_cp,
     _one_hot_tensor_cp,
     _outer_cp,
+    _penalty_term,
     _scatter_add_cp,
     _scatter_add_cp_bias_csr,
     _Z_correction,
@@ -167,7 +169,7 @@ def harmonize(
 
     # Set random seed
     cp.random.seed(random_state)
-
+    t1 = time.time()
     # Initialize algorithm
     R, E, O, objectives_harmony = _initialize_centroids(
         Z_norm,
@@ -181,7 +183,8 @@ def harmonize(
         n_batches=n_batches,
         colsum_func=colsum_func_big,
     )
-
+    t2 = time.time()
+    print(f"Initialization time: {t2 - t1} seconds")
     # Main harmony iterations
     is_converged = False
 
@@ -331,7 +334,7 @@ def _clustering(
 
     for _ in range(max_iter):
         # Compute cluster centroids
-        Y = cp.dot(R.T, Z_norm)
+        Y = cp.cublas.gemm("T", "N", R, Z_norm)
         Y_norm = _normalize_cp(Y, p=2)
 
         # Randomly shuffle cell indices for block updates
@@ -358,11 +361,12 @@ def _clustering(
             _outer_cp(E, Pr_b, R_in_sum, 0)
 
             # Update cluster assignments for current block
-            R_out = _calc_R(term, cp.dot(Z_norm[idx_in], Y_norm.T))
+            R_out = _calc_R(term, cp.cublas.gemm("N", "T", Z_norm[idx_in], Y_norm))
             # Apply penalty term to cluster assignments
             penalty_term = _get_pen(E, O, theta.T)
             if Phi is None:
-                R_out *= penalty_term[cats_in]
+                # R_out *= penalty_term[cats_in]
+                R_out = _penalty_term(R_out, penalty_term, cats_in)
             else:
                 omega = cp.dot(Phi_in, penalty_term)
                 R_out *= omega
@@ -371,7 +375,7 @@ def _clustering(
             R_out = _normalize_cp(R_out, p=1)
             R[idx_in] = R_out
             # Use optimized column sum function again
-            R_out_sum = colsum_func(R_in)
+            R_out_sum = colsum_func(R_out)
 
             # Add contribution of updated block back to O
             if Phi is None:

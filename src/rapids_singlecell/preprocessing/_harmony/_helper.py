@@ -13,6 +13,7 @@ from ._kernels._outer import (
     _get_harmony_correction_kernel,
     _get_outer_kernel,
 )
+from ._kernels._pen import _get_pen_kernel
 from ._kernels._scatter_add import (
     _get_aggregated_matrix_kernel,
     _get_scatter_add_kernel_optimized,
@@ -461,3 +462,16 @@ def _choose_colsum_algo_benchmark(
     if verbose:
         print(f"Using {algo} for column sum")
     return func
+
+
+def _penalty_term(R: cp.ndarray, penalty: cp.ndarray, cats: cp.ndarray) -> cp.ndarray:
+    """
+    Calculate the penalty term for the Harmony algorithm.
+    """
+    n_cats, n_pcs = R.shape
+    N = n_cats * n_pcs
+    threads_per_block = 256
+    blocks = (N + threads_per_block - 1) // threads_per_block
+    pen_kernel = _get_pen_kernel(R.dtype)
+    pen_kernel((blocks,), (threads_per_block,), (R, penalty, cats, n_cats, n_pcs))
+    return R
