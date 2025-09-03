@@ -1,81 +1,79 @@
 from __future__ import annotations
 
-import math
-
 import cupy as cp
 import numpy as np
 
 from rapids_singlecell.decoupler_gpu._helper._docs import docs
 from rapids_singlecell.decoupler_gpu._helper._log import _log
 from rapids_singlecell.decoupler_gpu._helper._Method import Method, MethodMeta
+from rapids_singlecell.decoupler_gpu._helper._run import _run
 
-# Kernel definition
-reduce_sum_2D_kernel = cp.RawKernel(
+
+def rank_rows_desc(x: cp.ndarray) -> cp.ndarray:
+    order = cp.argsort(-x, axis=1)
+    n = x.shape[1]
+    ranks = cp.empty_like(order, dtype=cp.int32)
+    row_idx = cp.arange(x.shape[0])[:, None]
+    ranks[row_idx, order] = cp.arange(1, n + 1, dtype=cp.int32)
+    return ranks
+
+
+_auc_kernel = cp.RawKernel(
     r"""
-    extern "C" __global__
-    void aucell_reduce(const int* input, int* output, int R, int C, int max) {
-        int row = blockIdx.x *blockDim.x+ threadIdx.x ;
-        if (row>=R){
-            return;
+extern "C" __global__
+void auc_kernel(
+    const int* __restrict__ ranks,
+    const int R, const int C,
+    const int* __restrict__ cnct,
+    const int* __restrict__ starts,
+    const int* __restrict__ lens,
+    const int n_sets,
+    const int n_up,
+    const float*  __restrict__ max_aucs,
+    float*        __restrict__ es)
+{
+    const int set = blockIdx.x;
+    const int row = blockIdx.y * blockDim.x + threadIdx.x;
+    if (set >= n_sets || row >= R) return;
+
+    const int start = starts[set];
+    const int end   = start + lens[set];
+
+    int r = 0;
+    int s = 0;
+
+    for (int i = start; i < end; ++i) {
+        const int g = cnct[i];
+        const int rk = ranks[row * C + g];
+        if (rk <= n_up) {
+            r += 1;
+            s += rk;
         }
-        int sum = 0;
-        int prev = input[row*C+0];
-        int switcher = 1;
-        if (prev < max){
-            switcher = 0;
-            for(int i  = 1; i<C; i++){
-                int data = input[row*C+i];
-                if(data<max) {
-                    sum+= i *(data-prev);
-                    prev = data;
-                }
-                else{
-                    sum += i *(max-prev);
-                    switcher = 1;
-                    break;
-                }
-            }
-        }
-        if (switcher == 0){
-            sum += C *(max-prev);
-        }
-        output[row] = sum;
     }
-    """,
-    "aucell_reduce",
+    const float val = (float)((r * (long long)n_up) - s) / max_aucs[set];
+    es[row * n_sets + set] = val;
+}
+""",
+    "auc_kernel",
 )
 
 
-def _auc(
-    row, cnct, *, starts=None, offsets=None, n_up=None, n_fsets=None, max_aucs=None
-):
-    # Rank row
-    row = cp.argsort(cp.argsort(-row), axis=1) + 1
-    row = row.astype(cp.int32)
-    # Empty acts
-    es = cp.zeros((row.shape[0], n_fsets), dtype=cp.float32)
-    es_inter = cp.zeros(row.shape[0], dtype=cp.int32)
+def _auc(row, cnct, *, starts, offsets, n_up, n_fsets, max_aucs):
+    # Cast dtypes to what the kernel expects
+    ranks = rank_rows_desc(row)
 
-    threads_per_block = 32
-    blocks_per_grid = math.ceil(row.shape[0] / threads_per_block)
+    max_aucs = max_aucs.astype(cp.float32, copy=False)
 
-    for j in range(n_fsets):
-        # Extract feature set
-        srt = starts[j]
-        off = offsets[j] + srt
-        fset = cnct[srt:off]
-        # Compute AUC
-        x = row[:, fset]
-        x.sort(axis=1)
+    R, C = ranks.shape
+    es = cp.zeros((R, n_fsets), dtype=cp.float32)
 
-        reduce_sum_2D_kernel(
-            (blocks_per_grid,),
-            (threads_per_block,),
-            (x, es_inter, x.shape[0], x.shape[1], n_up),
-        )
-        # Update acts matrix
-        es[:, j] = (es_inter / max_aucs[j]).astype(cp.float32)
-        es_inter[:] = 0
+    tpb = 1024
+    grid_y = (R + tpb - 1) // tpb
+    _auc_kernel(
+        (n_fsets, grid_y),
+        (tpb,),
+        (ranks, R, C, cnct, starts, offsets, n_fsets, n_up, max_aucs, es),
+    )
     return es
 
 
@@ -160,6 +158,41 @@ def _func_aucell(
     return es.get(), None
 
 
+class AucellMethod(Method):
+    """Custom Method class for aucell with bsize=100 as default."""
+
+    def __call__(
+        self,
+        data,
+        net,
+        *,
+        tmin: int | float = 5,
+        raw: bool = False,
+        empty: bool = True,
+        bsize: int | float = 100,  # Default batch size of 100
+        verbose: bool = False,
+        pre_load: bool = False,
+        n_up: int | float | None = None,
+        **kwargs,
+    ):
+        return _run(
+            name=self.name,
+            func=self.func,
+            adj=self.adj,
+            test=self.test,
+            data=data,
+            net=net,
+            tmin=tmin,
+            raw=raw,
+            empty=empty,
+            bsize=bsize,
+            verbose=verbose,
+            pre_load=pre_load,
+            n_up=n_up,
+            **kwargs,
+        )
+
+
 _aucell = MethodMeta(
     name="aucell",
     desc="AUCell",
@@ -171,4 +204,4 @@ _aucell = MethodMeta(
     limits=(0, 1),
     reference="https://doi.org/10.1038/nmeth.4463",
 )
-aucell = Method(_method=_aucell)
+aucell = AucellMethod(_method=_aucell)

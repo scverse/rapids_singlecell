@@ -97,7 +97,7 @@ def _run(
     layer: str | None = None,
     raw: bool = False,
     empty: bool = True,
-    bsize: int | float = 250_000,
+    bsize: int | float = 5000,
     verbose: bool = False,
     pre_load: bool = False,
     **kwargs,

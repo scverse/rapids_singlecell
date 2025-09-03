@@ -52,9 +52,9 @@ def test_func_aucell(
         index=obs,
     )
     X_cp = cp.array(X.toarray())
-    cnct_cp = cp.array(cnct)
-    starts_cp = cp.array(starts)
-    offsets_cp = cp.array(offsets)
+    cnct_cp = cp.array(cnct, dtype=cp.int32)
+    starts_cp = cp.array(starts, dtype=cp.int32)
+    offsets_cp = cp.array(offsets, dtype=cp.int32)
     dc_es, _ = dc._method_aucell._func_aucell(
         mat=X_cp,
         cnct=cnct_cp,
