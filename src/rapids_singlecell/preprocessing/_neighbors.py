@@ -250,11 +250,15 @@ def _nn_descent_knn(
 
     # Extract intermediate_graph_degree from algorithm_kwds, with default
     intermediate_graph_degree = algorithm_kwds.get("intermediate_graph_degree", None)
+    max_iterations = algorithm_kwds.get("max_iterations", None)
+    termination_threshold = algorithm_kwds.get("termination_threshold", None)
 
     idxparams = nn_descent.IndexParams(
         graph_degree=k,
         intermediate_graph_degree=intermediate_graph_degree,
         metric="sqeuclidean" if metric == "euclidean" else metric,
+        max_iterations=max_iterations,
+        termination_threshold=termination_threshold,
     )
     idx = nn_descent.build(
         idxparams,
