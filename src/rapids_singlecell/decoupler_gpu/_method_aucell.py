@@ -67,7 +67,7 @@ def _auc(row, cnct, *, starts, offsets, n_up, n_fsets, max_aucs):
     R, C = ranks.shape
     es = cp.zeros((R, n_fsets), dtype=cp.float32)
 
-    tpb = 1024
+    tpb = 32
     grid_y = (R + tpb - 1) // tpb
     _auc_kernel(
         (n_fsets, grid_y),
