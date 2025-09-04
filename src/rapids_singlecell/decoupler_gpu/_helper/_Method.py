@@ -83,6 +83,7 @@ class Method(MethodMeta):
         bsize: int | float = 5000,
         verbose: bool = False,
         pre_load: bool = False,
+        adj_pv_gpu: bool = False,
         **kwargs,
     ):
         return _run(
@@ -98,5 +99,6 @@ class Method(MethodMeta):
             bsize=bsize,
             verbose=verbose,
             pre_load=pre_load,
+            adj_pv_gpu=adj_pv_gpu,
             **kwargs,
         )
