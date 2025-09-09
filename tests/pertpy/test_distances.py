@@ -175,7 +175,7 @@ def test_distance_counts(adata, distance):
     if (
         distance != "mahalanobis"
     ):  # skip, doesn't work because covariance matrix is a singular matrix, not invertible
-        distance = pt.tl.Distance(distance, layer_key="counts")
+        distance = Distance(distance, layer_key="counts")
         df = distance.pairwise(adata, groupby="perturbation")
         assert isinstance(df, DataFrame)
         assert df.columns.equals(df.index)
