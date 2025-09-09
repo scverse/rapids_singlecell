@@ -1,24 +1,28 @@
 from __future__ import annotations
 
+import cupy as cp
 import numpy as np
-from pertpy import data as dt
 import pytest
 import scanpy as sc
 from pandas import DataFrame, Series
+from pertpy import data as dt
 from pytest import fixture, mark
-import cupy as cp
-from rapids_singlecell.pertpy_gpu._distances import Distance
 from scipy import sparse as sp
-@pytest.fixture 
-def cp_rng(): #TODO(selmanozleyen): Think of a way to integrate this with decoupler's rng fixture
+
+from rapids_singlecell.pertpy_gpu._distances import Distance
+
+
+@pytest.fixture
+def cp_rng():  # TODO(selmanozleyen): Think of a way to integrate this with decoupler's rng fixture
     rng = cp.random.default_rng(seed=42)
     return rng
 
 
-@pytest.fixture 
-def np_rng(): #TODO(selmanozleyen): Think of a way to integrate this with decoupler's rng fixture
+@pytest.fixture
+def np_rng():  # TODO(selmanozleyen): Think of a way to integrate this with decoupler's rng fixture
     rng = np.random.default_rng(seed=42)
     return rng
+
 
 actual_distances = [
     # Euclidean distances and related
@@ -85,11 +89,12 @@ def adata(request):
         groups = np.unique(adata.obs["perturbation"])
         # KDE is slow, subset to 3 groups for speed up
         adata = adata[adata.obs["perturbation"].isin(groups[0:3])].copy()
-    
+
     adata.X = cp.asarray(adata.X.toarray())
     for l_key in adata.layers.keys():
         if sp.issparse(adata.layers[l_key]):
-            from cupyx.scipy.sparse import csr_matrix, csc_matrix , coo_matrix
+            from cupyx.scipy.sparse import coo_matrix, csc_matrix, csr_matrix
+
             if sp.isspmatrix_csr(adata.layers[l_key]):
                 adata.layers[l_key] = csr_matrix(adata.layers[l_key])
             elif sp.isspmatrix_csc(adata.layers[l_key]):
@@ -148,7 +153,6 @@ def test_triangle_inequality(pairwise_distance, distance, np_rng):
         return
 
     for _ in range(5):
-        from cupy.random import choice
         triplet = np_rng.choice(pairwise_distance.index, size=3, replace=False)
         assert (
             pairwise_distance.loc[triplet[0], triplet[1]]
@@ -220,7 +224,9 @@ def test_bootstrap_distance_output_type(cp_rng):
 def test_bootstrap_distance_pairwise(adata, distance):
     # Test consistency of pairwise distance results
     dist = Distance(distance, obsm_key="X_pca")
-    bootstrap_output = dist.pairwise(adata, groupby="perturbation", bootstrap=True, n_bootstrap=3)
+    bootstrap_output = dist.pairwise(
+        adata, groupby="perturbation", bootstrap=True, n_bootstrap=3
+    )
 
     assert isinstance(bootstrap_output, tuple)
 

@@ -3,14 +3,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
+import cupy as cp
 import numpy as np
 import pandas as pd
-from pandas import Series
-import cupy as cp
 from cuml.metrics import pairwise_distances
+from cuml.preprocessing import MinMaxScaler
 from cupy.random import choice
 from cupyx.scipy.sparse import issparse as cp_issparse
-from cuml.preprocessing import MinMaxScaler
+
 # TODO(selmanozleyen): adapt which progress bar to use, probably use rapidsinglecell's progress bar (if it exists)
 # from rich.progress import track
 # from scipy.sparse import issparse
@@ -421,7 +421,6 @@ class Distance:
 
             return df, df_var
 
-
     def precompute_distances(self, adata: AnnData, n_jobs: int = -1) -> None:
         """Precompute pairwise distances between all cells, writes to adata.obsp.
 
@@ -439,8 +438,14 @@ class Distance:
             >>> distance = pt.tools.Distance(metric="edistance")
             >>> distance.precompute_distances(adata)
         """
-        cells = adata.layers[self.layer_key] if self.layer_key else adata.obsm[self.obsm_key].copy()
-        pwd = pairwise_distances(cells, cells, metric=self.cell_wise_metric, n_jobs=n_jobs)
+        cells = (
+            adata.layers[self.layer_key]
+            if self.layer_key
+            else adata.obsm[self.obsm_key].copy()
+        )
+        pwd = pairwise_distances(
+            cells, cells, metric=self.cell_wise_metric, n_jobs=n_jobs
+        )
         adata.obsp[f"{self.obsm_key}_{self.cell_wise_metric}_predistances"] = pwd
 
     def compare_distance(
@@ -465,8 +470,9 @@ class Distance:
         if mode == "simple":
             pass  # nothing to be done
         elif mode == "scaled":
-
-            scaler = MinMaxScaler().fit(np.vstack((pert, ctrl)) if fit_to_pert_and_ctrl else ctrl)
+            scaler = MinMaxScaler().fit(
+                np.vstack((pert, ctrl)) if fit_to_pert_and_ctrl else ctrl
+            )
             pred = scaler.transform(pred)
             pert = scaler.transform(pert)
         else:
@@ -476,7 +482,9 @@ class Distance:
         d2 = self.metric_fct(ctrl, pred, **kwargs)
         return d1 / d2
 
-    def _bootstrap_mode(self, X, Y, n_bootstraps=100, random_state=0, **kwargs) -> MeanVar:
+    def _bootstrap_mode(
+        self, X, Y, n_bootstraps=100, random_state=0, **kwargs
+    ) -> MeanVar:
         # rng = np.random.default_rng(random_state)
 
         distances = []
@@ -491,28 +499,35 @@ class Distance:
         variance = np.var(distances)
         return MeanVar(mean=mean, variance=variance)
 
-    def _bootstrap_mode_precomputed(self, sub_pwd, sub_idx, n_bootstraps=100, random_state=0, **kwargs) -> MeanVar:
+    def _bootstrap_mode_precomputed(
+        self, sub_pwd, sub_idx, n_bootstraps=100, random_state=0, **kwargs
+    ) -> MeanVar:
         rng = np.random.default_rng(random_state)
 
         distances = []
         for _ in range(n_bootstraps):
             # To maintain the number of cells for both groups (whatever balancing they may have),
             # we sample the positive and negative indices separately
-            bootstrap_pos_idx = rng.choice(a=sub_idx[sub_idx].index, size=sub_idx[sub_idx].size, replace=True)
-            bootstrap_neg_idx = rng.choice(a=sub_idx[~sub_idx].index, size=sub_idx[~sub_idx].size, replace=True)
+            bootstrap_pos_idx = rng.choice(
+                a=sub_idx[sub_idx].index, size=sub_idx[sub_idx].size, replace=True
+            )
+            bootstrap_neg_idx = rng.choice(
+                a=sub_idx[~sub_idx].index, size=sub_idx[~sub_idx].size, replace=True
+            )
             bootstrap_idx = np.concatenate([bootstrap_pos_idx, bootstrap_neg_idx])
             bootstrap_idx_nrs = sub_idx.index.get_indexer(bootstrap_idx)
 
             bootstrap_sub_idx = sub_idx[bootstrap_idx]
             bootstrap_sub_pwd = sub_pwd[bootstrap_idx_nrs, :][:, bootstrap_idx_nrs]
 
-            distance = self.metric_fct.from_precomputed(bootstrap_sub_pwd, bootstrap_sub_idx, **kwargs)
+            distance = self.metric_fct.from_precomputed(
+                bootstrap_sub_pwd, bootstrap_sub_idx, **kwargs
+            )
             distances.append(distance.get())
 
         mean = np.mean(distances)
         variance = np.var(distances)
         return MeanVar(mean=mean, variance=variance)
-
 
     def onesided_distances(
         self,
@@ -654,6 +669,7 @@ class Distance:
 
             return df, df_var
 
+
 class AbstractDistance(ABC):
     """Abstract class of distance metrics between two sets of vectors."""
 
@@ -700,8 +716,12 @@ class Edistance(AbstractDistance):
         self.cell_wise_metric = "euclidean"
 
     def __call__(self, X: cp.ndarray, Y: cp.ndarray, **kwargs) -> float:
-        sigma_X = pairwise_distances(X, X, metric=self.cell_wise_metric, **kwargs).mean()
-        sigma_Y = pairwise_distances(Y, Y, metric=self.cell_wise_metric, **kwargs).mean()
+        sigma_X = pairwise_distances(
+            X, X, metric=self.cell_wise_metric, **kwargs
+        ).mean()
+        sigma_Y = pairwise_distances(
+            Y, Y, metric=self.cell_wise_metric, **kwargs
+        ).mean()
         delta = pairwise_distances(X, Y, metric=self.cell_wise_metric, **kwargs).mean()
         return 2 * delta - sigma_X - sigma_Y
 
