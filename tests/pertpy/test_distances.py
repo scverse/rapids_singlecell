@@ -238,30 +238,32 @@ def test_bootstrap_distance_pairwise(adata, distance):
     assert np.sum(var.values - var.values.T) == 0  # symmetry
 
 
-# @mark.parametrize("distance", ["edistance"])
-# def test_bootstrap_distance_onesided(adata, distance):
-#     # Test consistency of one-sided distance results
-#     selected_group = adata.obs.perturbation.unique()[0]
-#     d = Distance(distance, obsm_key="X_pca")
-#     bootstrap_output = d.onesided_distances(
-#         adata,
-#         groupby="perturbation",
-#         selected_group=selected_group,
-#         bootstrap=True,
-#         n_bootstrap=3,
-#     )
+@mark.parametrize("distance", ["edistance"])
+def test_bootstrap_distance_onesided(adata, distance):
+    # Test consistency of one-sided distance results
+    selected_group = adata.obs.perturbation.unique()[0]
+    d = Distance(distance, obsm_key="X_pca")
+    bootstrap_output = d.onesided_distances(
+        adata,
+        groupby="perturbation",
+        selected_group=selected_group,
+        bootstrap=True,
+        n_bootstrap=3,
+    )
 
-#     assert isinstance(bootstrap_output, tuple)
+    assert isinstance(bootstrap_output, tuple)
 
 
-# def test_compare_distance(rng):
-#     X = rng.standard_normal(size=(50, 10))
-#     Y = rng.standard_normal(size=(50, 10))
-#     C = rng.standard_normal(size=(50, 10))
-#     d = Distance()
-#     res_simple = d.compare_distance(X, Y, C, mode="simple")
-#     assert isinstance(res_simple.get(), float)
-#     res_scaled = d.compare_distance(X, Y, C, mode="scaled")
-#     assert isinstance(res_scaled.get(), float)
-#     with pytest.raises(ValueError):
-#         d.compare_distance(X, Y, C, mode="new_mode")
+def test_compare_distance(cp_rng):
+    X = cp_rng.standard_normal(size=(50, 10))
+    Y = cp_rng.standard_normal(size=(50, 10))
+    C = cp_rng.standard_normal(size=(50, 10))
+    d = Distance()
+    res_simple = d.compare_distance(X, Y, C, mode="simple")
+    res_simple = float(res_simple.get())
+    assert isinstance(res_simple, float)
+    res_scaled = d.compare_distance(X, Y, C, mode="scaled")
+    res_scaled = float(res_scaled.get())
+    assert isinstance(res_scaled, float)
+    with pytest.raises(ValueError):
+        d.compare_distance(X, Y, C, mode="new_mode")
