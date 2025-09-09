@@ -5,7 +5,12 @@ from typing import TYPE_CHECKING, Literal, NamedTuple
 
 import numpy as np
 import pandas as pd
-
+from pandas import Series
+import cupy as cp
+from cuml.metrics import pairwise_distances
+from cupy.random import choice
+from cupyx.scipy.sparse import issparse as cp_issparse
+from cuml.preprocessing import MinMaxScaler
 # TODO(selmanozleyen): adapt which progress bar to use, probably use rapidsinglecell's progress bar (if it exists)
 # from rich.progress import track
 # from scipy.sparse import issparse
@@ -132,7 +137,7 @@ class Distance:
     def __init__(
         self,
         metric: Metric = "edistance",
-        agg_fct: Callable = np.mean,
+        agg_fct: Callable = cp.mean,
         layer_key: str = None,
         obsm_key: str = None,
         cell_wise_metric: str = "euclidean",
@@ -207,8 +212,8 @@ class Distance:
 
     def __call__(
         self,
-        X: np.ndarray,
-        Y: np.ndarray,
+        X: cp.ndarray | cp.sparse.spmatrix,
+        Y: cp.ndarray | cp.sparse.spmatrix,
         **kwargs,
     ) -> float:
         """Compute distance between vectors X and Y.
@@ -229,9 +234,9 @@ class Distance:
             >>> Y = adata.obsm["X_pca"][adata.obs["perturbation"] == "control"]
             >>> D = Distance(X, Y)
         """
-        if issparse(X):
+        if cp_issparse(X):
             X = X.toarray()
-        if issparse(Y):
+        if cp_issparse(Y):
             Y = Y.toarray()
 
         if len(X) == 0 or len(Y) == 0:
@@ -241,8 +246,8 @@ class Distance:
 
     def bootstrap(
         self,
-        X: np.ndarray,
-        Y: np.ndarray,
+        X: cp.ndarray,
+        Y: cp.ndarray,
         *,
         n_bootstrap: int = 100,
         random_state: int = 0,
@@ -372,9 +377,9 @@ class Distance:
                 else adata.obsm[self.obsm_key].copy()
             )
             for index_x, group_x in enumerate(fct(groups)):
-                cells_x = embedding[np.asarray(grouping == group_x)].copy()
+                cells_x = embedding[cp.asarray(grouping == group_x)].copy()
                 for group_y in groups[index_x:]:  # type: ignore
-                    cells_y = embedding[np.asarray(grouping == group_y)].copy()
+                    cells_y = embedding[cp.asarray(grouping == group_y)].copy()
                     if not bootstrap:
                         # By distance axiom, the distance between a group and itself is 0
                         dist = (
@@ -415,6 +420,99 @@ class Distance:
             df_var.name = f"pairwise {self.metric} variance"
 
             return df, df_var
+
+
+    def precompute_distances(self, adata: AnnData, n_jobs: int = -1) -> None:
+        """Precompute pairwise distances between all cells, writes to adata.obsp.
+
+        The precomputed distances are stored in adata.obsp under the key
+        '{self.obsm_key}_{cell_wise_metric}_predistances', as they depend on
+        both the cell-wise metric and the embedding used.
+
+        Args:
+            adata: Annotated data matrix.
+            n_jobs: Number of cores to use. Defaults to -1 (all).
+
+        Examples:
+            >>> import pertpy as pt
+            >>> adata = pt.dt.distance_example()
+            >>> distance = pt.tools.Distance(metric="edistance")
+            >>> distance.precompute_distances(adata)
+        """
+        cells = adata.layers[self.layer_key] if self.layer_key else adata.obsm[self.obsm_key].copy()
+        pwd = pairwise_distances(cells, cells, metric=self.cell_wise_metric, n_jobs=n_jobs)
+        adata.obsp[f"{self.obsm_key}_{self.cell_wise_metric}_predistances"] = pwd
+
+    def compare_distance(
+        self,
+        pert: cp.ndarray,
+        pred: cp.ndarray,
+        ctrl: cp.ndarray,
+        mode: Literal["simple", "scaled"] = "simple",
+        fit_to_pert_and_ctrl: bool = False,
+        **kwargs,
+    ) -> float:
+        """Compute the score of simulating a perturbation.
+
+        Args:
+            pert: Real perturbed data.
+            pred: Simulated perturbed data.
+            ctrl: Control data
+            mode: Mode to use.
+            fit_to_pert_and_ctrl: Scales data based on both `pert` and `ctrl` if True, otherwise only on `ctrl`.
+            kwargs: Additional keyword arguments passed to the metric function.
+        """
+        if mode == "simple":
+            pass  # nothing to be done
+        elif mode == "scaled":
+
+            scaler = MinMaxScaler().fit(np.vstack((pert, ctrl)) if fit_to_pert_and_ctrl else ctrl)
+            pred = scaler.transform(pred)
+            pert = scaler.transform(pert)
+        else:
+            raise ValueError(f"Unknown mode {mode}. Please choose simple or scaled.")
+
+        d1 = self.metric_fct(pert, pred, **kwargs)
+        d2 = self.metric_fct(ctrl, pred, **kwargs)
+        return d1 / d2
+
+    def _bootstrap_mode(self, X, Y, n_bootstraps=100, random_state=0, **kwargs) -> MeanVar:
+        # rng = np.random.default_rng(random_state)
+
+        distances = []
+        for _ in range(n_bootstraps):
+            X_bootstrapped = X[choice(a=X.shape[0], size=X.shape[0], replace=True)]
+            Y_bootstrapped = Y[choice(a=Y.shape[0], size=X.shape[0], replace=True)]
+
+            distance = self(X_bootstrapped, Y_bootstrapped, **kwargs)
+            distances.append(distance.get())
+
+        mean = np.mean(distances)
+        variance = np.var(distances)
+        return MeanVar(mean=mean, variance=variance)
+
+    def _bootstrap_mode_precomputed(self, sub_pwd, sub_idx, n_bootstraps=100, random_state=0, **kwargs) -> MeanVar:
+        rng = np.random.default_rng(random_state)
+
+        distances = []
+        for _ in range(n_bootstraps):
+            # To maintain the number of cells for both groups (whatever balancing they may have),
+            # we sample the positive and negative indices separately
+            bootstrap_pos_idx = rng.choice(a=sub_idx[sub_idx].index, size=sub_idx[sub_idx].size, replace=True)
+            bootstrap_neg_idx = rng.choice(a=sub_idx[~sub_idx].index, size=sub_idx[~sub_idx].size, replace=True)
+            bootstrap_idx = np.concatenate([bootstrap_pos_idx, bootstrap_neg_idx])
+            bootstrap_idx_nrs = sub_idx.index.get_indexer(bootstrap_idx)
+
+            bootstrap_sub_idx = sub_idx[bootstrap_idx]
+            bootstrap_sub_pwd = sub_pwd[bootstrap_idx_nrs, :][:, bootstrap_idx_nrs]
+
+            distance = self.metric_fct.from_precomputed(bootstrap_sub_pwd, bootstrap_sub_idx, **kwargs)
+            distances.append(distance.get())
+
+        mean = np.mean(distances)
+        variance = np.var(distances)
+        return MeanVar(mean=mean, variance=variance)
+
 
     def onesided_distances(
         self,
@@ -556,117 +654,6 @@ class Distance:
 
             return df, df_var
 
-    def precompute_distances(self, adata: AnnData, n_jobs: int = -1) -> None:
-        """Precompute pairwise distances between all cells, writes to adata.obsp.
-
-        The precomputed distances are stored in adata.obsp under the key
-        '{self.obsm_key}_{cell_wise_metric}_predistances', as they depend on
-        both the cell-wise metric and the embedding used.
-
-        Args:
-            adata: Annotated data matrix.
-            n_jobs: Number of cores to use. Defaults to -1 (all).
-
-        Examples:
-            >>> import pertpy as pt
-            >>> adata = pt.dt.distance_example()
-            >>> distance = pt.tools.Distance(metric="edistance")
-            >>> distance.precompute_distances(adata)
-        """
-        cells = (
-            adata.layers[self.layer_key]
-            if self.layer_key
-            else adata.obsm[self.obsm_key].copy()
-        )
-        pwd = pairwise_distances(
-            cells, cells, metric=self.cell_wise_metric, n_jobs=n_jobs
-        )
-        adata.obsp[f"{self.obsm_key}_{self.cell_wise_metric}_predistances"] = pwd
-
-    def compare_distance(
-        self,
-        pert: np.ndarray,
-        pred: np.ndarray,
-        ctrl: np.ndarray,
-        mode: Literal["simple", "scaled"] = "simple",
-        fit_to_pert_and_ctrl: bool = False,
-        **kwargs,
-    ) -> float:
-        """Compute the score of simulating a perturbation.
-
-        Args:
-            pert: Real perturbed data.
-            pred: Simulated perturbed data.
-            ctrl: Control data
-            mode: Mode to use.
-            fit_to_pert_and_ctrl: Scales data based on both `pert` and `ctrl` if True, otherwise only on `ctrl`.
-            kwargs: Additional keyword arguments passed to the metric function.
-        """
-        if mode == "simple":
-            pass  # nothing to be done
-        elif mode == "scaled":
-            from sklearn.preprocessing import MinMaxScaler
-
-            scaler = MinMaxScaler().fit(
-                np.vstack((pert, ctrl)) if fit_to_pert_and_ctrl else ctrl
-            )
-            pred = scaler.transform(pred)
-            pert = scaler.transform(pert)
-        else:
-            raise ValueError(f"Unknown mode {mode}. Please choose simple or scaled.")
-
-        d1 = self.metric_fct(pert, pred, **kwargs)
-        d2 = self.metric_fct(ctrl, pred, **kwargs)
-        return d1 / d2
-
-    def _bootstrap_mode(
-        self, X, Y, n_bootstraps=100, random_state=0, **kwargs
-    ) -> MeanVar:
-        rng = np.random.default_rng(random_state)
-
-        distances = []
-        for _ in range(n_bootstraps):
-            X_bootstrapped = X[rng.choice(a=X.shape[0], size=X.shape[0], replace=True)]
-            Y_bootstrapped = Y[rng.choice(a=Y.shape[0], size=X.shape[0], replace=True)]
-
-            distance = self(X_bootstrapped, Y_bootstrapped, **kwargs)
-            distances.append(distance)
-
-        mean = np.mean(distances)
-        variance = np.var(distances)
-        return MeanVar(mean=mean, variance=variance)
-
-    def _bootstrap_mode_precomputed(
-        self, sub_pwd, sub_idx, n_bootstraps=100, random_state=0, **kwargs
-    ) -> MeanVar:
-        rng = np.random.default_rng(random_state)
-
-        distances = []
-        for _ in range(n_bootstraps):
-            # To maintain the number of cells for both groups (whatever balancing they may have),
-            # we sample the positive and negative indices separately
-            bootstrap_pos_idx = rng.choice(
-                a=sub_idx[sub_idx].index, size=sub_idx[sub_idx].size, replace=True
-            )
-            bootstrap_neg_idx = rng.choice(
-                a=sub_idx[~sub_idx].index, size=sub_idx[~sub_idx].size, replace=True
-            )
-            bootstrap_idx = np.concatenate([bootstrap_pos_idx, bootstrap_neg_idx])
-            bootstrap_idx_nrs = sub_idx.index.get_indexer(bootstrap_idx)
-
-            bootstrap_sub_idx = sub_idx[bootstrap_idx]
-            bootstrap_sub_pwd = sub_pwd[bootstrap_idx_nrs, :][:, bootstrap_idx_nrs]
-
-            distance = self.metric_fct.from_precomputed(
-                bootstrap_sub_pwd, bootstrap_sub_idx, **kwargs
-            )
-            distances.append(distance)
-
-        mean = np.mean(distances)
-        variance = np.var(distances)
-        return MeanVar(mean=mean, variance=variance)
-
-
 class AbstractDistance(ABC):
     """Abstract class of distance metrics between two sets of vectors."""
 
@@ -676,7 +663,7 @@ class AbstractDistance(ABC):
         self.accepts_precomputed: bool = None
 
     @abstractmethod
-    def __call__(self, X: np.ndarray, Y: np.ndarray, **kwargs) -> float:
+    def __call__(self, X: cp.ndarray, Y: cp.ndarray, **kwargs) -> float:
         """Compute distance between vectors X and Y.
 
         Args:
@@ -690,7 +677,7 @@ class AbstractDistance(ABC):
         raise NotImplementedError("Metric class is abstract.")
 
     @abstractmethod
-    def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
+    def from_precomputed(self, P: cp.ndarray, idx: cp.ndarray, **kwargs) -> float:
         """Compute a distance between vectors X and Y with precomputed distances.
 
         Args:
@@ -712,533 +699,14 @@ class Edistance(AbstractDistance):
         self.accepts_precomputed = True
         self.cell_wise_metric = "euclidean"
 
-    def __call__(self, X: np.ndarray, Y: np.ndarray, **kwargs) -> float:
-        sigma_X = pairwise_distances(
-            X, X, metric=self.cell_wise_metric, **kwargs
-        ).mean()
-        sigma_Y = pairwise_distances(
-            Y, Y, metric=self.cell_wise_metric, **kwargs
-        ).mean()
+    def __call__(self, X: cp.ndarray, Y: cp.ndarray, **kwargs) -> float:
+        sigma_X = pairwise_distances(X, X, metric=self.cell_wise_metric, **kwargs).mean()
+        sigma_Y = pairwise_distances(Y, Y, metric=self.cell_wise_metric, **kwargs).mean()
         delta = pairwise_distances(X, Y, metric=self.cell_wise_metric, **kwargs).mean()
         return 2 * delta - sigma_X - sigma_Y
 
-    def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
+    def from_precomputed(self, P: cp.ndarray, idx: cp.ndarray, **kwargs) -> float:
         sigma_X = P[idx, :][:, idx].mean()
         sigma_Y = P[~idx, :][:, ~idx].mean()
         delta = P[idx, :][:, ~idx].mean()
         return 2 * delta - sigma_X - sigma_Y
-
-
-# class MMD(AbstractDistance):
-#     """Linear Maximum Mean Discrepancy."""
-
-#     # Taken in parts from https://github.com/jindongwang/transferlearning/blob/master/code/distance/mmd_numpy_sklearn.py
-#     def __init__(self) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = False
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, *, kernel="linear", gamma=1.0, degree=2, **kwargs) -> float:
-#         if kernel == "linear":
-#             XX = np.dot(X, X.T)
-#             YY = np.dot(Y, Y.T)
-#             XY = np.dot(X, Y.T)
-#         elif kernel == "rbf":
-#             XX = rbf_kernel(X, X, gamma=gamma)
-#             YY = rbf_kernel(Y, Y, gamma=gamma)
-#             XY = rbf_kernel(X, Y, gamma=gamma)
-#         elif kernel == "poly":
-#             XX = polynomial_kernel(X, X, degree=degree, gamma=gamma, coef0=0)
-#             YY = polynomial_kernel(Y, Y, degree=degree, gamma=gamma, coef0=0)
-#             XY = polynomial_kernel(X, Y, degree=degree, gamma=gamma, coef0=0)
-#         else:
-#             raise ValueError(f"Kernel {kernel} not recognized.")
-
-#         return XX.mean() + YY.mean() - 2 * XY.mean()
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("MMD cannot be called on a pairwise distance matrix.")
-
-
-# class EuclideanDistance(AbstractDistance):
-#     """Euclidean distance between pseudobulk vectors."""
-
-#     def __init__(self, aggregation_func: Callable = np.mean) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = False
-#         self.aggregation_func = aggregation_func
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, **kwargs) -> float:
-#         return np.linalg.norm(
-#             self.aggregation_func(X, axis=0) - self.aggregation_func(Y, axis=0),
-#             ord=2,
-#             **kwargs,
-#         )
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("EuclideanDistance cannot be called on a pairwise distance matrix.")
-
-
-# class MeanSquaredDistance(AbstractDistance):
-#     """Mean squared distance between pseudobulk vectors."""
-
-#     def __init__(self, aggregation_func: Callable = np.mean) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = False
-#         self.aggregation_func = aggregation_func
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, **kwargs) -> float:
-#         return (
-#             np.linalg.norm(
-#                 self.aggregation_func(X, axis=0) - self.aggregation_func(Y, axis=0),
-#                 ord=2,
-#                 **kwargs,
-#             )
-#             ** 2
-#             / X.shape[1]
-#         )
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("MeanSquaredDistance cannot be called on a pairwise distance matrix.")
-
-
-# class MeanAbsoluteDistance(AbstractDistance):
-#     """Absolute (Norm-1) distance between pseudobulk vectors."""
-
-#     def __init__(self, aggregation_func: Callable = np.mean) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = False
-#         self.aggregation_func = aggregation_func
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, **kwargs) -> float:
-#         return (
-#             np.linalg.norm(
-#                 self.aggregation_func(X, axis=0) - self.aggregation_func(Y, axis=0),
-#                 ord=1,
-#                 **kwargs,
-#             )
-#             / X.shape[1]
-#         )
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("MeanAbsoluteDistance cannot be called on a pairwise distance matrix.")
-
-
-# class MeanPairwiseDistance(AbstractDistance):
-#     """Mean of the pairwise euclidean distance between two groups of cells."""
-
-#     # NOTE: This is not a metric in the mathematical sense.
-
-#     def __init__(self) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = True
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, **kwargs) -> float:
-#         return pairwise_distances(X, Y, **kwargs).mean()
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         return P[idx, :][:, ~idx].mean()
-
-
-# class PearsonDistance(AbstractDistance):
-#     """Pearson distance between pseudobulk vectors."""
-
-#     def __init__(self, aggregation_func: Callable = np.mean) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = False
-#         self.aggregation_func = aggregation_func
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, **kwargs) -> float:
-#         return 1 - pearsonr(self.aggregation_func(X, axis=0), self.aggregation_func(Y, axis=0))[0]
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("PearsonDistance cannot be called on a pairwise distance matrix.")
-
-
-# class SpearmanDistance(AbstractDistance):
-#     """Spearman distance between pseudobulk vectors."""
-
-#     def __init__(self, aggregation_func: Callable = np.mean) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = False
-#         self.aggregation_func = aggregation_func
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, **kwargs) -> float:
-#         return 1 - spearmanr(self.aggregation_func(X, axis=0), self.aggregation_func(Y, axis=0))[0]
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("SpearmanDistance cannot be called on a pairwise distance matrix.")
-
-
-# class KendallTauDistance(AbstractDistance):
-#     """Kendall-tau distance between pseudobulk vectors."""
-
-#     def __init__(self, aggregation_func: Callable = np.mean) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = False
-#         self.aggregation_func = aggregation_func
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, **kwargs) -> float:
-#         x, y = self.aggregation_func(X, axis=0), self.aggregation_func(Y, axis=0)
-#         n = len(x)
-#         tau_corr = kendalltau(x, y).statistic
-#         tau_dist = (1 - tau_corr) * n * (n - 1) / 4
-#         return tau_dist
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("KendallTauDistance cannot be called on a pairwise distance matrix.")
-
-
-# class CosineDistance(AbstractDistance):
-#     """Cosine distance between pseudobulk vectors."""
-
-#     def __init__(self, aggregation_func: Callable = np.mean) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = False
-#         self.aggregation_func = aggregation_func
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, **kwargs) -> float:
-#         return cosine(self.aggregation_func(X, axis=0), self.aggregation_func(Y, axis=0))
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("CosineDistance cannot be called on a pairwise distance matrix.")
-
-
-# class R2ScoreDistance(AbstractDistance):
-#     """Coefficient of determination across genes between pseudobulk vectors."""
-
-#     # NOTE: This is not a distance metric but a similarity metric.
-
-#     def __init__(self, aggregation_func: Callable = np.mean) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = False
-#         self.aggregation_func = aggregation_func
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, **kwargs) -> float:
-#         return 1 - r2_score(self.aggregation_func(X, axis=0), self.aggregation_func(Y, axis=0))
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("R2ScoreDistance cannot be called on a pairwise distance matrix.")
-
-
-# class SymmetricKLDivergence(AbstractDistance):
-#     """Average of symmetric KL divergence between gene distributions of two groups.
-
-#     Assuming a Gaussian distribution for each gene in each group, calculates
-#     the KL divergence between them and averages over all genes. Repeats this ABBA to get a symmetrized distance.
-#     See https://en.wikipedia.org/wiki/Kullback%E2%80%93Leibler_divergence#Symmetrised_divergence.
-
-#     """
-
-#     def __init__(self) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = False
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, epsilon=1e-8, **kwargs) -> float:
-#         kl_all = []
-#         for i in range(X.shape[1]):
-#             x_mean, x_std = X[:, i].mean(), X[:, i].std() + epsilon
-#             y_mean, y_std = Y[:, i].mean(), Y[:, i].std() + epsilon
-#             kl = np.log(y_std / x_std) + (x_std**2 + (x_mean - y_mean) ** 2) / (2 * y_std**2) - 1 / 2
-#             klr = np.log(x_std / y_std) + (y_std**2 + (y_mean - x_mean) ** 2) / (2 * x_std**2) - 1 / 2
-#             kl_all.append(kl + klr)
-#         return sum(kl_all) / len(kl_all)
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("SymmetricKLDivergence cannot be called on a pairwise distance matrix.")
-
-
-# class TTestDistance(AbstractDistance):
-#     """Average of T test statistic between two groups assuming unequal variances."""
-
-#     def __init__(self) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = False
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, epsilon=1e-8, **kwargs) -> float:
-#         t_test_all = []
-#         n1 = X.shape[0]
-#         n2 = Y.shape[0]
-#         for i in range(X.shape[1]):
-#             m1, v1 = X[:, i].mean(), X[:, i].std() ** 2 * n1 / (n1 - 1) + epsilon
-#             m2, v2 = Y[:, i].mean(), Y[:, i].std() ** 2 * n2 / (n2 - 1) + epsilon
-#             vn1 = v1 / n1
-#             vn2 = v2 / n2
-#             t = (m1 - m2) / np.sqrt(vn1 + vn2)
-#             t_test_all.append(abs(t))
-#         return sum(t_test_all) / len(t_test_all)
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("TTestDistance cannot be called on a pairwise distance matrix.")
-
-
-# class KSTestDistance(AbstractDistance):
-#     """Average of two-sided KS test statistic between two groups."""
-
-#     def __init__(self) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = False
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, **kwargs) -> float:
-#         stats = [abs(kstest(X[:, i], Y[:, i])[0]) for i in range(X.shape[1])]
-#         return sum(stats) / len(stats)
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("KSTestDistance cannot be called on a pairwise distance matrix.")
-
-
-# class NBLL(AbstractDistance):
-#     """Average of Log likelihood (scalar) of group B cells according to a NB distribution fitted over group A."""
-
-#     def __init__(self) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = False
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, epsilon=1e-8, **kwargs) -> float:
-#         def _is_count_matrix(matrix, tolerance=1e-6):
-#             return bool(matrix.dtype.kind == "i" or np.all(np.abs(matrix - np.round(matrix)) < tolerance))
-
-#         if not _is_count_matrix(matrix=X) or not _is_count_matrix(matrix=Y):
-#             raise ValueError("NBLL distance only works for raw counts.")
-
-#         @jit(forceobj=True)
-#         def _compute_nll(y: np.ndarray, nb_params: tuple[float, float], epsilon: float) -> float:
-#             mu = np.exp(nb_params[0])
-#             theta = 1 / nb_params[1]
-#             eps = epsilon
-
-#             log_theta_mu_eps = np.log(theta + mu + eps)
-#             nll = (
-#                 theta * (np.log(theta + eps) - log_theta_mu_eps)
-#                 + y * (np.log(mu + eps) - log_theta_mu_eps)
-#                 + gammaln(y + theta)
-#                 - gammaln(theta)
-#                 - gammaln(y + 1)
-#             )
-#             return nll.mean()
-
-#         def _process_gene(x: np.ndarray, y: np.ndarray, epsilon: float) -> float:
-#             try:
-#                 nb_params = NegativeBinomialP(x, np.ones_like(x)).fit(disp=False).params
-#                 return _compute_nll(y, nb_params, epsilon)
-#             except np.linalg.LinAlgError:
-#                 if x.mean() < 10 and y.mean() < 10:
-#                     return 0.0
-#                 else:
-#                     return np.nan  # Use NaN to indicate skipped genes
-
-#         nlls = []
-#         genes_skipped = 0
-
-#         for i in range(X.shape[1]):
-#             nll = _process_gene(X[:, i], Y[:, i], epsilon)
-#             if np.isnan(nll):
-#                 genes_skipped += 1
-#             else:
-#                 nlls.append(nll)
-
-#         if genes_skipped > X.shape[1] / 2:
-#             raise AttributeError(f"{genes_skipped} genes could not be fit, which is over half.")
-
-#         return -np.sum(nlls) / len(nlls)
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("NBLL cannot be called on a pairwise distance matrix.")
-
-
-# def _sample(X, frac=None, n=None):
-#     """Returns subsample of cells in format (train, test)."""
-#     if frac and n:
-#         raise ValueError("Cannot pass both frac and n.")
-#     if frac:
-#         n_cells = max(1, int(X.shape[0] * frac))
-#     elif n:
-#         n_cells = n
-#     else:
-#         raise ValueError("Must pass either `frac` or `n`.")
-
-#     rng = np.random.default_rng()
-#     sampled_indices = rng.choice(X.shape[0], n_cells, replace=False)
-#     remaining_indices = np.setdiff1d(np.arange(X.shape[0]), sampled_indices)
-#     return X[remaining_indices, :], X[sampled_indices, :]
-
-
-# class ClassifierProbaDistance(AbstractDistance):
-#     """Average of classification probabilites of a binary classifier.
-
-#     Assumes the first condition is control and the second is perturbed.
-#     Always holds out 20% of the perturbed condition.
-#     """
-
-#     def __init__(self) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = False
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, **kwargs) -> float:
-#         Y_train, Y_test = _sample(Y, frac=0.2)
-#         label = ["c"] * X.shape[0] + ["p"] * Y_train.shape[0]
-#         train = np.concatenate([X, Y_train])
-
-#         reg = LogisticRegression()
-#         reg.fit(train, label)
-#         test_labels = reg.predict_proba(Y_test)
-#         return np.mean(test_labels[:, 1])
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("ClassifierProbaDistance cannot be called on a pairwise distance matrix.")
-
-
-# class ClassifierClassProjection(AbstractDistance):
-#     """Average of 1-(classification probability of control).
-
-#     Warning: unlike all other distances, this must also take a list of categorical labels the same length as X.
-#     """
-
-#     def __init__(self) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = False
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("ClassifierClassProjection can currently only be called with onesided.")
-
-#     def onesided_distances(
-#         self,
-#         adata: AnnData,
-#         groupby: str,
-#         selected_group: str | None = None,
-#         groups: list[str] | None = None,
-#         show_progressbar: bool = True,
-#         n_jobs: int = -1,
-#         **kwargs,
-#     ) -> Series:
-#         """Unlike the parent function, all groups except the selected group are factored into the classifier.
-
-#         Similar to the parent function, the returned dataframe contains only the specified groups.
-#         """
-#         groups = adata.obs[groupby].unique() if groups is None else groups
-#         fct = track if show_progressbar else lambda iterable: iterable
-
-#         X = adata[adata.obs[groupby] != selected_group].X
-#         labels = adata[adata.obs[groupby] != selected_group].obs[groupby].values
-#         Y = adata[adata.obs[groupby] == selected_group].X
-
-#         reg = LogisticRegression()
-#         reg.fit(X, labels)
-#         test_probas = reg.predict_proba(Y)
-
-#         df = pd.Series(index=groups, dtype=float)
-
-#         for group in fct(groups):
-#             if group == selected_group:
-#                 df.loc[group] = 0
-#             else:
-#                 class_idx = list(reg.classes_).index(group)
-#                 df.loc[group] = 1 - np.mean(test_probas[:, class_idx])
-#         df.index.name = groupby
-#         df.name = f"classifier_cp to {selected_group}"
-
-#         return df
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("ClassifierClassProjection cannot be called on a pairwise distance matrix.")
-
-
-# class MeanVarDistributionDistance(AbstractDistance):
-#     """Distance between mean-var distributions of gene expression."""
-
-#     def __init__(self) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = False
-
-#     @staticmethod
-#     def _mean_var(x, log: bool = False):
-#         mean = np.mean(x, axis=0)
-#         var = np.var(x, axis=0)
-#         positive = mean > 0
-#         mean = mean[positive]
-#         var = var[positive]
-#         if log:
-#             mean = np.log(mean)
-#             var = np.log(var)
-#         return mean, var
-
-#     @staticmethod
-#     def _prep_kde_data(x, y):
-#         return np.concatenate([x.reshape(-1, 1), y.reshape(-1, 1)], axis=1)
-
-#     @staticmethod
-#     def _grid_points(d, n_points=100):
-#         # Make grid, add 1 bin on lower/upper end to get final n_points
-#         d_min = d.min()
-#         d_max = d.max()
-#         # Compute bin size
-#         d_bin = (d_max - d_min) / (n_points - 2)
-#         d_min = d_min - d_bin
-#         d_max = d_max + d_bin
-#         return np.arange(start=d_min + 0.5 * d_bin, stop=d_max, step=d_bin)
-
-#     @staticmethod
-#     def _kde_eval_both(x_kde, y_kde, grid):
-#         n_points = len(grid)
-#         chunk_size = 10000
-
-#         result_x = np.zeros(n_points)
-#         result_y = np.zeros(n_points)
-
-#         # Process same chunks for both KDEs
-#         for start in range(0, n_points, chunk_size):
-#             end = min(start + chunk_size, n_points)
-#             chunk = grid[start:end]
-#             result_x[start:end] = x_kde.score_samples(chunk)
-#             result_y[start:end] = y_kde.score_samples(chunk)
-
-#         return result_x, result_y
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, **kwargs) -> float:
-#         """Difference of mean-var distributions in 2 matrices.
-
-#         Args:
-#             X: Normalized and log transformed cells x genes count matrix.
-#             Y: Normalized and log transformed cells x genes count matrix.
-#             kwargs: Passed to the metrics function.
-#         """
-#         mean_x, var_x = self._mean_var(X, log=True)
-#         mean_y, var_y = self._mean_var(Y, log=True)
-
-#         x = self._prep_kde_data(mean_x, var_x)
-#         y = self._prep_kde_data(mean_y, var_y)
-
-#         # Gridpoints to eval KDE on
-#         mean_grid = self._grid_points(np.concatenate([mean_x, mean_y]))
-#         var_grid = self._grid_points(np.concatenate([var_x, var_y]))
-#         grid = np.array(np.meshgrid(mean_grid, var_grid)).T.reshape(-1, 2)
-
-#         # Fit both KDEs first
-#         x_kde = KernelDensity(bandwidth="silverman", kernel="exponential").fit(x)
-#         y_kde = KernelDensity(bandwidth="silverman", kernel="exponential").fit(y)
-
-#         # Evaluate both KDEs on same grid chunks
-#         kde_x, kde_y = self._kde_eval_both(x_kde, y_kde, grid)
-
-#         return ((np.exp(kde_x) - np.exp(kde_y)) ** 2).mean()
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("MeanVarDistributionDistance cannot be called on a pairwise distance matrix.")
-
-
-# class MahalanobisDistance(AbstractDistance):
-#     """Mahalanobis distance between pseudobulk vectors."""
-
-#     def __init__(self, aggregation_func: Callable = np.mean) -> None:
-#         super().__init__()
-#         self.accepts_precomputed = False
-#         self.aggregation_func = aggregation_func
-
-#     def __call__(self, X: np.ndarray, Y: np.ndarray, **kwargs) -> float:
-#         return mahalanobis(
-#             self.aggregation_func(X, axis=0),
-#             self.aggregation_func(Y, axis=0),
-#             np.linalg.inv(np.cov(X.T)),
-#         )
-
-#     def from_precomputed(self, P: np.ndarray, idx: np.ndarray, **kwargs) -> float:
-#         raise NotImplementedError("Mahalanobis cannot be called on a pairwise distance matrix.")
