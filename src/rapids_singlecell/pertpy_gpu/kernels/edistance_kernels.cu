@@ -60,7 +60,7 @@ __global__ void compute_group_distances(
     // Reduce across threads using shared memory
     shared_sums[thread_id] = local_sum;
     __syncthreads();
-    
+
     for (int stride = block_size / 2; stride > 0; stride >>= 1) {
         if (thread_id < stride) {
             shared_sums[thread_id] += shared_sums[thread_id + stride];
