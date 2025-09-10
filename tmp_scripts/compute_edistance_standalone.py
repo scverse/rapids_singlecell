@@ -28,7 +28,7 @@ if __name__ == "__main__":
     save_dir = os.path.join(
         os.path.expanduser("~"), "data", "adamson_2016_upr_epistasis_pca.h5ad"
     )
-    save_dir_df = os.path.join(os.path.expanduser("~"), "data", "df_cpu.csv")
+    save_dir_df = os.path.join(os.path.expanduser("~"), "data", "df_cpu_float64.csv")
     adata = ad.read_h5ad(save_dir)
     rsc.get.anndata_to_GPU(adata, convert_all=True)
     start_time = time.time()
@@ -43,17 +43,26 @@ if __name__ == "__main__":
     # print(f"Time taken: {end_time - start_time} seconds")
     df = pd.read_csv(save_dir_df, index_col=0)
 
+    is_not_close = []
     groups = adata.obs[obs_key].unique()
-    for group_x in groups:
-        for group_y in groups:
+    k = len(groups)
+    atol = 1e-8
+    for idx1 in range(k):
+        for idx2 in range(idx1 + 1, k):
+            group_x = groups[idx1]
+            group_y = groups[idx2]
             if group_x == group_y:
                 assert df_gpu.loc[group_x, group_y] == 0
             else:
-                assert np.isclose(
-                    df_gpu.loc[group_x, group_y], df.loc[group_x, group_y], atol=1e-3
-                ), (
-                    f"Group df_gpu: {df_gpu.loc[group_x, group_y]}, Group df: {df.loc[group_x, group_y]}"
-                )
+                if not np.isclose(
+                    df_gpu.loc[group_x, group_y], df.loc[group_x, group_y], atol=atol
+                ):
+                    is_not_close.append(
+                        ((group_x, group_y), df_gpu.loc[group_x, group_y], df.loc[group_x, group_y], np.abs(df_gpu.loc[group_x, group_y] - df.loc[group_x, group_y]))
+                    )
+                    print(f"Group df_gpu: {df_gpu.loc[group_x, group_y]}, Group df: {df.loc[group_x, group_y]}, idx: ({idx1}, {idx2})")
+    
+    print("Out of", int(k * (k - 1) / 2), "pairs,", len(is_not_close), "pairs are not close with atol=", atol)
     # print(df.equals(df_gpu))
     # print(df)
     # print(df_gpu)

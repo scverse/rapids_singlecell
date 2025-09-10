@@ -76,7 +76,7 @@ def compute_d_other_gpu(
     num_pairs = len(pair_left)  # k * (k-1) pairs instead of k²
 
     # Allocate output for off-diagonal distances only
-    d_other_offdiag = cp.zeros(num_pairs, dtype=np.float32)
+    d_other_offdiag = cp.zeros(num_pairs, dtype=np.float64)
 
     # Choose optimal block size
     props = cp.cuda.runtime.getDeviceProperties(0)
@@ -85,7 +85,7 @@ def compute_d_other_gpu(
     chosen_threads = None
     shared_mem_size = 0  # TODO: think of a better way to do this
     for tpb in (1024, 512, 256, 128, 64, 32):
-        required = tpb * cp.dtype(cp.float32).itemsize
+        required = tpb * cp.dtype(cp.float64).itemsize
         if required <= max_smem:
             chosen_threads = tpb
             shared_mem_size = required
@@ -111,7 +111,7 @@ def compute_d_other_gpu(
     )
 
     # Build full k x k matrix
-    pairwise_means = cp.zeros((k, k), dtype=np.float32)
+    pairwise_means = cp.zeros((k, k), dtype=np.float64)
 
     # Fill the full matrix
     for i, idx in enumerate(pair_indices.get()):
@@ -160,7 +160,7 @@ def pairwise_edistance_gpu(
     # 1. Prepare data (same as original)
     _assert_categorical_obs(adata, key=groupby)
 
-    embedding = cp.array(adata.obsm[obsm_key]).astype(np.float32)
+    embedding = cp.array(adata.obsm[obsm_key]).astype(np.float64)
     original_groups = adata.obs[groupby]
     group_map = {v: i for i, v in enumerate(original_groups.cat.categories.values)}
     group_labels = cp.array([group_map[c] for c in original_groups], dtype=cp.int32)
