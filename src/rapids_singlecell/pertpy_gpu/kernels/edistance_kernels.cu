@@ -9,22 +9,22 @@ extern "C" {
  * Each block processes one group pair, threads collaborate within the block
  */
 __global__ void compute_group_distances(
-    const double* __restrict__ embedding,
+    const float* __restrict__ embedding,
     const int* __restrict__ cat_offsets,
     const int* __restrict__ cell_indices,
     const int* __restrict__ pair_left,
     const int* __restrict__ pair_right,
-    double* __restrict__ d_other,
+    float* __restrict__ d_other,
     int k,
     int n_features)
 {
-    extern __shared__ double shared_sums[];
+    extern __shared__ float shared_sums[];
 
     const int thread_id = threadIdx.x;
     const int block_id = blockIdx.x;
     const int block_size = blockDim.x;
 
-    double local_sum = 0.0;
+    float local_sum = 0.0f;
 
     const int a = pair_left[block_id];
     const int b = pair_right[block_id];
@@ -46,14 +46,14 @@ __global__ void compute_group_distances(
         for (int jb = start_b; jb < end_b; ++jb) {
             const int idx_j = cell_indices[jb];
 
-            double dist_sq = 0.0;
+            float dist_sq = 0.0f;
             #pragma unroll
             for (int feat = 0; feat < n_features; ++feat) {
-                double diff = embedding[idx_i * n_features + feat] -
+                float diff = embedding[idx_i * n_features + feat] -
                             embedding[idx_j * n_features + feat];
                 dist_sq += diff * diff;
             }
-            local_sum += sqrt(dist_sq);
+            local_sum += sqrtf(dist_sq);
         }
     }
 
@@ -70,7 +70,7 @@ __global__ void compute_group_distances(
 
     if (thread_id == 0) {
         // Store mean between-group distance
-        d_other[block_id] = shared_sums[0] / (double)(n_a * n_b);
+        d_other[block_id] = shared_sums[0] / (float)(n_a * n_b);
     }
 }
 
