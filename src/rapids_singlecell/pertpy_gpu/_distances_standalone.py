@@ -46,38 +46,6 @@ void edistance_pairwise_kernel(
     if (a == b) {
         // Same group: edistance = 0 by definition, but we still need to compute
         // within-group sum to match cuml behavior
-        for (int ia = start_a + thread_id; ia < end_a; ia += block_size) {
-            const int idx_i = cell_indices[ia];
-
-            // Compute ALL pairwise distances within group (including symmetric pairs)
-            for (int ja = start_a; ja < end_a; ++ja) {
-                const int idx_j = cell_indices[ja];
-
-                if (idx_i != idx_j) {  // Skip diagonal (distance = 0)
-                    float dist_sq = 0.0f;
-                    for (int feat = 0; feat < n_features; ++feat) {
-                        float diff = embedding[idx_i * n_features + feat] -
-                                    embedding[idx_j * n_features + feat];
-                        dist_sq += diff * diff;
-                    }
-                    local_within_A += sqrtf(dist_sq);
-                }
-            }
-        }
-
-        // Store in shared memory for reduction
-        shared_sums[thread_id] = local_within_A;
-        __syncthreads();
-
-        // Parallel reduction
-        for (int stride = block_size / 2; stride > 0; stride >>= 1) {
-            if (thread_id < stride) {
-                shared_sums[thread_id] += shared_sums[thread_id + stride];
-            }
-            __syncthreads();
-        }
-
-        // For same groups, edistance is always 0
         if (thread_id == 0) {
             edistances[block_id] = 0.0f;
         }
@@ -178,12 +146,13 @@ void edistance_pairwise_kernel(
         // Compute final edistance directly
         if (thread_id == 0) {
             // Normalize by total matrix elements (matching cuml behavior)
-            float mean_within_A = total_within_A / (n_a * n_a);
-            float mean_within_B = total_within_B / (n_b * n_b);
-            float mean_between = total_between / (n_a * n_b);
+            // cast to float
+            float mean_within_A = total_within_A / ((float)(n_a * n_a));
+            float mean_within_B = total_within_B / ((float)(n_b * n_b));
+            float mean_between = total_between / ((float)(n_a * n_b) * 0.5f);
 
             // Edistance formula: 2*δ - σ_A - σ_B
-            edistances[block_id] = 2.0f * mean_between - mean_within_A - mean_within_B;
+            edistances[block_id] = mean_between - mean_within_A - mean_within_B;
         }
     }
 }
