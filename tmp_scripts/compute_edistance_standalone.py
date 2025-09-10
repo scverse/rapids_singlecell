@@ -58,11 +58,27 @@ if __name__ == "__main__":
                     df_gpu.loc[group_x, group_y], df.loc[group_x, group_y], atol=atol
                 ):
                     is_not_close.append(
-                        ((group_x, group_y), df_gpu.loc[group_x, group_y], df.loc[group_x, group_y], np.abs(df_gpu.loc[group_x, group_y] - df.loc[group_x, group_y]))
+                        (
+                            (group_x, group_y),
+                            df_gpu.loc[group_x, group_y],
+                            df.loc[group_x, group_y],
+                            np.abs(
+                                df_gpu.loc[group_x, group_y] - df.loc[group_x, group_y]
+                            ),
+                        )
                     )
-                    print(f"Group df_gpu: {df_gpu.loc[group_x, group_y]}, Group df: {df.loc[group_x, group_y]}, idx: ({idx1}, {idx2})")
-    
-    print("Out of", int(k * (k - 1) / 2), "pairs,", len(is_not_close), "pairs are not close with atol=", atol)
+                    print(
+                        f"Group df_gpu: {df_gpu.loc[group_x, group_y]}, Group df: {df.loc[group_x, group_y]}, idx: ({idx1}, {idx2})"
+                    )
+
+    print(
+        "Out of",
+        int(k * (k - 1) / 2),
+        "pairs,",
+        len(is_not_close),
+        "pairs are not close with atol=",
+        atol,
+    )
     # print(df.equals(df_gpu))
     # print(df)
     # print(df_gpu)
