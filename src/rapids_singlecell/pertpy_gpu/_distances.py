@@ -523,7 +523,7 @@ class Distance:
             distance = self.metric_fct.from_precomputed(
                 bootstrap_sub_pwd, bootstrap_sub_idx, **kwargs
             )
-            distances.append(distance.get())
+            distances.append(distance)
 
         mean = np.mean(distances)
         variance = np.var(distances)
