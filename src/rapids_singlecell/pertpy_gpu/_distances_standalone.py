@@ -324,7 +324,9 @@ def pairwise_edistance_gpu(
     """
     _assert_categorical_obs(adata, key=groupby)
 
-    embedding = cp.array(adata.obsm[obsm_key]).astype(np.float32)  # Changed from float64
+    embedding = cp.array(adata.obsm[obsm_key]).astype(
+        np.float32
+    )  # Changed from float64
     original_groups = adata.obs[groupby]
     group_map = {v: i for i, v in enumerate(original_groups.cat.categories.values)}
     group_labels = cp.array([group_map[c] for c in original_groups], dtype=cp.int32)
