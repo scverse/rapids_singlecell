@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import time
+from argparse import ArgumentParser
+from pathlib import Path
 
 import anndata as ad
 import cupy as cp
@@ -9,11 +11,9 @@ import numpy as np
 import pandas as pd
 import rmm
 from rmm.allocators.cupy import rmm_cupy_allocator
-from argparse import ArgumentParser
-from pathlib import Path
+
 import rapids_singlecell as rsc
 from rapids_singlecell.pertpy_gpu._distances_standalone import pairwise_edistance_gpu
-from pathlib import Path
 
 rmm.reinitialize(
     managed_memory=False,  # Allows oversubscription
@@ -37,23 +37,30 @@ if __name__ == "__main__":
 
     df_expected = None
     if bootstrap:
-        df_cpu_bootstrap_var = pd.read_csv(home_dir / "df_cpu_bootstrap_var.csv", index_col=0)
+        df_cpu_bootstrap_var = pd.read_csv(
+            home_dir / "df_cpu_bootstrap_var.csv", index_col=0
+        )
         df_cpu_bootstrap = pd.read_csv(home_dir / "df_cpu_bootstrap.csv", index_col=0)
         df_expected = df_cpu_bootstrap
     else:
         df_cpu_float64 = pd.read_csv(home_dir / "df_cpu_float64.csv", index_col=0)
         df_expected = df_cpu_float64
 
-
     start_time = time.time()
     if not bootstrap:
-        df_gpu = pairwise_edistance_gpu(adata, groupby=obs_key, obsm_key="X_pca", bootstrap=bootstrap)
+        df_gpu = pairwise_edistance_gpu(
+            adata, groupby=obs_key, obsm_key="X_pca", bootstrap=bootstrap
+        )
     else:
-        df_gpu, df_gpu_var = pairwise_edistance_gpu(adata, groupby=obs_key, obsm_key="X_pca", bootstrap=bootstrap, n_bootstrap=100)
+        df_gpu, df_gpu_var = pairwise_edistance_gpu(
+            adata,
+            groupby=obs_key,
+            obsm_key="X_pca",
+            bootstrap=bootstrap,
+            n_bootstrap=100,
+        )
     end_time = time.time()
     print(f"Time taken: {end_time - start_time} seconds")
-
-  
 
     is_not_close = []
     groups = adata.obs[obs_key].unique()
@@ -67,7 +74,9 @@ if __name__ == "__main__":
                 assert df_gpu.loc[group_x, group_y] == 0
             else:
                 if not np.isclose(
-                    df_gpu.loc[group_x, group_y], df_expected.loc[group_x, group_y], atol=atol
+                    df_gpu.loc[group_x, group_y],
+                    df_expected.loc[group_x, group_y],
+                    atol=atol,
                 ):
                     is_not_close.append(
                         (
@@ -75,7 +84,8 @@ if __name__ == "__main__":
                             df_expected.loc[group_x, group_y],
                             df_gpu.loc[group_x, group_y],
                             np.abs(
-                                df_expected.loc[group_x, group_y] - df_gpu.loc[group_x, group_y]
+                                df_expected.loc[group_x, group_y]
+                                - df_gpu.loc[group_x, group_y]
                             ),
                         )
                     )

@@ -131,7 +131,7 @@ def generate_bootstrap_indices(
     """
     Generate bootstrap indices for all groups and all bootstrap iterations.
     This matches the CPU implementation's random sampling logic for reproducibility.
-    
+
     Parameters
     ----------
     cat_offsets : cp.ndarray
@@ -142,7 +142,7 @@ def generate_bootstrap_indices(
         Number of bootstrap samples
     random_state : int
         Random seed for reproducibility
-        
+
     Returns
     -------
     bootstrap_indices : list[list[cp.ndarray]]
@@ -150,23 +150,23 @@ def generate_bootstrap_indices(
         Shape: [n_bootstrap][k] where each element is cp.ndarray of group_size
     """
     import numpy as np
-    
+
     # Use same RNG logic as CPU code
     rng = np.random.default_rng(random_state)
-    
+
     # Convert to numpy for CPU-based random generation
     cat_offsets_np = cat_offsets.get()
-    
+
     bootstrap_indices = []
-    
+
     for bootstrap_iter in range(n_bootstrap):
         group_indices = []
-        
+
         for group_idx in range(k):
             start_idx = cat_offsets_np[group_idx]
             end_idx = cat_offsets_np[group_idx + 1]
             group_size = end_idx - start_idx
-            
+
             if group_size > 0:
                 # Generate bootstrap indices using same logic as CPU code
                 # rng.choice(a=X.shape[0], size=X.shape[0], replace=True)
@@ -178,9 +178,9 @@ def generate_bootstrap_indices(
             else:
                 # Empty group
                 group_indices.append(cp.array([], dtype=cp.int32))
-        
+
         bootstrap_indices.append(group_indices)
-    
+
     return bootstrap_indices
 
 
@@ -193,7 +193,7 @@ def _bootstrap_sample_cells_from_indices(
 ) -> tuple[cp.ndarray, cp.ndarray]:
     """
     Bootstrap sample cells using pre-generated indices.
-    
+
     Parameters
     ----------
     cat_offsets : cp.ndarray
@@ -204,7 +204,7 @@ def _bootstrap_sample_cells_from_indices(
         Number of groups
     bootstrap_group_indices : list[cp.ndarray]
         Pre-generated bootstrap indices for each group
-        
+
     Returns
     -------
     new_cat_offsets, new_cell_indices : tuple[cp.ndarray, cp.ndarray]
@@ -212,24 +212,24 @@ def _bootstrap_sample_cells_from_indices(
     """
     new_cell_indices = []
     new_cat_offsets = cp.zeros(k + 1, dtype=cp.int32)
-    
+
     for group_idx in range(k):
         start_idx = cat_offsets[group_idx]
         end_idx = cat_offsets[group_idx + 1]
         group_size = end_idx - start_idx
-        
+
         if group_size > 0:
             # Get original cell indices for this group
             group_cells = cell_indices[start_idx:end_idx]
-            
+
             # Use pre-generated bootstrap indices
             bootstrap_indices = bootstrap_group_indices[group_idx]
             bootstrap_cells = group_cells[bootstrap_indices]
-            
+
             new_cell_indices.extend(bootstrap_cells.get().tolist())
-        
+
         new_cat_offsets[group_idx + 1] = len(new_cell_indices)
-    
+
     return new_cat_offsets, cp.array(new_cell_indices, dtype=cp.int32)
 
 
@@ -245,7 +245,7 @@ def compute_pairwise_means_gpu_bootstrap(
     """
     Compute bootstrap statistics for between-group distances.
     Uses CPU-compatible random generation for reproducibility.
-    
+
     Returns:
         means: [k, k] matrix of bootstrap means
         variances: [k, k] matrix of bootstrap variances
@@ -254,9 +254,9 @@ def compute_pairwise_means_gpu_bootstrap(
     bootstrap_indices = generate_bootstrap_indices(
         cat_offsets, k, n_bootstrap, random_state
     )
-    
+
     bootstrap_results = []
-    
+
     for bootstrap_iter in range(n_bootstrap):
         # Use pre-generated indices for this bootstrap iteration
         boot_cat_offsets, boot_cell_indices = _bootstrap_sample_cells_from_indices(
@@ -265,7 +265,7 @@ def compute_pairwise_means_gpu_bootstrap(
             k=k,
             bootstrap_group_indices=bootstrap_indices[bootstrap_iter],
         )
-        
+
         # Compute distances with bootstrapped samples
         pairwise_means = compute_pairwise_means_gpu(
             embedding=embedding,
@@ -274,12 +274,12 @@ def compute_pairwise_means_gpu_bootstrap(
             k=k,
         )
         bootstrap_results.append(pairwise_means.get())
-    
+
     # Compute statistics across bootstrap samples
     bootstrap_stack = cp.array(bootstrap_results)  # [n_bootstrap, k, k]
     means = cp.mean(bootstrap_stack, axis=0)
     variances = cp.var(bootstrap_stack, axis=0)
-    
+
     return means, variances
 
 
