@@ -5,6 +5,7 @@ __pycache__/
 .ipynb_checkpoints/
 /data/
 .vscode/
+_version.py
 
 # Distribution / packaging
 /dist/

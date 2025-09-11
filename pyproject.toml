@@ -3,7 +3,7 @@ requires = [
     "scikit-build-core>=0.10",
     "nanobind>=2.0.0",
     "pybind11-stubgen; python_version>='3.11'",
-    "hatch-vcs",
+    "setuptools-scm>=8",
 ]
 build-backend = "scikit_build_core.build"
 
@@ -112,27 +112,18 @@ markers = [
     "gpu: tests that use a GPU (currently unused, but needs to be specified here as we import anndata.tests.helpers, which uses it)",
 ]
 
-[tool.hatch.build]
-# exclude big files that don’t need to be installed
-exclude = [
-    "tests",
-    "docs",
-    "notebooks",
-]
-[tool.hatch.build.hooks.vcs]
-version-file = "src/rapids_singlecell/_version.py"
-
-[tool.hatch.version]
-source = "vcs"
-
-[tool.hatch.build.targets.wheel]
-packages = [ 'src/rapids_singlecell', 'src/testing' ]
+[tool.setuptools_scm]
+write_to = "src/rapids_singlecell/_version.py"
+# Optional but useful:
+version_scheme = "guess-next-dev"
+local_scheme = "node-and-date"
 
 [tool.scikit-build]
 wheel.packages = [ "src/rapids_singlecell", "src/testing" ]
-cmake.minimum-version = "3.24"
+cmake.version = ">=3.24"
 cmake.build-type = "Release"
-ninja.minimum-version = "1.10"
+ninja.version = ">=1.10"
+experimental = false
 cmake.args = [ "-DCMAKE_CUDA_ARCHITECTURES=75;80;86;89;90;100" ]
 sdist.include = [
     "CMakeLists.txt",
@@ -148,6 +139,7 @@ sdist.include = [
     "src/rapids_singlecell/_cuda/qc_dask/kernels.cuh",
 ]
 build-dir = "build"
+metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
 
 
 [tool.codespell]
