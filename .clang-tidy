@@ -1,6 +1,0 @@
-Checks: '-*,clang-analyzer-*,bugprone-*,performance-*,readability-*,modernize-*'
-WarningsAsErrors: ''
-HeaderFilterRegex: 'src/rapids_singlecell/_cuda/.*'
-AnalyzeTemporaryDtors: false
-FormatStyle: none
-ExtraArgs: ['-std=c++17']

@@ -36,8 +36,5 @@ repos:
     rev: v1.3.5
     hooks:
     -   id: clang-format
-        args: [--style=Google]
-        files: '\\.(cu|cuh|c|cc|cpp|cxx|h|hpp)$'
-    -   id: clang-tidy
-        args: ["-p", "build"]
-        files: '\\.(cu|cuh|c|cc|cpp|cxx|h|hpp)$'
+        args: [--style=google]
+        types_or: [c, c++, cuda]
