@@ -1,6 +1,6 @@
 repos:
 -   repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.12.11
+    rev: v0.13.0
     hooks:
     -   id: ruff-check
         args: ["--fix"]
@@ -32,19 +32,12 @@ repos:
     -   id: codespell
         additional_dependencies:
         - tomli
--   repo: https://github.com/cpp-linter/cpp-linter-hooks
-    rev: v1.1.0  # or whatever stable tag
+-   repo: https://github.com/pocc/pre-commit-hooks
+    rev: v1.3.5
     hooks:
-        -   id: clang-format
-            args:
-                - --style=Google   # or your .clang-format file
-            files: ^(src|include)/.*\.(cpp|cc|cxx|cu|cuh|h|hpp)$
-
-        -   id: clang-tidy
-            args:
-                - --checks=bugprone-*,performance-*,modernize-*,cuda-*  # if cuda-* checks are available
-                - --  # after this, pass compile-flags
-                - -Iinclude
-                - -DDEFINE_YOU_USE
-                - --cuda-path=/usr/local/cuda
-            files: ^(src|include)/.*\.(cpp|cc|cxx|cu|cuh)$
+    -   id: clang-format
+        args: [--style=Google]
+        files: '\\.(cu|cuh|c|cc|cpp|cxx|h|hpp)$'
+    -   id: clang-tidy
+        args: ["-p", "build"]
+        files: '\\.(cu|cuh|c|cc|cpp|cxx|h|hpp)$'

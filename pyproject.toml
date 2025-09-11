@@ -1,6 +1,11 @@
 [build-system]
-requires = [ "hatchling", "hatch-vcs" ]
-build-backend = "hatchling.build"
+requires = [
+    "scikit-build-core>=0.10",
+    "nanobind>=2.0.0",
+    "pybind11-stubgen; python_version>='3.11'",
+    "hatch-vcs",
+]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "rapids_singlecell"
@@ -122,6 +127,28 @@ source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = [ 'src/rapids_singlecell', 'src/testing' ]
+
+[tool.scikit-build]
+wheel.packages = [ "src/rapids_singlecell", "src/testing" ]
+cmake.minimum-version = "3.24"
+cmake.build-type = "Release"
+ninja.minimum-version = "1.10"
+cmake.args = [ "-DCMAKE_CUDA_ARCHITECTURES=75;80;86;89;90;100" ]
+sdist.include = [
+    "CMakeLists.txt",
+    "src/rapids_singlecell/_cuda/mean_var/mean_var.cu",
+    "src/rapids_singlecell/_cuda/mean_var/kernels.cuh",
+    "src/rapids_singlecell/_cuda/sparse2dense/sparse2dense.cu",
+    "src/rapids_singlecell/_cuda/sparse2dense/kernels.cuh",
+    "src/rapids_singlecell/_cuda/scale/scale.cu",
+    "src/rapids_singlecell/_cuda/scale/kernels.cuh",
+    "src/rapids_singlecell/_cuda/qc/qc.cu",
+    "src/rapids_singlecell/_cuda/qc/kernels.cuh",
+    "src/rapids_singlecell/_cuda/qc_dask/qc_kernels_dask.cu",
+    "src/rapids_singlecell/_cuda/qc_dask/kernels.cuh",
+]
+build-dir = "build"
+
 
 [tool.codespell]
 skip = '*.ipynb,*.csv'

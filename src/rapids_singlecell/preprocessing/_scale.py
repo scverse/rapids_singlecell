@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from typing import Union
 
 import cupy as cp
@@ -154,33 +153,34 @@ def _scale_array(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=
     std = cp.sqrt(var)
     std[std == 0] = 1
     max_value = _get_max_value(max_value, X.dtype)
+    print(f"mean = {mean[:10]}")
+    print(f"std = {std[:10]}")
+    mean = mean.astype(X.dtype)
+    std = std.astype(X.dtype)
     if zero_center:
-        from ._kernels._scale_kernel import _dense_center_scale_kernel
+        from rapids_singlecell._cuda import _scale_cuda as _sc
 
-        scale_kernel_center = _dense_center_scale_kernel(X.dtype)
-
-        scale_kernel_center(
-            (math.ceil(X.shape[0] / 32), math.ceil(X.shape[1] / 32)),
-            (32, 32),
-            (
-                X,
-                mean.astype(X.dtype),
-                std.astype(X.dtype),
-                mask_array,
-                max_value,
-                X.shape[0],
-                X.shape[1],
-            ),
+        _sc.dense_scale_center_diff(
+            X.data.ptr,
+            mean.data.ptr,
+            std.data.ptr,
+            mask_array.data.ptr,
+            float(max_value),
+            np.int64(X.shape[0]),
+            np.int64(X.shape[1]),
+            np.int32(cp.dtype(X.dtype).itemsize),
         )
     else:
-        from ._kernels._scale_kernel import _dense_scale_kernel
+        from rapids_singlecell._cuda import _scale_cuda as _sc
 
-        scale_kernel = _dense_scale_kernel(X.dtype)
-
-        scale_kernel(
-            (math.ceil(X.shape[0] / 32), math.ceil(X.shape[1] / 32)),
-            (32, 32),
-            (X, std.astype(X.dtype), mask_array, max_value, X.shape[0], X.shape[1]),
+        _sc.dense_scale_diff(
+            X.data.ptr,
+            std.data.ptr,
+            mask_array.data.ptr,
+            float(max_value),
+            np.int64(X.shape[0]),
+            np.int64(X.shape[1]),
+            np.int32(cp.dtype(X.dtype).itemsize),
         )
 
     return X, mean, std
@@ -215,13 +215,15 @@ def _scale_sparse_csc(
         mean, var = _get_mean_var(X)
         std = cp.sqrt(var)
         std[std == 0] = 1
-        from ._kernels._scale_kernel import _csc_scale_diff
+        std = std.astype(X.dtype)
+        from rapids_singlecell._cuda import _scale_cuda as _sc
 
-        scale_csc = _csc_scale_diff(X.dtype)
-        scale_csc(
-            (X.shape[1],),
-            (64,),
-            (X.indptr, X.data, std, X.shape[1]),
+        _sc.csc_scale_diff(
+            X.indptr.data.ptr,
+            X.data.data.ptr,
+            std.data.ptr,
+            int(X.shape[1]),
+            int(cp.dtype(X.dtype).itemsize),
         )
         if max_value:
             X.data = cp.clip(X.data, a_min=None, a_max=max_value)
@@ -256,21 +258,18 @@ def _scale_sparse_csr(
         std[std == 0] = 1
 
         max_value = _get_max_value(max_value, X.dtype)
-        from ._kernels._scale_kernel import _csr_scale_kernel
+        std = std.astype(X.dtype)
+        from rapids_singlecell._cuda import _scale_cuda as _sc
 
-        scale_csr = _csr_scale_kernel(X.dtype)
-        scale_csr(
-            (X.shape[0],),
-            (64,),
-            (
-                X.indptr,
-                X.indices,
-                X.data,
-                std.astype(X.dtype),
-                mask_array,
-                max_value,
-                X.shape[0],
-            ),
+        _sc.csr_scale_diff(
+            X.indptr.data.ptr,
+            X.indices.data.ptr,
+            X.data.data.ptr,
+            std.data.ptr,
+            mask_array.data.ptr,
+            float(max_value),
+            int(X.shape[0]),
+            int(cp.dtype(X.dtype).itemsize),
         )
 
         return X, mean, std
@@ -295,25 +294,9 @@ def _scale_dask(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=N
     )
 
     if isinstance(X._meta, sparse.csr_matrix) and zero_center:
-        from ._kernels._sparse2dense import _sparse2densekernel
-
-        kernel = _sparse2densekernel(X.dtype)
-        kernel.compile()
 
         def __dense(X_part):
-            major, minor = X_part.shape
-            dense = cp.zeros(X_part.shape, order="C", dtype=X_part.dtype)
-            max_nnz = cp.diff(X_part.indptr).max()
-            tpb = (32, 32)
-            bpg_x = math.ceil(major / tpb[0])
-            bpg_y = math.ceil(max_nnz / tpb[1])
-            bpg = (bpg_x, bpg_y)
-
-            kernel(
-                bpg,
-                tpb,
-                (X_part.indptr, X_part.indices, X_part.data, dense, major, minor, 1),
-            )
+            dense = _sparse_to_dense(X_part, order="C")
             return dense
 
         X = X.map_blocks(
@@ -336,27 +319,21 @@ def _scale_dask(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=N
 
 
 def _scale_dask_array_zc(X, *, mask_array, mean, std, max_value):
-    from ._kernels._scale_kernel import _dense_center_scale_kernel
-
-    scale_kernel_center = _dense_center_scale_kernel(X.dtype)
-    scale_kernel_center.compile()
+    from rapids_singlecell._cuda import _scale_cuda as _sc
 
     mean_ = mean.astype(X.dtype)
     std_ = std.astype(X.dtype)
 
     def __scale_kernel_center(X_part, mask_part):
-        scale_kernel_center(
-            (math.ceil(X_part.shape[0] / 32), math.ceil(X_part.shape[1] / 32)),
-            (32, 32),
-            (
-                X_part,
-                mean_,
-                std_,
-                mask_part,
-                max_value,
-                X_part.shape[0],
-                X_part.shape[1],
-            ),
+        _sc.dense_scale_center_diff(
+            X_part.data.ptr,
+            mean_.data.ptr,
+            std_.data.ptr,
+            mask_part.data.ptr,
+            float(max_value),
+            int(X_part.shape[0]),
+            int(X_part.shape[1]),
+            int(cp.dtype(X_part.dtype).itemsize),
         )
         return X_part
 
@@ -374,17 +351,19 @@ def _scale_dask_array_zc(X, *, mask_array, mean, std, max_value):
 
 
 def _scale_dask_array_nzc(X, *, mask_array, mean, std, max_value):
-    from ._kernels._scale_kernel import _dense_scale_kernel
+    from rapids_singlecell._cuda import _scale_cuda as _sc
 
-    scale_kernel = _dense_scale_kernel(X.dtype)
-    scale_kernel.compile()
     std_ = std.astype(X.dtype)
 
     def __scale_kernel(X_part, mask_part):
-        scale_kernel(
-            (math.ceil(X_part.shape[0] / 32), math.ceil(X_part.shape[1] / 32)),
-            (32, 32),
-            (X_part, std_, mask_part, max_value, X_part.shape[0], X_part.shape[1]),
+        _sc.dense_scale_diff(
+            X_part.data.ptr,
+            std_.data.ptr,
+            mask_part.data.ptr,
+            float(max_value),
+            X_part.shape[0],
+            X_part.shape[1],
+            int(cp.dtype(X_part.dtype).itemsize),
         )
 
         return X_part
@@ -403,25 +382,20 @@ def _scale_dask_array_nzc(X, *, mask_array, mean, std, max_value):
 
 
 def _scale_sparse_csr_dask(X, *, mask_array, mean, std, max_value):
-    from ._kernels._scale_kernel import _csr_scale_kernel
+    from rapids_singlecell._cuda import _scale_cuda as _sc
 
-    scale_kernel_csr = _csr_scale_kernel(X.dtype)
-    scale_kernel_csr.compile()
     std_ = std.astype(X.dtype)
 
     def __scale_kernel_csr(X_part, mask_part):
-        scale_kernel_csr(
-            (X_part.shape[0],),
-            (64,),
-            (
-                X_part.indptr,
-                X_part.indices,
-                X_part.data,
-                std_,
-                mask_part,
-                max_value,
-                X_part.shape[0],
-            ),
+        _sc.csr_scale_diff(
+            X_part.indptr.data.ptr,
+            X_part.indices.data.ptr,
+            X_part.data.data.ptr,
+            std_.data.ptr,
+            mask_part.data.ptr,
+            float(max_value),
+            int(X_part.shape[0]),
+            int(cp.dtype(X_part.data.dtype).itemsize),
         )
         return X_part
 
