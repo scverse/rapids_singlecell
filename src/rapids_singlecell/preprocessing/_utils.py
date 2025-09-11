@@ -30,7 +30,10 @@ def _sparse_to_dense(X: spmatrix, order: Literal["C", "F"] | None = None) -> cp.
         switcher = 0 if order == "C" else 1
     else:
         raise ValueError("Input matrix must be a sparse `csc` or `csr` matrix")
+
     dense = cp.zeros(X.shape, order=order, dtype=X.dtype)
+    max_nnz = cp.diff(X.indptr).max()
+    print(type(X), X.shape, dense.shape, major, minor, switcher)
     _s2d.sparse2dense(
         X.indptr.data.ptr,
         X.indices.data.ptr,
@@ -39,6 +42,7 @@ def _sparse_to_dense(X: spmatrix, order: Literal["C", "F"] | None = None) -> cp.
         int(major),
         int(minor),
         int(switcher),
+        int(max_nnz),
         int(cp.dtype(X.dtype).itemsize),
     )
     return dense
