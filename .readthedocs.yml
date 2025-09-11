@@ -14,7 +14,7 @@ build:
     - asdf global uv latest
 
     # Use uv to synchronize dependencies
-    - CMAKE_ARGS="-DRSC_BUILD_EXTENSIONS=OFF" uv pip install ".[doc]"
+    - CMAKE_ARGS="-DRSC_BUILD_EXTENSIONS=OFF" uv pip install --system ".[doc]"
 
     # Build documentation using sphinx
     - python -m sphinx -T -b html -d docs/_build/doctrees -D language=en docs $READTHEDOCS_OUTPUT/html
