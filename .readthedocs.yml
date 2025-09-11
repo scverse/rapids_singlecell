@@ -12,6 +12,9 @@ build:
     - asdf install uv latest
     - asdf global uv latest
 
+    # Set CMAKE
+    - export CMAKE_ARGS: "-DRSC_BUILD_EXTENSIONS=OFF"
+
     # Use uv to synchronize dependencies
     - uv pip install --system .[doc]
 
