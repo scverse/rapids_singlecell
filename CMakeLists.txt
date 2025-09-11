@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(rapids_singlecell_cuda LANGUAGES CXX CUDA)
+project(rapids_singlecell_cuda LANGUAGES CXX)
 
 # Option to disable building compiled extensions (for docs/RTD)
 option(RSC_BUILD_EXTENSIONS "Build CUDA/C++ extensions" ON)
@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if (RSC_BUILD_EXTENSIONS)
+  enable_language(CUDA)
   find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
   find_package(nanobind CONFIG REQUIRED)
   find_package(CUDAToolkit REQUIRED)
