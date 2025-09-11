@@ -1,10 +1,11 @@
+import warnings
+warnings.filterwarnings("ignore")
 import cupy as cp
 import numpy as np
 import anndata as ad
 from pathlib import Path
 import os
 import time
-import warnings
 import rapids_singlecell as rsc
 
 # Add utils to path for GPU version
@@ -27,6 +28,7 @@ def compare_indices(adata_cpu):
     rsc.get.anndata_to_GPU(adata_gpu, convert_all=True)
     g = adata_cpu.obsp['spatial_connectivities']
     g_gpu = adata_gpu.obsp['spatial_connectivities']
+    degrees = cp.diff(g_gpu.indptr)
     spatial_cpu = adata_cpu.obsm['spatial'].astype(np.float64)
     spatial_gpu = adata_gpu.obsm['spatial'].astype(cp.float32)
     
@@ -35,14 +37,14 @@ def compare_indices(adata_cpu):
 
     # Compute indices with both methods
     start = time.time()
-    sat_cpu, sat_idx_cpu, unsat_cpu, unsat_idx_cpu = _compute_idxs(g, spatial_cpu, 6, "l1")
-    end = time.time()
-    print("CPU indices computed in ", end - start, "seconds")
-    start = time.time()
     sat_gpu, sat_idx_gpu, unsat_gpu, unsat_idx_gpu = _compute_idxs_gpu(g_gpu, spatial_gpu, 6)
     end = time.time()
     print("GPU indices computed in ", end - start, "seconds")
     
+    start = time.time()
+    sat_cpu, sat_idx_cpu, unsat_cpu, unsat_idx_cpu = _compute_idxs(g, spatial_cpu, 6, "l1")
+    end = time.time()
+    print("CPU indices computed in ", end - start, "seconds")
     # Convert GPU results to CPU for comparison
     sat_gpu_cpu = sat_gpu.get()
     sat_idx_gpu_cpu = sat_idx_gpu.get()
