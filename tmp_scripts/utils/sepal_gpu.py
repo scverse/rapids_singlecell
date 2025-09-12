@@ -191,12 +191,12 @@ def _cuda_kernel_diffusion_gpu(
     n_unsat = len(unsat)
     
     # Flatten sat_idx for kernel (kernel expects flattened array)
-    sat_idx_flat = sat_idx.flatten(order="C")
+    # sat_idx_flat = sat_idx.flatten(order="C")
     
     # Allocate working arrays for the kernel (reused for each gene)
     concentration = cp.zeros(n_cells, dtype=cp.float64)
     derivatives = cp.zeros(n_cells, dtype=cp.float64)
-    result_gpu = cp.zeros(1, dtype=cp.float64)
+    result_gpu = cp.zeros(1, dtype=cp.float32)
     
     # Store results for all genes
     all_scores = []
@@ -207,7 +207,6 @@ def _cuda_kernel_diffusion_gpu(
             print(f"Processing gene {gene_idx}/{n_genes}")
             
         # Copy gene data to working array
-        gene_data = vals[:, gene_idx].flatten(order="C")
         
         # Launch CUDA kernel for this gene
         # Block size should be a multiple of warp size (32) and handle convergence sync
@@ -217,15 +216,17 @@ def _cuda_kernel_diffusion_gpu(
         sepal_simulation(
             (grid_size,), (block_size,),
             (
-                gene_data,              # const double* gene_data [n_cells]
+                vals,              # const double* gene_data [n_cells]
+                gene_idx,             # int gene_idx
                 sat,                    # const int* sat [n_sat]  
-                sat_idx_flat,           # const int* sat_idx [n_sat * sat_thresh]
+                sat_idx,           # const int* sat_idx [n_sat , sat_thresh]
                 unsat,                  # const int* unsat [n_unsat]
                 unsat_to_nearest_sat,   # const int* unsat_idx [n_unsat]
                 concentration,          # double* concentration [n_cells] (working array)
                 derivatives,            # double* derivatives [n_cells] (working array)
-                result_gpu,             # double* result [1] (output)
+                result_gpu,             # float* result [1] (output)
                 n_cells,                # int n_cells
+                n_genes,                # int n_genes
                 n_sat,                  # int n_sat  
                 n_unsat,                # int n_unsat
                 max_neighs,             # int sat_thresh (same as max_neighs)

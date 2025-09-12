@@ -29,15 +29,17 @@ extern "C" {
     }
 
     __global__ void sepal_simulation(
-        const double* __restrict__ gene_data,    // [n_cells] input gene expression
+        const double* __restrict__ vals,         // [n_cells * n_genes] all gene data
+        int gene_idx,                            // NEW: which gene to process
         const int* __restrict__ sat,             // [n_sat] saturated node indices
         const int* __restrict__ sat_idx,         // [n_sat * sat_thresh] neighborhoods
         const int* __restrict__ unsat,           // [n_unsat] unsaturated node indices
         const int* __restrict__ unsat_idx,       // [n_unsat] mapping to saturated
-        double* __restrict__ concentration,      // [n_cells] working concentration array (global memory)
-        double* __restrict__ derivatives,        // [n_cells] working derivatives array (global memory)
-        double* __restrict__ result,             // [1] output
+        double* __restrict__ concentration,      // [n_cells] working concentration array (unused)
+        double* __restrict__ derivatives,        // [n_cells] working derivatives array (unused)
+        float* __restrict__ result,             // [1] output
         int n_cells,
+        int n_genes,                             // NEW: number of genes
         int n_sat,
         int n_unsat,
         int sat_thresh,
@@ -64,7 +66,7 @@ extern "C" {
         
         // Initialize concentration array in parallel
         for (int i = tid; i < n_cells; i += blockSize) {
-            concentration[i] = gene_data[i];
+            concentration[i] = vals[i * n_genes + gene_idx];
             derivatives[i] = 0.0;
         }
         __syncthreads();
@@ -157,7 +159,7 @@ extern "C" {
         
         if (tid == 0) {
             // Return the iteration number, let Python handle dt multiplication
-            result[0] = has_converged ? (double)convergence_iteration : -999999.0;
+            result[0] = has_converged ? (float)convergence_iteration : -999999.0;
             
         }
     }
