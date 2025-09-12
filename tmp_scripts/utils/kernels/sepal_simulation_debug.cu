@@ -1,5 +1,37 @@
 extern "C" {
     
+    __device__ float compute_entropy_device(
+        const float* __restrict__ conc,
+        const int* __restrict__ sat,             // INDEX ARRAY: saturated node indices
+        int n_sat
+    ) {
+        float total_sum = 0.0f;
+        float entropy = 0.0f;
+        
+        // Compute total sum of saturated concentrations
+        for (int i = 0; i < n_sat; i++) {
+            float val = conc[sat[i]];  // sat[i] is INDEX into conc array
+            if (val > 0.0f) {
+                total_sum += val;
+            }
+        }
+        
+        if (total_sum <= 0.0f) {
+            return 0.0f;
+        }
+        
+        // Compute entropy
+        for (int i = 0; i < n_sat; i++) {
+            float val = conc[sat[i]];  // sat[i] is INDEX into conc array
+            if (val > 0.0f) {
+                float normalized = val / total_sum;
+                entropy += -normalized * logf(normalized);
+            }
+        }
+        
+        return entropy / n_sat;
+    }
+
     __global__ void sepal_simulation_debug(
         const float* __restrict__ gene_data,
         const int* __restrict__ sat,
@@ -7,7 +39,6 @@ extern "C" {
         const int* __restrict__ unsat,
         const int* __restrict__ unsat_idx,
         float* __restrict__ result,
-        float* __restrict__ debug_output,    // [debug_size] debug array
         int n_cells, int n_sat, int n_unsat, int sat_thresh,
         int max_neighs, int n_iter, float dt, float thresh
     )
@@ -15,15 +46,17 @@ extern "C" {
         int tid = threadIdx.x;
         int blockSize = blockDim.x;
         
-        // Shared memory layout
+        // FIXED: Add proper memory layout like the main kernel
         extern __shared__ float shared_mem[];
+        
+        // Calculate offsets explicitly to prevent overlap
         const int conc_offset = 0;
-        const int nhood_offset = n_cells;
+        const int nhood_offset = n_cells;  
         const int dcdt_offset = n_cells + n_sat;
         
-        float* concentration = &shared_mem[conc_offset];
-        float* neighbor_sums = &shared_mem[nhood_offset];
-        float* derivatives = &shared_mem[dcdt_offset];
+        float* concentration = &shared_mem[conc_offset];     // [n_cells]
+        float* neighbor_sums = &shared_mem[nhood_offset];    // [n_sat]
+        float* derivatives = &shared_mem[dcdt_offset];       // [n_cells]
         
         __shared__ bool has_converged;
         __shared__ int convergence_iteration;
@@ -34,6 +67,9 @@ extern "C" {
             
             printf("=== GPU DEBUG ===\n");
             printf("n_cells: %d, n_sat: %d, n_unsat: %d\n", n_cells, n_sat, n_unsat);
+            printf("Memory layout: conc[0:%d] nhood[%d:%d] dcdt[%d:%d]\n", 
+                   n_cells-1, nhood_offset, nhood_offset+n_sat-1, 
+                   dcdt_offset, dcdt_offset+n_cells-1);
         }
         
         // Initialize
@@ -55,7 +91,11 @@ extern "C" {
                    concentration[0], concentration[1], concentration[2], 
                    concentration[3], concentration[4]);
             printf("sat[0:3]: %d %d %d\n", sat[0], sat[1], sat[2]);
-            printf("unsat[0:3]: %d %d %d\n", unsat[0], unsat[1], unsat[2]);
+            if (n_unsat > 0) {
+                printf("unsat[0:3]: %d %d %d\n", unsat[0], 
+                       n_unsat > 1 ? unsat[1] : -1, 
+                       n_unsat > 2 ? unsat[2] : -1);
+            }
         }
         
         float prev_entropy = 1.0f;
@@ -70,7 +110,9 @@ extern "C" {
                 float sum = 0.0f;
                 for (int j = 0; j < sat_thresh; j++) {
                     int neighbor_idx = sat_idx[i * sat_thresh + j];
-                    sum += concentration[neighbor_idx];
+                    if (neighbor_idx >= 0 && neighbor_idx < n_cells) {  // BOUNDS CHECK
+                        sum += concentration[neighbor_idx];
+                    }
                 }
                 neighbor_sums[i] = sum;
             }
@@ -89,17 +131,19 @@ extern "C" {
             // Phase 2: Derivatives
             for (int i = tid; i < n_sat; i += blockSize) {
                 int sat_node_idx = sat[i];
-                float center = concentration[sat_node_idx];
-                float neighbors = neighbor_sums[i];
-                float d2;
-                
-                if (max_neighs == 4) {
-                    d2 = (neighbors - 4.0f * center) / (h * h);
-                } else if (max_neighs == 6) {
-                    d2 = (2.0f * (neighbors - 6.0f * center) / (3.0f * h * h));
+                if (sat_node_idx >= 0 && sat_node_idx < n_cells) {  // BOUNDS CHECK
+                    float center = concentration[sat_node_idx];
+                    float neighbors = neighbor_sums[i];
+                    float d2;
+                    
+                    if (max_neighs == 4) {
+                        d2 = (neighbors - 4.0f * center) / (h * h);
+                    } else if (max_neighs == 6) {
+                        d2 = (2.0f * (neighbors - 6.0f * center) / (3.0f * h * h));
+                    }
+                    
+                    derivatives[sat_node_idx] = D * d2;
                 }
-                
-                derivatives[sat_node_idx] = D * d2;
             }
             
             __syncthreads();
@@ -113,16 +157,21 @@ extern "C" {
             // Phase 3: Update saturated
             for (int i = tid; i < n_sat; i += blockSize) {
                 int sat_node_idx = sat[i];
-                concentration[sat_node_idx] += derivatives[sat_node_idx] * dt;
-                concentration[sat_node_idx] = fmaxf(0.0f, concentration[sat_node_idx]);
+                if (sat_node_idx >= 0 && sat_node_idx < n_cells) {  // BOUNDS CHECK
+                    concentration[sat_node_idx] += derivatives[sat_node_idx] * dt;
+                    concentration[sat_node_idx] = fmaxf(0.0f, concentration[sat_node_idx]);
+                }
             }
             
             // Phase 4: Update unsaturated
             for (int i = tid; i < n_unsat; i += blockSize) {
                 int unsat_node_idx = unsat[i];
                 int mapped_sat_idx = unsat_idx[i];
-                concentration[unsat_node_idx] += derivatives[mapped_sat_idx] * dt;
-                concentration[unsat_node_idx] = fmaxf(0.0f, concentration[unsat_node_idx]);
+                if (unsat_node_idx >= 0 && unsat_node_idx < n_cells && 
+                    mapped_sat_idx >= 0 && mapped_sat_idx < n_cells) {  // BOUNDS CHECK
+                    concentration[unsat_node_idx] += derivatives[mapped_sat_idx] * dt;
+                    concentration[unsat_node_idx] = fmaxf(0.0f, concentration[unsat_node_idx]);
+                }
             }
             
             __syncthreads();
@@ -131,8 +180,12 @@ extern "C" {
             if (tid == 0) {
                 printf("  After update conc[sat][0:3]: %.6f %.6f %.6f\n",
                        concentration[sat[0]], concentration[sat[1]], concentration[sat[2]]);
-                printf("  After update conc[unsat][0:3]: %.6f %.6f %.6f\n",
-                       concentration[unsat[0]], concentration[unsat[1]], concentration[unsat[2]]);
+                if (n_unsat > 0) {
+                    printf("  After update conc[unsat][0:3]: %.6f %.6f %.6f\n",
+                           concentration[unsat[0]], 
+                           n_unsat > 1 ? concentration[unsat[1]] : 0.0f,
+                           n_unsat > 2 ? concentration[unsat[2]] : 0.0f);
+                }
             }
             
             // Phase 5: Check convergence
@@ -158,9 +211,82 @@ extern "C" {
             }
         }
         
-        // Continue without debug prints for remaining iterations
+        // Continue without debug prints for remaining iterations  
         for (int iter = 5; iter < n_iter; iter++) {
-            // ... normal simulation loop without prints
+            // Phase 1: Neighborhood sums
+            for (int i = tid; i < n_sat; i += blockSize) {
+                float sum = 0.0f;
+                for (int j = 0; j < sat_thresh; j++) {
+                    int neighbor_idx = sat_idx[i * sat_thresh + j];
+                    if (neighbor_idx >= 0 && neighbor_idx < n_cells) {
+                        sum += concentration[neighbor_idx];
+                    }
+                }
+                neighbor_sums[i] = sum;
+            }
+            
+            __syncthreads();
+            
+            // Phase 2: Derivatives
+            for (int i = tid; i < n_sat; i += blockSize) {
+                int sat_node_idx = sat[i];
+                if (sat_node_idx >= 0 && sat_node_idx < n_cells) {
+                    float center = concentration[sat_node_idx];
+                    float neighbors = neighbor_sums[i];
+                    float d2;
+                    
+                    if (max_neighs == 4) {
+                        d2 = (neighbors - 4.0f * center) / (h * h);
+                    } else if (max_neighs == 6) {
+                        d2 = (2.0f * (neighbors - 6.0f * center) / (3.0f * h * h));
+                    }
+                    
+                    derivatives[sat_node_idx] = D * d2;
+                }
+            }
+            
+            __syncthreads();
+            
+            // Phase 3: Update saturated
+            for (int i = tid; i < n_sat; i += blockSize) {
+                int sat_node_idx = sat[i];
+                if (sat_node_idx >= 0 && sat_node_idx < n_cells) {
+                    concentration[sat_node_idx] += derivatives[sat_node_idx] * dt;
+                    concentration[sat_node_idx] = fmaxf(0.0f, concentration[sat_node_idx]);
+                }
+            }
+            
+            // Phase 4: Update unsaturated
+            for (int i = tid; i < n_unsat; i += blockSize) {
+                int unsat_node_idx = unsat[i];
+                int mapped_sat_idx = unsat_idx[i];
+                if (unsat_node_idx >= 0 && unsat_node_idx < n_cells && 
+                    mapped_sat_idx >= 0 && mapped_sat_idx < n_cells) {
+                    concentration[unsat_node_idx] += derivatives[mapped_sat_idx] * dt;
+                    concentration[unsat_node_idx] = fmaxf(0.0f, concentration[unsat_node_idx]);
+                }
+            }
+            
+            __syncthreads();
+            
+            // Phase 5: Check convergence
+            if (tid == 0) {
+                float entropy = compute_entropy_device(concentration, sat, n_sat);
+                float entropy_diff = fabsf(entropy - prev_entropy);
+                
+                if (entropy_diff <= thresh) {
+                    has_converged = true;
+                    convergence_iteration = iter;
+                }
+                
+                prev_entropy = entropy;
+            }
+            
+            __syncthreads();
+            
+            if (has_converged) {
+                break;
+            }
         }
         
         // Write result

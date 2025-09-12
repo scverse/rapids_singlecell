@@ -36,7 +36,7 @@ def _diffusion_debug(
     unsat_idx: NDArrayA,
     dt: float = 0.001,
     thresh: float = 1e-8,
-    gene_name: str = "unknown",
+    gene_idx: int = 0,
 ) -> float:
     """Debug version with prints."""
     sat_shape, conc_shape = sat.shape[0], conc.shape[0]
@@ -47,10 +47,15 @@ def _diffusion_debug(
     
     dcdt = np.zeros(conc_shape)
     
-    print(f"=== CPU DEBUG: {gene_name} ===")
-    print(f"Initial conc[0:5]: {conc[0:5]}")
-    print(f"sat[0:3]: {sat[0:3]}, unsat[0:3]: {unsat[0:3]}")
-    print(f"sat_idx[0,0:3]: {sat_idx[0,0:3]}")
+    # Numba-compatible printing (can only print individual values)
+    print("=== CPU DEBUG ===")
+    print("Gene index:", gene_idx)
+    print("Initial conc[0]:", conc[0])
+    print("Initial conc[1]:", conc[1]) 
+    print("Initial conc[2]:", conc[2])
+    print("sat[0]:", sat[0])
+    print("sat[1]:", sat[1])
+    print("sat[2]:", sat[2])
     
     for i in range(min(5, n_iter)):  # Debug first 5 iterations
         # Compute neighborhood sums
@@ -60,28 +65,35 @@ def _diffusion_debug(
         d2 = laplacian(conc[sat], nhood)
         dcdt[sat] = D * d2
         
-        print(f"Iter {i}:")
-        print(f"  nhood[0:3]: {nhood[0:3]}")
-        print(f"  conc[sat][0:3]: {conc[sat][0:3]}")
-        print(f"  d2[0:3]: {d2[0:3]}")
-        print(f"  dcdt[sat][0:3]: {dcdt[sat][0:3]}")
+        print("Iter:", i)
+        print("  nhood[0]:", nhood[0])
+        print("  nhood[1]:", nhood[1])
+        print("  nhood[2]:", nhood[2])
+        print("  conc[sat[0]]:", conc[sat[0]])
+        print("  conc[sat[1]]:", conc[sat[1]])
+        print("  conc[sat[2]]:", conc[sat[2]])
+        print("  d2[0]:", d2[0])
+        print("  d2[1]:", d2[1])
+        print("  d2[2]:", d2[2])
         
         conc[sat] += dcdt[sat] * dt
         conc[unsat] += dcdt[unsat_idx] * dt
         conc[conc < 0] = 0
         
-        print(f"  After update conc[sat][0:3]: {conc[sat][0:3]}")
-        print(f"  After update conc[unsat][0:3]: {conc[unsat][0:3]}")
+        print("  After update conc[sat[0]]:", conc[sat[0]])
+        print("  After update conc[sat[1]]:", conc[sat[1]])
+        print("  After update conc[sat[2]]:", conc[sat[2]])
         
         # compute entropy
         ent = _entropy(conc[sat]) / sat_shape
         entropy_arr[i] = np.abs(ent - prev_ent)
         
-        print(f"  entropy: {ent}, diff: {entropy_arr[i]}")
+        print("  entropy:", ent)
+        print("  entropy_diff:", entropy_arr[i])
         
         prev_ent = ent
         if entropy_arr[i] <= thresh:
-            print(f"  CONVERGED at iteration {i}")
+            print("  CONVERGED at iteration:", i)
             break
     
     # Continue normal execution for remaining iterations
@@ -101,7 +113,7 @@ def _diffusion_debug(
 
     tmp = np.nonzero(entropy_arr <= thresh)[0]
     result = float(tmp[0] if len(tmp) else np.nan)
-    print(f"CPU Final result: {result * dt}")
+    print("CPU Final result:", result * dt)
     return result
 
 def sepal(
@@ -119,6 +131,7 @@ def sepal(
     n_jobs: int | None = None,
     backend: str = "loky",
     show_progress_bar: bool = True,
+    debug: bool = False,
 ) -> pd.DataFrame | None:
     """
     Identify spatially variable genes with *Sepal*.
@@ -219,6 +232,7 @@ def sepal(
         unsat_idx=unsat_idx,
         dt=dt,
         thresh=thresh,
+        debug=debug,
     )
 
     key_added = "sepal_score"
@@ -246,6 +260,7 @@ def _score_helper(
     unsat_idx: NDArrayA,
     dt: float,
     thresh: float,
+    debug: bool,
     queue: SigQueue | None = None,
 ) -> NDArrayA:
     if max_neighs == 4:
@@ -262,7 +277,10 @@ def _score_helper(
         else:
             conc = vals[:, i].copy()  # vals is assumed to be a NumPy array here
 
-        time_iter = _diffusion(conc, fun, n_iter, sat, sat_idx, unsat, unsat_idx, dt=dt, thresh=thresh)
+        if debug:
+            time_iter = _diffusion_debug(conc, fun, n_iter, sat, sat_idx, unsat, unsat_idx, dt=dt, thresh=thresh, gene_idx=i)
+        else:
+            time_iter = _diffusion(conc, fun, n_iter, sat, sat_idx, unsat, unsat_idx, dt=dt, thresh=thresh)
         score.append(dt * time_iter)
 
         if queue is not None:

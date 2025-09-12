@@ -20,7 +20,9 @@ from squidpy.gr._utils import (
 )
 from .kernels.sepal_kernels import (
     get_nhood_idx_with_distance,
-    sepal_simulation
+    sepal_simulation_debug,
+    sepal_simulation,
+
 )
 
 
@@ -31,7 +33,7 @@ from cupyx.scipy.sparse import isspmatrix_csc as cp_isspmatrix_csc
 
 
 
-def _score_helper_gpu(
+def _score_helper_gpu_debug(
     gene_idx: int,
     vals: cp.ndarray,
     max_neighs: int,
@@ -42,50 +44,96 @@ def _score_helper_gpu(
     unsat_idx: cp.ndarray,
     dt: float = 0.001,
     thresh: float = 1e-8,
+    debug: bool = False,
 ) -> cp.ndarray:
-
-    # """GPU-accelerated score computation for a batch of genes."""
+    """GPU-accelerated score computation for a single gene with debug."""
     
-    
-    # # implement this in one kernel
-
     n_cells = vals.shape[0]
     n_sat = len(sat)
     n_unsat = len(unsat)
     sat_thresh = max_neighs
     
+    print(f"Processing gene {gene_idx} of 1")
+    print(f"GPU Input validation:")
+    print(f"  n_cells: {n_cells}, n_sat: {n_sat}, n_unsat: {n_unsat}")
+    print(f"  vals[0:3]: {vals[0:3].get()}")
+    print(f"  sat[0:3]: {sat[0:3].get()}")
+    
+    # Check GPU memory limits
+    device = cp.cuda.Device()
+    max_shared_mem = device.attributes['MaxSharedMemoryPerBlock']
+    print(f"Max shared memory per block: {max_shared_mem} bytes")
+    
+    # Calculate shared memory requirements
+    conc_floats = n_cells
+    nhood_floats = n_sat  
+    dcdt_floats = n_cells
+    total_floats = conc_floats + nhood_floats + dcdt_floats
+    shared_mem_bytes = total_floats * 4  # 4 bytes per float
+    
+    print(f"Required shared memory: {total_floats} floats = {shared_mem_bytes} bytes")
+    
+    if shared_mem_bytes > max_shared_mem:
+        print(f"ERROR: Required shared memory ({shared_mem_bytes}) exceeds limit ({max_shared_mem})")
+        print("Consider using global memory instead of shared memory")
+        result = cp.array([-999999.0], dtype=cp.float32)
+        return result
+    
     # Allocate result on GPU
     result = cp.zeros(1, dtype=cp.float32)
     
-    # Calculate shared memory requirements
-    # conc: n_cells, nhood: n_sat, dcdt: n_cells
-    shared_mem_size = (2 * n_cells + n_sat) * cp.dtype(cp.float32).itemsize
-    
-    # Launch single-gene simulation kernel
-    threads_per_block = min(256, n_cells)  # Choose appropriate block size
-    
-    sepal_simulation(
-        (1,),  # 1 block for single gene
-        (threads_per_block,),
-        (
-            vals.astype(cp.float32),           # gene_data [n_cells] - ONE GENE ONLY
-            sat.astype(cp.int32),              # sat
-            sat_idx.astype(cp.int32),          # sat_idx  
-            unsat.astype(cp.int32),            # unsat
-            unsat_idx.astype(cp.int32),        # unsat_idx
-            result,                            # result
-            n_cells,                           # n_cells
-            n_sat,                             # n_sat
-            n_unsat,                           # n_unsat
-            sat_thresh,                        # sat_thresh
-            max_neighs,                        # max_neighs
-            n_iter,                            # n_iter
-            cp.float32(dt),                    # dt
-            cp.float32(thresh)                 # thresh
-        ),
-        shared_mem=shared_mem_size
-    )
-    
+    # Launch debug kernel with proper block size
+    threads_per_block = min(256, n_cells)
+    if debug:
+        try:
+            sepal_simulation_debug(
+                (1,),  # 1 block for single gene
+                (threads_per_block,),
+                (
+                    vals.astype(cp.float32),           # gene_data
+                    sat.astype(cp.int32),              # sat
+                    sat_idx.astype(cp.int32),          # sat_idx  
+                    unsat.astype(cp.int32),            # unsat
+                    unsat_idx.astype(cp.int32),        # unsat_idx
+                    result,                            # result
+                    n_cells,                           # n_cells
+                    n_sat,                             # n_sat
+                    n_unsat,                           # n_unsat
+                    sat_thresh,                        # sat_thresh
+                    max_neighs,                        # max_neighs
+                    n_iter,                            # n_iter
+                    cp.float32(dt),                    # dt
+                    cp.float32(thresh)                 # thresh
+                ),
+                shared_mem=shared_mem_bytes
+            )
+            cp.cuda.Device().synchronize()  # Wait for completion
+            print(f"GPU result: {result.get()}")
+        except Exception as e:
+            print(f"GPU kernel error: {e}")
+            result[0] = -999999.0
+    else:
+        sepal_simulation(
+            (1,),  # 1 block for single gene
+            (threads_per_block,),
+            (
+                vals.astype(cp.float32),           # gene_data
+                sat.astype(cp.int32),              # sat
+                sat_idx.astype(cp.int32),          # sat_idx  
+                unsat.astype(cp.int32),            # unsat
+                unsat_idx.astype(cp.int32),        # unsat_idx
+                result,                            # result
+                n_cells,                           # n_cells
+                n_sat,                             # n_sat
+                n_unsat,                           # n_unsat
+                sat_thresh,                        # sat_thresh
+                max_neighs,                        # max_neighs
+                n_iter,                            # n_iter
+                cp.float32(dt),                    # dt
+                cp.float32(thresh)                 # thresh
+            ),
+            shared_mem=shared_mem_bytes
+        )
     
     return result
 
@@ -101,6 +149,7 @@ def sepal_gpu(
     layer: str | None = None,
     use_raw: bool = False,
     copy: bool = False,
+    debug: bool = False,
 ) -> pd.DataFrame | None:
     """
     Identify spatially variable genes with *Sepal*.
@@ -135,7 +184,8 @@ def sepal_gpu(
         Layer in :attr:`anndata.AnnData.layers` to use. If `None`, use :attr:`anndata.AnnData.X`.
     use_raw
         Whether to access :attr:`anndata.AnnData.raw`.
-
+    debug
+        Whether to run in debug mode.
     Returns
     -------
     If ``copy = True``, returns a :class:`pandas.DataFrame` with the sepal scores.
@@ -194,18 +244,19 @@ def sepal_gpu(
     if cp_isspmatrix_csr(vals) or cp_isspmatrix_csc(vals):
         vals = vals.toarray()
     for gene_idx in range(len(genes)):
-        
-        gene_score = _score_helper_gpu(
+        print(f"Processing gene {gene_idx} of {len(genes)}")
+        gene_score = _score_helper_gpu_debug(
             gene_idx=gene_idx,
             vals=vals[:, gene_idx],
             max_neighs=max_neighs,
-            dt=dt,
-            thresh=thresh,
             n_iter=n_iter,
             sat=sat,
             sat_idx=sat_idx, 
             unsat=unsat,
             unsat_idx=unsat_idx,
+            dt=dt,
+            thresh=thresh,
+            debug=debug,
         )
         all_scores.append(gene_score.get())
     
