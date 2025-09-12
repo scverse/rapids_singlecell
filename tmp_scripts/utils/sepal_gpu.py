@@ -20,9 +20,7 @@ from squidpy.gr._utils import (
 )
 from .kernels.sepal_kernels import (
     get_nhood_idx_with_distance,
-    sepal_simulation_debug,
     sepal_simulation,
-
 )
 
 
@@ -33,7 +31,7 @@ from cupyx.scipy.sparse import isspmatrix_csc as cp_isspmatrix_csc
 
 
 
-def _score_helper_gpu_debug(
+def _score_helper_gpu(
     gene_idx: int,
     vals: cp.ndarray,
     max_neighs: int,
@@ -87,56 +85,28 @@ def _score_helper_gpu_debug(
     
     # Launch debug kernel with proper block size
     threads_per_block = min(256, n_cells)
-    if debug:
-        try:
-            sepal_simulation_debug(
-                (1,),  # 1 block for single gene
-                (threads_per_block,),
-                (
-                    vals.astype(cp.float32),           # gene_data
-                    sat.astype(cp.int32),              # sat
-                    sat_idx.astype(cp.int32),          # sat_idx  
-                    unsat.astype(cp.int32),            # unsat
-                    unsat_idx.astype(cp.int32),        # unsat_idx
-                    result,                            # result
-                    n_cells,                           # n_cells
-                    n_sat,                             # n_sat
-                    n_unsat,                           # n_unsat
-                    sat_thresh,                        # sat_thresh
-                    max_neighs,                        # max_neighs
-                    n_iter,                            # n_iter
-                    cp.float32(dt),                    # dt
-                    cp.float32(thresh)                 # thresh
-                ),
-                shared_mem=shared_mem_bytes
-            )
-            cp.cuda.Device().synchronize()  # Wait for completion
-            print(f"GPU result: {result.get()}")
-        except Exception as e:
-            print(f"GPU kernel error: {e}")
-            result[0] = -999999.0
-    else:
-        sepal_simulation(
-            (1,),  # 1 block for single gene
-            (threads_per_block,),
-            (
-                vals.astype(cp.float32),           # gene_data
-                sat.astype(cp.int32),              # sat
-                sat_idx.astype(cp.int32),          # sat_idx  
-                unsat.astype(cp.int32),            # unsat
-                unsat_idx.astype(cp.int32),        # unsat_idx
-                result,                            # result
-                n_cells,                           # n_cells
-                n_sat,                             # n_sat
-                n_unsat,                           # n_unsat
-                sat_thresh,                        # sat_thresh
-                max_neighs,                        # max_neighs
-                n_iter,                            # n_iter
-                cp.float32(dt),                    # dt
-                cp.float32(thresh)                 # thresh
-            ),
-            shared_mem=shared_mem_bytes
-        )
+    sepal_simulation(
+        (1,),  # 1 block for single gene
+        (threads_per_block,),
+        (
+            vals.astype(cp.float32),           # gene_data
+            sat.astype(cp.int32),              # sat
+            sat_idx.astype(cp.int32),          # sat_idx  
+            unsat.astype(cp.int32),            # unsat
+            unsat_idx.astype(cp.int32),        # unsat_idx
+            result,                            # result
+            n_cells,                           # n_cells
+            n_sat,                             # n_sat
+            n_unsat,                           # n_unsat
+            sat_thresh,                        # sat_thresh
+            max_neighs,                        # max_neighs
+            n_iter,                            # n_iter
+            cp.float32(dt),                    # dt
+            cp.float32(thresh)                 # thresh
+        ),
+        shared_mem=shared_mem_bytes,
+        debug=debug,
+    )
     
     return result
 
@@ -248,7 +218,7 @@ def sepal_gpu(
         vals = vals.toarray()
     for gene_idx in range(len(genes)):
         print(f"Processing gene {gene_idx} of {len(genes)}")
-        gene_score = _score_helper_gpu_debug(
+        gene_score = _score_helper_gpu(
             gene_idx=gene_idx,
             vals=vals[:, gene_idx],
             max_neighs=max_neighs,
