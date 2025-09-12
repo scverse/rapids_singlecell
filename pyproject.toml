@@ -125,19 +125,6 @@ cmake.build-type = "Release"
 ninja.version = ">=1.10"
 experimental = false
 cmake.args = [ "-DCMAKE_CUDA_ARCHITECTURES=75;80;86;89;90;100" ]
-sdist.include = [
-    "CMakeLists.txt",
-    "src/rapids_singlecell/_cuda/mean_var/mean_var.cu",
-    "src/rapids_singlecell/_cuda/mean_var/kernels.cuh",
-    "src/rapids_singlecell/_cuda/sparse2dense/sparse2dense.cu",
-    "src/rapids_singlecell/_cuda/sparse2dense/kernels.cuh",
-    "src/rapids_singlecell/_cuda/scale/scale.cu",
-    "src/rapids_singlecell/_cuda/scale/kernels.cuh",
-    "src/rapids_singlecell/_cuda/qc/qc.cu",
-    "src/rapids_singlecell/_cuda/qc/kernels.cuh",
-    "src/rapids_singlecell/_cuda/qc_dask/qc_kernels_dask.cu",
-    "src/rapids_singlecell/_cuda/qc_dask/kernels.cuh",
-]
 build-dir = "build"
 metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
 

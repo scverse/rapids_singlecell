@@ -33,7 +33,6 @@ def _sparse_to_dense(X: spmatrix, order: Literal["C", "F"] | None = None) -> cp.
 
     dense = cp.zeros(X.shape, order=order, dtype=X.dtype)
     max_nnz = cp.diff(X.indptr).max()
-    print(type(X), X.shape, dense.shape, major, minor, switcher)
     _s2d.sparse2dense(
         X.indptr.data.ptr,
         X.indices.data.ptr,

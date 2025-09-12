@@ -153,8 +153,6 @@ def _scale_array(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=
     std = cp.sqrt(var)
     std[std == 0] = 1
     max_value = _get_max_value(max_value, X.dtype)
-    print(f"mean = {mean[:10]}")
-    print(f"std = {std[:10]}")
     mean = mean.astype(X.dtype)
     std = std.astype(X.dtype)
     if zero_center:
