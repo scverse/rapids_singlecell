@@ -24,6 +24,85 @@ from squidpy.gr._utils import (
 )
 
 
+# Add this debug version to sepal_cpu.py
+@njit(fastmath=True)
+def _diffusion_debug(
+    conc: NDArrayA,
+    laplacian: Callable[[NDArrayA, NDArrayA, NDArrayA], float],
+    n_iter: int,
+    sat: NDArrayA,
+    sat_idx: NDArrayA,
+    unsat: NDArrayA,
+    unsat_idx: NDArrayA,
+    dt: float = 0.001,
+    thresh: float = 1e-8,
+    gene_name: str = "unknown",
+) -> float:
+    """Debug version with prints."""
+    sat_shape, conc_shape = sat.shape[0], conc.shape[0]
+    entropy_arr = np.zeros(n_iter)
+    prev_ent = 1.0
+    D = 1.0
+    nhood = np.zeros(sat_shape)
+    
+    dcdt = np.zeros(conc_shape)
+    
+    print(f"=== CPU DEBUG: {gene_name} ===")
+    print(f"Initial conc[0:5]: {conc[0:5]}")
+    print(f"sat[0:3]: {sat[0:3]}, unsat[0:3]: {unsat[0:3]}")
+    print(f"sat_idx[0,0:3]: {sat_idx[0,0:3]}")
+    
+    for i in range(min(5, n_iter)):  # Debug first 5 iterations
+        # Compute neighborhood sums
+        for j in range(sat_shape):
+            nhood[j] = np.sum(conc[sat_idx[j]])
+        
+        d2 = laplacian(conc[sat], nhood)
+        dcdt[sat] = D * d2
+        
+        print(f"Iter {i}:")
+        print(f"  nhood[0:3]: {nhood[0:3]}")
+        print(f"  conc[sat][0:3]: {conc[sat][0:3]}")
+        print(f"  d2[0:3]: {d2[0:3]}")
+        print(f"  dcdt[sat][0:3]: {dcdt[sat][0:3]}")
+        
+        conc[sat] += dcdt[sat] * dt
+        conc[unsat] += dcdt[unsat_idx] * dt
+        conc[conc < 0] = 0
+        
+        print(f"  After update conc[sat][0:3]: {conc[sat][0:3]}")
+        print(f"  After update conc[unsat][0:3]: {conc[unsat][0:3]}")
+        
+        # compute entropy
+        ent = _entropy(conc[sat]) / sat_shape
+        entropy_arr[i] = np.abs(ent - prev_ent)
+        
+        print(f"  entropy: {ent}, diff: {entropy_arr[i]}")
+        
+        prev_ent = ent
+        if entropy_arr[i] <= thresh:
+            print(f"  CONVERGED at iteration {i}")
+            break
+    
+    # Continue normal execution for remaining iterations
+    for i in range(5, n_iter):
+        for j in range(sat_shape):
+            nhood[j] = np.sum(conc[sat_idx[j]])
+        d2 = laplacian(conc[sat], nhood)
+        dcdt[sat] = D * d2
+        conc[sat] += dcdt[sat] * dt
+        conc[unsat] += dcdt[unsat_idx] * dt
+        conc[conc < 0] = 0
+        ent = _entropy(conc[sat]) / sat_shape
+        entropy_arr[i] = np.abs(ent - prev_ent)
+        prev_ent = ent
+        if entropy_arr[i] <= thresh:
+            break
+
+    tmp = np.nonzero(entropy_arr <= thresh)[0]
+    result = float(tmp[0] if len(tmp) else np.nan)
+    print(f"CPU Final result: {result * dt}")
+    return result
 
 def sepal(
     adata: AnnData | SpatialData,
@@ -205,24 +284,29 @@ def _diffusion(
     unsat: NDArrayA,
     unsat_idx: NDArrayA,
     dt: float = 0.001,
-    D: float = 1.0,
     thresh: float = 1e-8,
 ) -> float:
     """Simulate diffusion process on a regular graph."""
     sat_shape, conc_shape = sat.shape[0], conc.shape[0]
     entropy_arr = np.zeros(n_iter)
     prev_ent = 1.0
+    D = 1.0
     nhood = np.zeros(sat_shape)
-    weights = np.ones(sat_shape)
+    # weights = np.ones(sat_shape)
 
+    dcdt = np.zeros(conc_shape)
     for i in range(n_iter):
         for j in range(sat_shape):
             nhood[j] = np.sum(conc[sat_idx[j]])
-        d2 = laplacian(conc[sat], nhood, weights)
+        
+        
+        d2 = laplacian(conc[sat], nhood)
 
-        dcdt = np.zeros(conc_shape)
         dcdt[sat] = D * d2
+
         conc[sat] += dcdt[sat] * dt
+
+
         conc[unsat] += dcdt[unsat_idx] * dt
         # set values below zero to 0
         conc[conc < 0] = 0
@@ -242,13 +326,13 @@ def _diffusion(
 def _laplacian_rect(
     centers: NDArrayA,
     nbrs: NDArrayA,
-    h: float,
 ) -> NDArrayA:
     """
     Five point stencil approximation on rectilinear grid.
 
     See `Wikipedia <https://en.wikipedia.org/wiki/Five-point_stencil>`_ for more information.
     """
+    h = 1.0
     d2f: NDArrayA = nbrs - 4 * centers
     d2f = d2f / h**2
 
@@ -260,7 +344,6 @@ def _laplacian_rect(
 def _laplacian_hex(
     centers: NDArrayA,
     nbrs: NDArrayA,
-    h: float,
 ) -> NDArrayA:
     """
     Seven point stencil approximation on hexagonal grid.
@@ -271,6 +354,7 @@ def _laplacian_hex(
     Curtis D. Benster, L.V. Kantorovich, V.I. Krylov,
     ISBN-13: 978-0486821603.
     """
+    h = 1.0
     d2f: NDArrayA = nbrs - 6 * centers
     d2f = d2f / h**2
     d2f = (d2f * 2) / 3

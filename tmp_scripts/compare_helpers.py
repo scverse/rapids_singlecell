@@ -37,7 +37,8 @@ def compare_indices(adata_cpu):
 
     # Compute indices with both methods
     start = time.time()
-    sat_gpu, sat_idx_gpu, unsat_gpu, unsat_idx_gpu = _compute_idxs_gpu(g_gpu, spatial_gpu, 6)
+    degrees = cp.diff(g_gpu.indptr)
+    sat_gpu, sat_idx_gpu, unsat_gpu, unsat_idx_gpu = _compute_idxs_gpu(g_gpu, degrees, spatial_gpu, 6)
     end = time.time()
     print("GPU indices computed in ", end - start, "seconds")
     

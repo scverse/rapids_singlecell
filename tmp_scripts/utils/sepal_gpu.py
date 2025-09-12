@@ -6,14 +6,11 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 from anndata import AnnData
-from numba import njit
 from scanpy import logging as logg
 import cupy as cp
 # from scipy.sparse import csr_matrix, issparse, isspmatrix_csr, spmatrix
 from spatialdata import SpatialData
 from squidpy._constants._pkg_constants import Key
-from squidpy._docs import d, inject_docs
-from squidpy._utils import NDArrayA, Signal, SigQueue, parallelize
 from squidpy.gr._utils import (
     _assert_connectivity_key,
     _assert_non_empty_sequence,
@@ -21,297 +18,234 @@ from squidpy.gr._utils import (
     _extract_expression,
     _save_data,
 )
-from .kernels.sepal_kernels import find_closest_saturated_nodes, get_nhood_idx, get_nhood_idx_with_distance
+from .kernels.sepal_kernels import (
+    get_nhood_idx_with_distance,
+    sepal_simulation
+)
 
 
 
 from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
 from cupyx.scipy.sparse import isspmatrix_csr as cp_isspmatrix_csr
+from cupyx.scipy.sparse import isspmatrix_csc as cp_isspmatrix_csc
 
 
-# def sepal_gpu(
-#     adata: AnnData | SpatialData,
-#     max_neighs: Literal[4, 6],
-#     genes: str | Sequence[str] | None = None,
-#     n_iter: int | None = 30000,
-#     dt: float = 0.001,
-#     thresh: float = 1e-8,
-#     connectivity_key: str = Key.obsp.spatial_conn(),
-#     spatial_key: str = Key.obsm.spatial,
-#     layer: str | None = None,
-#     use_raw: bool = False,
-#     copy: bool = False,
-#     n_jobs: int | None = None,
-#     backend: str = "loky",
-#     show_progress_bar: bool = True,
-# ) -> pd.DataFrame | None:
-#     """
-#     Identify spatially variable genes with *Sepal*.
 
-#     *Sepal* is a method that simulates a diffusion process to quantify spatial structure in tissue.
-#     See :cite:`andersson2021` for reference.
+def _score_helper_gpu(
+    gene_idx: int,
+    vals: cp.ndarray,
+    max_neighs: int,
+    n_iter: int,
+    sat: cp.ndarray,
+    sat_idx: cp.ndarray, 
+    unsat: cp.ndarray,
+    unsat_idx: cp.ndarray,
+    dt: float = 0.001,
+    thresh: float = 1e-8,
+) -> cp.ndarray:
 
-#     Parameters
-#     ----------
-#     %(adata)s
-#     max_neighs
-#         Maximum number of neighbors of a node in the graph. Valid options are:
+    # """GPU-accelerated score computation for a batch of genes."""
+    
+    
+    # # implement this in one kernel
 
-#             - `4` - for a square-grid (ST, Dbit-seq).
-#             - `6` - for a hexagonal-grid (Visium).
-#     genes
-#         List of gene names, as stored in :attr:`anndata.AnnData.var_names`, used to compute sepal score.
+    n_cells = vals.shape[0]
+    n_sat = len(sat)
+    n_unsat = len(unsat)
+    sat_thresh = max_neighs
+    
+    # Allocate result on GPU
+    result = cp.zeros(1, dtype=cp.float32)
+    
+    # Calculate shared memory requirements
+    # conc: n_cells, nhood: n_sat, dcdt: n_cells
+    shared_mem_size = (2 * n_cells + n_sat) * cp.dtype(cp.float32).itemsize
+    
+    # Launch single-gene simulation kernel
+    threads_per_block = min(256, n_cells)  # Choose appropriate block size
+    
+    sepal_simulation(
+        (1,),  # 1 block for single gene
+        (threads_per_block,),
+        (
+            vals.astype(cp.float32),           # gene_data [n_cells] - ONE GENE ONLY
+            sat.astype(cp.int32),              # sat
+            sat_idx.astype(cp.int32),          # sat_idx  
+            unsat.astype(cp.int32),            # unsat
+            unsat_idx.astype(cp.int32),        # unsat_idx
+            result,                            # result
+            n_cells,                           # n_cells
+            n_sat,                             # n_sat
+            n_unsat,                           # n_unsat
+            sat_thresh,                        # sat_thresh
+            max_neighs,                        # max_neighs
+            n_iter,                            # n_iter
+            cp.float32(dt),                    # dt
+            cp.float32(thresh)                 # thresh
+        ),
+        shared_mem=shared_mem_size
+    )
+    
+    
+    return result
 
-#         If `None`, it's computed :attr:`anndata.AnnData.var` ``['highly_variable']``, if present.
-#         Otherwise, it's computed for all genes.
-#     n_iter
-#         Maximum number of iterations for the diffusion simulation.
-#         If ``n_iter`` iterations are reached, the simulation will terminate
-#         even though convergence has not been achieved.
-#     dt
-#         Time step in diffusion simulation.
-#     thresh
-#         Entropy threshold for convergence of diffusion simulation.
-#     %(conn_key)s
-#     %(spatial_key)s
-#     layer
-#         Layer in :attr:`anndata.AnnData.layers` to use. If `None`, use :attr:`anndata.AnnData.X`.
-#     use_raw
-#         Whether to access :attr:`anndata.AnnData.raw`.
-#     %(copy)s
-#     %(parallelize)s
+def sepal_gpu(
+    adata: AnnData | SpatialData,
+    max_neighs: Literal[4, 6],
+    genes: str | Sequence[str] | None = None,
+    n_iter: int = 30000,
+    dt: float = 0.001,
+    thresh: float = 1e-8,
+    connectivity_key: str = Key.obsp.spatial_conn(),
+    spatial_key: str = Key.obsm.spatial,
+    layer: str | None = None,
+    use_raw: bool = False,
+    copy: bool = False,
+) -> pd.DataFrame | None:
+    """
+    Identify spatially variable genes with *Sepal*.
 
-#     Returns
-#     -------
-#     If ``copy = True``, returns a :class:`pandas.DataFrame` with the sepal scores.
+    *Sepal* is a method that simulates a diffusion process to quantify spatial structure in tissue.
+    See :cite:`andersson2021` for reference.
 
-#     Otherwise, modifies the ``adata`` with the following key:
+    Parameters
+    ----------
+    %(adata)s
+    max_neighs
+        Maximum number of neighbors of a node in the graph. Valid options are:
 
-#         - :attr:`anndata.AnnData.uns` ``['sepal_score']`` - the sepal scores.
+            - `4` - for a square-grid (ST, Dbit-seq).
+            - `6` - for a hexagonal-grid (Visium).
+    genes
+        List of gene names, as stored in :attr:`anndata.AnnData.var_names`, used to compute sepal score.
 
-#     Notes
-#     -----
-#     If some genes in :attr:`anndata.AnnData.uns` ``['sepal_score']`` are `NaN`,
-#     consider re-running the function with increased ``n_iter``.
-#     """
-#     if isinstance(adata, SpatialData):
-#         adata = adata.table
-#     _assert_connectivity_key(adata, connectivity_key)
-#     _assert_spatial_basis(adata, key=spatial_key)
-#     if max_neighs not in (4, 6):
-#         raise ValueError(f"Expected `max_neighs` to be either `4` or `6`, found `{max_neighs}`.")
+        If `None`, it's computed :attr:`anndata.AnnData.var` ``['highly_variable']``, if present.
+        Otherwise, it's computed for all genes.
+    n_iter
+        Maximum number of iterations for the diffusion simulation.
+        If ``n_iter`` iterations are reached, the simulation will terminate
+        even though convergence has not been achieved.
+    dt
+        Time step in diffusion simulation.
+    thresh
+        Entropy threshold for convergence of diffusion simulation.
+    %(conn_key)s
+    %(spatial_key)s
+    layer
+        Layer in :attr:`anndata.AnnData.layers` to use. If `None`, use :attr:`anndata.AnnData.X`.
+    use_raw
+        Whether to access :attr:`anndata.AnnData.raw`.
 
-#     spatial = adata.obsm[spatial_key].astype(np.float64)
+    Returns
+    -------
+    If ``copy = True``, returns a :class:`pandas.DataFrame` with the sepal scores.
 
-#     if genes is None:
-#         genes = adata.var_names.values
-#         if "highly_variable" in adata.var.columns:
-#             genes = genes[adata.var["highly_variable"].values]
-#     genes = _assert_non_empty_sequence(genes, name="genes")
+    Otherwise, modifies the ``adata`` with the following key:
 
-#     g = adata.obsp[connectivity_key]
-#     if not cp_isspmatrix_csr(g):
-#         g = cp_csr_matrix(g)
-#     g.eliminate_zeros()
+        - :attr:`anndata.AnnData.uns` ``['sepal_score']`` - the sepal scores.
 
-#     max_n = cp.diff(g.indptr).max()
-#     if max_n != max_neighs:
-#         raise ValueError(f"Expected `max_neighs={max_neighs}`, found node with `{max_n}` neighbors.")
+    Notes
+    -----
+    If some genes in :attr:`anndata.AnnData.uns` ``['sepal_score']`` are `NaN`,
+    consider re-running the function with increased ``n_iter``.
+    """
+    if isinstance(adata, SpatialData):
+        adata = adata.table
+    _assert_connectivity_key(adata, connectivity_key)
+    _assert_spatial_basis(adata, key=spatial_key)
+    if max_neighs not in (4, 6):
+        raise ValueError(f"Expected `max_neighs` to be either `4` or `6`, found `{max_neighs}`.")
 
-#     # get saturated/unsaturated nodes
-#     sat, sat_idx, unsat, unsat_idx = _compute_idxs_gpu(g, spatial, max_neighs, "l1")
-#     # get counts
-#     vals, genes = _extract_expression(adata, genes=genes, use_raw=use_raw, layer=layer)
-#     start = logg.info(f"Calculating sepal score for `{len(genes)}` genes using GPU")
+    spatial = adata.obsm[spatial_key].astype(cp.float32)
 
-#     score = parallelize(
-#         _score_helper,
-#         collection=np.arange(len(genes)).tolist(),
-#         extractor=np.hstack,
-#         use_ixs=False,
-#         n_jobs=n_jobs,
-#         backend=backend,
-#         show_progress_bar=show_progress_bar,
-#     )(
-#         vals=vals,
-#         max_neighs=max_neighs,
-#         n_iter=n_iter,
-#         sat=sat,
-#         sat_idx=sat_idx,
-#         unsat=unsat,
-#         unsat_idx=unsat_idx,
-#         dt=dt,
-#         thresh=thresh,
-#     )
+    if genes is None:
+        genes = adata.var_names.values
+        if "highly_variable" in adata.var.columns:
+            genes = genes[adata.var["highly_variable"].values]
+    genes = _assert_non_empty_sequence(genes, name="genes")
 
-#     key_added = "sepal_score"
-#     sepal_score = pd.DataFrame(score, index=genes, columns=[key_added])
+    g = adata.obsp[connectivity_key]
+    if not cp_isspmatrix_csr(g):
+        g = cp_csr_matrix(g)
+    g.eliminate_zeros()
 
-#     if sepal_score[key_added].isna().any():
-#         logg.warning("Found `NaN` in sepal scores, consider increasing `n_iter` to a higher value")
-#     sepal_score = sepal_score.sort_values(by=key_added, ascending=False)
+    degrees = cp.diff(g.indptr)
+    max_n = degrees.max()
+    if max_n != max_neighs:
+        raise ValueError(f"Expected `max_neighs={max_neighs}`, found node with `{max_n}` neighbors.")
 
-#     if copy:
-#         start = logg.info("Finish", time=start)
-#         logg.info("Finish", time=start)
-#         return sepal_score
+    # get saturated/unsaturated nodes
+    sat, sat_idx, unsat, unsat_idx = _compute_idxs_gpu(
+        g=g,
+        degrees=degrees,
+        spatial=spatial,
+        sat_thresh=max_neighs,
+    )
+    # sat_idx is [n_sat, sat_thresh]
+    # unsat_idx is [n_unsat]
+    # get counts
+    vals, genes = _extract_expression(adata, genes=genes, use_raw=use_raw, layer=layer)
+    start = logg.info(f"Calculating sepal score for `{len(genes)}` genes using GPU")
 
-#     _save_data(adata, attr="uns", key=key_added, data=sepal_score, time=start)
-#     return sepal_score
+    # vals is already on GPU
 
-# def _score_helper(
-#     ixs: Sequence[int],
-#     vals: cp_csr_matrix | NDArrayA,
-#     max_neighs: int,
-#     n_iter: int,
-#     sat: NDArrayA,
-#     sat_idx: NDArrayA,
-#     unsat: NDArrayA,
-#     unsat_idx: NDArrayA,
-#     dt: float,
-#     thresh: float,
-#     queue: SigQueue | None = None,
-# ) -> NDArrayA:
-#     if max_neighs == 4:
-#         fun = _laplacian_rect
-#     elif max_neighs == 6:
-#         fun = _laplacian_hex
-#     else:
-#         raise NotImplementedError(f"Laplacian for `{max_neighs}` neighbors is not yet implemented.")
+        # Process genes in batches
+    all_scores = []
+    if cp_isspmatrix_csr(vals) or cp_isspmatrix_csc(vals):
+        vals = vals.toarray()
+    for gene_idx in range(len(genes)):
+        
+        gene_score = _score_helper_gpu(
+            gene_idx=gene_idx,
+            vals=vals[:, gene_idx],
+            max_neighs=max_neighs,
+            dt=dt,
+            thresh=thresh,
+            n_iter=n_iter,
+            sat=sat,
+            sat_idx=sat_idx, 
+            unsat=unsat,
+            unsat_idx=unsat_idx,
+        )
+        all_scores.append(gene_score.get())
+    
 
-#     score = []
-#     for i in ixs:
-#         if isinstance(vals, cp_csr_matrix):
-#             conc = vals[:, i].toarray().flatten()  # Safe to call toarray()
-#         else:
-#             conc = vals[:, i].copy()  # vals is assumed to be a NumPy array here
+    score = np.concatenate(all_scores)
 
-#         time_iter = _diffusion(conc, fun, n_iter, sat, sat_idx, unsat, unsat_idx, dt=dt, thresh=thresh)
-#         score.append(dt * time_iter)
+    key_added = "sepal_score"
+    sepal_score = pd.DataFrame(score, index=genes, columns=[key_added])
 
-#         if queue is not None:
-#             queue.put(Signal.UPDATE)
+    if sepal_score[key_added].isna().any():
+        logg.warning("Found `NaN` in sepal scores, consider increasing `n_iter` to a higher value")
+    sepal_score = sepal_score.sort_values(by=key_added, ascending=False)
 
-#     if queue is not None:
-#         queue.put(Signal.FINISH)
+    if copy:
+        start = logg.info("Finish", time=start)
+        logg.info("Finish", time=start)
+        return sepal_score
 
-#     return np.array(score)
+    _save_data(adata, attr="uns", key=key_added, data=sepal_score, time=start)
+    return sepal_score
 
-
-# @njit(fastmath=True)
-# def _diffusion(
-#     conc: NDArrayA,
-#     laplacian: Callable[[NDArrayA, NDArrayA, NDArrayA], float],
-#     n_iter: int,
-#     sat: NDArrayA,
-#     sat_idx: NDArrayA,
-#     unsat: NDArrayA,
-#     unsat_idx: NDArrayA,
-#     dt: float = 0.001,
-#     D: float = 1.0,
-#     thresh: float = 1e-8,
-# ) -> float:
-#     """Simulate diffusion process on a regular graph."""
-#     sat_shape, conc_shape = sat.shape[0], conc.shape[0]
-#     entropy_arr = np.zeros(n_iter)
-#     prev_ent = 1.0
-#     nhood = np.zeros(sat_shape)
-#     weights = np.ones(sat_shape)
-
-#     for i in range(n_iter):
-#         for j in range(sat_shape):
-#             nhood[j] = np.sum(conc[sat_idx[j]])
-#         d2 = laplacian(conc[sat], nhood, weights)
-
-#         dcdt = np.zeros(conc_shape)
-#         dcdt[sat] = D * d2
-#         conc[sat] += dcdt[sat] * dt
-#         conc[unsat] += dcdt[unsat_idx] * dt
-#         # set values below zero to 0
-#         conc[conc < 0] = 0
-#         # compute entropy
-#         ent = _entropy(conc[sat]) / sat_shape
-#         entropy_arr[i] = np.abs(ent - prev_ent)  # estimate entropy difference
-#         prev_ent = ent
-#         if entropy_arr[i] <= thresh:
-#             break
-
-#     tmp = np.nonzero(entropy_arr <= thresh)[0]
-#     return float(tmp[0] if len(tmp) else np.nan)
-
-
-# # taken from https://github.com/almaan/sepal/blob/master/sepal/models.py
-# @njit(parallel=False, fastmath=True)
-# def _laplacian_rect(
-#     centers: NDArrayA,
-#     nbrs: NDArrayA,
-#     h: float,
-# ) -> NDArrayA:
-#     """
-#     Five point stencil approximation on rectilinear grid.
-
-#     See `Wikipedia <https://en.wikipedia.org/wiki/Five-point_stencil>`_ for more information.
-#     """
-#     d2f: NDArrayA = nbrs - 4 * centers
-#     d2f = d2f / h**2
-
-#     return d2f
-
-
-# # taken from https://github.com/almaan/sepal/blob/master/sepal/models.py
-# @njit(fastmath=True)
-# def _laplacian_hex(
-#     centers: NDArrayA,
-#     nbrs: NDArrayA,
-#     h: float,
-# ) -> NDArrayA:
-#     """
-#     Seven point stencil approximation on hexagonal grid.
-
-#     References
-#     ----------
-#     Approximate Methods of Higher Analysis,
-#     Curtis D. Benster, L.V. Kantorovich, V.I. Krylov,
-#     ISBN-13: 978-0486821603.
-#     """
-#     d2f: NDArrayA = nbrs - 6 * centers
-#     d2f = d2f / h**2
-#     d2f = (d2f * 2) / 3
-
-#     return d2f
-
-
-# # taken from https://github.com/almaan/sepal/blob/master/sepal/models.py
-# @njit(fastmath=True)
-# def _entropy(
-#     xx: NDArrayA,
-# ) -> float:
-#     """Get entropy of an array."""
-#     xnz = xx[xx > 0]
-#     xs: np.float64 = np.sum(xnz)
-#     xn = xnz / xs
-#     xl = np.log(xn)
-#     return float((-xl * xn).sum())
 
 def _compute_idxs_gpu(
-    g: cp_csr_matrix, 
+    g: cp_csr_matrix,
+    degrees: cp.ndarray,
     spatial: cp.ndarray, 
     sat_thresh: int, 
 ) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, cp.ndarray]:
     """Compute saturated/unsaturated indices on GPU with unified distance computation."""
     
     # Get saturated and unsaturated nodes
-    n_indices = cp.diff(g.indptr)
-    unsat_mask = n_indices < sat_thresh
-    sat_mask = n_indices == sat_thresh
+    unsat_mask = degrees < sat_thresh
+    sat_mask = degrees == sat_thresh
     
     unsat = cp.asarray(cp.where(unsat_mask)[0], dtype=cp.int32)
     sat = cp.asarray(cp.where(sat_mask)[0], dtype=cp.int32)
     
     # Extract saturated neighborhoods with vectorized CuPy
-    sat_idx = g.indices[g.indptr[sat][:, None] + cp.arange(sat_thresh)]
-    
     nearest_sat = cp.full(len(unsat), -1, dtype=cp.int32)
+    sat_idx = g.indices[g.indptr[sat][:, None] + cp.arange(sat_thresh)]
     
     # Single kernel handles both graph neighbors and distance fallback
     if len(unsat) > 0:
@@ -321,12 +255,12 @@ def _compute_idxs_gpu(
         get_nhood_idx_with_distance(
             (blocks,), (threads_per_block,),
             (
-                unsat,                              # unsaturated nodes
-                spatial.astype(cp.float32),         # spatial coordinates [n_nodes, 2] 
-                sat,                                # saturated node list
-                g.indptr,                           # CSR indptr
-                g.indices,                          # CSR indices
-                sat_mask,                           # boolean mask for saturated nodes
+                unsat,                              # unsaturated nodes (read only assumed to be int32)
+                spatial,                             # spatial coordinates [n_nodes, 2] (read only assumed to be float32)
+                sat,                                # saturated node list (read only assumed to be int32)
+                g.indptr,                           # CSR indptr (read only assumed to be float32)
+                g.indices,                          # CSR indices (read only assumed to be float32)
+                sat_mask,                           # boolean mask for saturated nodes (read only assumed to be bool)
                 nearest_sat,                        # output
                 len(unsat),                         # number of unsaturated nodes
                 len(sat)                            # number of saturated nodes
