@@ -16,7 +16,7 @@ def debug_sepal_comparison():
     adata = ad.read_h5ad(HOME / "data/visium_hne_adata.h5ad")
     
     # Test with single gene first
-    test_genes = ["Oprk1"]  # Just one gene
+    test_genes = [ "Npbwr1"]  # Just one gene
     
     print("=== CPU vs GPU Comparison ===")
     

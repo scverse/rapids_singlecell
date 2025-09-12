@@ -53,16 +53,18 @@ def _score_helper_gpu_debug(
     n_unsat = len(unsat)
     sat_thresh = max_neighs
     
-    print(f"Processing gene {gene_idx} of 1")
-    print(f"GPU Input validation:")
-    print(f"  n_cells: {n_cells}, n_sat: {n_sat}, n_unsat: {n_unsat}")
-    print(f"  vals[0:3]: {vals[0:3].get()}")
-    print(f"  sat[0:3]: {sat[0:3].get()}")
+    if debug:
+        print(f"Processing gene {gene_idx} of 1")
+        print(f"GPU Input validation:")
+        print(f"  n_cells: {n_cells}, n_sat: {n_sat}, n_unsat: {n_unsat}")
+        print(f"  vals[0:3]: {vals[0:3].get()}")
+        print(f"  sat[0:3]: {sat[0:3].get()}")
     
     # Check GPU memory limits
     device = cp.cuda.Device()
     max_shared_mem = device.attributes['MaxSharedMemoryPerBlock']
-    print(f"Max shared memory per block: {max_shared_mem} bytes")
+    if debug:
+        print(f"Max shared memory per block: {max_shared_mem} bytes")
     
     # Calculate shared memory requirements
     conc_floats = n_cells
@@ -70,12 +72,13 @@ def _score_helper_gpu_debug(
     dcdt_floats = n_cells
     total_floats = conc_floats + nhood_floats + dcdt_floats
     shared_mem_bytes = total_floats * 4  # 4 bytes per float
-    
-    print(f"Required shared memory: {total_floats} floats = {shared_mem_bytes} bytes")
+    if debug:
+        print(f"Required shared memory: {total_floats} floats = {shared_mem_bytes} bytes")
     
     if shared_mem_bytes > max_shared_mem:
-        print(f"ERROR: Required shared memory ({shared_mem_bytes}) exceeds limit ({max_shared_mem})")
-        print("Consider using global memory instead of shared memory")
+        if debug:
+            print(f"ERROR: Required shared memory ({shared_mem_bytes}) exceeds limit ({max_shared_mem})")
+            print("Consider using global memory instead of shared memory")
         result = cp.array([-999999.0], dtype=cp.float32)
         return result
     
