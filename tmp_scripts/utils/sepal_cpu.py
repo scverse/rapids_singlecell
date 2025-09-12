@@ -23,99 +23,6 @@ from squidpy.gr._utils import (
     _save_data,
 )
 
-
-# Add this debug version to sepal_cpu.py
-@njit(fastmath=True)
-def _diffusion_debug(
-    conc: NDArrayA,
-    laplacian: Callable[[NDArrayA, NDArrayA, NDArrayA], float],
-    n_iter: int,
-    sat: NDArrayA,
-    sat_idx: NDArrayA,
-    unsat: NDArrayA,
-    unsat_idx: NDArrayA,
-    dt: float = 0.001,
-    thresh: float = 1e-8,
-    gene_idx: int = 0,
-) -> float:
-    """Debug version with prints."""
-    sat_shape, conc_shape = sat.shape[0], conc.shape[0]
-    entropy_arr = np.zeros(n_iter)
-    prev_ent = 1.0
-    D = 1.0
-    nhood = np.zeros(sat_shape)
-    
-    dcdt = np.zeros(conc_shape)
-    
-    # Numba-compatible printing (can only print individual values)
-    print("=== CPU DEBUG ===")
-    print("Gene index:", gene_idx)
-    print("Initial conc[0]:", conc[0])
-    print("Initial conc[1]:", conc[1]) 
-    print("Initial conc[2]:", conc[2])
-    print("sat[0]:", sat[0])
-    print("sat[1]:", sat[1])
-    print("sat[2]:", sat[2])
-    
-    for i in range(min(5, n_iter)):  # Debug first 5 iterations
-        # Compute neighborhood sums
-        for j in range(sat_shape):
-            nhood[j] = np.sum(conc[sat_idx[j]])
-        
-        d2 = laplacian(conc[sat], nhood)
-        dcdt[sat] = D * d2
-        
-        print("Iter:", i)
-        print("  nhood[0]:", nhood[0])
-        print("  nhood[1]:", nhood[1])
-        print("  nhood[2]:", nhood[2])
-        print("  conc[sat[0]]:", conc[sat[0]])
-        print("  conc[sat[1]]:", conc[sat[1]])
-        print("  conc[sat[2]]:", conc[sat[2]])
-        print("  d2[0]:", d2[0])
-        print("  d2[1]:", d2[1])
-        print("  d2[2]:", d2[2])
-        
-        conc[sat] += dcdt[sat] * dt
-        conc[unsat] += dcdt[unsat_idx] * dt
-        conc[conc < 0] = 0
-        
-        print("  After update conc[sat[0]]:", conc[sat[0]])
-        print("  After update conc[sat[1]]:", conc[sat[1]])
-        print("  After update conc[sat[2]]:", conc[sat[2]])
-        
-        # compute entropy
-        ent = _entropy(conc[sat]) / sat_shape
-        entropy_arr[i] = np.abs(ent - prev_ent)
-        
-        print("  entropy:", ent)
-        print("  entropy_diff:", entropy_arr[i])
-        
-        prev_ent = ent
-        if entropy_arr[i] <= thresh:
-            print("  CONVERGED at iteration:", i)
-            break
-    
-    # Continue normal execution for remaining iterations
-    for i in range(5, n_iter):
-        for j in range(sat_shape):
-            nhood[j] = np.sum(conc[sat_idx[j]])
-        d2 = laplacian(conc[sat], nhood)
-        dcdt[sat] = D * d2
-        conc[sat] += dcdt[sat] * dt
-        conc[unsat] += dcdt[unsat_idx] * dt
-        conc[conc < 0] = 0
-        ent = _entropy(conc[sat]) / sat_shape
-        entropy_arr[i] = np.abs(ent - prev_ent)
-        prev_ent = ent
-        if entropy_arr[i] <= thresh:
-            break
-
-    tmp = np.nonzero(entropy_arr <= thresh)[0]
-    result = float(tmp[0] if len(tmp) else np.nan)
-    print("CPU Final result:", result * dt)
-    return result
-
 def sepal(
     adata: AnnData | SpatialData,
     max_neighs: Literal[4, 6],
@@ -213,7 +120,7 @@ def sepal(
     # get counts
     vals, genes = _extract_expression(adata, genes=genes, use_raw=use_raw, layer=layer)
     start = logg.info(f"Calculating sepal score for `{len(genes)}` genes using `{n_jobs}` core(s)")
-
+    print("genes", genes)
     score = parallelize(
         _score_helper,
         collection=np.arange(len(genes)).tolist(),
@@ -277,10 +184,7 @@ def _score_helper(
         else:
             conc = vals[:, i].copy()  # vals is assumed to be a NumPy array here
 
-        if debug:
-            time_iter = _diffusion_debug(conc, fun, n_iter, sat, sat_idx, unsat, unsat_idx, dt=dt, thresh=thresh, gene_idx=i)
-        else:
-            time_iter = _diffusion(conc, fun, n_iter, sat, sat_idx, unsat, unsat_idx, dt=dt, thresh=thresh)
+        time_iter = _diffusion(conc, fun, n_iter, sat, sat_idx, unsat, unsat_idx, dt=dt, thresh=thresh, debug=debug)
         score.append(dt * time_iter)
 
         if queue is not None:
@@ -291,8 +195,7 @@ def _score_helper(
 
     return np.array(score)
 
-
-@njit(fastmath=True)
+@njit(fastmath=False)
 def _diffusion(
     conc: NDArrayA,
     laplacian: Callable[[NDArrayA, NDArrayA, NDArrayA], float],
@@ -303,6 +206,7 @@ def _diffusion(
     unsat_idx: NDArrayA,
     dt: float = 0.001,
     thresh: float = 1e-8,
+    debug: bool = False,
 ) -> float:
     """Simulate diffusion process on a regular graph."""
     sat_shape, conc_shape = sat.shape[0], conc.shape[0]
@@ -316,8 +220,9 @@ def _diffusion(
     for i in range(n_iter):
         for j in range(sat_shape):
             nhood[j] = np.sum(conc[sat_idx[j]])
-        
-        
+            # if debug and i == 0 and j < 5:
+            #     for k, neighbor_idx in enumerate(sat_idx[j]):
+            #         print(f"CPU iter={i}, sat_idx={j}, sat_node={sat[j]}, neighbor_sum={nhood[j]:.6f}, neighbor_idx={neighbor_idx}, neighbor_concentration={conc[neighbor_idx]:.6f}")
         d2 = laplacian(conc[sat], nhood)
 
         dcdt[sat] = D * d2
@@ -340,7 +245,7 @@ def _diffusion(
 
 
 # taken from https://github.com/almaan/sepal/blob/master/sepal/models.py
-@njit(parallel=False, fastmath=True)
+@njit(parallel=False, fastmath=False)
 def _laplacian_rect(
     centers: NDArrayA,
     nbrs: NDArrayA,
@@ -358,7 +263,7 @@ def _laplacian_rect(
 
 
 # taken from https://github.com/almaan/sepal/blob/master/sepal/models.py
-@njit(fastmath=True)
+@njit(fastmath=False)
 def _laplacian_hex(
     centers: NDArrayA,
     nbrs: NDArrayA,
@@ -381,7 +286,7 @@ def _laplacian_hex(
 
 
 # taken from https://github.com/almaan/sepal/blob/master/sepal/models.py
-@njit(fastmath=True)
+@njit(fastmath=False)
 def _entropy(
     xx: NDArrayA,
 ) -> float:

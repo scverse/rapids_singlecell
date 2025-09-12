@@ -25,7 +25,7 @@ extern "C" {
             }
         }
         
-        return entropy / n_sat;
+        return entropy;  // Remove the division by n_sat here
     }
 
     __global__ void sepal_simulation(
@@ -60,10 +60,6 @@ extern "C" {
             convergence_iteration = n_iter;
             prev_entropy = 1.0;
             
-            if (debug) {
-                printf("=== GPU DEBUG (FIXED ALGO) ===\n");
-                printf("n_cells: %d, n_sat: %d, n_unsat: %d\n", n_cells, n_sat, n_unsat);
-            }
         }
         
         // Initialize concentration array in parallel
@@ -76,13 +72,7 @@ extern "C" {
         const double D = 1.0;
         const double h = 1.0;
         
-        // Debug initial state
-        if (debug && tid == 0) {
-            printf("Initial conc[0:5]: %.6f %.6f %.6f %.6f %.6f\n", 
-                   concentration[0], concentration[1], concentration[2], 
-                   concentration[3], concentration[4]);
-            printf("sat[0:3]: %d %d %d\n", sat[0], sat[1], sat[2]);
-        }
+        
         
         for (int iter = 0; iter < n_iter; iter++) {
             
@@ -96,7 +86,13 @@ extern "C" {
                 for (int j = 0; j < sat_thresh; j++) {
                     int neighbor_idx = sat_idx[i * sat_thresh + j];
                     neighbor_sum += concentration[neighbor_idx];
+                    if (debug && iter == 0 && i < 5) {
+                        printf("GPU iter=%d, sat_idx=%d, sat_node=%d, neighbor_sum=%.6f, neighbor_idx=%d, neighbor_concentration=%.6f\n", 
+                               iter, i, sat_node_idx, neighbor_sum, neighbor_idx, concentration[neighbor_idx]);
+                    }
                 }
+                
+                // Debug neighborhood sums for first iteration
                 
                 double center = concentration[sat_node_idx];
                 double d2;
@@ -135,32 +131,18 @@ extern "C" {
             
             __syncthreads(); // Wait for all updates
             
-            // Debug iteration details for first few iterations
-            if (debug && iter < 5 && tid == 0) {
-                printf("Iter %d:\n", iter);
-                printf("  neighbor_sum[0]: computed in kernel\n");
-                printf("  conc[sat[0:3]]: %.6f %.6f %.6f\n",
-                       concentration[sat[0]], concentration[sat[1]], concentration[sat[2]]);
-                printf("  dcdt[sat[0:3]]: %.6f %.6f %.6f\n",
-                       derivatives[sat[0]], derivatives[sat[1]], derivatives[sat[2]]);
-            }
             
             // Phase 4: Compute entropy and check convergence (single thread)
             if (tid == 0) {
                 double entropy = compute_entropy_device(concentration, sat, n_sat);
+                entropy = entropy / n_sat;  // Apply division here to match CPU behavior
                 double entropy_diff = fabs(entropy - prev_entropy);
                 
-                if (debug && iter < 5) {
-                    printf("  entropy: %.6f, diff: %.6f\n", entropy, entropy_diff);
-                }
-                
-                if (entropy_diff <= thresh) {
+
+                if (entropy_diff <= thresh && !has_converged) {
                     has_converged = true;
                     convergence_iteration = iter;
                     
-                    if (debug) {
-                        printf("  GPU CONVERGED at iteration %d\n", iter);
-                    }
                 }
                 
                 prev_entropy = entropy;
@@ -174,11 +156,9 @@ extern "C" {
         }
         
         if (tid == 0) {
-            result[0] = has_converged ? dt * convergence_iteration : -999999.0;
+            // Return the iteration number, let Python handle dt multiplication
+            result[0] = has_converged ? (double)convergence_iteration : -999999.0;
             
-            if (debug) {
-                printf("GPU Final result: %.6f\n", result[0]);
-            }
         }
     }
 

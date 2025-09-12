@@ -15,7 +15,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     adata = ad.read_h5ad(HOME / "data/visium_hne_adata.h5ad")
     start_time = time.time()
-    result = sepal(adata, max_neighs=6, genes=adata.var_names.values[:10], n_iter=4000, copy=True, debug=args.debug)
+    result = sepal(adata, max_neighs=6, genes=adata.var_names.values[:1], n_iter=4000, copy=True, debug=args.debug)
     end_time = time.time()
     print(f"Time taken: {end_time - start_time} seconds")
     result.sort_values(by="sepal_score", ascending=False, inplace=True)
