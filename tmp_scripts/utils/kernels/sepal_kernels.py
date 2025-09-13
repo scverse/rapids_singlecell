@@ -11,6 +11,7 @@ def _load_sepal_simulation_kernel():
     kernel_dir = os.path.dirname(__file__)
     with open(os.path.join(kernel_dir, "sepal_simulation.cu"), "r") as f:
         code = f.read()
+    # Load the new multi-gene batch kernel
     step_kernel = cp.RawKernel(code, "sepal_simulation")
     return step_kernel
 

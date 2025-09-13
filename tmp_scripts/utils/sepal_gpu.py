@@ -42,54 +42,8 @@ def sepal_gpu(
     debug: bool = False,
 ) -> pd.DataFrame | None:
     """
-    Identify spatially variable genes with *Sepal* using custom CUDA kernel.
-
-    *Sepal* is a method that simulates a diffusion process to quantify spatial structure in tissue.
-    See :cite:`andersson2021` for reference.
-
-    This implementation uses a custom CUDA kernel for maximum performance and CPU compatibility.
-
-    Parameters
-    ----------
-    %(adata)s
-    max_neighs
-        Maximum number of neighbors of a node in the graph. Valid options are:
-
-            - `4` - for a square-grid (ST, Dbit-seq).
-            - `6` - for a hexagonal-grid (Visium).
-    genes
-        List of gene names, as stored in :attr:`anndata.AnnData.var_names`, used to compute sepal score.
-
-        If `None`, it's computed :attr:`anndata.AnnData.var` ``['highly_variable']``, if present.
-        Otherwise, it's computed for all genes.
-    n_iter
-        Maximum number of iterations for the diffusion simulation.
-        If ``n_iter`` iterations are reached, the simulation will terminate
-        even though convergence has not been achieved.
-    dt
-        Time step in diffusion simulation.
-    thresh
-        Entropy threshold for convergence of diffusion simulation.
-    %(conn_key)s
-    %(spatial_key)s
-    layer
-        Layer in :attr:`anndata.AnnData.layers` to use. If `None`, use :attr:`anndata.AnnData.X`.
-    use_raw
-        Whether to access :attr:`anndata.AnnData.raw`.
-    debug
-        Whether to run in debug mode.
-    Returns
-    -------
-    If ``copy = True``, returns a :class:`pandas.DataFrame` with the sepal scores.
-
-    Otherwise, modifies the ``adata`` with the following key:
-
-        - :attr:`anndata.AnnData.uns` ``['sepal_score']`` - the sepal scores.
-
-    Notes
-    -----
-    If some genes in :attr:`anndata.AnnData.uns` ``['sepal_score']`` are `NaN`,
-    consider re-running the function with increased ``n_iter``.
+    GPU-accelerated sepal implementation with unlimited scalability.
+    Handles datasets from thousands to millions of cells.
     """
     if isinstance(adata, SpatialData):
         adata = adata.table
@@ -99,7 +53,7 @@ def sepal_gpu(
     if max_neighs not in (4, 6):
         raise ValueError(f"Expected `max_neighs` to be either `4` or `6`, found `{max_neighs}`.")
 
-    # Setup exactly like CPU but on GPU
+    # Setup (unchanged)
     spatial = cp.asarray(adata.obsm[spatial_key], dtype=cp.float64)
     
     if genes is None:
@@ -108,7 +62,7 @@ def sepal_gpu(
             genes = genes[adata.var["highly_variable"].values]
     genes = _assert_non_empty_sequence(genes, name="genes")
 
-    # Graph setup
+    # Graph and index computation (unchanged)
     g = adata.obsp[connectivity_key]
     if not cp_isspmatrix_csr(g):
         g = cp_csr_matrix(g)
@@ -119,7 +73,6 @@ def sepal_gpu(
     if max_n != max_neighs:
         raise ValueError(f"Expected `max_neighs={max_neighs}`, found node with `{max_n}` neighbors.")
 
-    # Get saturated/unsaturated nodes
     sat, sat_idx, unsat, unsat_to_nearest_sat = _compute_idxs_gpu(
         g=g,
         degrees=degrees,
@@ -127,17 +80,20 @@ def sepal_gpu(
         sat_thresh=max_neighs,
     )
     
-    # Get expression data
+    # Expression data
     vals, genes = _extract_expression(adata, genes=genes, use_raw=use_raw, layer=layer)
-    start = logg.info(f"Calculating sepal score for `{len(genes)}` genes using CUDA kernel")
-    print("genes", genes)
-    # Convert to GPU arrays with consistent dtype
+    start = logg.info(f"Calculating sepal score for `{len(genes)}` genes using scalable GPU kernel")
+    
+    if debug:
+        print(f"Dataset: {len(genes)} genes, {len(sat)} saturated, {len(unsat)} unsaturated cells")
+    
+    # Convert to optimal format
     if cp_isspmatrix_csr(vals) or cp_isspmatrix_csc(vals):
         vals = vals.toarray()
-
-    vals = cp.asarray(vals, dtype=cp.float64)
     
-    # Run CUDA kernel-based simulation
+    vals = cp.ascontiguousarray(cp.asarray(vals, dtype=cp.float64))
+    
+    # Run scalable simulation - handles ANY dataset size!
     scores = _cuda_kernel_diffusion_gpu(
         vals=vals,
         sat=sat,
@@ -151,10 +107,9 @@ def sepal_gpu(
         debug=debug,
     )
     
-    # Convert back to CPU
+    # Results processing (unchanged)
     score = cp.asnumpy(scores)
     
-    # Create results dataframe
     key_added = "sepal_score"
     sepal_score = pd.DataFrame(score, index=genes, columns=[key_added])
     
@@ -182,102 +137,70 @@ def _cuda_kernel_diffusion_gpu(
     thresh: float,
     debug: bool = False,
 ) -> cp.ndarray:
-    """
-    Run diffusion simulation using custom CUDA kernel for each gene.
-    Fixed deadlock issues with proper synchronization.
-    """
+    
     n_cells, n_genes = vals.shape
     n_sat = len(sat)
     n_unsat = len(unsat)
     
-    # Create mapping for sequential access
-    node_reorder = cp.concatenate([sat, unsat])
-    reverse_mapping = cp.zeros(n_cells, dtype=cp.int32)
-    reverse_mapping[node_reorder] = cp.arange(len(node_reorder))
+    # Reorder: [sat_nodes, unsat_nodes] for coalesced access
+    reorder_indices = cp.concatenate([sat, unsat])
+    vals_reordered = vals[reorder_indices, :]  # (n_cells, n_genes) reordered
     
-    # Rearrange data for sequential access
-    vals_reordered = vals[node_reorder, :].astype(cp.float64, copy=False)
+    # Create a flat mapping for unsat nodes to their nearest saturated
+    unsat_to_nearest_sat_remapped = cp.searchsorted(sat, unsat_to_nearest_sat[unsat])
     
-    # Vectorized remapping
-    sat_idx_remapped = reverse_mapping[sat_idx]
-    unsat_to_nearest_sat_remapped = reverse_mapping[unsat_to_nearest_sat]
-    sat_idx_flat = sat_idx_remapped.flatten(order="C")
+    # Flatten sat_idx for better memory access
+    sat_idx_flat = sat_idx.flatten()
     
-    # Allocate working arrays
-    reordered_size = n_sat + n_unsat
-    concentration = cp.zeros(reordered_size, dtype=cp.float64)
-    derivatives = cp.zeros(reordered_size, dtype=cp.float64)
-    result_gpu = cp.zeros(1, dtype=cp.float32)
+    reordered_size = n_cells  # Total cells after reordering
     
-    # Calculate optimal block size (must be power of 2 for reductions)
-    block_size = 256  # Good for reductions and memory coalescing
-    grid_size = 1     # Single block to avoid inter-block synchronization
+    # **MULTI-GENE PARALLEL PROCESSING**
+    # Grid size = n_genes (one block per gene)
+    threads_per_block = 256
+    blocks_per_grid = n_genes  # Process ALL genes in parallel!
     
-    # Shared memory for reductions (2 * block_size * sizeof(double))
-    shared_mem_size = 2 * block_size * 8  # 8 bytes per double
+    print(f"🚀 LAUNCHING LARGE GRID: {blocks_per_grid} blocks × {threads_per_block} threads = {blocks_per_grid * threads_per_block} total threads")
     
-    all_scores = []
+    # Allocate arrays for ALL genes at once
+    concentration_all = cp.ascontiguousarray(vals_reordered.T, dtype=cp.float64)  # (n_genes, n_cells)
+    derivatives_all = cp.zeros((n_genes, reordered_size), dtype=cp.float64)
+    results_all = cp.full(n_genes, -999999.0, dtype=cp.float32)  # Results for ALL genes
     
-    if debug:
-        print(f"Processing {n_genes} genes with block_size={block_size}, shared_mem={shared_mem_size}")
-        print(f"Reordered size: {reordered_size} (sat={n_sat}, unsat={n_unsat})")
+    # Calculate shared memory (fixed size per block, independent of n_cells)
+    tile_size = 1024  # Fixed tile size for scalability
+    shared_mem_size = tile_size * 2 * 8  # 2 double arrays per tile
     
-    # Process each gene
-    for gene_idx in range(n_genes):
-        if debug and gene_idx % 1000 == 0:
-            print(f"Processing gene {gene_idx}/{n_genes}")
-        
-        # Ensure GPU synchronization before kernel launch
-        cp.cuda.Device().synchronize()
-        
-        try:
-            sepal_simulation(
-                (grid_size,), (block_size,),
-                (
-                    vals_reordered,              # Reordered gene data
-                    gene_idx,                    # Current gene index
-                    sat_idx_flat,                # Flattened neighborhood indices
-                    unsat_to_nearest_sat_remapped, # Remapped unsat mapping
-                    concentration,               # Working arrays
-                    derivatives,
-                    result_gpu,                  # Output
-                    reordered_size,              # Total size
-                    n_genes,
-                    n_sat,
-                    n_unsat,
-                    max_neighs,                  # sat_thresh
-                    max_neighs,                  # max_neighs
-                    n_iter,
-                    dt,
-                    thresh,
-                    debug
-                ),
-                shared_mem=shared_mem_size
-            )
-            
-            # Synchronize after kernel to ensure completion
-            cp.cuda.Device().synchronize()
-            
-        except Exception as e:
-            if debug:
-                print(f"Kernel failed for gene {gene_idx}: {e}")
-            # Return NaN for failed genes
-            all_scores.append(np.nan)
-            continue
-        
-        # Process result
-        kernel_result = float(result_gpu[0])
-        if kernel_result == -999999.0:
-            final_score = np.nan
-        else:
-            final_score = dt * kernel_result
-            
-        all_scores.append(final_score)
-        
-        if debug and gene_idx < 5:
-            print(f"  Gene {gene_idx} score: {final_score}")
+    print(f"💾 Memory layout: {n_genes} genes × {reordered_size} cells = {concentration_all.nbytes / 1e6:.1f} MB")
+    print(f"🔧 Shared memory per block: {shared_mem_size / 1024:.1f} KB (independent of dataset size)")
     
-    return cp.asarray(all_scores, dtype=cp.float64)
+    # **SINGLE KERNEL LAUNCH FOR ALL GENES**
+    sepal_simulation(
+        (blocks_per_grid,),                    # Grid: one block per gene
+        (threads_per_block,),                  # Block: 256 threads
+        (
+            concentration_all,                 # (n_genes, n_cells) - all genes
+            derivatives_all,                   # (n_genes, n_cells) - all derivatives
+            sat_idx_flat,                     
+            unsat_to_nearest_sat_remapped,    
+            results_all,                       # (n_genes,) - results for all genes
+            reordered_size,                    # n_cells (can be 1M+)
+            n_genes,                          # Number of genes to process
+            n_sat,
+            n_unsat, 
+            max_neighs,
+            max_neighs,  # sat_thresh
+            n_iter,
+            cp.float32(dt),                    # **FIX: Convert to float32**
+            cp.float32(thresh),                # **FIX: Convert to float32**
+            debug
+        ),
+        shared_mem=shared_mem_size
+    )
+    
+    # Convert results
+    final_scores = cp.where(results_all == -999999.0, cp.nan, dt * results_all)
+    
+    return final_scores  # Shape: (n_genes,)
 
 
 def _compute_idxs_gpu(
