@@ -158,7 +158,7 @@ extern "C" {
             __syncthreads();  // **REQUIRED: Ensure all updates complete**
             
             // **CONVERGENCE CHECK - ALL THREADS PARTICIPATE**
-            if (!converged_flag && iter % 10 == 0) {  // Check every 10 iterations for efficiency
+            if (!converged_flag) {  // Check every 10 iterations for efficiency
                 // **ALL THREADS CALL ENTROPY FUNCTION**
                 double current_entropy = compute_entropy_cooperative(concentration, n_sat, tid, blockSize);
                 

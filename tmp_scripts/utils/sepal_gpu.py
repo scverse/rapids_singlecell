@@ -149,8 +149,6 @@ def _cuda_kernel_diffusion_gpu(
     # Create a flat mapping for unsat nodes to their nearest saturated
     unsat_to_nearest_sat_remapped = cp.searchsorted(sat, unsat_to_nearest_sat[unsat])
     
-    # Flatten sat_idx for better memory access
-    sat_idx_flat = sat_idx.flatten()
     
     reordered_size = n_cells  # Total cells after reordering
     
@@ -168,6 +166,8 @@ def _cuda_kernel_diffusion_gpu(
     
     # Calculate shared memory (fixed size per block, independent of n_cells)
     tile_size = 1024  # Fixed tile size for scalability
+    min_blocks = 256  # Hardware-specific minimum
+    blocks_per_grid = max(n_genes, min_blocks)
     shared_mem_size = tile_size * 2 * 8  # 2 double arrays per tile
     
     print(f"💾 Memory layout: {n_genes} genes × {reordered_size} cells = {concentration_all.nbytes / 1e6:.1f} MB")
@@ -180,7 +180,7 @@ def _cuda_kernel_diffusion_gpu(
         (
             concentration_all,                 # (n_genes, n_cells) - all genes
             derivatives_all,                   # (n_genes, n_cells) - all derivatives
-            sat_idx_flat,                     
+            sat_idx,                     
             unsat_to_nearest_sat_remapped,    
             results_all,                       # (n_genes,) - results for all genes
             reordered_size,                    # n_cells (can be 1M+)
