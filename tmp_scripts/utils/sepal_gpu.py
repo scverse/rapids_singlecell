@@ -184,86 +184,97 @@ def _cuda_kernel_diffusion_gpu(
 ) -> cp.ndarray:
     """
     Run diffusion simulation using custom CUDA kernel for each gene.
-    This processes genes one by one with rearranged data for sequential access.
+    Fixed deadlock issues with proper synchronization.
     """
     n_cells, n_genes = vals.shape
     n_sat = len(sat)
     n_unsat = len(unsat)
     
-    # Create mapping for sequential access: [saturated_nodes][unsaturated_nodes]
-    # New arrangement: indices 0 to n_sat-1 are saturated, n_sat to n_sat+n_unsat-1 are unsaturated
-    node_reorder = cp.concatenate([sat, unsat])  # [sat_nodes..., unsat_nodes...]
-    
-    # Create reverse mapping: original_node_idx -> new_sequential_idx
+    # Create mapping for sequential access
+    node_reorder = cp.concatenate([sat, unsat])
     reverse_mapping = cp.zeros(n_cells, dtype=cp.int32)
     reverse_mapping[node_reorder] = cp.arange(len(node_reorder))
     
-    # Rearrange vals data: put saturated nodes first, then unsaturated
-    # Shape: (n_sat + n_unsat, n_genes) with sequential layout
-    vals_reordered = vals[node_reorder, :]
+    # Rearrange data for sequential access
+    vals_reordered = vals[node_reorder, :].astype(cp.float64, copy=False)
     
-    # Remap sat_idx neighborhoods to use new sequential indices
+    # Vectorized remapping
     sat_idx_remapped = reverse_mapping[sat_idx]
-
     unsat_to_nearest_sat_remapped = reverse_mapping[unsat_to_nearest_sat]
-    
-    
-    # Flatten sat_idx for kernel (kernel expects flattened array)
     sat_idx_flat = sat_idx_remapped.flatten(order="C")
     
-    # Allocate working arrays for the kernel (reused for each gene)
-    # Size is n_sat + n_unsat (only the nodes we care about)
+    # Allocate working arrays
     reordered_size = n_sat + n_unsat
     concentration = cp.zeros(reordered_size, dtype=cp.float64)
     derivatives = cp.zeros(reordered_size, dtype=cp.float64)
     result_gpu = cp.zeros(1, dtype=cp.float32)
     
-    # Store results for all genes
+    # Calculate optimal block size (must be power of 2 for reductions)
+    block_size = 256  # Good for reductions and memory coalescing
+    grid_size = 1     # Single block to avoid inter-block synchronization
+    
+    # Shared memory for reductions (2 * block_size * sizeof(double))
+    shared_mem_size = 2 * block_size * 8  # 8 bytes per double
+    
     all_scores = []
     
-    # Process each gene using the CUDA kernel
+    if debug:
+        print(f"Processing {n_genes} genes with block_size={block_size}, shared_mem={shared_mem_size}")
+        print(f"Reordered size: {reordered_size} (sat={n_sat}, unsat={n_unsat})")
+    
+    # Process each gene
     for gene_idx in range(n_genes):
-        if debug:
+        if debug and gene_idx % 1000 == 0:
             print(f"Processing gene {gene_idx}/{n_genes}")
-            
-        # Launch CUDA kernel for this gene
-        # Block size should be a multiple of warp size (32) and handle convergence sync
-        block_size = 256
-        grid_size = 1  # Single block since kernel uses shared memory for convergence
         
-        sepal_simulation(
-            (grid_size,), (block_size,),
-            (
-                vals_reordered,              # const double* gene_data [n_sat + n_unsat, n_genes] - reordered
-                gene_idx,                    # int gene_idx
-                sat_idx_flat,                # const int* sat_idx [n_sat * sat_thresh] - remapped to sequential
-                unsat_to_nearest_sat_remapped, # const int* unsat_idx [n_unsat] - remapped to sequential
-                concentration,               # double* concentration [n_sat + n_unsat] (working array)
-                derivatives,                 # double* derivatives [n_sat + n_unsat] (working array)
-                result_gpu,                  # float* result [1] (output)
-                reordered_size,              # int n_cells_reordered (n_sat + n_unsat)
-                n_genes,                     # int n_genes
-                n_sat,                       # int n_sat  
-                n_unsat,                     # int n_unsat
-                max_neighs,                  # int sat_thresh (same as max_neighs)
-                max_neighs,                  # int max_neighs
-                n_iter,                      # int n_iter
-                dt,                          # double dt
-                thresh,                      # double thresh
-                debug                        # bool debug
+        # Ensure GPU synchronization before kernel launch
+        cp.cuda.Device().synchronize()
+        
+        try:
+            sepal_simulation(
+                (grid_size,), (block_size,),
+                (
+                    vals_reordered,              # Reordered gene data
+                    gene_idx,                    # Current gene index
+                    sat_idx_flat,                # Flattened neighborhood indices
+                    unsat_to_nearest_sat_remapped, # Remapped unsat mapping
+                    concentration,               # Working arrays
+                    derivatives,
+                    result_gpu,                  # Output
+                    reordered_size,              # Total size
+                    n_genes,
+                    n_sat,
+                    n_unsat,
+                    max_neighs,                  # sat_thresh
+                    max_neighs,                  # max_neighs
+                    n_iter,
+                    dt,
+                    thresh,
+                    debug
+                ),
+                shared_mem=shared_mem_size
             )
-        )
+            
+            # Synchronize after kernel to ensure completion
+            cp.cuda.Device().synchronize()
+            
+        except Exception as e:
+            if debug:
+                print(f"Kernel failed for gene {gene_idx}: {e}")
+            # Return NaN for failed genes
+            all_scores.append(np.nan)
+            continue
         
-        # Get result and handle special values
+        # Process result
         kernel_result = float(result_gpu[0])
-        if kernel_result == -999999.0:  # Kernel's NaN indicator
+        if kernel_result == -999999.0:
             final_score = np.nan
         else:
-            final_score = dt * kernel_result  # Apply dt multiplication here
+            final_score = dt * kernel_result
             
         all_scores.append(final_score)
         
-        if debug:
+        if debug and gene_idx < 5:
             print(f"  Gene {gene_idx} score: {final_score}")
     
     return cp.asarray(all_scores, dtype=cp.float64)

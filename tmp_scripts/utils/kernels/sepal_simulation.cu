@@ -1,38 +1,67 @@
 extern "C" {
 
-    __device__ double compute_entropy_device(
+    // Thread-safe entropy computation using parallel reduction
+    __device__ double compute_entropy_parallel(
         const double* __restrict__ conc,
-        int n_sat  // Only need n_sat since saturated nodes are indices 0 to n_sat-1
+        int n_sat,
+        int tid,
+        int blockSize
     ) {
-        double total_sum = 0.0;
-        double entropy = 0.0;
+        __shared__ double total_sum_shared[256];  // Max block size
+        __shared__ double entropy_shared[256];
         
-        // Sequential access: saturated nodes are indices 0 to n_sat-1
-        for (int i = 0; i < n_sat; i++) {
-            double val = conc[i];  // Direct sequential access!
+        // Phase 1: Parallel computation of total sum
+        double local_sum = 0.0;
+        for (int i = tid; i < n_sat; i += blockSize) {
+            double val = conc[i];
             if (val > 0.0) {
-                total_sum += val;
+                local_sum += val;
             }
         }
         
+        total_sum_shared[tid] = local_sum;
+        __syncthreads();
+        
+        // Reduction for total sum
+        for (int s = blockSize / 2; s > 0; s >>= 1) {
+            if (tid < s) {
+                total_sum_shared[tid] += total_sum_shared[tid + s];
+            }
+            __syncthreads();
+        }
+        
+        double total_sum = total_sum_shared[0];
         if (total_sum <= 0.0) return 0.0;
         
-        for (int i = 0; i < n_sat; i++) {
-            double val = conc[i];  // Direct sequential access!
+        // Phase 2: Parallel computation of entropy
+        double local_entropy = 0.0;
+        for (int i = tid; i < n_sat; i += blockSize) {
+            double val = conc[i];
             if (val > 0.0) {
                 double normalized = val / total_sum;
-                entropy += -normalized * log(normalized);
+                local_entropy += -normalized * log(normalized);
             }
         }
         
-        return entropy;
+        entropy_shared[tid] = local_entropy;
+        __syncthreads();
+        
+        // Reduction for entropy
+        for (int s = blockSize / 2; s > 0; s >>= 1) {
+            if (tid < s) {
+                entropy_shared[tid] += entropy_shared[tid + s];
+            }
+            __syncthreads();
+        }
+        
+        return entropy_shared[0];
     }
 
     __global__ void sepal_simulation(
-        const double* __restrict__ vals,         // [n_reordered * n_genes] reordered gene data (sat first, then unsat)
+        const double* __restrict__ vals,         // [n_reordered * n_genes] reordered gene data
         int gene_idx,                            // which gene to process
-        const int* __restrict__ sat_idx,         // [n_sat * sat_thresh] neighborhood indices (remapped to sequential)
-        const int* __restrict__ unsat_idx,       // [n_unsat] mapping to saturated (remapped to sequential)
+        const int* __restrict__ sat_idx,         // [n_sat * sat_thresh] neighborhood indices
+        const int* __restrict__ unsat_idx,       // [n_unsat] mapping to saturated
         double* __restrict__ concentration,      // [n_reordered] working concentration array
         double* __restrict__ derivatives,        // [n_reordered] working derivatives array
         float* __restrict__ result,             // [1] output
@@ -51,81 +80,73 @@ extern "C" {
         int tid = threadIdx.x;
         int blockSize = blockDim.x;
         
+        // Shared variables for convergence (accessed by all threads)
         __shared__ bool has_converged;
         __shared__ int convergence_iteration;
         __shared__ double prev_entropy;
         
+        // Initialize shared variables (all threads participate)
         if (tid == 0) {
             has_converged = false;
             convergence_iteration = n_iter;
             prev_entropy = 1.0;
         }
+        __syncthreads();  // ALL threads wait here
         
-        // Initialize concentration array in parallel with SEQUENTIAL ACCESS
+        // Initialize concentration array in parallel (ALL threads participate)
         for (int i = tid; i < n_reordered; i += blockSize) {
-            concentration[i] = vals[i * n_genes + gene_idx];  // Sequential read from reordered data!
+            concentration[i] = vals[i * n_genes + gene_idx];
             derivatives[i] = 0.0;
         }
-        __syncthreads();
+        __syncthreads();  // ALL threads wait here
         
         const double D = 1.0;
         const double h = 1.0;
         
+        // Main simulation loop
         for (int iter = 0; iter < n_iter; iter++) {
             
-            // Phase 1: Compute derivatives for saturated nodes (SEQUENTIAL ACCESS)
-            // Saturated nodes are indices 0 to n_sat-1
+            // Phase 1: Compute derivatives for saturated nodes (ALL threads can participate)
             for (int i = tid; i < n_sat; i += blockSize) {
-                // i is now the direct index in concentration array (sequential!)
-                
-                // Compute neighborhood sum for this saturated node
                 double neighbor_sum = 0.0;
                 for (int j = 0; j < sat_thresh; j++) {
-                    int neighbor_idx = sat_idx[i * sat_thresh + j];  // Already remapped to sequential indices
-                    neighbor_sum += concentration[neighbor_idx];  // Sequential access!
-                    
-                    if (debug && iter == 0 && i < 5) {
-                        printf("GPU iter=%d, sat_idx=%d, neighbor_sum=%.6f, neighbor_idx=%d, neighbor_concentration=%.6f\n", 
-                               iter, i, neighbor_sum, neighbor_idx, concentration[neighbor_idx]);
-                    }
+                    int neighbor_idx = sat_idx[i * sat_thresh + j];
+                    neighbor_sum += concentration[neighbor_idx];
                 }
                 
-                double center = concentration[i];  // Direct sequential access!
+                double center = concentration[i];
                 double d2;
                 
-                // Apply correct Laplacian (matches CPU exactly)
                 if (max_neighs == 4) {
                     d2 = (neighbor_sum - 4.0 * center) / (h * h);
                 } else if (max_neighs == 6) {
                     d2 = (2.0 * (neighbor_sum - 6.0 * center) / (3.0 * h * h));
                 }
                 
-                // Store derivative: dcdt[sat] = D * d2
-                derivatives[i] = D * d2;  // Sequential write!
+                derivatives[i] = D * d2;
             }
+            __syncthreads();  // ALL threads wait here
             
-            __syncthreads(); // Wait for all derivatives to be computed
-            
-            // Phase 2: Update saturated concentrations (SEQUENTIAL ACCESS)
+            // Phase 2: Update saturated concentrations (ALL threads can participate)
             for (int i = tid; i < n_sat; i += blockSize) {
-                concentration[i] += derivatives[i] * dt;  // Sequential access!
+                concentration[i] += derivatives[i] * dt;
                 concentration[i] = fmax(0.0, concentration[i]);
             }
             
-            // Phase 3: Update unsaturated concentrations (SEQUENTIAL ACCESS)
-            // Unsaturated nodes are indices n_sat to n_sat+n_unsat-1
+            // Phase 3: Update unsaturated concentrations (ALL threads can participate)
             for (int i = tid; i < n_unsat; i += blockSize) {
-                int unsat_idx_in_array = n_sat + i;  // Sequential index for unsaturated node
-                int mapped_sat_idx = unsat_idx[i];   // Corresponding saturated node (already remapped)
-                concentration[unsat_idx_in_array] += derivatives[mapped_sat_idx] * dt;  // Sequential access!
+                int unsat_idx_in_array = n_sat + i;
+                int mapped_sat_idx = unsat_idx[i];
+                concentration[unsat_idx_in_array] += derivatives[mapped_sat_idx] * dt;
                 concentration[unsat_idx_in_array] = fmax(0.0, concentration[unsat_idx_in_array]);
             }
+            __syncthreads();  // ALL threads wait here
             
-            __syncthreads(); // Wait for all updates
+            // Phase 4: Convergence check (ALL threads participate in entropy calculation)
+            double entropy = compute_entropy_parallel(concentration, n_sat, tid, blockSize);
             
-            // Phase 4: Compute entropy and check convergence (single thread)
+            // Only thread 0 updates convergence status, but ALL threads read it
             if (tid == 0) {
-                double entropy = compute_entropy_device(concentration, n_sat);  // Sequential access in entropy!
                 entropy = entropy / n_sat;
                 double entropy_diff = fabs(entropy - prev_entropy);
 
@@ -136,14 +157,15 @@ extern "C" {
                 
                 prev_entropy = entropy;
             }
+            __syncthreads();  // ALL threads wait here and read updated has_converged
             
-            __syncthreads();
-            
+            // ALL threads check convergence status together
             if (has_converged) {
-                break;
+                break;  // ALL threads break together
             }
         }
         
+        // Only thread 0 writes result (no synchronization needed after loop)
         if (tid == 0) {
             result[0] = has_converged ? (float)convergence_iteration : -999999.0;
         }
