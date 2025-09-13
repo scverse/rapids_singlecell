@@ -184,18 +184,38 @@ def _cuda_kernel_diffusion_gpu(
 ) -> cp.ndarray:
     """
     Run diffusion simulation using custom CUDA kernel for each gene.
-    This processes genes one by one using the optimized CUDA kernel.
+    This processes genes one by one with rearranged data for sequential access.
     """
     n_cells, n_genes = vals.shape
     n_sat = len(sat)
     n_unsat = len(unsat)
     
+    # Create mapping for sequential access: [saturated_nodes][unsaturated_nodes]
+    # New arrangement: indices 0 to n_sat-1 are saturated, n_sat to n_sat+n_unsat-1 are unsaturated
+    node_reorder = cp.concatenate([sat, unsat])  # [sat_nodes..., unsat_nodes...]
+    
+    # Create reverse mapping: original_node_idx -> new_sequential_idx
+    reverse_mapping = cp.zeros(n_cells, dtype=cp.int32)
+    reverse_mapping[node_reorder] = cp.arange(len(node_reorder))
+    
+    # Rearrange vals data: put saturated nodes first, then unsaturated
+    # Shape: (n_sat + n_unsat, n_genes) with sequential layout
+    vals_reordered = vals[node_reorder, :]
+    
+    # Remap sat_idx neighborhoods to use new sequential indices
+    sat_idx_remapped = reverse_mapping[sat_idx]
+
+    unsat_to_nearest_sat_remapped = reverse_mapping[unsat_to_nearest_sat]
+    
+    
     # Flatten sat_idx for kernel (kernel expects flattened array)
-    # sat_idx_flat = sat_idx.flatten(order="C")
+    sat_idx_flat = sat_idx_remapped.flatten(order="C")
     
     # Allocate working arrays for the kernel (reused for each gene)
-    concentration = cp.zeros(n_cells, dtype=cp.float64)
-    derivatives = cp.zeros(n_cells, dtype=cp.float64)
+    # Size is n_sat + n_unsat (only the nodes we care about)
+    reordered_size = n_sat + n_unsat
+    concentration = cp.zeros(reordered_size, dtype=cp.float64)
+    derivatives = cp.zeros(reordered_size, dtype=cp.float64)
     result_gpu = cp.zeros(1, dtype=cp.float32)
     
     # Store results for all genes
@@ -206,8 +226,6 @@ def _cuda_kernel_diffusion_gpu(
         if debug:
             print(f"Processing gene {gene_idx}/{n_genes}")
             
-        # Copy gene data to working array
-        
         # Launch CUDA kernel for this gene
         # Block size should be a multiple of warp size (32) and handle convergence sync
         block_size = 256
@@ -216,25 +234,23 @@ def _cuda_kernel_diffusion_gpu(
         sepal_simulation(
             (grid_size,), (block_size,),
             (
-                vals,              # const double* gene_data [n_cells]
-                gene_idx,             # int gene_idx
-                sat,                    # const int* sat [n_sat]  
-                sat_idx,           # const int* sat_idx [n_sat , sat_thresh]
-                unsat,                  # const int* unsat [n_unsat]
-                unsat_to_nearest_sat,   # const int* unsat_idx [n_unsat]
-                concentration,          # double* concentration [n_cells] (working array)
-                derivatives,            # double* derivatives [n_cells] (working array)
-                result_gpu,             # float* result [1] (output)
-                n_cells,                # int n_cells
-                n_genes,                # int n_genes
-                n_sat,                  # int n_sat  
-                n_unsat,                # int n_unsat
-                max_neighs,             # int sat_thresh (same as max_neighs)
-                max_neighs,             # int max_neighs
-                n_iter,                 # int n_iter
-                dt,                     # double dt
-                thresh,                 # double thresh
-                debug                   # bool debug
+                vals_reordered,              # const double* gene_data [n_sat + n_unsat, n_genes] - reordered
+                gene_idx,                    # int gene_idx
+                sat_idx_flat,                # const int* sat_idx [n_sat * sat_thresh] - remapped to sequential
+                unsat_to_nearest_sat_remapped, # const int* unsat_idx [n_unsat] - remapped to sequential
+                concentration,               # double* concentration [n_sat + n_unsat] (working array)
+                derivatives,                 # double* derivatives [n_sat + n_unsat] (working array)
+                result_gpu,                  # float* result [1] (output)
+                reordered_size,              # int n_cells_reordered (n_sat + n_unsat)
+                n_genes,                     # int n_genes
+                n_sat,                       # int n_sat  
+                n_unsat,                     # int n_unsat
+                max_neighs,                  # int sat_thresh (same as max_neighs)
+                max_neighs,                  # int max_neighs
+                n_iter,                      # int n_iter
+                dt,                          # double dt
+                thresh,                      # double thresh
+                debug                        # bool debug
             )
         )
         
