@@ -1,7 +1,10 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
 import squidpy as sq
 
-from pathlib import Path
-import os
 HOME = Path(os.path.expanduser("~"))
 if __name__ == "__main__":
     (HOME / "data").mkdir(parents=True, exist_ok=True)

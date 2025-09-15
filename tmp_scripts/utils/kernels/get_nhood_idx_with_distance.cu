@@ -14,18 +14,18 @@ extern "C" {
     {
         int tid = blockIdx.x * blockDim.x + threadIdx.x;
         if (tid >= n_unsat) return;
-        
+
         int node = unsat_nodes[tid];
         float node_x = spatial[node * 2];
         float node_y = spatial[node * 2 + 1];
-        
+
         float min_dist = -1.0f;  // -1.0f means no closest sat found yet
         int closest = -1;
-        
+
         // Phase 1: Check graph neighbors for saturated nodes
         int start = g_indptr[node];
         int end = g_indptr[node + 1];
-        
+
         for (int i = start; i < end; i++) {
             int neighbor = g_indices[i];
             if (sat_mask[neighbor]) {
@@ -33,7 +33,7 @@ extern "C" {
                 break;               // Stop immediately
             }
         }
-        
+
         // Phase 2: If no saturated graph neighbors, search ALL saturated nodes
         if (closest == -1) {
             for (int i = 0; i < n_sat; i++) {
@@ -41,15 +41,15 @@ extern "C" {
                 float sat_x = spatial[sat_node * 2];
                 float sat_y = spatial[sat_node * 2 + 1];
                 float dist = fabsf(node_x - sat_x) + fabsf(node_y - sat_y);
-                
+
                 if (min_dist < 0.0f || dist < min_dist) {
                     min_dist = dist;
                     closest = sat_node;
                 }
             }
         }
-        
+
         nearest_sat[tid] = closest;
     }
-    
+
     } // extern "C"
