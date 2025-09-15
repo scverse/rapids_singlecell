@@ -309,6 +309,12 @@ def test_highly_variable_genes_pearson_residuals_general(
     ]:
         assert key in cudata.var.columns
 
+    print(cudata.var["residual_variances"].values.shape)
+    print(residual_variances_reference.shape)
+    print(
+        f"cudata.var['residual_variances'].values: {cudata.var['residual_variances'].values}"
+    )
+    print(f"residual_variances_reference: {residual_variances_reference}")
     assert np.allclose(
         cudata.var["residual_variances"].values, residual_variances_reference
     )

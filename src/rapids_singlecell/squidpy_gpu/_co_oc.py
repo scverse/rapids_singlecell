@@ -6,17 +6,12 @@ import cupy as cp
 import numpy as np
 from cuml.metrics import pairwise_distances
 
+from rapids_singlecell._cuda import _cooc_cuda as _co
 from rapids_singlecell.preprocessing._harmony._helper import (
     _create_category_index_mapping,
 )
 
 from ._utils import _assert_categorical_obs, _assert_spatial_basis
-from .kernels._co_oc import (
-    occur_count_kernel_csr_catpairs,
-    occur_count_kernel_pairwise,
-    occur_reduction_kernel_global,
-    occur_reduction_kernel_shared,
-)
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -120,7 +115,6 @@ def _co_occurrence_helper(
         A 3D array of shape (k, k, len(v_radium)-1) containing the co-occurrence probabilities.
 
     """
-    n = spatial.shape[0]
     # labels are dense [0, k)
     k = int(cp.asnumpy(labs.max())) + 1
     l_val = len(v_radium) - 1
@@ -140,76 +134,55 @@ def _co_occurrence_helper(
                 pair_right.append(b)
         pair_left = cp.asarray(pair_left, dtype=cp.int32)
         pair_right = cp.asarray(pair_right, dtype=cp.int32)
-        # Choose the largest block size that fits shared memory
-        props = cp.cuda.runtime.getDeviceProperties(0)
-        max_smem = int(props.get("sharedMemPerBlock", 48 * 1024))
-
-        chosen_threads = None
-        for tpb in (1024, 512, 256, 128, 64, 32):
-            warps = tpb // 32
-            l_pad = ((l_val + 31) // 32) * 32
-            required = warps * l_pad * cp.dtype(cp.int32).itemsize
-            if required <= max_smem:
-                chosen_threads = tpb
-                shared_mem_size_fast = required
-                break
-
-        if chosen_threads is not None:
-            counts = cp.zeros((k, k, l_val), dtype=cp.int32)
-            grid = (pair_left.size,)
-            block = (chosen_threads,)
-            occur_count_kernel_csr_catpairs(
-                grid,
-                block,
-                (
-                    spatial,
-                    thresholds,
-                    cat_offsets,
-                    cell_indices,
-                    pair_left,
-                    pair_right,
-                    counts,
-                    k,
-                    l_val,
-                ),
-                shared_mem=shared_mem_size_fast,
-            )
-            # CSR kernel now writes counts in (k, k, l_val) layout
-            reader = 1
-            use_fast_kernel = True
+        # Let C++ pick tpb; fall back to slow if insufficient shared memory
+        counts = cp.zeros((k, k, l_val), dtype=cp.int32)
+        reader = 1
+        use_fast_kernel = _co.count_csr_catpairs_auto(
+            spatial.data.ptr,
+            thresholds.data.ptr,
+            cat_offsets.data.ptr,
+            cell_indices.data.ptr,
+            pair_left.data.ptr,
+            pair_right.data.ptr,
+            counts.data.ptr,
+            int(pair_left.size),
+            int(k),
+            int(l_val),
+        )
 
     # Fallback to the standard kernel if fast=False or shared memory was insufficient
     if not use_fast_kernel:
         counts = cp.zeros((k, k, l_val * 2), dtype=cp.int32)
-        grid = (n,)
-        block = (32,)
-        occur_count_kernel_pairwise(
-            grid, block, (spatial, thresholds, labs, counts, n, k, l_val)
+        _co.count_pairwise(
+            spatial.data.ptr,
+            thresholds.data.ptr,
+            labs.data.ptr,
+            counts.data.ptr,
+            int(spatial.shape[0]),
+            int(k),
+            int(l_val),
         )
         reader = 0
 
     occ_prob = cp.empty((k, k, l_val), dtype=np.float32)
-    shared_mem_size = (k * k + k) * cp.dtype("float32").itemsize
-    props = cp.cuda.runtime.getDeviceProperties(0)
-    if fast and shared_mem_size < props["sharedMemPerBlock"]:
-        grid2 = (l_val,)
-        block2 = (32,)
-        occur_reduction_kernel_shared(
-            grid2,
-            block2,
-            (counts, occ_prob, k, l_val, reader),
-            shared_mem=shared_mem_size,
+    ok = False
+    if fast:
+        ok = _co.reduce_shared(
+            counts.data.ptr,
+            occ_prob.data.ptr,
+            int(k),
+            int(l_val),
+            int(reader),
         )
-    else:
-        shared_mem_size = (k) * cp.dtype("float32").itemsize
-        grid2 = (l_val,)
-        block2 = (32,)
+    if not ok:
         inter_out = cp.zeros((l_val, k, k), dtype=np.float32)
-        occur_reduction_kernel_global(
-            grid2,
-            block2,
-            (counts, inter_out, occ_prob, k, l_val, reader),
-            shared_mem=shared_mem_size,
+        _co.reduce_global(
+            counts.data.ptr,
+            inter_out.data.ptr,
+            occ_prob.data.ptr,
+            int(k),
+            int(l_val),
+            int(reader),
         )
 
     return occ_prob

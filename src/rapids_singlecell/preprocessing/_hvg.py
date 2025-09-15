@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import warnings
 from dataclasses import dataclass
 from inspect import signature
@@ -706,15 +705,8 @@ def _highly_variable_pearson_residuals(
 
     n_batches = len(np.unique(batch_info))
     residual_gene_vars = []
-    if issparse(X):
-        from ._kernels._pr_kernels import _csc_hvg_res, _sparse_sum_csc
 
-        sum_csc = _sparse_sum_csc(X.dtype)
-        csc_hvg_res = _csc_hvg_res(X.dtype)
-    else:
-        from ._kernels._pr_kernels import _dense_hvg_res
-
-        dense_hvg_res = _dense_hvg_res(X.dtype)
+    from rapids_singlecell._cuda import _pr_cuda as _pr
 
     for b in np.unique(batch_info):
         if issparse(X):
@@ -724,72 +716,47 @@ def _highly_variable_pearson_residuals(
             X_batch = cp.array(X[batch_info == b], dtype=X.dtype)
             nnz_per_gene = cp.sum(X_batch != 0, axis=0).ravel()
         nonzero_genes = cp.array(nnz_per_gene >= 1)
-        X_batch = X_batch[:, nonzero_genes]
+        X_batch = X_batch[:, nonzero_genes].copy()
         if clip is None:
             n = X_batch.shape[0]
             clip = cp.sqrt(n, dtype=X.dtype)
         if clip < 0:
             raise ValueError("Pearson residuals require `clip>=0` or `clip=None`.")
 
-        clip = cp.array([clip], dtype=X.dtype)
-        theta = cp.array([theta], dtype=X.dtype)
+        inv_theta = float(1.0 / theta)
+        from rapids_singlecell.preprocessing._qc import _basic_qc
+
+        sums_cells, sums_genes, _, _ = _basic_qc(X_batch)
+        inv_sum_total = float(1 / sums_genes.sum())
         residual_gene_var = cp.zeros(X_batch.shape[1], dtype=X.dtype, order="C")
         if issparse(X_batch):
-            sums_genes = cp.zeros(X_batch.shape[1], dtype=X.dtype)
-            sums_cells = cp.zeros(X_batch.shape[0], dtype=X.dtype)
-            block = (32,)
-            grid = (int(math.ceil(X_batch.shape[1] / block[0])),)
-
-            sum_csc(
-                grid,
-                block,
-                (
-                    X_batch.indptr,
-                    X_batch.indices,
-                    X_batch.data,
-                    sums_genes,
-                    sums_cells,
-                    X_batch.shape[1],
-                ),
-            )
-            sum_total = sums_genes.sum().squeeze()
-            csc_hvg_res(
-                grid,
-                block,
-                (
-                    X_batch.indptr,
-                    X_batch.indices,
-                    X_batch.data,
-                    sums_genes,
-                    sums_cells,
-                    residual_gene_var,
-                    sum_total,
-                    clip,
-                    theta,
-                    X_batch.shape[1],
-                    X_batch.shape[0],
-                ),
+            _pr.csc_hvg_res(
+                X_batch.indptr.data.ptr,
+                X_batch.indices.data.ptr,
+                X_batch.data.data.ptr,
+                sums_genes.data.ptr,
+                sums_cells.data.ptr,
+                residual_gene_var.data.ptr,
+                inv_sum_total,
+                clip,
+                inv_theta,
+                int(X_batch.shape[1]),
+                int(X_batch.shape[0]),
+                int(cp.dtype(X_batch.dtype).itemsize),
             )
         else:
-            sums_genes = cp.sum(X_batch, axis=0, dtype=X.dtype).ravel()
-            sums_cells = cp.sum(X_batch, axis=1, dtype=X.dtype).ravel()
-            sum_total = sums_genes.sum().squeeze()
-            block = (32,)
-            grid = (int(math.ceil(X_batch.shape[1] / block[0])),)
-            dense_hvg_res(
-                grid,
-                block,
-                (
-                    cp.array(X_batch, dtype=X.dtype, order="F"),
-                    sums_genes,
-                    sums_cells,
-                    residual_gene_var,
-                    sum_total,
-                    clip,
-                    theta,
-                    X_batch.shape[1],
-                    X_batch.shape[0],
-                ),
+            X_batch = cp.asfortranarray(X_batch)
+            _pr.dense_hvg_res(
+                X_batch.data.ptr,
+                sums_genes.data.ptr,
+                sums_cells.data.ptr,
+                residual_gene_var.data.ptr,
+                inv_sum_total,
+                clip,
+                inv_theta,
+                int(X_batch.shape[1]),
+                int(X_batch.shape[0]),
+                int(cp.dtype(X.dtype).itemsize),
             )
 
         unmasked_residual_gene_var = cp.zeros(len(nonzero_genes))

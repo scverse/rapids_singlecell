@@ -2,7 +2,7 @@
 #include <nanobind/nanobind.h>
 #include <cstdint>
 
-#include "kernels.cuh"
+#include "kernels_mv.cuh"
 
 namespace nb = nanobind;
 using nb::handle;
@@ -47,11 +47,6 @@ void mean_var_minor_api(std::uintptr_t indices, std::uintptr_t data, std::uintpt
 }
 
 NB_MODULE(_mean_var_cuda, m) {
-  m.def("mean_var_major_f32", &mean_var_major_api<float>);
-  m.def("mean_var_major_f64", &mean_var_major_api<double>);
-  m.def("mean_var_minor_f32", &mean_var_minor_api<float>);
-  m.def("mean_var_minor_f64", &mean_var_minor_api<double>);
-
   m.def("mean_var_major",
         [](std::uintptr_t indptr, std::uintptr_t indices, std::uintptr_t data, std::uintptr_t means,
            std::uintptr_t vars, int major, int minor, int itemsize) {

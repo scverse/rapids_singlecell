@@ -90,15 +90,16 @@ def _normalize_total(X: ArrayTypesDask, target_sum: int):
     elif isinstance(X, DaskArray):
         return _normalize_total_dask(X, target_sum)
     elif isinstance(X, cp.ndarray):
-        from ._kernels._norm_kernel import _mul_dense
+        from rapids_singlecell._cuda import _norm_cuda as _nc
 
         if not X.flags.c_contiguous:
             X = cp.asarray(X, order="C")
-        mul_kernel = _mul_dense(X.dtype)
-        mul_kernel(
-            (math.ceil(X.shape[0] / 128),),
-            (128,),
-            (X, X.shape[0], X.shape[1], int(target_sum)),
+        _nc.mul_dense(
+            X.data.ptr,
+            int(X.shape[0]),
+            int(X.shape[1]),
+            float(target_sum),
+            int(cp.dtype(X.dtype).itemsize),
         )
         return X
     else:
@@ -106,44 +107,43 @@ def _normalize_total(X: ArrayTypesDask, target_sum: int):
 
 
 def _normalize_total_csr(X: sparse.csr_matrix, target_sum: int) -> sparse.csr_matrix:
-    from ._kernels._norm_kernel import _mul_csr
+    from rapids_singlecell._cuda import _norm_cuda as _nc
 
-    mul_kernel = _mul_csr(X.dtype)
-    mul_kernel(
-        (math.ceil(X.shape[0] / 128),),
-        (128,),
-        (X.indptr, X.data, X.shape[0], int(target_sum)),
+    _nc.mul_csr(
+        X.indptr.data.ptr,
+        X.data.data.ptr,
+        int(X.shape[0]),
+        float(target_sum),
+        int(cp.dtype(X.dtype).itemsize),
     )
     return X
 
 
 def _normalize_total_dask(X: DaskArray, target_sum: int) -> DaskArray:
     if isinstance(X._meta, sparse.csr_matrix):
-        from ._kernels._norm_kernel import _mul_csr
-
-        mul_kernel = _mul_csr(X.dtype)
-        mul_kernel.compile()
+        from rapids_singlecell._cuda import _norm_cuda as _nc
 
         def __mul(X_part):
-            mul_kernel(
-                (math.ceil(X_part.shape[0] / 32),),
-                (32,),
-                (X_part.indptr, X_part.data, X_part.shape[0], int(target_sum)),
+            _nc.mul_csr(
+                X_part.indptr.data.ptr,
+                X_part.data.data.ptr,
+                int(X_part.shape[0]),
+                float(target_sum),
+                int(cp.dtype(X_part.dtype).itemsize),
             )
             return X_part
 
         X = X.map_blocks(__mul, meta=_meta_sparse(X.dtype))
     elif isinstance(X._meta, cp.ndarray):
-        from ._kernels._norm_kernel import _mul_dense
-
-        mul_kernel = _mul_dense(X.dtype)
-        mul_kernel.compile()
+        from rapids_singlecell._cuda import _norm_cuda as _nc
 
         def __mul(X_part):
-            mul_kernel(
-                (math.ceil(X_part.shape[0] / 128),),
-                (128,),
-                (X_part, X_part.shape[0], X_part.shape[1], int(target_sum)),
+            _nc.mul_dense(
+                X_part.data.ptr,
+                int(X_part.shape[0]),
+                int(X_part.shape[1]),
+                float(target_sum),
+                int(cp.dtype(X_part.dtype).itemsize),
             )
             return X_part
 
@@ -163,14 +163,15 @@ def _get_target_sum(X: ArrayTypesDask) -> int:
 
 
 def _get_target_sum_csr(X: sparse.csr_matrix) -> int:
-    from ._kernels._norm_kernel import _get_sparse_sum_major
+    from rapids_singlecell._cuda import _norm_cuda as _nc
 
     counts_per_cell = cp.zeros(X.shape[0], dtype=X.dtype)
-    sum_kernel = _get_sparse_sum_major(X.dtype)
-    sum_kernel(
-        (X.shape[0],),
-        (64,),
-        (X.indptr, X.data, counts_per_cell, X.shape[0]),
+    _nc.sum_major(
+        X.indptr.data.ptr,
+        X.data.data.ptr,
+        counts_per_cell.data.ptr,
+        int(X.shape[0]),
+        int(cp.dtype(X.dtype).itemsize),
     )
     counts_per_cell = counts_per_cell[counts_per_cell > 0]
     target_sum = cp.median(counts_per_cell)
@@ -179,17 +180,16 @@ def _get_target_sum_csr(X: sparse.csr_matrix) -> int:
 
 def _get_target_sum_dask(X: DaskArray) -> int:
     if isinstance(X._meta, sparse.csr_matrix):
-        from ._kernels._norm_kernel import _get_sparse_sum_major
-
-        sum_kernel = _get_sparse_sum_major(X.dtype)
-        sum_kernel.compile()
+        from rapids_singlecell._cuda import _norm_cuda as _nc
 
         def __sum(X_part):
             counts_per_cell = cp.zeros(X_part.shape[0], dtype=X_part.dtype)
-            sum_kernel(
-                (X.shape[0],),
-                (64,),
-                (X_part.indptr, X_part.data, counts_per_cell, X_part.shape[0]),
+            _nc.sum_major(
+                X_part.indptr.data.ptr,
+                X_part.data.data.ptr,
+                counts_per_cell.data.ptr,
+                int(X_part.shape[0]),
+                int(cp.dtype(X_part.dtype).itemsize),
             )
             return counts_per_cell
 
@@ -344,111 +344,70 @@ def normalize_pearson_residuals(
         raise ValueError("Pearson residuals require theta > 0")
     if clip is None:
         n = X.shape[0]
-        clip = cp.sqrt(n, dtype=X.dtype)
+        clip = math.sqrt(n)
     if clip < 0:
         raise ValueError("Pearson residuals require `clip>=0` or `clip=None`.")
-    theta = cp.array([1 / theta], dtype=X.dtype)
-    clip = cp.array([clip], dtype=X.dtype)
-    sums_cells = cp.zeros(X.shape[0], dtype=X.dtype)
-    sums_genes = cp.zeros(X.shape[1], dtype=X.dtype)
+    inv_theta = 1.0 / theta
+    # sums_cells = cp.zeros(X.shape[0], dtype=X.dtype)
+    # sums_genes = cp.zeros(X.shape[1], dtype=X.dtype)
+
+    from rapids_singlecell.preprocessing._qc import _basic_qc
+
+    sums_cells, sums_genes, _, _ = _basic_qc(X)
+    inv_sum_total = float(1 / sums_genes.sum())
+    residuals = cp.zeros(X.shape, dtype=X.dtype)
 
     if sparse.issparse(X):
-        residuals = cp.zeros(X.shape, dtype=X.dtype)
-        if sparse.isspmatrix_csc(X):
-            from ._kernels._pr_kernels import _sparse_norm_res_csc, _sparse_sum_csc
+        from rapids_singlecell._cuda import _pr_cuda as _pr
 
-            block = (8,)
-            grid = (int(math.ceil(X.shape[1] / block[0])),)
-            sum_csc = _sparse_sum_csc(X.dtype)
-            sum_csc(
-                grid,
-                block,
-                (X.indptr, X.indices, X.data, sums_genes, sums_cells, X.shape[1]),
-            )
-            sum_total = 1 / sums_genes.sum().squeeze()
-            norm_res = _sparse_norm_res_csc(X.dtype)
-            norm_res(
-                grid,
-                block,
-                (
-                    X.indptr,
-                    X.indices,
-                    X.data,
-                    sums_cells,
-                    sums_genes,
-                    residuals,
-                    sum_total,
-                    clip,
-                    theta,
-                    X.shape[0],
-                    X.shape[1],
-                ),
+        if sparse.isspmatrix_csc(X):
+            _pr.sparse_norm_res_csc(
+                X.indptr.data.ptr,
+                X.indices.data.ptr,
+                X.data.data.ptr,
+                sums_cells.data.ptr,
+                sums_genes.data.ptr,
+                residuals.data.ptr,
+                inv_sum_total,
+                clip,
+                inv_theta,
+                int(X.shape[0]),
+                int(X.shape[1]),
+                int(cp.dtype(X.dtype).itemsize),
             )
         elif sparse.isspmatrix_csr(X):
-            from ._kernels._pr_kernels import _sparse_norm_res_csr, _sparse_sum_csr
-
-            block = (8,)
-            grid = (int(math.ceil(X.shape[0] / block[0])),)
-            sum_csr = _sparse_sum_csr(X.dtype)
-            sum_csr(
-                grid,
-                block,
-                (X.indptr, X.indices, X.data, sums_genes, sums_cells, X.shape[0]),
-            )
-            sum_total = 1 / sums_genes.sum().squeeze()
-            norm_res = _sparse_norm_res_csr(X.dtype)
-            norm_res(
-                grid,
-                block,
-                (
-                    X.indptr,
-                    X.indices,
-                    X.data,
-                    sums_cells,
-                    sums_genes,
-                    residuals,
-                    sum_total,
-                    clip,
-                    theta,
-                    X.shape[0],
-                    X.shape[1],
-                ),
+            _pr.sparse_norm_res_csr(
+                X.indptr.data.ptr,
+                X.indices.data.ptr,
+                X.data.data.ptr,
+                sums_cells.data.ptr,
+                sums_genes.data.ptr,
+                residuals.data.ptr,
+                inv_sum_total,
+                clip,
+                inv_theta,
+                int(X.shape[0]),
+                int(X.shape[1]),
+                int(cp.dtype(X.dtype).itemsize),
             )
         else:
             raise ValueError(
                 "Please transform you sparse matrix into CSR or CSC format."
             )
     else:
-        from ._kernels._pr_kernels import _norm_res_dense, _sum_dense
+        from rapids_singlecell._cuda import _pr_cuda as _pr
 
-        residuals = cp.zeros(X.shape, dtype=X.dtype)
-        block = (8, 8)
-        grid = (
-            math.ceil(residuals.shape[0] / block[0]),
-            math.ceil(residuals.shape[1] / block[1]),
-        )
-        sum_dense = _sum_dense(X.dtype)
-        sum_dense(
-            grid,
-            block,
-            (X, sums_cells, sums_genes, residuals.shape[0], residuals.shape[1]),
-        )
-        sum_total = 1 / sums_genes.sum().squeeze()
-        norm_res = _norm_res_dense(X.dtype)
-        norm_res(
-            grid,
-            block,
-            (
-                X,
-                residuals,
-                sums_cells,
-                sums_genes,
-                sum_total,
-                clip,
-                theta,
-                residuals.shape[0],
-                residuals.shape[1],
-            ),
+        _pr.dense_norm_res(
+            X.data.ptr,
+            residuals.data.ptr,
+            sums_cells.data.ptr,
+            sums_genes.data.ptr,
+            inv_sum_total,
+            clip,
+            inv_theta,
+            int(residuals.shape[0]),
+            int(residuals.shape[1]),
+            int(cp.dtype(X.dtype).itemsize),
         )
 
     if inplace is True:

@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-from typing import (
-    TYPE_CHECKING,
-    Literal,
-    Union,
-    get_args,
-)
+from typing import TYPE_CHECKING, Literal, Union, get_args
 
 import cupy as cp
 from anndata import AnnData
@@ -13,10 +8,8 @@ from cupyx.scipy import sparse as cp_sparse
 from scanpy._utils import _resolve_axis
 from scanpy.get._aggregated import _combine_categories
 
-from rapids_singlecell._compat import (
-    DaskArray,
-    _meta_dense,
-)
+from rapids_singlecell._compat import DaskArray, _meta_dense
+from rapids_singlecell._cuda import _aggr_cuda
 from rapids_singlecell.get import _check_mask
 from rapids_singlecell.preprocessing._utils import _check_gpu_X
 
@@ -59,6 +52,8 @@ class Aggregate:
         self.n_cells = cp.array(cp.bincount(self.groupby), dtype=cp.float64).reshape(
             -1, 1
         )
+        if data.dtype.kind != "f" and not isinstance(data, DaskArray):
+            data = data.astype(cp.float32, copy=False)
         self.data = data
 
     groupby: cp.ndarray
@@ -79,57 +74,40 @@ class Aggregate:
         import dask.array as da
 
         assert dof >= 0
-        from ._kernels._aggr_kernels import (
-            _get_aggr_dense_kernel_C,
-            _get_aggr_sparse_kernel,
-        )
-
-        if isinstance(self.data._meta, cp.ndarray):
-            kernel = _get_aggr_dense_kernel_C(self.data.dtype)
-            is_sparse = False
-        else:
-            kernel = _get_aggr_sparse_kernel(self.data.dtype)
-            is_sparse = True
-
-        kernel.compile()
+        is_sparse = not isinstance(self.data._meta, cp.ndarray)
         n_groups = self.n_cells.shape[0]
 
         def __aggregate_dask(X_part, mask_part, groupby_part):
             out = cp.zeros((1, 3, n_groups, self.data.shape[1]), dtype=cp.float64)
-            threads_per_block = 512
+            gb = groupby_part.ravel()
+            mk = mask_part.ravel()
 
             if is_sparse:
-                # Sparse matrix kernel parameters
-                grid = (X_part.shape[0],)
-                kernel_args = (
-                    X_part.indptr,
-                    X_part.indices,
-                    X_part.data,
-                )
-            else:
-                # Dense matrix kernel parameters
-                N = X_part.shape[0] * X_part.shape[1]
-
-                blocks = min(
-                    (N + threads_per_block - 1) // threads_per_block,
-                    cp.cuda.Device().attributes["MultiProcessorCount"] * 8,
-                )
-                grid = (blocks,)
-                kernel_args = (X_part,)
-
-            kernel(
-                grid,
-                (threads_per_block,),
-                (
-                    *kernel_args,
-                    out,
-                    groupby_part,
-                    mask_part,
+                _aggr_cuda.sparse_aggr(
+                    X_part.indptr.data.ptr,
+                    X_part.indices.data.ptr,
+                    X_part.data.data.ptr,
+                    out.data.ptr,
+                    gb.data.ptr,
+                    mk.data.ptr,
                     X_part.shape[0],
                     X_part.shape[1],
-                    n_groups,
-                ),
-            )
+                    int(n_groups),
+                    bool(0),
+                    int(X_part.data.dtype.itemsize),
+                )
+            else:
+                _aggr_cuda.dense_aggr(
+                    int(X_part.data.ptr),
+                    int(out.data.ptr),
+                    int(gb.data.ptr),
+                    int(mk.data.ptr),
+                    int(X_part.shape[0]),
+                    int(X_part.shape[1]),
+                    int(n_groups),
+                    bool(0 if X_part.flags.c_contiguous else 1),
+                    int(X_part.dtype.itemsize),
+                )
             return out
 
         # Prepare Dask arrays
@@ -179,37 +157,23 @@ class Aggregate:
         """
 
         assert dof >= 0
-        from ._kernels._aggr_kernels import (
-            _get_aggr_sparse_kernel,
-            _get_aggr_sparse_kernel_csc,
-        )
-
         out = cp.zeros(
             (3, self.n_cells.shape[0] * self.data.shape[1]), dtype=cp.float64
         )
-
-        block = (512,)
-        if self.data.format == "csc":
-            grid = (self.data.shape[1],)
-            aggr_kernel = _get_aggr_sparse_kernel_csc(self.data.dtype)
-        else:
-            grid = (self.data.shape[0],)
-            aggr_kernel = _get_aggr_sparse_kernel(self.data.dtype)
         mask = self._get_mask()
-        aggr_kernel(
-            grid,
-            block,
-            (
-                self.data.indptr,
-                self.data.indices,
-                self.data.data,
-                out,
-                self.groupby,
-                mask,
-                self.data.shape[0],
-                self.data.shape[1],
-                self.n_cells.shape[0],
-            ),
+
+        _aggr_cuda.sparse_aggr(
+            self.data.indptr.data.ptr,
+            self.data.indices.data.ptr,
+            self.data.data.data.ptr,
+            out.data.ptr,
+            self.groupby.data.ptr,
+            mask.data.ptr,
+            int(self.data.shape[0]),
+            int(self.data.shape[1]),
+            int(self.n_cells.shape[0]),
+            self.data.format == "csc",
+            int(self.data.data.dtype.itemsize),
         )
         sums, counts, sq_sums = out[0, :], out[1, :], out[2, :]
         sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])
@@ -230,10 +194,6 @@ class Aggregate:
         """
 
         assert dof >= 0
-        from ._kernels._aggr_kernels import (
-            _get_aggr_sparse_sparse_kernel,
-            _get_sparse_var_kernel,
-        )
 
         if self.data.format == "csc":
             self.data = self.data.tocsr()
@@ -241,24 +201,19 @@ class Aggregate:
         src_row = cp.zeros(self.data.nnz, dtype=cp.int32)
         src_col = cp.zeros(self.data.nnz, dtype=cp.int32)
         src_data = cp.zeros(self.data.nnz, dtype=cp.float64)
-        block = (128,)
-        grid = (self.data.shape[0],)
-        aggr_kernel = _get_aggr_sparse_sparse_kernel(self.data.dtype)
         mask = self._get_mask()
-        aggr_kernel(
-            grid,
-            block,
-            (
-                self.data.indptr,
-                self.data.indices,
-                self.data.data,
-                src_row,
-                src_col,
-                src_data,
-                self.groupby,
-                mask,
-                self.data.shape[0],
-            ),
+
+        _aggr_cuda.csr_to_coo(
+            self.data.indptr.data.ptr,
+            self.data.indices.data.ptr,
+            self.data.data.data.ptr,
+            src_row.data.ptr,
+            src_col.data.ptr,
+            src_data.data.ptr,
+            self.groupby.data.ptr,
+            mask.data.ptr,
+            int(self.data.shape[0]),
+            int(self.data.data.dtype.itemsize),
         )
 
         keys = cp.stack([src_col, src_row])
@@ -346,19 +301,14 @@ class Aggregate:
                     shape=(self.n_cells.shape[0], self.data.shape[1]),
                 )
 
-                sparse_var = _get_sparse_var_kernel(var.dtype)
-                sparse_var(
-                    grid,
-                    block,
-                    (
-                        var.indptr,
-                        var.indices,
-                        var.data,
-                        means,
-                        self.n_cells,
-                        dof,
-                        var.shape[0],
-                    ),
+                _aggr_cuda.sparse_var(
+                    var.indptr.data.ptr,
+                    var.indices.data.ptr,
+                    var.data.data.ptr,
+                    means.data.ptr,
+                    self.n_cells.data.ptr,
+                    int(dof),
+                    int(var.shape[0]),
                 )
                 results["var"] = var
         if "count_nonzero" in funcs:
@@ -387,36 +337,20 @@ class Aggregate:
         """
 
         assert dof >= 0
-        from ._kernels._aggr_kernels import (
-            _get_aggr_dense_kernel_C,
-            _get_aggr_dense_kernel_F,
-        )
-
         out = cp.zeros((3, self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
 
-        N = self.data.shape[0] * self.data.shape[1]
-        threads_per_block = 512
-        blocks = min(
-            (N + threads_per_block - 1) // threads_per_block,
-            cp.cuda.Device().attributes["MultiProcessorCount"] * 8,
-        )
-        if self.data.flags.c_contiguous:
-            aggr_kernel = _get_aggr_dense_kernel_C(self.data.dtype)
-        else:
-            aggr_kernel = _get_aggr_dense_kernel_F(self.data.dtype)
         mask = self._get_mask()
-        aggr_kernel(
-            (blocks,),
-            (threads_per_block,),
-            (
-                self.data,
-                out,
-                self.groupby,
-                mask,
-                self.data.shape[0],
-                self.data.shape[1],
-                self.n_cells.shape[0],
-            ),
+
+        _aggr_cuda.dense_aggr(
+            self.data.data.ptr,
+            out.data.ptr,
+            self.groupby.data.ptr,
+            mask.data.ptr,
+            self.data.shape[0],
+            int(self.data.shape[1]),
+            int(self.n_cells.shape[0]),
+            bool(0 if self.data.flags.c_contiguous else 1),
+            int(self.data.dtype.itemsize),
         )
         sums, counts, sq_sums = out[0], out[1], out[2]
         sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])

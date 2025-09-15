@@ -24,10 +24,10 @@ def _sparse_to_dense(X: spmatrix, order: Literal["C", "F"] | None = None) -> cp.
 
     if isspmatrix_csr(X):
         major, minor = X.shape[0], X.shape[1]
-        switcher = 1 if order == "C" else 0
+        switcher = True if order == "C" else False
     elif isspmatrix_csc(X):
         major, minor = X.shape[1], X.shape[0]
-        switcher = 0 if order == "C" else 1
+        switcher = False if order == "C" else True
     else:
         raise ValueError("Input matrix must be a sparse `csc` or `csr` matrix")
 
@@ -40,7 +40,7 @@ def _sparse_to_dense(X: spmatrix, order: Literal["C", "F"] | None = None) -> cp.
         dense.data.ptr,
         int(major),
         int(minor),
-        int(switcher),
+        switcher,
         int(max_nnz),
         int(cp.dtype(X.dtype).itemsize),
     )

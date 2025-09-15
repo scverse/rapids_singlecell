@@ -2,7 +2,7 @@
 #include <nanobind/nanobind.h>
 #include <cstdint>
 
-#include "kernels.cuh"
+#include "kernels_qc.cuh"
 
 namespace nb = nanobind;
 
