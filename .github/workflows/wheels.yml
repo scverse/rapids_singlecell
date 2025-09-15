@@ -8,7 +8,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm]
+        include:
+          - os: ubuntu-latest
+            cibw_build: "cp3{11,12,13}-manylinux_x86_64"
+            cibw_image: "ghcr.io/OWNER/REPO:manylinux_2_28_x86_64_cuda12.9"
+            dockerfile: "docker/manylinux_2_28_x86_64_cuda12.9.Dockerfile"
+          - os: ubuntu-24.04-arm
+            cibw_build: "cp3{11,12,13}-manylinux_aarch64"
+            cibw_image: "ghcr.io/OWNER/REPO:manylinux_2_28_aarch64_cuda12.9"
+            dockerfile: "docker/manylinux_2_28_aarch64_cuda12.9.Dockerfile"
 
     steps:
       - uses: actions/checkout@v5
@@ -17,43 +25,47 @@ jobs:
         with:
           python-version: "3.12"
 
+      # OPTIONAL: build the CUDA-enabled manylinux image in CI
+      - name: Build CUDA manylinux image for this arch
+        run: |
+          docker build -t "${{ matrix.cibw_image }}" -f "${{ matrix.dockerfile }}" docker
+        # If you've pushed images to GHCR/Docker Hub, remove this step.
+
       - name: Install cibuildwheel
         run: python -m pip install cibuildwheel==3.1.4
 
       - name: Build wheels (compile-only, CUDA 12.9)
         env:
-          # Which Python/ABI wheels to build
-          CIBW_BUILD: "cp3{9,10,11,12}-manylinux_{x86_64,aarch64}"
-          CIBW_SKIP: "pp* *-musllinux* *-win* *-macosx*"
+          # Hard-force cibuildwheel to Linux only
+          CIBW_PLATFORM: linux
 
-          # Point cibuildwheel to custom manylinux images with CUDA 12.9
-          CIBW_MANYLINUX_X86_64_IMAGE: "ghcr.io/OWNER/REPO:manylinux_2_28_x86_64_cuda12.9"
-          CIBW_MANYLINUX_AARCH64_IMAGE: "ghcr.io/OWNER/REPO:manylinux_2_28_aarch64_cuda12.9"
+          # Build only the ABIs for THIS runner/arch
+          CIBW_BUILD: ${{ matrix.cibw_build }}
 
-          # Make CUDA visible in the container
+          # Extra safety: do not attempt musllinux
+          CIBW_SKIP: "pp* *-musllinux*"
+
+          # Select the matching manylinux image per-arch
+          CIBW_MANYLINUX_X86_64_IMAGE: ${{ (matrix.os == 'ubuntu-latest') && matrix.cibw_image || '' }}
+          CIBW_MANYLINUX_AARCH64_IMAGE: ${{ (matrix.os == 'ubuntu-24.04-arm') && matrix.cibw_image || '' }}
+
+          # CUDA in build env
           CIBW_ENVIRONMENT: >
             CUDA_HOME=/usr/local/cuda
             LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
             PATH=/usr/local/cuda/bin:$PATH
 
-          # Ensure build tooling for nanobind extension is present
+          # Tooling for nanobind build
           CIBW_BEFORE_BUILD: >
             python -m pip install -U pip
             scikit-build-core cmake ninja nanobind
 
-          # Compile-only: don’t run runtime tests (needs GPU)
+          # Compile-only: no runtime tests (no GPU on CI)
           CIBW_TEST_SKIP: "*"
           CIBW_TEST_COMMAND: ""
 
-          # Let auditwheel check manylinux tags and bundle CUDA libs
-          # (set to "" to go faster if you only want compile proof)
+          # Keep repair for manylinux; set "" to speed up if you only need compile-proof
           CIBW_REPAIR_WHEEL_COMMAND: "auditwheel repair -w {dest_dir} {wheel}"
 
-          # Show compiler/linker commands
           CIBW_BUILD_VERBOSITY: "1"
-        run: python -m cibuildwheel --output-dir wheelhouse
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
-          path: ./wheelhouse/*.whl
+        run: python -m cibuildwheel --output-dir w
