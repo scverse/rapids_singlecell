@@ -162,10 +162,9 @@ def _cuda_kernel_diffusion_gpu(
     results_all = cp.full(n_genes, -999999.0, dtype=cp.float64)  # Results for ALL genes
     
     # Calculate shared memory (fixed size per block, independent of n_cells)
-    tile_size = 1024  # Fixed tile size for scalability
     min_blocks = 256  # Hardware-specific minimum
     blocks_per_grid = max(n_genes, min_blocks)
-    shared_mem_size = tile_size * 2 * 8  # 2 double arrays per tile
+    shared_mem_size = threads_per_block * 2 * 8  # 2 double arrays per thread
     
     
     # **SINGLE KERNEL LAUNCH FOR ALL GENES**
