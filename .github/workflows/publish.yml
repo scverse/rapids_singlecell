@@ -26,12 +26,6 @@ jobs:
             runs-on: windows-latest
           - os: windows-arm
             runs-on: windows-11-arm
-          - os: macos-intel
-            # macos-13 was the last x86_64 runner
-            runs-on: macos-13
-          - os: macos-arm
-            # macos-14+ (including latest) are ARM64 runners
-            runs-on: macos-latest
 
     steps:
       - uses: actions/checkout@v5
