@@ -2,7 +2,7 @@
 requires = [
     "scikit-build-core>=0.10",
     "nanobind>=2.0.0",
-    "pybind11-stubgen; python_version>='3.11'",
+    "pybind11-stubgen",
     "setuptools-scm>=8",
 ]
 build-backend = "scikit_build_core.build"
@@ -10,7 +10,7 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "rapids_singlecell"
 description = "running single cell analysis on Nvidia GPUs"
-requires-python = ">=3.11, <3.14"
+requires-python = ">=3.12, <3.14"
 license = { file = "LICENSE" }
 authors = [ { name = "Severin Dicks" } ]
 readme = { file = "README.md", content-type = "text/markdown" }
@@ -120,7 +120,7 @@ local_scheme = "node-and-date"
 
 [tool.scikit-build]
 # Use limited ABI wheels (one wheel for all Python minor versions on one platform)
-wheel.py-api = "cp311"
+wheel.py-api = "cp312"
 wheel.packages = [ "src/rapids_singlecell", "src/testing" ]
 cmake.version = ">=3.24"
 cmake.build-type = "Release"
