@@ -145,7 +145,7 @@ def _cuda_kernel_diffusion_gpu(
     # Reorder: [sat_nodes, unsat_nodes] for coalesced access
     reorder_indices = cp.concatenate([sat, unsat])
     vals_reordered = vals[reorder_indices, :]  # (n_cells, n_genes) reordered
-    
+    # TODO: explain whats going on here better
     # Create a flat mapping for unsat nodes to their nearest saturated
     unsat_to_nearest_sat_remapped = cp.searchsorted(sat, unsat_to_nearest_sat[unsat])
     
