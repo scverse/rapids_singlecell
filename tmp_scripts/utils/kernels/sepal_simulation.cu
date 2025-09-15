@@ -1,38 +1,37 @@
 extern "C" {
-
+    // Computes entropy using cooperative thread reduction
+    // Shared memory per block: 4096 bytes (2 arrays of 256 doubles)
     __device__ double compute_entropy_cooperative(
-        const double* __restrict__ conc,
-        int n_sat,
-        int tid,
-        int blockSize
+        const double* __restrict__ conc,     // Input concentration values
+        int n_sat,                          // Number of saturated nodes
+        int tid,                            // Thread ID within block
+        int blockSize                       // Block size (256 threads)
     ) {
-        __shared__ double total_sum_shared[256];
-        __shared__ double entropy_shared[256];
+        __shared__ double total_sum_shared[256];   // 2048 bytes
+        __shared__ double entropy_shared[256];     // 2048 bytes
         
-        // **ALL THREADS PARTICIPATE - Phase 1: Compute total sum**
+        // Each thread accumulates its portion of nodes
         double local_sum = 0.0;
         for (int i = tid; i < n_sat; i += blockSize) {
             double val = conc[i];
-            if (val > 0.0) {
-                local_sum += val;
-            }
+            if (val > 0.0) local_sum += val;
         }
         
         total_sum_shared[tid] = local_sum;
-        __syncthreads();  // SAFE: All threads participate
+        __syncthreads();
         
-        // **WARP-OPTIMIZED REDUCTION**
+        // Parallel reduction to sum all values
         for (int s = blockSize / 2; s > 0; s >>= 1) {
             if (tid < s) {
                 total_sum_shared[tid] += total_sum_shared[tid + s];
             }
-            __syncthreads();  // SAFE: All threads participate
+            __syncthreads();
         }
         
         double total_sum = total_sum_shared[0];
         if (total_sum <= 0.0) return 0.0;
         
-        // **ALL THREADS PARTICIPATE - Phase 2: Compute entropy**
+        // Each thread computes entropy for its portion
         double local_entropy = 0.0;
         for (int i = tid; i < n_sat; i += blockSize) {
             double val = conc[i];
@@ -43,27 +42,29 @@ extern "C" {
         }
         
         entropy_shared[tid] = local_entropy;
-        __syncthreads();  // SAFE: All threads participate
+        __syncthreads();
         
-        // **WARP-OPTIMIZED REDUCTION**
+        // Parallel reduction for entropy
         for (int s = blockSize / 2; s > 0; s >>= 1) {
             if (tid < s) {
                 entropy_shared[tid] += entropy_shared[tid + s];
             }
-            __syncthreads();  // SAFE: All threads participate
+            __syncthreads();
         }
         
-        return entropy_shared[0] / (double)(n_sat);  // Normalize like CPU
+        return entropy_shared[0] / (double)(n_sat);
     }
 
+    // Main simulation kernel - one block processes one gene
+    // Shared memory per block: 16 bytes (convergence tracking)
     __global__ void sepal_simulation(
-        double* __restrict__ concentration_all,  // [n_genes * n_cells] - all genes
-        double* __restrict__ derivatives_all,          // [n_genes * n_cells] - all derivatives  
-        const int* __restrict__ sat_idx,               // [n_sat * max_neighs] - flattened
-        const int* __restrict__ unsat_idx,             // [n_unsat] - unsat mappings
-        double* __restrict__ results,                   // [n_genes] - output for all genes
-        int n_cells,                                   // Total cells
-        int n_genes,                                   // Total genes 
+        double* __restrict__ concentration_all,  // [n_genes, n_cells]
+        double* __restrict__ derivatives_all,    // [n_genes, n_cells]
+        const int* __restrict__ sat_idx,         // [n_sat, max_neighs]
+        const int* __restrict__ unsat_idx,       // [n_unsat]
+        double* __restrict__ results,            // [n_genes]
+        int n_cells,
+        int n_genes,
         int n_sat,
         int n_unsat,
         int max_neighs,
@@ -72,125 +73,89 @@ extern "C" {
         double thresh,
         bool debug
     ) {
-        // **EACH BLOCK PROCESSES ONE GENE**
-        int gene_idx = blockIdx.x;  // Gene index (0 to n_genes-1)
-        int tid = threadIdx.x;      // Thread within block (0 to 255)
-        int blockSize = blockDim.x; // 256
+        int gene_idx = blockIdx.x;              // Each block handles one gene
+        int tid = threadIdx.x;                  // Thread ID (0-255)
+        int blockSize = blockDim.x;             // 256 threads per block
         
         if (gene_idx >= n_genes) return;
         
-        // **GLOBAL MEMORY POINTERS FOR THIS GENE**
+        // Per-gene pointers into global arrays
         double* concentration = &concentration_all[gene_idx * n_cells];
         double* derivatives = &derivatives_all[gene_idx * n_cells];
         
-        // **CONVERGENCE TRACKING - SHARED BY ALL THREADS**
-        __shared__ double prev_entropy;
-        __shared__ int convergence_iter;
-        __shared__ bool converged_flag;  // **FIX: Shared convergence flag**
+        // Convergence tracking (16 bytes shared per block)
+        __shared__ double prev_entropy;         // 8 bytes
+        __shared__ int convergence_iter;        // 4 bytes
+        __shared__ bool converged_flag;         // 4 bytes (padded)
         
         if (tid == 0) {
             prev_entropy = 1.0;
             convergence_iter = -1;
             converged_flag = false;
         }
-        __syncthreads();  // **ALL THREADS WAIT**
+        __syncthreads();
         
-        // **ITERATION LOOP**
+        // Main iteration loop - all threads process their portion of nodes
         for (int iter = 0; iter < n_iter; iter++) {
-            
-            // **PHASE 1: Compute derivatives for saturated nodes**
+            // Phase 1: Update derivatives for saturated nodes
             for (int i = tid; i < n_sat; i += blockSize) {
                 double neighbor_sum = 0.0;
-                
-                // **DEBUG: Print details for first few iterations of first genes**
-                bool should_debug = debug && gene_idx < 2 && iter < 3 && i < 3;
-                
-                // Sum neighbors for this saturated node
                 for (int j = 0; j < max_neighs; j++) {
-                    int neighbor_idx = sat_idx[i * max_neighs + j];
-                    double neighbor_val = concentration[neighbor_idx];
-                    neighbor_sum += neighbor_val;
-                    
-                    if (should_debug) {
-                        printf("Gene %d, iter %d, sat_node %d, neighbor %d: idx=%d, val=%e\n", 
-                               gene_idx, iter, i, j, neighbor_idx, neighbor_val);
-                    }
-                }
-                
-                if (should_debug) {
-                    printf("Gene %d, iter %d, sat_node %d: center=%e, neighbor_sum=%e\n", 
-                           gene_idx, iter, i, concentration[i], neighbor_sum);
+                    neighbor_sum += concentration[sat_idx[i * max_neighs + j]];
                 }
                 
                 double center = concentration[i];
-                double d2;
-                double h = 1.0;  // **SPATIAL STEP SIZE**
+                double h = 1.0;
+                double d2 = 0.0;
+                
                 if (max_neighs == 4) {
-                    d2 = (neighbor_sum - 4.0 * center) / (h * h);  // **FIX: Use h, not dt**
+                    d2 = (neighbor_sum - 4.0 * center) / (h * h);
                 } else if (max_neighs == 6) {
-                    d2 = (neighbor_sum - 6.0 * center) / (h * h);  // **FIX: Use h, not dt**
-                    d2 = (d2 * 2.0) / 3.0;  // **MATCH CPU EXACTLY**
-                } else {
-                    d2 = 0.0;
+                    d2 = (neighbor_sum - 6.0 * center) / (h * h) * (2.0 / 3.0);
                 }
-                derivatives[i] = 1.0 * d2;  // D = 1.0
+                derivatives[i] = d2;
             }
-            __syncthreads();  // **FIX: Ensure derivatives are ready for Phase 3**
+            __syncthreads();
             
-            // **PHASE 2: Update saturated nodes**
+            // Phase 2: Update saturated node concentrations
             for (int i = tid; i < n_sat; i += blockSize) {
                 concentration[i] += derivatives[i] * dt;
                 concentration[i] = fmax(0.0, concentration[i]);
             }
-            __syncthreads();  // **REQUIRED: Ensure sat updates complete**
+            __syncthreads();
             
-            // **PHASE 3: Update unsaturated nodes**
+            // Phase 3: Update unsaturated nodes based on nearest saturated
             for (int i = tid; i < n_unsat; i += blockSize) {
-                int mapped_sat_idx = unsat_idx[i];
                 int unsat_global_idx = n_sat + i;
-                concentration[unsat_global_idx] += derivatives[mapped_sat_idx] * dt;
+                concentration[unsat_global_idx] += derivatives[unsat_idx[i]] * dt;
                 concentration[unsat_global_idx] = fmax(0.0, concentration[unsat_global_idx]);
             }
-            __syncthreads();  // **REQUIRED: Ensure all updates complete**
+            __syncthreads();
             
-            // **CONVERGENCE CHECK - ALL THREADS PARTICIPATE**
-            if (!converged_flag) {  // Check every 10 iterations for efficiency
-                // **ALL THREADS CALL ENTROPY FUNCTION**
-                double current_entropy = compute_entropy_cooperative(concentration, n_sat, tid, blockSize);
+            // Check convergence using entropy
+            if (!converged_flag) {
+                double current_entropy = compute_entropy_cooperative(
+                    concentration, n_sat, tid, blockSize
+                );
                 
-                // **ONLY THREAD 0 UPDATES CONVERGENCE STATE**
                 if (tid == 0) {
                     double entropy_diff = fabs(current_entropy - prev_entropy);
-                    
                     if (entropy_diff <= thresh && convergence_iter == -1) {
                         convergence_iter = iter;
-                        converged_flag = true;  // **SET SHARED FLAG**
+                        converged_flag = true;
                     }
                     prev_entropy = current_entropy;
-                    
-                    // if (debug && gene_idx < 3) {
-                    //     printf("Gene %d, iter %d: entropy_diff = %e, thresh = %e\n", 
-                    //            gene_idx, iter, entropy_diff, thresh);
-                    // }
                 }
-                __syncthreads();  // **ALL THREADS SEE CONVERGENCE UPDATE**
+                __syncthreads();
             }
             
-            // **COORDINATED EARLY EXIT - ALL THREADS DECIDE TOGETHER**
-            if (converged_flag) {
-                break;  // **ALL THREADS EXIT TOGETHER**
-            }
+            if (converged_flag) break;
         }
         
-        // **FINAL RESULT - ONLY THREAD 0 WRITES**
+        // Store result for this gene
         if (tid == 0) {
-            if (convergence_iter >= 0) {
-                results[gene_idx] = (double)convergence_iter;
-            } else {
-                results[gene_idx] = -1.0;  // No convergence
-            }
-            
+            results[gene_idx] = convergence_iter >= 0 ? 
+                (double)convergence_iter : -1.0;
         }
     }
-
-}  // extern "C"
+}
