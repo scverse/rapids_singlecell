@@ -11,7 +11,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if (RSC_BUILD_EXTENSIONS)
   enable_language(CUDA)
-  find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
+  find_package(Python REQUIRED COMPONENTS Interpreter Development.Module ${SKBUILD_SABI_COMPONENT})
   find_package(nanobind CONFIG REQUIRED)
   find_package(CUDAToolkit REQUIRED)
 else()
