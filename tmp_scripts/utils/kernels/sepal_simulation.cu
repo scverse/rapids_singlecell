@@ -1,7 +1,5 @@
 extern "C" {
 
-    // **DEADLOCK-FREE ENTROPY COMPUTATION**
-    // All threads participate to avoid deadlocks
     __device__ double compute_entropy_cooperative(
         const double* __restrict__ conc,
         int n_sat,
@@ -58,22 +56,20 @@ extern "C" {
         return entropy_shared[0] / (double)(n_sat);  // Normalize like CPU
     }
 
-    // **DEADLOCK-FREE MULTI-GENE KERNEL**
     __global__ void sepal_simulation(
         double* __restrict__ concentration_all,  // [n_genes * n_cells] - all genes
         double* __restrict__ derivatives_all,          // [n_genes * n_cells] - all derivatives  
-        const int* __restrict__ sat_idx,               // [n_sat * sat_thresh] - flattened
+        const int* __restrict__ sat_idx,               // [n_sat * max_neighs] - flattened
         const int* __restrict__ unsat_idx,             // [n_unsat] - unsat mappings
-        float* __restrict__ results,                   // [n_genes] - output for all genes
-        int n_cells,                                   // Total cells (can be 1M+)
+        double* __restrict__ results,                   // [n_genes] - output for all genes
+        int n_cells,                                   // Total cells
         int n_genes,                                   // Total genes 
         int n_sat,
         int n_unsat,
         int max_neighs,
-        int sat_thresh,
         int n_iter,
-        float dt,
-        float thresh,
+        double dt,
+        double thresh,
         bool debug
     ) {
         // **EACH BLOCK PROCESSES ONE GENE**
@@ -110,8 +106,8 @@ extern "C" {
                 bool should_debug = debug && gene_idx < 2 && iter < 3 && i < 3;
                 
                 // Sum neighbors for this saturated node
-                for (int j = 0; j < sat_thresh; j++) {
-                    int neighbor_idx = sat_idx[i * sat_thresh + j];
+                for (int j = 0; j < max_neighs; j++) {
+                    int neighbor_idx = sat_idx[i * max_neighs + j];
                     double neighbor_val = concentration[neighbor_idx];
                     neighbor_sum += neighbor_val;
                     
@@ -189,14 +185,11 @@ extern "C" {
         // **FINAL RESULT - ONLY THREAD 0 WRITES**
         if (tid == 0) {
             if (convergence_iter >= 0) {
-                results[gene_idx] = (float)convergence_iter;
+                results[gene_idx] = (double)convergence_iter;
             } else {
-                results[gene_idx] = -999999.0;  // No convergence
+                results[gene_idx] = -1.0;  // No convergence
             }
             
-            // if (debug && gene_idx < 3) {
-            //     printf("Gene %d: final convergence_iter = %d\n", gene_idx, convergence_iter);
-            // }
         }
     }
 

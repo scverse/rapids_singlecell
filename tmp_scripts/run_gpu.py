@@ -23,7 +23,7 @@ if __name__ == "__main__":
     adata.obsp['spatial_connectivities'] = rsc.get.X_to_GPU(adata.obsp['spatial_connectivities'])
     adata.obsm['spatial'] = rsc.get.X_to_GPU(adata.obsm['spatial'])
     start_time = time.time()
-    genes = adata.var_names.values[:10]
+    genes = adata.var_names.values[:1000]
     # genes = ["Gm29570"]
     result = sepal_gpu(adata, max_neighs=6, genes=genes, n_iter=30000, copy=True, debug=args.debug)
     end_time = time.time()

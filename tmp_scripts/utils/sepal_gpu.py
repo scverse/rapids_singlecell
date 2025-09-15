@@ -54,7 +54,7 @@ def sepal_gpu(
         raise ValueError(f"Expected `max_neighs` to be either `4` or `6`, found `{max_neighs}`.")
 
     # Setup (unchanged)
-    spatial = cp.asarray(adata.obsm[spatial_key], dtype=cp.float64)
+    spatial = cp.asarray(adata.obsm[spatial_key], dtype=cp.float32)
     
     if genes is None:
         genes = adata.var_names.values
@@ -87,7 +87,6 @@ def sepal_gpu(
     if debug:
         print(f"Dataset: {len(genes)} genes, {len(sat)} saturated, {len(unsat)} unsaturated cells")
     
-    # Convert to optimal format
     if cp_isspmatrix_csr(vals) or cp_isspmatrix_csc(vals):
         vals = vals.toarray()
     
@@ -141,6 +140,7 @@ def _cuda_kernel_diffusion_gpu(
     n_cells, n_genes = vals.shape
     n_sat = len(sat)
     n_unsat = len(unsat)
+
     
     # Reorder: [sat_nodes, unsat_nodes] for coalesced access
     reorder_indices = cp.concatenate([sat, unsat])
@@ -150,19 +150,16 @@ def _cuda_kernel_diffusion_gpu(
     unsat_to_nearest_sat_remapped = cp.searchsorted(sat, unsat_to_nearest_sat[unsat])
     
     
-    reordered_size = n_cells  # Total cells after reordering
     
-    # **MULTI-GENE PARALLEL PROCESSING**
     # Grid size = n_genes (one block per gene)
     threads_per_block = 256
     blocks_per_grid = n_genes  # Process ALL genes in parallel!
     
-    print(f"🚀 LAUNCHING LARGE GRID: {blocks_per_grid} blocks × {threads_per_block} threads = {blocks_per_grid * threads_per_block} total threads")
     
     # Allocate arrays for ALL genes at once
     concentration_all = cp.ascontiguousarray(vals_reordered.T, dtype=cp.float64)  # (n_genes, n_cells)
-    derivatives_all = cp.zeros((n_genes, reordered_size), dtype=cp.float64)
-    results_all = cp.full(n_genes, -999999.0, dtype=cp.float32)  # Results for ALL genes
+    derivatives_all = cp.zeros((n_genes, n_cells), dtype=cp.float64)
+    results_all = cp.full(n_genes, -999999.0, dtype=cp.float64)  # Results for ALL genes
     
     # Calculate shared memory (fixed size per block, independent of n_cells)
     tile_size = 1024  # Fixed tile size for scalability
@@ -170,8 +167,6 @@ def _cuda_kernel_diffusion_gpu(
     blocks_per_grid = max(n_genes, min_blocks)
     shared_mem_size = tile_size * 2 * 8  # 2 double arrays per tile
     
-    print(f"💾 Memory layout: {n_genes} genes × {reordered_size} cells = {concentration_all.nbytes / 1e6:.1f} MB")
-    print(f"🔧 Shared memory per block: {shared_mem_size / 1024:.1f} KB (independent of dataset size)")
     
     # **SINGLE KERNEL LAUNCH FOR ALL GENES**
     sepal_simulation(
@@ -183,22 +178,21 @@ def _cuda_kernel_diffusion_gpu(
             sat_idx,                     
             unsat_to_nearest_sat_remapped,    
             results_all,                       # (n_genes,) - results for all genes
-            reordered_size,                    # n_cells (can be 1M+)
+            n_cells,                    # n_cells (can be 1M+)
             n_genes,                          # Number of genes to process
             n_sat,
             n_unsat, 
             max_neighs,
-            max_neighs,  # sat_thresh
             n_iter,
-            cp.float32(dt),                    # **FIX: Convert to float32**
-            cp.float32(thresh),                # **FIX: Convert to float32**
+            cp.float64(dt),                    
+            cp.float64(thresh),                 
             debug
         ),
         shared_mem=shared_mem_size
     )
     
     # Convert results
-    final_scores = cp.where(results_all == -999999.0, cp.nan, dt * results_all)
+    final_scores = cp.where(results_all < 0.0, cp.nan, dt * results_all)
     
     return final_scores  # Shape: (n_genes,)
 
@@ -230,15 +224,15 @@ def _compute_idxs_gpu(
         get_nhood_idx_with_distance(
             (blocks,), (threads_per_block,),
             (
-                unsat,                              # unsaturated nodes (read only assumed to be int32)
-                spatial,                             # spatial coordinates [n_nodes, 2] (read only assumed to be float64)
-                sat,                                # saturated node list (read only assumed to be int32)
-                g.indptr,                           # CSR indptr (read only assumed to be float32)
-                g.indices,                          # CSR indices (read only assumed to be float32)
-                sat_mask,                           # boolean mask for saturated nodes (read only assumed to be bool)
-                nearest_sat,                        # output
-                len(unsat),                         # number of unsaturated nodes
-                len(sat)                            # number of saturated nodes
+                unsat,                              # unsaturated nodes (read only int32)
+                spatial,                            # spatial coordinates [n_nodes, 2] (read only float32)
+                sat,                                # saturated node list (read only int32)
+                g.indptr,                           # CSR indptr (read only int32)
+                g.indices,                          # CSR indices (read only int32)
+                sat_mask,                           # boolean mask for saturated nodes (read only bool)
+                nearest_sat,                        # output int32
+                len(unsat),                         # number of unsaturated nodes read only int32
+                len(sat)                            # number of saturated nodes read only int32
             )
         )
     

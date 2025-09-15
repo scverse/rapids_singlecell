@@ -19,7 +19,7 @@ extern "C" {
         float node_x = spatial[node * 2];
         float node_y = spatial[node * 2 + 1];
         
-        float min_dist = 3.402823466e+38f;  // FLT_MAX
+        float min_dist = -1.0f;  // -1.0f means no closest sat found yet
         int closest = -1;
         
         // Phase 1: Check graph neighbors for saturated nodes
@@ -29,8 +29,8 @@ extern "C" {
         for (int i = start; i < end; i++) {
             int neighbor = g_indices[i];
             if (sat_mask[neighbor]) {
-                closest = neighbor;  // Take first, don't compute distance
-                break;               // Stop immediately like original
+                closest = neighbor;  // Take first
+                break;               // Stop immediately
             }
         }
         
@@ -42,7 +42,7 @@ extern "C" {
                 float sat_y = spatial[sat_node * 2 + 1];
                 float dist = fabsf(node_x - sat_x) + fabsf(node_y - sat_y);
                 
-                if (dist < min_dist) {
+                if (min_dist < 0.0f || dist < min_dist) {
                     min_dist = dist;
                     closest = sat_node;
                 }
