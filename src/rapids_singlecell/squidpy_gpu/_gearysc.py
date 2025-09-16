@@ -3,7 +3,10 @@ from __future__ import annotations
 import cupy as cp
 from cupyx.scipy import sparse
 
-from rapids_singlecell._cuda import _autocorr_cuda as _ac
+try:
+    from rapids_singlecell._cuda import _autocorr_cuda as _ac
+except ImportError:
+    _ac = None
 
 
 def _gearys_C_cupy_dense(data, adj_matrix_cupy, n_permutations=100):

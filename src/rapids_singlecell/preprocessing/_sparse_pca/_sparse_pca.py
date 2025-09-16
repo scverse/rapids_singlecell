@@ -16,6 +16,11 @@ from rapids_singlecell.preprocessing._utils import _get_mean_var
 
 from ._helper import _check_matrix_for_zero_genes, _compute_cov, _copy_gram
 
+try:
+    from rapids_singlecell._cuda import _spca_cuda as _spca
+except ImportError:
+    _spca = None
+
 
 class PCA_sparse:
     def __init__(self, n_components: int | None, *, zero_center: bool = True) -> None:
@@ -199,50 +204,32 @@ def _cov_sparse(
 
 
 def _create_gram_matrix(x):
-    from ._kernels._pca_sparse_kernel import (
-        _gramm_kernel_csr,
-    )
-
     if isinstance(x, csr_matrix):
         gram_matrix = cp.zeros((x.shape[1], x.shape[1]), dtype=x.data.dtype)
-
-        block = (128,)
-        grid = (x.shape[0],)
-        compute_mean_cov = _gramm_kernel_csr(x.dtype)
-        compute_mean_cov(
-            grid,
-            block,
-            (
-                x.indptr,
-                x.indices,
-                x.data,
-                x.shape[0],
-                x.shape[1],
-                gram_matrix,
-            ),
+        _spca.gram_csr_upper(
+            x.indptr.data.ptr,
+            x.indices.data.ptr,
+            x.data.data.ptr,
+            int(x.shape[0]),
+            int(x.shape[1]),
+            gram_matrix.data.ptr,
+            int(cp.dtype(x.dtype).itemsize),
         )
     elif isinstance(x, DaskArray):
-        compute_mean_cov = _gramm_kernel_csr(x.dtype)
-        compute_mean_cov.compile()
         n_cols = x.shape[1]
         if isinstance(x._meta, csr_matrix):
             # Gram matrix for CSR matrix
             def __gram_block(x_part):
                 gram_matrix = cp.zeros((n_cols, n_cols), dtype=x.dtype)
 
-                block = (128,)
-                grid = (x_part.shape[0],)
-                compute_mean_cov(
-                    grid,
-                    block,
-                    (
-                        x_part.indptr,
-                        x_part.indices,
-                        x_part.data,
-                        x_part.shape[0],
-                        n_cols,
-                        gram_matrix,
-                    ),
+                _spca.gram_csr_upper(
+                    x_part.indptr.data.ptr,
+                    x_part.indices.data.ptr,
+                    x_part.data.data.ptr,
+                    int(x_part.shape[0]),
+                    int(n_cols),
+                    gram_matrix.data.ptr,
+                    int(cp.dtype(x_part.dtype).itemsize),
                 )
                 return gram_matrix[None, ...]  # need new axis for summing
         else:

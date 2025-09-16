@@ -6,7 +6,11 @@ import cupy as cp
 import numpy as np
 from cuml.metrics import pairwise_distances
 
-from rapids_singlecell._cuda import _cooc_cuda as _co
+try:
+    from rapids_singlecell._cuda import _cooc_cuda as _co
+except ImportError:
+    _co = None
+
 from rapids_singlecell.preprocessing._harmony._helper import (
     _create_category_index_mapping,
 )

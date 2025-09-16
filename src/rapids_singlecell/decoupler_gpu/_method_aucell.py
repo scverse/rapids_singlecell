@@ -3,7 +3,11 @@ from __future__ import annotations
 import cupy as cp
 import numpy as np
 
-from rapids_singlecell._cuda import _aucell_cuda as _au
+try:
+    from rapids_singlecell._cuda import _aucell_cuda as _au
+except ImportError:
+    _au = None
+
 from rapids_singlecell.decoupler_gpu._helper._docs import docs
 from rapids_singlecell.decoupler_gpu._helper._log import _log
 from rapids_singlecell.decoupler_gpu._helper._Method import Method, MethodMeta
