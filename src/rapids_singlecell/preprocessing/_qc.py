@@ -128,10 +128,13 @@ def _basic_qc(
 
         if sparse.isspmatrix_csr(X):
             sparse_qc = _qc.sparse_qc_csr
+            shape = X.shape[0]
         elif sparse.isspmatrix_csc(X):
             sparse_qc = _qc.sparse_qc_csc
+            shape = X.shape[1]
         else:
             raise ValueError("Please use a csr or csc matrix")
+
         sparse_qc(
             X.indptr.data.ptr,
             X.indices.data.ptr,
@@ -140,7 +143,7 @@ def _basic_qc(
             sums_genes.data.ptr,
             genes_per_cell.data.ptr,
             cells_per_gene.data.ptr,
-            int(X.shape[1]),
+            int(shape),
             int(cp.dtype(X.data.dtype).itemsize),
         )
     else:
