@@ -185,8 +185,8 @@ def _mean_var_dense_dask(X, axis):
     from ._kernels._mean_var_kernel import mean_sum, sq_sum
 
     def __mean_var(X_part):
-        var = sq_sum(X_part, axis=axis)
-        mean = mean_sum(X_part, axis=axis)
+        var = sq_sum(X=X_part, axis=axis)
+        mean = mean_sum(X=X_part, axis=axis)
         if axis == 0:
             return cp.vstack([mean, var])[None, ...]
         else:
@@ -217,8 +217,8 @@ def _mean_var_dense_dask(X, axis):
 def _mean_var_dense(X, axis):
     from ._kernels._mean_var_kernel import mean_sum, sq_sum
 
-    var = sq_sum(X, axis=axis)
-    mean = mean_sum(X, axis=axis)
+    var = sq_sum(X=X, axis=axis)
+    mean = mean_sum(X=X, axis=axis)
     mean = mean / X.shape[axis]
     var = var / X.shape[axis]
     var -= cp.power(mean, 2)

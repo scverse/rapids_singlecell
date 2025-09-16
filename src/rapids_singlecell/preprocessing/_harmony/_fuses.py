@@ -24,11 +24,11 @@ def _log_div_OE(o: cp.ndarray, e: cp.ndarray) -> cp.ndarray:
 
 
 _entropy_kernel = cp.ReductionKernel(
-    "T x",
-    "T y",
-    "x * logf(x + 1e-12)",
-    "a + b",
-    "y = a",
-    "0",
-    "entropy_reduce",
+    "T x",  # in_params
+    "T y",  # out_params
+    "x * logf(x + 1e-12)",  # map_expr
+    "a + b",  # reduce_expr
+    "y = a",  # post_map_expr
+    "0",  # identity
+    "entropy_reduce",  # name
 )

@@ -605,7 +605,7 @@ def _compute_objective(
     """
     kmeans_error = _kmeans_error(R, cp.dot(Z_norm, Y_norm.T))
     R_normalized = R / R.sum(axis=1, keepdims=True)
-    entropy = _entropy_kernel(R_normalized)
+    entropy = _entropy_kernel(X=R_normalized)
     entropy_term = sigma * entropy
     diversity_penalty = sigma * cp.sum(cp.dot(theta, _log_div_OE(O, E)))
     objective = kmeans_error + entropy_term + diversity_penalty
