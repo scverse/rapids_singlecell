@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import cupy as cp
-from cuml.internals.memory_utils import with_cupy_rmm
 from cupyx.scipy import sparse
 from scanpy.get import _get_obs_rep
 
@@ -313,7 +312,6 @@ def _geneset_qc(X: ArrayTypesDask, mask: cp.ndarray) -> cp.ndarray:
     return sums_cells_sub
 
 
-@with_cupy_rmm
 def _geneset_qc_dask(X: DaskArray, mask: cp.ndarray) -> cp.ndarray:
     if isinstance(X._meta, sparse.csr_matrix):
         from rapids_singlecell._cuda import _qc_cuda as _qc
