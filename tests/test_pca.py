@@ -258,7 +258,7 @@ def test_pca_layer():
 
 
 def test_pca_layer_mask():
-    adata = sc.datasets.pbmc3k()[:, 1000].copy()
+    adata = sc.datasets.pbmc3k()[:, 997:1000].copy()
     sc.pp.normalize_total(adata)
     sc.pp.log1p(adata)
     with pytest.raises(
