@@ -39,13 +39,14 @@ def _compute_cov(
 
 def _check_matrix_for_zero_genes(X: spmatrix) -> None:
     gene_ex = cp.zeros(X.shape[1], dtype=cp.int32)
-    _spca.check_zero_genes(
-        X.indices.data.ptr,
-        gene_ex.data.ptr,
-        int(X.nnz),
-        int(X.shape[1]),
-        int(cp.cuda.get_current_stream().ptr),
-    )
+    if X.nnz > 0:
+        _spca.check_zero_genes(
+            int(X.indices.data.ptr),
+            int(gene_ex.data.ptr),
+            int(X.nnz),
+            int(X.shape[1]),
+            int(cp.cuda.get_current_stream().ptr),
+        )
     if cp.any(gene_ex == 0):
         raise ValueError(
             "There are genes with zero expression. Please remove them before running PCA."
