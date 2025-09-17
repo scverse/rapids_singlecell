@@ -42,8 +42,11 @@ __global__ void cov_from_gram_kernel(T* cov_values, const T* gram_matrix, const 
   cov_values[rid * ncols + cid] = gram_matrix[rid * ncols + cid] - mean_x[rid] * mean_y[cid];
 }
 
-__global__ void check_zero_genes_kernel(const int* indices, int* genes, int nnz) {
+__global__ void check_zero_genes_kernel(const int* indices, int* genes, int nnz, int num_genes) {
   int value = blockIdx.x * blockDim.x + threadIdx.x;
   if (value >= nnz) return;
-  atomicAdd(&genes[indices[value]], 1);
+  int gene_index = indices[value];
+  if (gene_index >= 0 && gene_index < num_genes) {
+    atomicAdd(&genes[gene_index], 1);
+  }
 }

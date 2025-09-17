@@ -21,6 +21,7 @@ def _gearys_C_cupy_dense(data, adj_matrix_cupy, n_permutations=100):
         num.data.ptr,
         int(n_samples),
         int(n_features),
+        int(cp.cuda.get_current_stream().ptr),
     )
     # Calculate the denominator for Geary's C
     gene_mean = data.mean(axis=0).ravel()
@@ -46,6 +47,7 @@ def _gearys_C_cupy_dense(data, adj_matrix_cupy, n_permutations=100):
                 num_permuted.data.ptr,
                 int(n_samples),
                 int(n_features),
+                int(cp.cuda.get_current_stream().ptr),
             )
             gearys_C_permutations[p, :] = (n_samples - 1) * num_permuted / den
             num_permuted[:] = 0
@@ -71,6 +73,7 @@ def _gearys_C_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
         int(n_samples),
         int(n_features),
         num.data.ptr,
+        int(cp.cuda.get_current_stream().ptr),
     )
     # Calculate the denominator for Geary's C
     means = data.mean(axis=0).ravel()
@@ -83,6 +86,7 @@ def _gearys_C_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
         means.data.ptr,
         den.data.ptr,
         counter.data.ptr,
+        int(cp.cuda.get_current_stream().ptr),
     )
     counter = n_samples - counter
     den += counter * means**2
@@ -108,6 +112,7 @@ def _gearys_C_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
                 int(n_samples),
                 int(n_features),
                 num_permuted.data.ptr,
+                int(cp.cuda.get_current_stream().ptr),
             )
             gearys_C_permutations[p, :] = (n_samples - 1) * num_permuted / den
             num_permuted[:] = 0

@@ -156,7 +156,7 @@ def test_pca_sparse(zero_center, rtol, atol):
 
 
 def test_mask_length_error():
-    """Check error for n_obs / mask length mismatch."""
+    # Check error for n_obs / mask length mismatch.
     adata = AnnData(np.array(A_list).astype("float32"))
     mask_var = np.random.choice([True, False], adata.shape[1] + 1)
     with pytest.raises(
@@ -170,7 +170,7 @@ def test_mask_length_error():
     "array_type", ["array", cusparse.csr_matrix, cusparse.csc_matrix]
 )
 def test_mask_var_argument_equivalence(float_dtype, array_type):
-    """Test if pca result is equal when given mask as boolarray vs string"""
+    # Test if pca result is equal when given mask as boolarray vs string
     X = cp.random.random((100, 10), dtype=float_dtype)
     if array_type != "array":
         X = array_type(X)
@@ -212,10 +212,9 @@ def test_mask():
 
 @pytest.mark.parametrize("float_dtype", ["float32", "float64"])
 def test_mask_defaults(float_dtype):
-    """
-    Test if pca result is equal without highly variable and with-but mask is None
-    and if pca takes highly variable as mask as default
-    """
+    # Test if pca result is equal without highly variable and with-but mask is None
+    # and if pca takes highly variable as mask as default
+
     A = cp.array(A_list).astype("float32")
     adata = AnnData(A)
 
@@ -233,9 +232,8 @@ def test_mask_defaults(float_dtype):
 
 
 def test_pca_layer():
-    """
-    Tests that layers works the same way as .X
-    """
+    # Tests that layers works the same way as .X
+
     X_adata = _pbmc3k_normalized()
     X_adata.X = X_adata.X.astype(np.float64)
 
@@ -267,4 +265,4 @@ def test_pca_layer_mask():
         ValueError,
         match="There are genes with zero expression. Please remove them before running PCA.",
     ):
-        rsc.pp.pca(adata)
+        rsc.pp.pca(adata, mask_var=None)

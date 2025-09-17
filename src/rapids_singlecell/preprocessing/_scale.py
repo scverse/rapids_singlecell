@@ -167,6 +167,7 @@ def _scale_array(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=
             np.int64(X.shape[0]),
             np.int64(X.shape[1]),
             np.int32(cp.dtype(X.dtype).itemsize),
+            int(cp.cuda.get_current_stream().ptr),
         )
     else:
         from rapids_singlecell._cuda import _scale_cuda as _sc
@@ -179,6 +180,7 @@ def _scale_array(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=
             np.int64(X.shape[0]),
             np.int64(X.shape[1]),
             np.int32(cp.dtype(X.dtype).itemsize),
+            int(cp.cuda.get_current_stream().ptr),
         )
 
     return X, mean, std
@@ -222,6 +224,7 @@ def _scale_sparse_csc(
             std.data.ptr,
             int(X.shape[1]),
             int(cp.dtype(X.dtype).itemsize),
+            int(cp.cuda.get_current_stream().ptr),
         )
         if max_value:
             X.data = cp.clip(X.data, a_min=None, a_max=max_value)
@@ -268,6 +271,7 @@ def _scale_sparse_csr(
             float(max_value),
             int(X.shape[0]),
             int(cp.dtype(X.dtype).itemsize),
+            int(cp.cuda.get_current_stream().ptr),
         )
 
         return X, mean, std
@@ -332,6 +336,7 @@ def _scale_dask_array_zc(X, *, mask_array, mean, std, max_value):
             int(X_part.shape[0]),
             int(X_part.shape[1]),
             int(cp.dtype(X_part.dtype).itemsize),
+            int(cp.cuda.get_current_stream().ptr),
         )
         return X_part
 
@@ -362,6 +367,7 @@ def _scale_dask_array_nzc(X, *, mask_array, mean, std, max_value):
             X_part.shape[0],
             X_part.shape[1],
             int(cp.dtype(X_part.dtype).itemsize),
+            int(cp.cuda.get_current_stream().ptr),
         )
 
         return X_part
@@ -394,6 +400,7 @@ def _scale_sparse_csr_dask(X, *, mask_array, mean, std, max_value):
             float(max_value),
             int(X_part.shape[0]),
             int(cp.dtype(X_part.data.dtype).itemsize),
+            int(cp.cuda.get_current_stream().ptr),
         )
         return X_part
 

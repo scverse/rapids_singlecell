@@ -9,8 +9,9 @@ namespace nb = nanobind;
 template <typename T, bool C_ORDER>
 static inline void launch_typed(const int* indptr, const int* index, const T* data, T* out,
                                 long long major, long long minor, int max_nnz, dim3 grid,
-                                dim3 block) {
-  sparse2dense_kernel<T, C_ORDER><<<grid, block>>>(indptr, index, data, out, major, minor);
+                                dim3 block, cudaStream_t stream) {
+  sparse2dense_kernel<T, C_ORDER>
+      <<<grid, block, 0, stream>>>(indptr, index, data, out, major, minor);
 }
 
 template <typename T>
@@ -18,7 +19,7 @@ static inline void launch_sparse2dense(std::uintptr_t indptr_ptr, std::uintptr_t
                                        std::uintptr_t data_ptr, std::uintptr_t out_ptr,
                                        long long major, long long minor,
                                        bool c_switch,  // 1 = C (row-major), 0 = F (col-major)
-                                       int max_nnz) {
+                                       int max_nnz, cudaStream_t stream) {
   // Threads: 32x32 (1024) as you had; adjust if register pressure is high.
   dim3 block(32, 32);
   dim3 grid((unsigned)((major + block.x - 1) / block.x),
@@ -30,23 +31,31 @@ static inline void launch_sparse2dense(std::uintptr_t indptr_ptr, std::uintptr_t
   T* out = reinterpret_cast<T*>(out_ptr);
 
   if (c_switch == true) {
-    launch_typed<T, /*C_ORDER=*/true>(indptr, index, data, out, major, minor, max_nnz, grid, block);
+    launch_typed<T, /*C_ORDER=*/true>(indptr, index, data, out, major, minor, max_nnz, grid, block,
+                                      stream);
   } else {
-    launch_typed<T, /*C_ORDER=*/false>(indptr, index, data, out, major, minor, max_nnz, grid,
-                                       block);
+    launch_typed<T, /*C_ORDER=*/false>(indptr, index, data, out, major, minor, max_nnz, grid, block,
+                                       stream);
   }
 }
 
 NB_MODULE(_sparse2dense_cuda, m) {
-  m.def("sparse2dense",
-        [](std::uintptr_t indptr, std::uintptr_t index, std::uintptr_t data, std::uintptr_t out,
-           long long major, long long minor, bool c_switch, int max_nnz, int itemsize) {
-          if (itemsize == 4) {
-            launch_sparse2dense<float>(indptr, index, data, out, major, minor, c_switch, max_nnz);
-          } else if (itemsize == 8) {
-            launch_sparse2dense<double>(indptr, index, data, out, major, minor, c_switch, max_nnz);
-          } else {
-            throw nb::value_error("Unsupported itemsize for sparse2dense (expected 4 or 8)");
-          }
-        });
+  m.def(
+      "sparse2dense",
+      [](std::uintptr_t indptr, std::uintptr_t index, std::uintptr_t data, std::uintptr_t out,
+         long long major, long long minor, bool c_switch, int max_nnz, int itemsize,
+         std::uintptr_t stream) {
+        if (itemsize == 4) {
+          launch_sparse2dense<float>(indptr, index, data, out, major, minor, c_switch, max_nnz,
+                                     (cudaStream_t)stream);
+        } else if (itemsize == 8) {
+          launch_sparse2dense<double>(indptr, index, data, out, major, minor, c_switch, max_nnz,
+                                      (cudaStream_t)stream);
+        } else {
+          throw nb::value_error("Unsupported itemsize for sparse2dense (expected 4 or 8)");
+        }
+      },
+      nb::arg("indptr"), nb::arg("index"), nb::arg("data"), nb::arg("out"), nb::arg("major"),
+      nb::arg("minor"), nb::arg("c_switch"), nb::arg("max_nnz"), nb::arg("itemsize"),
+      nb::arg("stream") = 0);
 }

@@ -78,6 +78,7 @@ def _mean_var_major(X, major, minor):
         int(major),
         int(minor),
         int(cp.dtype(X.data.dtype).itemsize),
+        int(cp.cuda.get_current_stream().ptr),
     )
     mean = mean / minor
     var = var / minor
@@ -98,6 +99,7 @@ def _mean_var_minor(X, major, minor):
         var.data.ptr,
         int(X.nnz),
         int(cp.dtype(X.data.dtype).itemsize),
+        int(cp.cuda.get_current_stream().ptr),
     )
     mean /= major
     var /= major
@@ -123,6 +125,7 @@ def _mean_var_minor_dask(X, major, minor):
             var.data.ptr,
             int(X_part.nnz),
             int(cp.dtype(X_part.data.dtype).itemsize),
+            int(cp.cuda.get_current_stream().ptr),
         )
         return cp.vstack([mean, var])[None, ...]  # new axis for summing
 
@@ -160,6 +163,7 @@ def _mean_var_major_dask(X, major, minor):
             int(X_part.shape[0]),
             int(minor),
             int(cp.dtype(X_part.data.dtype).itemsize),
+            int(cp.cuda.get_current_stream().ptr),
         )
         return cp.stack([mean, var], axis=1)
 

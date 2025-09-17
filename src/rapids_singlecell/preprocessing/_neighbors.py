@@ -272,6 +272,7 @@ def _nn_descent_knn(
             int(X.shape[0]),
             int(X.shape[1]),
             int(neighbors.shape[1]),
+            int(cp.cuda.get_current_stream().ptr),
         )
     elif metric == "cosine":
         _nd.cosine(
@@ -281,6 +282,7 @@ def _nn_descent_knn(
             int(X.shape[0]),
             int(X.shape[1]),
             int(neighbors.shape[1]),
+            int(cp.cuda.get_current_stream().ptr),
         )
     elif metric == "inner_product":
         _nd.inner(
@@ -290,6 +292,7 @@ def _nn_descent_knn(
             int(X.shape[0]),
             int(X.shape[1]),
             int(neighbors.shape[1]),
+            int(cp.cuda.get_current_stream().ptr),
         )
     if metric == "euclidean":
         distances = cp.sqrt(distances)
@@ -426,6 +429,7 @@ def _trimming(cnts: cp_sparse.csr_matrix, trim: int) -> cp_sparse.csr_matrix:
         int(cnts.shape[0]),
         int(trim),
         vals_gpu.data.ptr,
+        int(cp.cuda.get_current_stream().ptr),
     )
 
     _bb.cut_smaller(
@@ -434,6 +438,7 @@ def _trimming(cnts: cp_sparse.csr_matrix, trim: int) -> cp_sparse.csr_matrix:
         cnts.data.data.ptr,
         vals_gpu.data.ptr,
         int(cnts.shape[0]),
+        int(cp.cuda.get_current_stream().ptr),
     )
 
     cnts.eliminate_zeros()

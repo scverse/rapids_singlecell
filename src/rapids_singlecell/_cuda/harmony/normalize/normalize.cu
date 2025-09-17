@@ -7,20 +7,24 @@
 namespace nb = nanobind;
 
 template <typename T>
-static inline void launch_normalize(std::uintptr_t X, long long rows, long long cols) {
+static inline void launch_normalize(std::uintptr_t X, long long rows, long long cols,
+                                    cudaStream_t stream) {
   dim3 block(32);
   dim3 grid(rows);
-  normalize_kernel_optimized<T><<<grid, block>>>(reinterpret_cast<T*>(X), rows, cols);
+  normalize_kernel_optimized<T><<<grid, block, 0, stream>>>(reinterpret_cast<T*>(X), rows, cols);
 }
 
 NB_MODULE(_harmony_normalize_cuda, m) {
-  m.def("normalize", [](std::uintptr_t X, long long rows, long long cols, int itemsize) {
-    if (itemsize == 4) {
-      launch_normalize<float>(X, rows, cols);
-    } else if (itemsize == 8) {
-      launch_normalize<double>(X, rows, cols);
-    } else {
-      throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
-    }
-  });
+  m.def(
+      "normalize",
+      [](std::uintptr_t X, long long rows, long long cols, int itemsize, std::uintptr_t stream) {
+        if (itemsize == 4) {
+          launch_normalize<float>(X, rows, cols, (cudaStream_t)stream);
+        } else if (itemsize == 8) {
+          launch_normalize<double>(X, rows, cols, (cudaStream_t)stream);
+        } else {
+          throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
+        }
+      },
+      nb::arg("X"), nb::arg("rows"), nb::arg("cols"), nb::arg("itemsize"), nb::arg("stream") = 0);
 }

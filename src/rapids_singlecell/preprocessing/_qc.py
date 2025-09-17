@@ -145,6 +145,7 @@ def _basic_qc(
             cells_per_gene.data.ptr,
             int(shape),
             int(cp.dtype(X.data.dtype).itemsize),
+            int(cp.cuda.get_current_stream().ptr),
         )
     else:
         from rapids_singlecell._cuda import _qc_cuda as _qc
@@ -160,6 +161,7 @@ def _basic_qc(
             int(X.shape[0]),
             int(X.shape[1]),
             int(cp.dtype(X.dtype).itemsize),
+            int(cp.cuda.get_current_stream().ptr),
         )
     return sums_cells, sums_genes, genes_per_cell, cells_per_gene
 
@@ -183,6 +185,7 @@ def _basic_qc_dask(
                 genes_per_cell.data.ptr,
                 int(X_part.shape[0]),
                 int(cp.dtype(X_part.data.dtype).itemsize),
+                int(cp.cuda.get_current_stream().ptr),
             )
             return cp.stack([sums_cells, genes_per_cell.astype(X_part.dtype)], axis=1)
 
@@ -196,6 +199,7 @@ def _basic_qc_dask(
                 cells_per_gene.data.ptr,
                 int(X_part.nnz),
                 int(cp.dtype(X_part.data.dtype).itemsize),
+                int(cp.cuda.get_current_stream().ptr),
             )
             return cp.vstack([sums_genes, cells_per_gene.astype(X_part.dtype)])[
                 None, ...
@@ -216,6 +220,7 @@ def _basic_qc_dask(
                 int(X_part.shape[0]),
                 int(X_part.shape[1]),
                 int(cp.dtype(X_part.dtype).itemsize),
+                int(cp.cuda.get_current_stream().ptr),
             )
             return cp.stack([sums_cells, genes_per_cell.astype(X_part.dtype)], axis=1)
 
@@ -231,6 +236,7 @@ def _basic_qc_dask(
                 int(X_part.shape[0]),
                 int(X_part.shape[1]),
                 int(cp.dtype(X_part.dtype).itemsize),
+                int(cp.cuda.get_current_stream().ptr),
             )
             return cp.vstack([sums_genes, cells_per_gene.astype(X_part.dtype)])[
                 None, ...
@@ -286,6 +292,7 @@ def _geneset_qc(X: ArrayTypesDask, mask: cp.ndarray) -> cp.ndarray:
                 mask.data.ptr,
                 int(X.shape[0]),
                 int(cp.dtype(X.data.dtype).itemsize),
+                int(cp.cuda.get_current_stream().ptr),
             )
         elif sparse.isspmatrix_csc(X):
             _qc.sparse_qc_csc_sub(
@@ -296,6 +303,7 @@ def _geneset_qc(X: ArrayTypesDask, mask: cp.ndarray) -> cp.ndarray:
                 mask.data.ptr,
                 int(X.shape[1]),
                 int(cp.dtype(X.data.dtype).itemsize),
+                int(cp.cuda.get_current_stream().ptr),
             )
         else:
             raise ValueError("Please use a csr or csc matrix")
@@ -309,6 +317,7 @@ def _geneset_qc(X: ArrayTypesDask, mask: cp.ndarray) -> cp.ndarray:
             int(X.shape[0]),
             int(X.shape[1]),
             int(cp.dtype(X.dtype).itemsize),
+            int(cp.cuda.get_current_stream().ptr),
         )
     return sums_cells_sub
 
@@ -328,6 +337,7 @@ def _geneset_qc_dask(X: DaskArray, mask: cp.ndarray) -> cp.ndarray:
                 mask.data.ptr,
                 int(X_part.shape[0]),
                 int(cp.dtype(X_part.data.dtype).itemsize),
+                int(cp.cuda.get_current_stream().ptr),
             )
             return sums_cells_sub
 
@@ -345,6 +355,7 @@ def _geneset_qc_dask(X: DaskArray, mask: cp.ndarray) -> cp.ndarray:
                 int(X_part.shape[0]),
                 int(X_part.shape[1]),
                 int(cp.dtype(X_part.dtype).itemsize),
+                int(cp.cuda.get_current_stream().ptr),
             )
             return sums_cells_sub
 

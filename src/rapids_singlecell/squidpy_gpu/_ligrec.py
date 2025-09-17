@@ -473,6 +473,7 @@ def ligrec(
             int(data_cp.shape[1]),
             int(n_clusters),
             int(cp.dtype(data_cp.dtype).itemsize),
+            int(cp.cuda.get_current_stream().ptr),
         )
 
         mean_cp = sum_gt0 / total_counts
@@ -491,6 +492,7 @@ def ligrec(
             int(data_cp.shape[0]),
             int(n_clusters),
             int(cp.dtype(data_cp.dtype).itemsize),
+            int(cp.cuda.get_current_stream().ptr),
         )
         mean_cp = sum_gt0 / total_counts
         mask_cp = count_gt0 / total_counts >= threshold
@@ -521,6 +523,7 @@ def ligrec(
                 int(data_cp.shape[0]),
                 int(n_clusters),
                 int(cp.dtype(data_cp.dtype).itemsize),
+                int(cp.cuda.get_current_stream().ptr),
             )
 
             _lc.elementwise_diff(
@@ -529,6 +532,7 @@ def ligrec(
                 int(data_cp.shape[1]),
                 int(n_cls),
                 int(cp.dtype(g.dtype).itemsize),
+                int(cp.cuda.get_current_stream().ptr),
             )
             _lc.interaction(
                 interactions_.data.ptr,
@@ -541,6 +545,7 @@ def ligrec(
                 int(len(interaction_clusters)),
                 int(n_cls),
                 int(cp.dtype(mean_cp.dtype).itemsize),
+                int(cp.cuda.get_current_stream().ptr),
             )
     else:
         for _i in range(n_perms):
@@ -554,6 +559,7 @@ def ligrec(
                 int(data_cp.shape[1]),
                 int(n_cls),
                 int(cp.dtype(data_cp.dtype).itemsize),
+                int(cp.cuda.get_current_stream().ptr),
             )
             _lc.elementwise_diff(
                 g.data.ptr,
@@ -561,6 +567,7 @@ def ligrec(
                 int(data_cp.shape[1]),
                 int(n_cls),
                 int(cp.dtype(g.dtype).itemsize),
+                int(cp.cuda.get_current_stream().ptr),
             )
             _lc.interaction(
                 interactions_.data.ptr,
@@ -573,6 +580,7 @@ def ligrec(
                 int(len(interaction_clusters)),
                 int(n_cls),
                 int(cp.dtype(mean_cp.dtype).itemsize),
+                int(cp.cuda.get_current_stream().ptr),
             )
 
     res_mean = cp.zeros(
@@ -588,6 +596,7 @@ def ligrec(
         int(len(interaction_clusters)),
         int(n_cls),
         int(cp.dtype(mean_cp.dtype).itemsize),
+        int(cp.cuda.get_current_stream().ptr),
     )
 
     res_mean = res_mean.get()

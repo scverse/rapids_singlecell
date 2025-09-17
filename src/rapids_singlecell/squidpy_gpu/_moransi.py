@@ -24,6 +24,7 @@ def _morans_I_cupy_dense(data, adj_matrix_cupy, n_permutations=100):
         num.data.ptr,
         int(n_samples),
         int(n_features),
+        int(cp.cuda.get_current_stream().ptr),
     )
 
     # Calculate the denominator for Moarn's I
@@ -46,6 +47,7 @@ def _morans_I_cupy_dense(data, adj_matrix_cupy, n_permutations=100):
                 num_permuted.data.ptr,
                 int(n_samples),
                 int(n_features),
+                int(cp.cuda.get_current_stream().ptr),
             )
             morans_I_permutations[p, :] = num_permuted / den
             num_permuted[:] = 0
@@ -74,6 +76,7 @@ def _morans_I_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
         int(n_features),
         means.data.ptr,
         num.data.ptr,
+        int(cp.cuda.get_current_stream().ptr),
     )
 
     # Calculate the denominator for Moarn's I
@@ -86,6 +89,7 @@ def _morans_I_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
         means.data.ptr,
         den.data.ptr,
         counter.data.ptr,
+        int(cp.cuda.get_current_stream().ptr),
     )
     counter = n_samples - counter
     den += counter * means**2
@@ -112,6 +116,7 @@ def _morans_I_cupy_sparse(data, adj_matrix_cupy, n_permutations=100):
                 int(n_features),
                 means.data.ptr,
                 num_permuted.data.ptr,
+                int(cp.cuda.get_current_stream().ptr),
             )
 
             morans_I_permutations[p, :] = num_permuted / den

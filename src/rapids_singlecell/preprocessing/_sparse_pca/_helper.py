@@ -14,7 +14,10 @@ except ImportError:
 
 def _copy_gram(gram_matrix: cp.ndarray, n_cols: int) -> cp.ndarray:
     _spca.copy_upper_to_lower(
-        gram_matrix.data.ptr, int(n_cols), int(cp.dtype(gram_matrix.dtype).itemsize)
+        gram_matrix.data.ptr,
+        int(n_cols),
+        int(cp.dtype(gram_matrix.dtype).itemsize),
+        int(cp.cuda.get_current_stream().ptr),
     )
     return gram_matrix
 
@@ -29,6 +32,7 @@ def _compute_cov(
         mean_x.data.ptr,
         int(gram_matrix.shape[0]),
         int(cp.dtype(gram_matrix.dtype).itemsize),
+        int(cp.cuda.get_current_stream().ptr),
     )
     return cov_result
 
@@ -39,6 +43,8 @@ def _check_matrix_for_zero_genes(X: spmatrix) -> None:
         X.indices.data.ptr,
         gene_ex.data.ptr,
         int(X.nnz),
+        int(X.shape[1]),
+        int(cp.cuda.get_current_stream().ptr),
     )
     if cp.any(gene_ex == 0):
         raise ValueError(

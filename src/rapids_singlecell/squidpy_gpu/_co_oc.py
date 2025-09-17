@@ -152,6 +152,7 @@ def _co_occurrence_helper(
             int(pair_left.size),
             int(k),
             int(l_val),
+            int(cp.cuda.get_current_stream().ptr),
         )
 
     # Fallback to the standard kernel if fast=False or shared memory was insufficient
@@ -165,6 +166,7 @@ def _co_occurrence_helper(
             int(spatial.shape[0]),
             int(k),
             int(l_val),
+            int(cp.cuda.get_current_stream().ptr),
         )
         reader = 0
 
@@ -177,6 +179,7 @@ def _co_occurrence_helper(
             int(k),
             int(l_val),
             int(reader),
+            int(cp.cuda.get_current_stream().ptr),
         )
     if not ok:
         inter_out = cp.zeros((l_val, k, k), dtype=np.float32)
@@ -187,6 +190,7 @@ def _co_occurrence_helper(
             int(k),
             int(l_val),
             int(reader),
+            int(cp.cuda.get_current_stream().ptr),
         )
 
     return occ_prob

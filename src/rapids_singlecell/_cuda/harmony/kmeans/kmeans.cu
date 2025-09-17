@@ -8,22 +8,26 @@ namespace nb = nanobind;
 
 template <typename T>
 static inline void launch_kmeans_err(std::uintptr_t r, std::uintptr_t dot, std::size_t n,
-                                     std::uintptr_t out) {
+                                     std::uintptr_t out, cudaStream_t stream) {
   int threads = 256;
   int blocks = min((int)((n + threads - 1) / threads), (int)(8 * 128));
-  kmeans_err_kernel<T><<<blocks, threads>>>(
+  kmeans_err_kernel<T><<<blocks, threads, 0, stream>>>(
       reinterpret_cast<const T*>(r), reinterpret_cast<const T*>(dot), n, reinterpret_cast<T*>(out));
 }
 
 NB_MODULE(_harmony_kmeans_cuda, m) {
-  m.def("kmeans_err",
-        [](std::uintptr_t r, std::uintptr_t dot, std::size_t n, std::uintptr_t out, int itemsize) {
-          if (itemsize == 4) {
-            launch_kmeans_err<float>(r, dot, n, out);
-          } else if (itemsize == 8) {
-            launch_kmeans_err<double>(r, dot, n, out);
-          } else {
-            throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
-          }
-        });
+  m.def(
+      "kmeans_err",
+      [](std::uintptr_t r, std::uintptr_t dot, std::size_t n, std::uintptr_t out, int itemsize,
+         std::uintptr_t stream) {
+        if (itemsize == 4) {
+          launch_kmeans_err<float>(r, dot, n, out, (cudaStream_t)stream);
+        } else if (itemsize == 8) {
+          launch_kmeans_err<double>(r, dot, n, out, (cudaStream_t)stream);
+        } else {
+          throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
+        }
+      },
+      nb::arg("r"), nb::arg("dot"), nb::arg("n"), nb::arg("out"), nb::arg("itemsize"),
+      nb::arg("stream") = 0);
 }

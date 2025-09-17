@@ -7,7 +7,8 @@
 namespace nb = nanobind;
 
 static inline void launch_find_top_k_per_row(std::uintptr_t data_ptr, std::uintptr_t indptr_ptr,
-                                             int n_rows, int trim, std::uintptr_t vals_ptr) {
+                                             int n_rows, int trim, std::uintptr_t vals_ptr,
+                                             cudaStream_t stream) {
   dim3 block(64);
   dim3 grid((n_rows + 64 - 1) / 64);
   std::size_t shared_mem_size =
@@ -15,28 +16,38 @@ static inline void launch_find_top_k_per_row(std::uintptr_t data_ptr, std::uintp
   const float* data = reinterpret_cast<const float*>(data_ptr);
   const int* indptr = reinterpret_cast<const int*>(indptr_ptr);
   float* vals = reinterpret_cast<float*>(vals_ptr);
-  find_top_k_per_row_kernel<<<grid, block, shared_mem_size>>>(data, indptr, n_rows, trim, vals);
+  find_top_k_per_row_kernel<<<grid, block, shared_mem_size, stream>>>(data, indptr, n_rows, trim,
+                                                                      vals);
 }
 
 static inline void launch_cut_smaller(std::uintptr_t indptr_ptr, std::uintptr_t index_ptr,
-                                      std::uintptr_t data_ptr, std::uintptr_t vals_ptr,
-                                      int n_rows) {
+                                      std::uintptr_t data_ptr, std::uintptr_t vals_ptr, int n_rows,
+                                      cudaStream_t stream) {
   dim3 grid(n_rows);
   dim3 block(64);
   int* indptr = reinterpret_cast<int*>(indptr_ptr);
   int* index = reinterpret_cast<int*>(index_ptr);
   float* data = reinterpret_cast<float*>(data_ptr);
   float* vals = reinterpret_cast<float*>(vals_ptr);
-  cut_smaller_kernel<<<grid, block>>>(indptr, index, data, vals, n_rows);
+  cut_smaller_kernel<<<grid, block, 0, stream>>>(indptr, index, data, vals, n_rows);
 }
 
 NB_MODULE(_bbknn_cuda, m) {
-  m.def("find_top_k_per_row",
-        [](std::uintptr_t data, std::uintptr_t indptr, int n_rows, int trim, std::uintptr_t vals) {
-          launch_find_top_k_per_row(data, indptr, n_rows, trim, vals);
-        });
+  m.def(
+      "find_top_k_per_row",
+      [](std::uintptr_t data, std::uintptr_t indptr, int n_rows, int trim, std::uintptr_t vals,
+         std::uintptr_t stream) {
+        launch_find_top_k_per_row(data, indptr, n_rows, trim, vals, (cudaStream_t)stream);
+      },
+      nb::arg("data"), nb::arg("indptr"), nb::arg("n_rows"), nb::arg("trim"), nb::arg("vals"),
+      nb::arg("stream") = 0);
 
-  m.def("cut_smaller",
-        [](std::uintptr_t indptr, std::uintptr_t index, std::uintptr_t data, std::uintptr_t vals,
-           int n_rows) { launch_cut_smaller(indptr, index, data, vals, n_rows); });
+  m.def(
+      "cut_smaller",
+      [](std::uintptr_t indptr, std::uintptr_t index, std::uintptr_t data, std::uintptr_t vals,
+         int n_rows, std::uintptr_t stream) {
+        launch_cut_smaller(indptr, index, data, vals, n_rows, (cudaStream_t)stream);
+      },
+      nb::arg("indptr"), nb::arg("index"), nb::arg("data"), nb::arg("vals"), nb::arg("n_rows"),
+      nb::arg("stream") = 0);
 }

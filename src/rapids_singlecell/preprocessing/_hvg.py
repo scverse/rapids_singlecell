@@ -743,6 +743,7 @@ def _highly_variable_pearson_residuals(
                 int(X_batch.shape[1]),
                 int(X_batch.shape[0]),
                 int(cp.dtype(X_batch.dtype).itemsize),
+                int(cp.cuda.get_current_stream().ptr),
             )
         else:
             X_batch = cp.asfortranarray(X_batch)
@@ -757,6 +758,7 @@ def _highly_variable_pearson_residuals(
                 int(X_batch.shape[1]),
                 int(X_batch.shape[0]),
                 int(cp.dtype(X.dtype).itemsize),
+                int(cp.cuda.get_current_stream().ptr),
             )
 
         unmasked_residual_gene_var = cp.zeros(len(nonzero_genes))

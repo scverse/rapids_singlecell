@@ -50,7 +50,11 @@ def _normalize_cp_p1(X: cp.ndarray) -> cp.ndarray:
     rows, cols = X.shape
 
     _hc_norm.normalize(
-        X.data.ptr, int(rows), int(cols), int(cp.dtype(X.dtype).itemsize)
+        X.data.ptr,
+        int(rows),
+        int(cols),
+        int(cp.dtype(X.dtype).itemsize),
+        int(cp.cuda.get_current_stream().ptr),
     )
     return X
 
@@ -75,6 +79,7 @@ def _scatter_add_cp(
         int(switcher),
         out.data.ptr,
         int(cp.dtype(X.dtype).itemsize),
+        int(cp.cuda.get_current_stream().ptr),
     )
 
 
@@ -98,6 +103,7 @@ def _Z_correction(
         int(n_cells),
         int(n_pcs),
         int(cp.dtype(Z.dtype).itemsize),
+        int(cp.cuda.get_current_stream().ptr),
     )
 
 
@@ -114,6 +120,7 @@ def _outer_cp(
         int(n_pcs),
         int(switcher),
         int(cp.dtype(E.dtype).itemsize),
+        int(cp.cuda.get_current_stream().ptr),
     )
 
 
@@ -141,6 +148,7 @@ def _get_aggregated_matrix(
         float(sum.sum()),
         int(n_batches),
         int(cp.dtype(aggregated_matrix.dtype).itemsize),
+        int(cp.cuda.get_current_stream().ptr),
     )
 
 
@@ -217,6 +225,7 @@ def _scatter_add_cp_bias_csr(
             out.data.ptr,
             bias.data.ptr,
             int(cp.dtype(X.dtype).itemsize),
+            int(cp.cuda.get_current_stream().ptr),
         )
 
     else:
@@ -232,6 +241,7 @@ def _scatter_add_cp_bias_csr(
         out.data.ptr,
         bias.data.ptr,
         int(cp.dtype(X.dtype).itemsize),
+        int(cp.cuda.get_current_stream().ptr),
     )
 
 
@@ -246,6 +256,7 @@ def _kmeans_error(R: cp.ndarray, dot: cp.ndarray) -> float:
         int(R.size),
         out.data.ptr,
         int(cp.dtype(R.dtype).itemsize),
+        int(cp.cuda.get_current_stream().ptr),
     )
     return out[0]
 
@@ -306,7 +317,12 @@ def _column_sum(X: cp.ndarray) -> cp.ndarray:
     out = cp.zeros(cols, dtype=X.dtype)
 
     _hc_cs.colsum(
-        X.data.ptr, out.data.ptr, int(rows), int(cols), int(_dtype_code(X.dtype))
+        X.data.ptr,
+        out.data.ptr,
+        int(rows),
+        int(cols),
+        int(_dtype_code(X.dtype)),
+        int(cp.cuda.get_current_stream().ptr),
     )
 
     return out
@@ -325,7 +341,12 @@ def _column_sum_atomic(X: cp.ndarray) -> cp.ndarray:
     out = cp.zeros(cols, dtype=X.dtype)
 
     _hc_cs.colsum_atomic(
-        X.data.ptr, out.data.ptr, int(rows), int(cols), int(_dtype_code(X.dtype))
+        X.data.ptr,
+        out.data.ptr,
+        int(rows),
+        int(cols),
+        int(_dtype_code(X.dtype)),
+        int(cp.cuda.get_current_stream().ptr),
     )
 
     return out
@@ -503,6 +524,7 @@ def _penalty_term(R: cp.ndarray, penalty: cp.ndarray, cats: cp.ndarray) -> cp.nd
         int(n_cats),
         int(n_pcs),
         int(cp.dtype(R.dtype).itemsize),
+        int(cp.cuda.get_current_stream().ptr),
     )
 
     return R

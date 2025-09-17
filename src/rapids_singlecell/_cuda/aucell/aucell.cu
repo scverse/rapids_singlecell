@@ -32,15 +32,25 @@ __global__ void auc_kernel(const int* __restrict__ ranks, int R, int C,
 
 static inline void launch_auc(std::uintptr_t ranks, int R, int C, std::uintptr_t cnct,
                               std::uintptr_t starts, std::uintptr_t lens, int n_sets, int n_up,
-                              std::uintptr_t max_aucs, std::uintptr_t es) {
+                              std::uintptr_t max_aucs, std::uintptr_t es, cudaStream_t stream) {
   dim3 block(32);
   dim3 grid((unsigned)n_sets, (unsigned)((R + block.x - 1) / block.x));
-  auc_kernel<<<grid, block>>>(
+  auc_kernel<<<grid, block, 0, stream>>>(
       reinterpret_cast<const int*>(ranks), R, C, reinterpret_cast<const int*>(cnct),
       reinterpret_cast<const int*>(starts), reinterpret_cast<const int*>(lens), n_sets, n_up,
       reinterpret_cast<const float*>(max_aucs), reinterpret_cast<float*>(es));
 }
 
 NB_MODULE(_aucell_cuda, m) {
-  m.def("auc", &launch_auc);
+  m.def(
+      "auc",
+      [](std::uintptr_t ranks, int R, int C, std::uintptr_t cnct, std::uintptr_t starts,
+         std::uintptr_t lens, int n_sets, int n_up, std::uintptr_t max_aucs, std::uintptr_t es,
+         std::uintptr_t stream) {
+        launch_auc(ranks, R, C, cnct, starts, lens, n_sets, n_up, max_aucs, es,
+                   (cudaStream_t)stream);
+      },
+      nb::arg("ranks"), nb::arg("R"), nb::arg("C"), nb::arg("cnct"), nb::arg("starts"),
+      nb::arg("lens"), nb::arg("n_sets"), nb::arg("n_up"), nb::arg("max_aucs"), nb::arg("es"),
+      nb::arg("stream") = 0);
 }

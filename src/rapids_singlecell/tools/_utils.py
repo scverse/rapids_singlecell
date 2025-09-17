@@ -63,6 +63,7 @@ def _nan_mean_minor_dask_sparse(X, major, minor, *, mask=None, n_features=None):
             mask.data.ptr,
             int(X_part.nnz),
             int(cp.dtype(X_part.dtype).itemsize),
+            int(cp.cuda.get_current_stream().ptr),
         )
         return cp.vstack([mean, nans.astype(cp.float64)])[None, ...]
 
@@ -95,6 +96,7 @@ def _nan_mean_major_dask_sparse(X, major, minor, *, mask=None, n_features=None):
             int(major_part),
             int(minor),
             int(cp.dtype(X_part.dtype).itemsize),
+            int(cp.cuda.get_current_stream().ptr),
         )
         return cp.stack([mean, nans.astype(cp.float64)], axis=1)
 
@@ -150,6 +152,7 @@ def _nan_mean_minor(X, major, minor, *, mask=None, n_features=None):
         mask.data.ptr,
         int(X.nnz),
         int(cp.dtype(X.data.dtype).itemsize),
+        int(cp.cuda.get_current_stream().ptr),
     )
     mean /= n_features - nans
     return mean
@@ -170,6 +173,7 @@ def _nan_mean_major(X, major, minor, *, mask=None, n_features=None):
         int(major),
         int(minor),
         int(cp.dtype(X.data.dtype).itemsize),
+        int(cp.cuda.get_current_stream().ptr),
     )
     mean /= n_features - nans
 

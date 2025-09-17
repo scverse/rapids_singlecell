@@ -43,6 +43,7 @@ def _auc(row, cnct, *, starts, offsets, n_up, n_fsets, max_aucs):
         int(n_up),
         max_aucs.data.ptr,
         es.data.ptr,
+        int(cp.cuda.get_current_stream().ptr),
     )
     return es
 
