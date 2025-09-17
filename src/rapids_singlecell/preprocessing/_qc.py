@@ -127,32 +127,25 @@ def _basic_qc(
         from rapids_singlecell._cuda import _qc_cuda as _qc
 
         if sparse.isspmatrix_csr(X):
-            _qc.sparse_qc_csr(
-                X.indptr.data.ptr,
-                X.indices.data.ptr,
-                X.data.data.ptr,
-                sums_cells.data.ptr,
-                sums_genes.data.ptr,
-                genes_per_cell.data.ptr,
-                cells_per_gene.data.ptr,
-                int(X.shape[0]),
-                int(cp.dtype(X.data.dtype).itemsize),
-            )
+            qc_sparse = _qc.sparse_qc_csr
+            major = X.shape[0]
         elif sparse.isspmatrix_csc(X):
-            _qc.sparse_qc_csc(
-                X.indptr.data.ptr,
-                X.indices.data.ptr,
-                X.data.data.ptr,
-                sums_cells.data.ptr,
-                sums_genes.data.ptr,
-                genes_per_cell.data.ptr,
-                cells_per_gene.data.ptr,
-                int(X.shape[1]),
-                int(cp.dtype(X.data.dtype).itemsize),
-            )
-
+            qc_sparse = _qc.sparse_qc_csc
+            major = X.shape[1]
         else:
             raise ValueError("Please use a csr or csc matrix")
+
+        qc_sparse(
+            X.indptr.data.ptr,
+            X.indices.data.ptr,
+            X.data.data.ptr,
+            sums_cells.data.ptr,
+            sums_genes.data.ptr,
+            genes_per_cell.data.ptr,
+            cells_per_gene.data.ptr,
+            int(major),
+            int(cp.dtype(X.data.dtype).itemsize),
+        )
     else:
         from rapids_singlecell._cuda import _qc_cuda as _qc
 
