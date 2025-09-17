@@ -47,6 +47,7 @@ test-minimal = [
     "scanpy>=1.10.0",
     "bbknn",
     "decoupler",
+    "pertpy",
     "fast-array-utils",
 ]
 test = [
