@@ -44,7 +44,8 @@ NB_MODULE(_nanmean_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      "index"_a, "data"_a, "means"_a, "nans"_a, "mask"_a, "nnz"_a, "itemsize"_a, "stream"_a = 0);
+      "index"_a, "data"_a, nb::kw_only(), "means"_a, "nans"_a, "mask"_a, "nnz"_a, "itemsize"_a,
+      "stream"_a = 0);
 
   m.def(
       "nan_mean_major",
@@ -60,6 +61,6 @@ NB_MODULE(_nanmean_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      "indptr"_a, "index"_a, "data"_a, "means"_a, "nans"_a, "mask"_a, "major"_a, "minor"_a,
-      "itemsize"_a, "stream"_a = 0);
+      "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "means"_a, "nans"_a, "mask"_a, "major"_a,
+      "minor"_a, "itemsize"_a, "stream"_a = 0);
 }

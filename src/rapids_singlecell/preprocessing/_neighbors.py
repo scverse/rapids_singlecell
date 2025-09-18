@@ -267,32 +267,32 @@ def _nn_descent_knn(
     if metric == "euclidean" or metric == "sqeuclidean":
         _nd.sqeuclidean(
             X.data.ptr,
-            distances.data.ptr,
-            neighbors.data.ptr,
-            int(X.shape[0]),
-            int(X.shape[1]),
-            int(neighbors.shape[1]),
-            int(cp.cuda.get_current_stream().ptr),
+            out=distances.data.ptr,
+            pairs=neighbors.data.ptr,
+            n_samples=X.shape[0],
+            n_features=X.shape[1],
+            n_neighbors=neighbors.shape[1],
+            stream=cp.cuda.get_current_stream().ptr,
         )
     elif metric == "cosine":
         _nd.cosine(
             X.data.ptr,
-            distances.data.ptr,
-            neighbors.data.ptr,
-            int(X.shape[0]),
-            int(X.shape[1]),
-            int(neighbors.shape[1]),
-            int(cp.cuda.get_current_stream().ptr),
+            out=distances.data.ptr,
+            pairs=neighbors.data.ptr,
+            n_samples=X.shape[0],
+            n_features=X.shape[1],
+            n_neighbors=neighbors.shape[1],
+            stream=cp.cuda.get_current_stream().ptr,
         )
     elif metric == "inner_product":
         _nd.inner(
             X.data.ptr,
-            distances.data.ptr,
-            neighbors.data.ptr,
-            int(X.shape[0]),
-            int(X.shape[1]),
-            int(neighbors.shape[1]),
-            int(cp.cuda.get_current_stream().ptr),
+            out=distances.data.ptr,
+            pairs=neighbors.data.ptr,
+            n_samples=X.shape[0],
+            n_features=X.shape[1],
+            n_neighbors=neighbors.shape[1],
+            stream=cp.cuda.get_current_stream().ptr,
         )
     if metric == "euclidean":
         distances = cp.sqrt(distances)
@@ -426,19 +426,19 @@ def _trimming(cnts: cp_sparse.csr_matrix, trim: int) -> cp_sparse.csr_matrix:
     _bb.find_top_k_per_row(
         cnts.data.data.ptr,
         cnts.indptr.data.ptr,
-        int(cnts.shape[0]),
-        int(trim),
-        vals_gpu.data.ptr,
-        int(cp.cuda.get_current_stream().ptr),
+        n_rows=cnts.shape[0],
+        trim=int(trim),
+        vals=vals_gpu.data.ptr,
+        stream=cp.cuda.get_current_stream().ptr,
     )
 
     _bb.cut_smaller(
         cnts.indptr.data.ptr,
         cnts.indices.data.ptr,
         cnts.data.data.ptr,
-        vals_gpu.data.ptr,
-        int(cnts.shape[0]),
-        int(cp.cuda.get_current_stream().ptr),
+        vals=vals_gpu.data.ptr,
+        n_rows=cnts.shape[0],
+        stream=cp.cuda.get_current_stream().ptr,
     )
 
     cnts.eliminate_zeros()

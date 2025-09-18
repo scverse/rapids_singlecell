@@ -104,8 +104,8 @@ NB_MODULE(_ligrec_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "data"_a, "clusters"_a, "sum"_a, "count"_a, "rows"_a, "cols"_a, "ncls"_a, "itemsize"_a,
-      "stream"_a = 0);
+      "data"_a, nb::kw_only(), "clusters"_a, "sum"_a, "count"_a, "rows"_a, "cols"_a, "ncls"_a,
+      "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "sum_count_sparse",
@@ -122,8 +122,8 @@ NB_MODULE(_ligrec_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "indptr"_a, "index"_a, "data"_a, "clusters"_a, "sum"_a, "count"_a, "rows"_a, "ncls"_a,
-      "itemsize"_a, "stream"_a = 0);
+      "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "clusters"_a, "sum"_a, "count"_a, "rows"_a,
+      "ncls"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "mean_dense",
@@ -137,7 +137,8 @@ NB_MODULE(_ligrec_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "data"_a, "clusters"_a, "g"_a, "rows"_a, "cols"_a, "ncls"_a, "itemsize"_a, "stream"_a = 0);
+      "data"_a, nb::kw_only(), "clusters"_a, "g"_a, "rows"_a, "cols"_a, "ncls"_a, "itemsize"_a,
+      "stream"_a = 0);
 
   m.def(
       "mean_sparse",
@@ -153,8 +154,8 @@ NB_MODULE(_ligrec_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "indptr"_a, "index"_a, "data"_a, "clusters"_a, "g"_a, "rows"_a, "ncls"_a, "itemsize"_a,
-      "stream"_a = 0);
+      "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "clusters"_a, "g"_a, "rows"_a, "ncls"_a,
+      "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "elementwise_diff",
@@ -170,7 +171,8 @@ NB_MODULE(_ligrec_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "g"_a, "total_counts"_a, "n_genes"_a, "n_clusters"_a, "itemsize"_a, "stream"_a = 0);
+      "g"_a, nb::kw_only(), "total_counts"_a, "n_genes"_a, "n_clusters"_a, "itemsize"_a,
+      "stream"_a = 0);
 
   m.def(
       "interaction",
@@ -187,8 +189,8 @@ NB_MODULE(_ligrec_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "interactions"_a, "interaction_clusters"_a, "mean"_a, "res"_a, "mask"_a, "g"_a, "n_iter"_a,
-      "n_inter_clust"_a, "ncls"_a, "itemsize"_a, "stream"_a = 0);
+      "interactions"_a, "interaction_clusters"_a, "mean"_a, nb::kw_only(), "res"_a, "mask"_a, "g"_a,
+      "n_iter"_a, "n_inter_clust"_a, "ncls"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "res_mean",
@@ -205,6 +207,6 @@ NB_MODULE(_ligrec_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "interactions"_a, "interaction_clusters"_a, "mean"_a, "res_mean"_a, "n_inter"_a,
-      "n_inter_clust"_a, "ncls"_a, "itemsize"_a, "stream"_a = 0);
+      "interactions"_a, "interaction_clusters"_a, "mean"_a, nb::kw_only(), "res_mean"_a,
+      "n_inter"_a, "n_inter_clust"_a, "ncls"_a, "itemsize"_a, "stream"_a = 0);
 }

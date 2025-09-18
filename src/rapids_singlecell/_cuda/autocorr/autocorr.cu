@@ -80,8 +80,8 @@ NB_MODULE(_autocorr_cuda, m) {
         launch_morans_dense(data_centered, adj_row_ptr, adj_col_ind, adj_data, num, n_samples,
                             n_features, (cudaStream_t)stream);
       },
-      "data_centered"_a, "adj_row_ptr"_a, "adj_col_ind"_a, "adj_data"_a, "num"_a, "n_samples"_a,
-      "n_features"_a, "stream"_a = 0);
+      "data_centered"_a, nb::kw_only(), "adj_row_ptr"_a, "adj_col_ind"_a, "adj_data"_a, "num"_a,
+      "n_samples"_a, "n_features"_a, "stream"_a = 0);
   m.def(
       "morans_sparse",
       [](std::uintptr_t adj_row_ptr, std::uintptr_t adj_col_ind, std::uintptr_t adj_data,
@@ -92,8 +92,9 @@ NB_MODULE(_autocorr_cuda, m) {
                              data_values, n_samples, n_features, mean_array, num,
                              (cudaStream_t)stream);
       },
-      "adj_row_ptr"_a, "adj_col_ind"_a, "adj_data"_a, "data_row_ptr"_a, "data_col_ind"_a,
-      "data_values"_a, "n_samples"_a, "n_features"_a, "mean_array"_a, "num"_a, "stream"_a = 0);
+      "adj_row_ptr"_a, "adj_col_ind"_a, "adj_data"_a, nb::kw_only(), "data_row_ptr"_a,
+      "data_col_ind"_a, "data_values"_a, "n_samples"_a, "n_features"_a, "mean_array"_a, "num"_a,
+      "stream"_a = 0);
   m.def(
       "gearys_dense",
       [](std::uintptr_t data, std::uintptr_t adj_row_ptr, std::uintptr_t adj_col_ind,
@@ -102,8 +103,8 @@ NB_MODULE(_autocorr_cuda, m) {
         launch_gearys_dense(data, adj_row_ptr, adj_col_ind, adj_data, num, n_samples, n_features,
                             (cudaStream_t)stream);
       },
-      "data"_a, "adj_row_ptr"_a, "adj_col_ind"_a, "adj_data"_a, "num"_a, "n_samples"_a,
-      "n_features"_a, "stream"_a = 0);
+      "data"_a, nb::kw_only(), "adj_row_ptr"_a, "adj_col_ind"_a, "adj_data"_a, "num"_a,
+      "n_samples"_a, "n_features"_a, "stream"_a = 0);
   m.def(
       "gearys_sparse",
       [](std::uintptr_t adj_row_ptr, std::uintptr_t adj_col_ind, std::uintptr_t adj_data,
@@ -112,8 +113,8 @@ NB_MODULE(_autocorr_cuda, m) {
         launch_gearys_sparse(adj_row_ptr, adj_col_ind, adj_data, data_row_ptr, data_col_ind,
                              data_values, n_samples, n_features, num, (cudaStream_t)stream);
       },
-      "adj_row_ptr"_a, "adj_col_ind"_a, "adj_data"_a, "data_row_ptr"_a, "data_col_ind"_a,
-      "data_values"_a, "n_samples"_a, "n_features"_a, "num"_a, "stream"_a = 0);
+      "adj_row_ptr"_a, "adj_col_ind"_a, "adj_data"_a, nb::kw_only(), "data_row_ptr"_a,
+      "data_col_ind"_a, "data_values"_a, "n_samples"_a, "n_features"_a, "num"_a, "stream"_a = 0);
   m.def(
       "pre_den_sparse",
       [](std::uintptr_t data_col_ind, std::uintptr_t data_values, int nnz,
@@ -122,6 +123,6 @@ NB_MODULE(_autocorr_cuda, m) {
         launch_pre_den_sparse(data_col_ind, data_values, nnz, mean_array, den, counter,
                               (cudaStream_t)stream);
       },
-      "data_col_ind"_a, "data_values"_a, "nnz"_a, "mean_array"_a, "den"_a, "counter"_a,
-      "stream"_a = 0);
+      "data_col_ind"_a, "data_values"_a, nb::kw_only(), "nnz"_a, "mean_array"_a, "den"_a,
+      "counter"_a, "stream"_a = 0);
 }

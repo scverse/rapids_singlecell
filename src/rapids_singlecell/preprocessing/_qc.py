@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import cupy as cp
-from cuml.internals.memory_utils import with_cupy_rmm
+
+# from cuml.internals.memory_utils import with_cupy_rmm
 from cupyx.scipy import sparse
 from scanpy.get import _get_obs_rep
 
@@ -128,10 +129,10 @@ def _basic_qc(
 
         if sparse.isspmatrix_csr(X):
             sparse_qc = _qc.sparse_qc_csr
-            shape = X.shape[0]
+            is_csr = True
         elif sparse.isspmatrix_csc(X):
             sparse_qc = _qc.sparse_qc_csc
-            shape = X.shape[1]
+            is_csr = False
         else:
             raise ValueError("Please use a csr or csc matrix")
 
@@ -139,13 +140,13 @@ def _basic_qc(
             X.indptr.data.ptr,
             X.indices.data.ptr,
             X.data.data.ptr,
-            sums_cells.data.ptr,
-            sums_genes.data.ptr,
-            genes_per_cell.data.ptr,
-            cells_per_gene.data.ptr,
-            int(shape),
-            int(cp.dtype(X.data.dtype).itemsize),
-            int(cp.cuda.get_current_stream().ptr),
+            sums_cells=sums_cells.data.ptr,
+            sums_genes=sums_genes.data.ptr,
+            cell_ex=genes_per_cell.data.ptr,
+            gene_ex=cells_per_gene.data.ptr,
+            **({"n_cells": X.shape[0]} if is_csr else {"n_genes": X.shape[1]}),
+            itemsize=cp.dtype(X.data.dtype).itemsize,
+            stream=cp.cuda.get_current_stream().ptr,
         )
     else:
         from rapids_singlecell._cuda import _qc_cuda as _qc
@@ -154,14 +155,14 @@ def _basic_qc(
             X = cp.asarray(X, order="C")
         _qc.sparse_qc_dense(
             X.data.ptr,
-            sums_cells.data.ptr,
-            sums_genes.data.ptr,
-            genes_per_cell.data.ptr,
-            cells_per_gene.data.ptr,
-            int(X.shape[0]),
-            int(X.shape[1]),
-            int(cp.dtype(X.dtype).itemsize),
-            int(cp.cuda.get_current_stream().ptr),
+            sums_cells=sums_cells.data.ptr,
+            sums_genes=sums_genes.data.ptr,
+            cell_ex=genes_per_cell.data.ptr,
+            gene_ex=cells_per_gene.data.ptr,
+            n_cells=X.shape[0],
+            n_genes=X.shape[1],
+            itemsize=cp.dtype(X.dtype).itemsize,
+            stream=cp.cuda.get_current_stream().ptr,
         )
     return sums_cells, sums_genes, genes_per_cell, cells_per_gene
 
@@ -181,11 +182,11 @@ def _basic_qc_dask(
                 X_part.indptr.data.ptr,
                 X_part.indices.data.ptr,
                 X_part.data.data.ptr,
-                sums_cells.data.ptr,
-                genes_per_cell.data.ptr,
-                int(X_part.shape[0]),
-                int(cp.dtype(X_part.data.dtype).itemsize),
-                int(cp.cuda.get_current_stream().ptr),
+                sums_cells=sums_cells.data.ptr,
+                cell_ex=genes_per_cell.data.ptr,
+                n_cells=X_part.shape[0],
+                itemsize=cp.dtype(X_part.data.dtype).itemsize,
+                stream=cp.cuda.get_current_stream().ptr,
             )
             return cp.stack([sums_cells, genes_per_cell.astype(X_part.dtype)], axis=1)
 
@@ -195,11 +196,11 @@ def _basic_qc_dask(
             _qcd.sparse_qc_csr_genes(
                 X_part.indices.data.ptr,
                 X_part.data.data.ptr,
-                sums_genes.data.ptr,
-                cells_per_gene.data.ptr,
-                int(X_part.nnz),
-                int(cp.dtype(X_part.data.dtype).itemsize),
-                int(cp.cuda.get_current_stream().ptr),
+                sums_genes=sums_genes.data.ptr,
+                gene_ex=cells_per_gene.data.ptr,
+                nnz=X_part.nnz,
+                itemsize=cp.dtype(X_part.data.dtype).itemsize,
+                stream=cp.cuda.get_current_stream().ptr,
             )
             return cp.vstack([sums_genes, cells_per_gene.astype(X_part.dtype)])[
                 None, ...
@@ -215,12 +216,12 @@ def _basic_qc_dask(
                 X_part = cp.asarray(X_part, order="C")
             _qcd.sparse_qc_dense_cells(
                 X_part.data.ptr,
-                sums_cells.data.ptr,
-                genes_per_cell.data.ptr,
-                int(X_part.shape[0]),
-                int(X_part.shape[1]),
-                int(cp.dtype(X_part.dtype).itemsize),
-                int(cp.cuda.get_current_stream().ptr),
+                sums_cells=sums_cells.data.ptr,
+                cell_ex=genes_per_cell.data.ptr,
+                n_cells=X_part.shape[0],
+                n_genes=X_part.shape[1],
+                itemsize=cp.dtype(X_part.dtype).itemsize,
+                stream=cp.cuda.get_current_stream().ptr,
             )
             return cp.stack([sums_cells, genes_per_cell.astype(X_part.dtype)], axis=1)
 
@@ -231,12 +232,12 @@ def _basic_qc_dask(
                 X_part = cp.asarray(X_part, order="C")
             _qcd.sparse_qc_dense_genes(
                 X_part.data.ptr,
-                sums_genes.data.ptr,
-                cells_per_gene.data.ptr,
-                int(X_part.shape[0]),
-                int(X_part.shape[1]),
-                int(cp.dtype(X_part.dtype).itemsize),
-                int(cp.cuda.get_current_stream().ptr),
+                sums_genes=sums_genes.data.ptr,
+                gene_ex=cells_per_gene.data.ptr,
+                n_cells=X_part.shape[0],
+                n_genes=X_part.shape[1],
+                itemsize=cp.dtype(X_part.dtype).itemsize,
+                stream=cp.cuda.get_current_stream().ptr,
             )
             return cp.vstack([sums_genes, cells_per_gene.astype(X_part.dtype)])[
                 None, ...
@@ -288,22 +289,22 @@ def _geneset_qc(X: ArrayTypesDask, mask: cp.ndarray) -> cp.ndarray:
                 X.indptr.data.ptr,
                 X.indices.data.ptr,
                 X.data.data.ptr,
-                sums_cells_sub.data.ptr,
-                mask.data.ptr,
-                int(X.shape[0]),
-                int(cp.dtype(X.data.dtype).itemsize),
-                int(cp.cuda.get_current_stream().ptr),
+                sums_cells=sums_cells_sub.data.ptr,
+                mask=mask.data.ptr,
+                n_cells=X.shape[0],
+                itemsize=cp.dtype(X.data.dtype).itemsize,
+                stream=cp.cuda.get_current_stream().ptr,
             )
         elif sparse.isspmatrix_csc(X):
             _qc.sparse_qc_csc_sub(
                 X.indptr.data.ptr,
                 X.indices.data.ptr,
                 X.data.data.ptr,
-                sums_cells_sub.data.ptr,
-                mask.data.ptr,
-                int(X.shape[1]),
-                int(cp.dtype(X.data.dtype).itemsize),
-                int(cp.cuda.get_current_stream().ptr),
+                sums_cells=sums_cells_sub.data.ptr,
+                mask=mask.data.ptr,
+                n_genes=X.shape[1],
+                itemsize=cp.dtype(X.data.dtype).itemsize,
+                stream=cp.cuda.get_current_stream().ptr,
             )
         else:
             raise ValueError("Please use a csr or csc matrix")
@@ -312,17 +313,16 @@ def _geneset_qc(X: ArrayTypesDask, mask: cp.ndarray) -> cp.ndarray:
             X = cp.asarray(X, order="C")
         _qc.sparse_qc_dense_sub(
             X.data.ptr,
-            sums_cells_sub.data.ptr,
-            mask.data.ptr,
-            int(X.shape[0]),
-            int(X.shape[1]),
-            int(cp.dtype(X.dtype).itemsize),
-            int(cp.cuda.get_current_stream().ptr),
+            sums_cells=sums_cells_sub.data.ptr,
+            mask=mask.data.ptr,
+            n_cells=X.shape[0],
+            n_genes=X.shape[1],
+            itemsize=cp.dtype(X.dtype).itemsize,
+            stream=cp.cuda.get_current_stream().ptr,
         )
     return sums_cells_sub
 
 
-@with_cupy_rmm
 def _geneset_qc_dask(X: DaskArray, mask: cp.ndarray) -> cp.ndarray:
     if isinstance(X._meta, sparse.csr_matrix):
         from rapids_singlecell._cuda import _qc_cuda as _qc
@@ -333,11 +333,11 @@ def _geneset_qc_dask(X: DaskArray, mask: cp.ndarray) -> cp.ndarray:
                 X_part.indptr.data.ptr,
                 X_part.indices.data.ptr,
                 X_part.data.data.ptr,
-                sums_cells_sub.data.ptr,
-                mask.data.ptr,
-                int(X_part.shape[0]),
-                int(cp.dtype(X_part.data.dtype).itemsize),
-                int(cp.cuda.get_current_stream().ptr),
+                sums_cells=sums_cells_sub.data.ptr,
+                mask=mask.data.ptr,
+                n_cells=X_part.shape[0],
+                itemsize=cp.dtype(X_part.data.dtype).itemsize,
+                stream=cp.cuda.get_current_stream().ptr,
             )
             return sums_cells_sub
 
@@ -350,12 +350,12 @@ def _geneset_qc_dask(X: DaskArray, mask: cp.ndarray) -> cp.ndarray:
                 X_part = cp.asarray(X_part, order="C")
             _qc.sparse_qc_dense_sub(
                 X_part.data.ptr,
-                sums_cells_sub.data.ptr,
-                mask.data.ptr,
-                int(X_part.shape[0]),
-                int(X_part.shape[1]),
-                int(cp.dtype(X_part.dtype).itemsize),
-                int(cp.cuda.get_current_stream().ptr),
+                sums_cells=sums_cells_sub.data.ptr,
+                mask=mask.data.ptr,
+                n_cells=X_part.shape[0],
+                n_genes=X_part.shape[1],
+                itemsize=cp.dtype(X_part.dtype).itemsize,
+                stream=cp.cuda.get_current_stream().ptr,
             )
             return sums_cells_sub
 

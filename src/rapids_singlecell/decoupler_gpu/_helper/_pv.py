@@ -12,7 +12,7 @@ import numpy as np
 def _rev_cummin64(x, n_rows, m):
     y = cp.empty_like(x)
 
-    _pv.rev_cummin64(x.data.ptr, y.data.ptr, int(n_rows), int(m))
+    _pv.rev_cummin64(x.data.ptr, out=y.data.ptr, n_rows=n_rows, m=m)
     return y
 
 

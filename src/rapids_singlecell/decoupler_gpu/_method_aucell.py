@@ -34,16 +34,16 @@ def _auc(row, cnct, *, starts, offsets, n_up, n_fsets, max_aucs):
 
     _au.auc(
         ranks.data.ptr,
-        int(R),
-        int(C),
-        cnct.data.ptr,
-        starts.data.ptr,
-        offsets.data.ptr,
-        int(n_fsets),
-        int(n_up),
-        max_aucs.data.ptr,
-        es.data.ptr,
-        int(cp.cuda.get_current_stream().ptr),
+        R=R,
+        C=C,
+        cnct=cnct.data.ptr,
+        starts=starts.data.ptr,
+        lens=offsets.data.ptr,
+        n_sets=n_fsets,
+        n_up=n_up,
+        max_aucs=max_aucs.data.ptr,
+        es=es.data.ptr,
+        stream=cp.cuda.get_current_stream().ptr,
     )
     return es
 

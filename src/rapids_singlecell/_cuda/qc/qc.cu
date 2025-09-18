@@ -98,8 +98,8 @@ NB_MODULE(_qc_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      "indptr"_a, "index"_a, "data"_a, "sums_cells"_a, "sums_genes"_a, "cell_ex"_a, "gene_ex"_a,
-      "n_genes"_a, "itemsize"_a, "stream"_a = 0);
+      "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "sums_cells"_a, "sums_genes"_a, "cell_ex"_a,
+      "gene_ex"_a, "n_genes"_a, "itemsize"_a, "stream"_a = 0);
   m.def(
       "sparse_qc_csr",
       [](std::uintptr_t indptr, std::uintptr_t index, std::uintptr_t data,
@@ -114,8 +114,8 @@ NB_MODULE(_qc_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      "indptr"_a, "index"_a, "data"_a, "sums_cells"_a, "sums_genes"_a, "cell_ex"_a, "gene_ex"_a,
-      "n_cells"_a, "itemsize"_a, "stream"_a = 0);
+      "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "sums_cells"_a, "sums_genes"_a, "cell_ex"_a,
+      "gene_ex"_a, "n_cells"_a, "itemsize"_a, "stream"_a = 0);
   m.def(
       "sparse_qc_dense",
       [](std::uintptr_t data, std::uintptr_t sums_cells, std::uintptr_t sums_genes,
@@ -130,8 +130,8 @@ NB_MODULE(_qc_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      "data"_a, "sums_cells"_a, "sums_genes"_a, "cell_ex"_a, "gene_ex"_a, "n_cells"_a, "n_genes"_a,
-      "itemsize"_a, "stream"_a = 0);
+      "data"_a, nb::kw_only(), "sums_cells"_a, "sums_genes"_a, "cell_ex"_a, "gene_ex"_a,
+      "n_cells"_a, "n_genes"_a, "itemsize"_a, "stream"_a = 0);
   m.def(
       "sparse_qc_csc_sub",
       [](std::uintptr_t indptr, std::uintptr_t index, std::uintptr_t data,
@@ -146,8 +146,8 @@ NB_MODULE(_qc_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      "indptr"_a, "index"_a, "data"_a, "sums_cells"_a, "mask"_a, "n_genes"_a, "itemsize"_a,
-      "stream"_a = 0);
+      "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "sums_cells"_a, "mask"_a, "n_genes"_a,
+      "itemsize"_a, "stream"_a = 0);
   m.def(
       "sparse_qc_csr_sub",
       [](std::uintptr_t indptr, std::uintptr_t index, std::uintptr_t data,
@@ -162,8 +162,8 @@ NB_MODULE(_qc_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      "indptr"_a, "index"_a, "data"_a, "sums_cells"_a, "mask"_a, "n_cells"_a, "itemsize"_a,
-      "stream"_a = 0);
+      "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "sums_cells"_a, "mask"_a, "n_cells"_a,
+      "itemsize"_a, "stream"_a = 0);
   m.def(
       "sparse_qc_dense_sub",
       [](std::uintptr_t data, std::uintptr_t sums_cells, std::uintptr_t mask, int n_cells,
@@ -177,5 +177,6 @@ NB_MODULE(_qc_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      "data"_a, "sums_cells"_a, "mask"_a, "n_cells"_a, "n_genes"_a, "itemsize"_a, "stream"_a = 0);
+      "data"_a, nb::kw_only(), "sums_cells"_a, "mask"_a, "n_cells"_a, "n_genes"_a, "itemsize"_a,
+      "stream"_a = 0);
 }

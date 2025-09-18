@@ -27,5 +27,5 @@ NB_MODULE(_harmony_normalize_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "X"_a, "rows"_a, "cols"_a, "itemsize"_a, "stream"_a = 0);
+      "X"_a, nb::kw_only(), "rows"_a, "cols"_a, "itemsize"_a, "stream"_a = 0);
 }

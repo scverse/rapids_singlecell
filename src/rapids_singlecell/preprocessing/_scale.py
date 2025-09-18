@@ -162,12 +162,12 @@ def _scale_array(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=
             X.data.ptr,
             mean.data.ptr,
             std.data.ptr,
-            mask_array.data.ptr,
-            float(max_value),
-            np.int64(X.shape[0]),
-            np.int64(X.shape[1]),
-            np.int32(cp.dtype(X.dtype).itemsize),
-            int(cp.cuda.get_current_stream().ptr),
+            mask=mask_array.data.ptr,
+            clipper=float(max_value),
+            nrows=np.int64(X.shape[0]),
+            ncols=np.int64(X.shape[1]),
+            itemsize=np.int32(cp.dtype(X.dtype).itemsize),
+            stream=cp.cuda.get_current_stream().ptr,
         )
     else:
         from rapids_singlecell._cuda import _scale_cuda as _sc
@@ -175,12 +175,12 @@ def _scale_array(X, *, mask_obs=None, zero_center=True, inplace=True, max_value=
         _sc.dense_scale_diff(
             X.data.ptr,
             std.data.ptr,
-            mask_array.data.ptr,
-            float(max_value),
-            np.int64(X.shape[0]),
-            np.int64(X.shape[1]),
-            np.int32(cp.dtype(X.dtype).itemsize),
-            int(cp.cuda.get_current_stream().ptr),
+            mask=mask_array.data.ptr,
+            clipper=float(max_value),
+            nrows=np.int64(X.shape[0]),
+            ncols=np.int64(X.shape[1]),
+            itemsize=np.int32(cp.dtype(X.dtype).itemsize),
+            stream=cp.cuda.get_current_stream().ptr,
         )
 
     return X, mean, std
@@ -222,9 +222,9 @@ def _scale_sparse_csc(
             X.indptr.data.ptr,
             X.data.data.ptr,
             std.data.ptr,
-            int(X.shape[1]),
-            int(cp.dtype(X.dtype).itemsize),
-            int(cp.cuda.get_current_stream().ptr),
+            ncols=X.shape[1],
+            itemsize=cp.dtype(X.dtype).itemsize,
+            stream=cp.cuda.get_current_stream().ptr,
         )
         if max_value:
             X.data = cp.clip(X.data, a_min=None, a_max=max_value)
@@ -268,10 +268,10 @@ def _scale_sparse_csr(
             X.data.data.ptr,
             std.data.ptr,
             mask_array.data.ptr,
-            float(max_value),
-            int(X.shape[0]),
-            int(cp.dtype(X.dtype).itemsize),
-            int(cp.cuda.get_current_stream().ptr),
+            clipper=float(max_value),
+            nrows=X.shape[0],
+            itemsize=cp.dtype(X.dtype).itemsize,
+            stream=cp.cuda.get_current_stream().ptr,
         )
 
         return X, mean, std
@@ -331,12 +331,12 @@ def _scale_dask_array_zc(X, *, mask_array, mean, std, max_value):
             X_part.data.ptr,
             mean_.data.ptr,
             std_.data.ptr,
-            mask_part.data.ptr,
-            float(max_value),
-            int(X_part.shape[0]),
-            int(X_part.shape[1]),
-            int(cp.dtype(X_part.dtype).itemsize),
-            int(cp.cuda.get_current_stream().ptr),
+            mask=mask_part.data.ptr,
+            clipper=float(max_value),
+            nrows=X_part.shape[0],
+            ncols=X_part.shape[1],
+            itemsize=cp.dtype(X_part.dtype).itemsize,
+            stream=cp.cuda.get_current_stream().ptr,
         )
         return X_part
 
@@ -362,12 +362,12 @@ def _scale_dask_array_nzc(X, *, mask_array, mean, std, max_value):
         _sc.dense_scale_diff(
             X_part.data.ptr,
             std_.data.ptr,
-            mask_part.data.ptr,
-            float(max_value),
-            X_part.shape[0],
-            X_part.shape[1],
-            int(cp.dtype(X_part.dtype).itemsize),
-            int(cp.cuda.get_current_stream().ptr),
+            mask=mask_part.data.ptr,
+            clipper=float(max_value),
+            nrows=X_part.shape[0],
+            ncols=X_part.shape[1],
+            itemsize=cp.dtype(X_part.dtype).itemsize,
+            stream=cp.cuda.get_current_stream().ptr,
         )
 
         return X_part
@@ -397,10 +397,10 @@ def _scale_sparse_csr_dask(X, *, mask_array, mean, std, max_value):
             X_part.data.data.ptr,
             std_.data.ptr,
             mask_part.data.ptr,
-            float(max_value),
-            int(X_part.shape[0]),
-            int(cp.dtype(X_part.data.dtype).itemsize),
-            int(cp.cuda.get_current_stream().ptr),
+            clipper=float(max_value),
+            nrows=X_part.shape[0],
+            itemsize=cp.dtype(X_part.data.dtype).itemsize,
+            stream=cp.cuda.get_current_stream().ptr,
         )
         return X_part
 

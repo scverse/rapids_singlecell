@@ -56,6 +56,6 @@ NB_MODULE(_sparse2dense_cuda, m) {
           throw nb::value_error("Unsupported itemsize for sparse2dense (expected 4 or 8)");
         }
       },
-      "indptr"_a, "index"_a, "data"_a, "out"_a, "major"_a, "minor"_a, "c_switch"_a, "max_nnz"_a,
-      "itemsize"_a, "stream"_a = 0);
+      "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "out"_a, "major"_a, "minor"_a, "c_switch"_a,
+      "max_nnz"_a, "itemsize"_a, "stream"_a = 0);
 }

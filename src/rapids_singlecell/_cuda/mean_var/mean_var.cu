@@ -65,8 +65,8 @@ NB_MODULE(_mean_var_cuda, m) {
           throw nb::value_error("Unsupported itemsize for mean_var_major (expected 4 or 8)");
         }
       },
-      "indptr"_a, "indices"_a, "data"_a, "means"_a, "vars"_a, "major"_a, "minor"_a, "itemsize"_a,
-      "stream"_a = 0);
+      "indptr"_a, "indices"_a, "data"_a, nb::kw_only(), "means"_a, "vars"_a, "major"_a, "minor"_a,
+      "itemsize"_a, "stream"_a = 0);
   m.def(
       "mean_var_minor",
       [](std::uintptr_t indices, std::uintptr_t data, std::uintptr_t means, std::uintptr_t vars,
@@ -79,5 +79,6 @@ NB_MODULE(_mean_var_cuda, m) {
           throw nb::value_error("Unsupported itemsize for mean_var_minor (expected 4 or 8)");
         }
       },
-      "indices"_a, "data"_a, "means"_a, "vars"_a, "nnz"_a, "itemsize"_a, "stream"_a = 0);
+      "indices"_a, "data"_a, nb::kw_only(), "means"_a, "vars"_a, "nnz"_a, "itemsize"_a,
+      "stream"_a = 0);
 }

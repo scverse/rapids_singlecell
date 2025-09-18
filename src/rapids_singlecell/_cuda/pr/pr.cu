@@ -97,7 +97,7 @@ NB_MODULE(_pr_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      "indptr"_a, "index"_a, "data"_a, "sums_cells"_a, "sums_genes"_a, "residuals"_a,
+      "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "sums_cells"_a, "sums_genes"_a, "residuals"_a,
       "inv_sum_total"_a, "clip"_a, "inv_theta"_a, "n_cells"_a, "n_genes"_a, "itemsize"_a,
       "stream"_a = 0);
 
@@ -118,7 +118,7 @@ NB_MODULE(_pr_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      "indptr"_a, "index"_a, "data"_a, "sums_cells"_a, "sums_genes"_a, "residuals"_a,
+      "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "sums_cells"_a, "sums_genes"_a, "residuals"_a,
       "inv_sum_total"_a, "clip"_a, "inv_theta"_a, "n_cells"_a, "n_genes"_a, "itemsize"_a,
       "stream"_a = 0);
 
@@ -137,8 +137,8 @@ NB_MODULE(_pr_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      "X"_a, "residuals"_a, "sums_cells"_a, "sums_genes"_a, "inv_sum_total"_a, "clip"_a,
-      "inv_theta"_a, "n_cells"_a, "n_genes"_a, "itemsize"_a, "stream"_a = 0);
+      "X"_a, nb::kw_only(), "residuals"_a, "sums_cells"_a, "sums_genes"_a, "inv_sum_total"_a,
+      "clip"_a, "inv_theta"_a, "n_cells"_a, "n_genes"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "csc_hvg_res",
@@ -157,7 +157,7 @@ NB_MODULE(_pr_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      "indptr"_a, "index"_a, "data"_a, "sums_genes"_a, "sums_cells"_a, "residuals"_a,
+      "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "sums_genes"_a, "sums_cells"_a, "residuals"_a,
       "inv_sum_total"_a, "clip"_a, "inv_theta"_a, "n_genes"_a, "n_cells"_a, "itemsize"_a,
       "stream"_a = 0);
 
@@ -176,6 +176,6 @@ NB_MODULE(_pr_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      "data"_a, "sums_genes"_a, "sums_cells"_a, "residuals"_a, "inv_sum_total"_a, "clip"_a,
-      "inv_theta"_a, "n_genes"_a, "n_cells"_a, "itemsize"_a, "stream"_a = 0);
+      "data"_a, nb::kw_only(), "sums_genes"_a, "sums_cells"_a, "residuals"_a, "inv_sum_total"_a,
+      "clip"_a, "inv_theta"_a, "n_genes"_a, "n_cells"_a, "itemsize"_a, "stream"_a = 0);
 }

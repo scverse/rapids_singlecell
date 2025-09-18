@@ -143,16 +143,16 @@ def _co_occurrence_helper(
         reader = 1
         use_fast_kernel = _co.count_csr_catpairs_auto(
             spatial.data.ptr,
-            thresholds.data.ptr,
-            cat_offsets.data.ptr,
-            cell_indices.data.ptr,
-            pair_left.data.ptr,
-            pair_right.data.ptr,
-            counts.data.ptr,
-            int(pair_left.size),
-            int(k),
-            int(l_val),
-            int(cp.cuda.get_current_stream().ptr),
+            thresholds=thresholds.data.ptr,
+            cat_offsets=cat_offsets.data.ptr,
+            cell_indices=cell_indices.data.ptr,
+            pair_left=pair_left.data.ptr,
+            pair_right=pair_right.data.ptr,
+            counts_delta=counts.data.ptr,
+            num_pairs=pair_left.size,
+            k=k,
+            l_val=l_val,
+            stream=cp.cuda.get_current_stream().ptr,
         )
 
     # Fallback to the standard kernel if fast=False or shared memory was insufficient
@@ -160,13 +160,13 @@ def _co_occurrence_helper(
         counts = cp.zeros((k, k, l_val * 2), dtype=cp.int32)
         _co.count_pairwise(
             spatial.data.ptr,
-            thresholds.data.ptr,
-            labs.data.ptr,
-            counts.data.ptr,
-            int(spatial.shape[0]),
-            int(k),
-            int(l_val),
-            int(cp.cuda.get_current_stream().ptr),
+            thresholds=thresholds.data.ptr,
+            labels=labs.data.ptr,
+            result=counts.data.ptr,
+            n=spatial.shape[0],
+            k=k,
+            l_val=l_val,
+            stream=cp.cuda.get_current_stream().ptr,
         )
         reader = 0
 
@@ -175,22 +175,22 @@ def _co_occurrence_helper(
     if fast:
         ok = _co.reduce_shared(
             counts.data.ptr,
-            occ_prob.data.ptr,
-            int(k),
-            int(l_val),
-            int(reader),
-            int(cp.cuda.get_current_stream().ptr),
+            out=occ_prob.data.ptr,
+            k=k,
+            l_val=l_val,
+            format=reader,
+            stream=cp.cuda.get_current_stream().ptr,
         )
     if not ok:
         inter_out = cp.zeros((l_val, k, k), dtype=np.float32)
         _co.reduce_global(
             counts.data.ptr,
-            inter_out.data.ptr,
-            occ_prob.data.ptr,
-            int(k),
-            int(l_val),
-            int(reader),
-            int(cp.cuda.get_current_stream().ptr),
+            inter_out=inter_out.data.ptr,
+            out=occ_prob.data.ptr,
+            k=k,
+            l_val=l_val,
+            format=reader,
+            stream=cp.cuda.get_current_stream().ptr,
         )
 
     return occ_prob

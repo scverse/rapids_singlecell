@@ -66,7 +66,8 @@ NB_MODULE(_harmony_scatter_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "v"_a, "cats"_a, "n_cells"_a, "n_pcs"_a, "switcher"_a, "a"_a, "itemsize"_a, "stream"_a = 0);
+      "v"_a, nb::kw_only(), "cats"_a, "n_cells"_a, "n_pcs"_a, "switcher"_a, "a"_a, "itemsize"_a,
+      "stream"_a = 0);
 
   m.def(
       "aggregated_matrix",
@@ -82,7 +83,8 @@ NB_MODULE(_harmony_scatter_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "aggregated_matrix"_a, "sum"_a, "top_corner"_a, "n_batches"_a, "itemsize"_a, "stream"_a = 0);
+      "aggregated_matrix"_a, nb::kw_only(), "sum"_a, "top_corner"_a, "n_batches"_a, "itemsize"_a,
+      "stream"_a = 0);
 
   m.def(
       "scatter_add_cat0",
@@ -96,7 +98,7 @@ NB_MODULE(_harmony_scatter_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "v"_a, "n_cells"_a, "n_pcs"_a, "a"_a, "bias"_a, "itemsize"_a, "stream"_a = 0);
+      "v"_a, nb::kw_only(), "n_cells"_a, "n_pcs"_a, "a"_a, "bias"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "scatter_add_block",
@@ -113,6 +115,6 @@ NB_MODULE(_harmony_scatter_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "v"_a, "cat_offsets"_a, "cell_indices"_a, "n_cells"_a, "n_pcs"_a, "n_batches"_a, "a"_a,
-      "bias"_a, "itemsize"_a, "stream"_a = 0);
+      "v"_a, nb::kw_only(), "cat_offsets"_a, "cell_indices"_a, "n_cells"_a, "n_pcs"_a,
+      "n_batches"_a, "a"_a, "bias"_a, "itemsize"_a, "stream"_a = 0);
 }

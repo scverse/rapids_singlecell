@@ -210,11 +210,11 @@ def _create_gram_matrix(x):
             x.indptr.data.ptr,
             x.indices.data.ptr,
             x.data.data.ptr,
-            int(x.shape[0]),
-            int(x.shape[1]),
-            gram_matrix.data.ptr,
-            int(cp.dtype(x.dtype).itemsize),
-            int(cp.cuda.get_current_stream().ptr),
+            nrows=x.shape[0],
+            ncols=x.shape[1],
+            out=gram_matrix.data.ptr,
+            itemsize=cp.dtype(x.dtype).itemsize,
+            stream=cp.cuda.get_current_stream().ptr,
         )
     elif isinstance(x, DaskArray):
         n_cols = x.shape[1]
@@ -227,11 +227,11 @@ def _create_gram_matrix(x):
                     x_part.indptr.data.ptr,
                     x_part.indices.data.ptr,
                     x_part.data.data.ptr,
-                    int(x_part.shape[0]),
-                    int(n_cols),
-                    gram_matrix.data.ptr,
-                    int(cp.dtype(x_part.dtype).itemsize),
-                    int(cp.cuda.get_current_stream().ptr),
+                    nrows=x_part.shape[0],
+                    ncols=n_cols,
+                    out=gram_matrix.data.ptr,
+                    itemsize=cp.dtype(x_part.dtype).itemsize,
+                    stream=cp.cuda.get_current_stream().ptr,
                 )
                 return gram_matrix[None, ...]  # need new axis for summing
         else:

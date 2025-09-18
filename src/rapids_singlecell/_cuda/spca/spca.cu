@@ -69,7 +69,8 @@ NB_MODULE(_spca_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "indptr"_a, "index"_a, "data"_a, "nrows"_a, "ncols"_a, "out"_a, "itemsize"_a, "stream"_a = 0);
+      "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "nrows"_a, "ncols"_a, "out"_a, "itemsize"_a,
+      "stream"_a = 0);
 
   m.def(
       "copy_upper_to_lower",
@@ -82,11 +83,11 @@ NB_MODULE(_spca_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "out"_a, "ncols"_a, "itemsize"_a, "stream"_a = 0);
+      nb::kw_only(), "out"_a, "ncols"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "cov_from_gram",
-      [](std::uintptr_t cov, std::uintptr_t gram, std::uintptr_t meanx, std::uintptr_t meany,
+      [](std::uintptr_t gram, std::uintptr_t meanx, std::uintptr_t meany, std::uintptr_t cov,
          int ncols, int itemsize, std::uintptr_t stream) {
         if (itemsize == 4) {
           launch_cov_from_gram<float>(cov, gram, meanx, meany, ncols, (cudaStream_t)stream);
@@ -96,13 +97,14 @@ NB_MODULE(_spca_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "cov"_a, "gram"_a, "meanx"_a, "meany"_a, "ncols"_a, "itemsize"_a, "stream"_a = 0);
+      "gram"_a, "meanx"_a, "meany"_a, nb::kw_only(), "cov"_a, "ncols"_a, "itemsize"_a,
+      "stream"_a = 0);
 
   m.def(
       "check_zero_genes",
-      [](std::uintptr_t indices, std::uintptr_t genes, int nnz, int num_genes,
+      [](std::uintptr_t indices, std::uintptr_t out, int nnz, int num_genes,
          std::uintptr_t stream) {
-        launch_check_zero_genes(indices, genes, nnz, num_genes, (cudaStream_t)stream);
+        launch_check_zero_genes(indices, out, nnz, num_genes, (cudaStream_t)stream);
       },
-      "indices"_a, "genes"_a, "nnz"_a, "num_genes"_a, "stream"_a = 0);
+      "indices"_a, nb::kw_only(), "out"_a, "nnz"_a, "num_genes"_a, "stream"_a = 0);
 }

@@ -44,7 +44,7 @@ NB_MODULE(_harmony_outer_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "E"_a, "Pr_b"_a, "R_sum"_a, "n_cats"_a, "n_pcs"_a, "switcher"_a, "itemsize"_a,
+      "E"_a, nb::kw_only(), "Pr_b"_a, "R_sum"_a, "n_cats"_a, "n_pcs"_a, "switcher"_a, "itemsize"_a,
       "stream"_a = 0);
 
   m.def(
@@ -59,5 +59,6 @@ NB_MODULE(_harmony_outer_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "Z"_a, "W"_a, "cats"_a, "R"_a, "n_cells"_a, "n_pcs"_a, "itemsize"_a, "stream"_a = 0);
+      "Z"_a, nb::kw_only(), "W"_a, "cats"_a, "R"_a, "n_cells"_a, "n_pcs"_a, "itemsize"_a,
+      "stream"_a = 0);
 }

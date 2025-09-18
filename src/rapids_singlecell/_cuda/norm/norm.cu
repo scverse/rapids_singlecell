@@ -52,7 +52,7 @@ NB_MODULE(_norm_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "data"_a, "nrows"_a, "ncols"_a, "target_sum"_a, "itemsize"_a, "stream"_a = 0);
+      "data"_a, nb::kw_only(), "nrows"_a, "ncols"_a, "target_sum"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "mul_csr",
@@ -66,7 +66,7 @@ NB_MODULE(_norm_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "indptr"_a, "data"_a, "nrows"_a, "target_sum"_a, "itemsize"_a, "stream"_a = 0);
+      "indptr"_a, "data"_a, nb::kw_only(), "nrows"_a, "target_sum"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "sum_major",
@@ -80,5 +80,5 @@ NB_MODULE(_norm_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "indptr"_a, "data"_a, "sums"_a, "major"_a, "itemsize"_a, "stream"_a = 0);
+      "indptr"_a, "data"_a, nb::kw_only(), "sums"_a, "major"_a, "itemsize"_a, "stream"_a = 0);
 }

@@ -96,11 +96,11 @@ def _normalize_total(X: ArrayTypesDask, target_sum: int):
             X = cp.asarray(X, order="C")
         _nc.mul_dense(
             X.data.ptr,
-            int(X.shape[0]),
-            int(X.shape[1]),
-            float(target_sum),
-            int(cp.dtype(X.dtype).itemsize),
-            int(cp.cuda.get_current_stream().ptr),
+            nrows=X.shape[0],
+            ncols=X.shape[1],
+            target_sum=float(target_sum),
+            itemsize=cp.dtype(X.dtype).itemsize,
+            stream=cp.cuda.get_current_stream().ptr,
         )
         return X
     else:
@@ -113,10 +113,10 @@ def _normalize_total_csr(X: sparse.csr_matrix, target_sum: int) -> sparse.csr_ma
     _nc.mul_csr(
         X.indptr.data.ptr,
         X.data.data.ptr,
-        int(X.shape[0]),
-        float(target_sum),
-        int(cp.dtype(X.dtype).itemsize),
-        int(cp.cuda.get_current_stream().ptr),
+        nrows=X.shape[0],
+        target_sum=float(target_sum),
+        itemsize=cp.dtype(X.dtype).itemsize,
+        stream=cp.cuda.get_current_stream().ptr,
     )
     return X
 
@@ -129,10 +129,10 @@ def _normalize_total_dask(X: DaskArray, target_sum: int) -> DaskArray:
             _nc.mul_csr(
                 X_part.indptr.data.ptr,
                 X_part.data.data.ptr,
-                int(X_part.shape[0]),
-                float(target_sum),
-                int(cp.dtype(X_part.data.dtype).itemsize),
-                int(cp.cuda.get_current_stream().ptr),
+                nrows=X_part.shape[0],
+                target_sum=float(target_sum),
+                itemsize=cp.dtype(X_part.data.dtype).itemsize,
+                stream=cp.cuda.get_current_stream().ptr,
             )
             return X_part
 
@@ -143,11 +143,11 @@ def _normalize_total_dask(X: DaskArray, target_sum: int) -> DaskArray:
         def __mul(X_part):
             _nc.mul_dense(
                 X_part.data.ptr,
-                int(X_part.shape[0]),
-                int(X_part.shape[1]),
-                float(target_sum),
-                int(cp.dtype(X_part.dtype).itemsize),
-                int(cp.cuda.get_current_stream().ptr),
+                nrows=X_part.shape[0],
+                ncols=X_part.shape[1],
+                target_sum=float(target_sum),
+                itemsize=cp.dtype(X_part.dtype).itemsize,
+                stream=cp.cuda.get_current_stream().ptr,
             )
             return X_part
 
@@ -173,10 +173,10 @@ def _get_target_sum_csr(X: sparse.csr_matrix) -> int:
     _nc.sum_major(
         X.indptr.data.ptr,
         X.data.data.ptr,
-        counts_per_cell.data.ptr,
-        int(X.shape[0]),
-        int(cp.dtype(X.dtype).itemsize),
-        int(cp.cuda.get_current_stream().ptr),
+        sums=counts_per_cell.data.ptr,
+        major=X.shape[0],
+        itemsize=cp.dtype(X.dtype).itemsize,
+        stream=cp.cuda.get_current_stream().ptr,
     )
     counts_per_cell = counts_per_cell[counts_per_cell > 0]
     target_sum = cp.median(counts_per_cell)
@@ -192,10 +192,10 @@ def _get_target_sum_dask(X: DaskArray) -> int:
             _nc.sum_major(
                 X_part.indptr.data.ptr,
                 X_part.data.data.ptr,
-                counts_per_cell.data.ptr,
-                int(X_part.shape[0]),
-                int(cp.dtype(X_part.dtype).itemsize),
-                int(cp.cuda.get_current_stream().ptr),
+                sums=counts_per_cell.data.ptr,
+                major=X_part.shape[0],
+                itemsize=cp.dtype(X_part.dtype).itemsize,
+                stream=cp.cuda.get_current_stream().ptr,
             )
             return counts_per_cell
 
@@ -371,32 +371,32 @@ def normalize_pearson_residuals(
                 X.indptr.data.ptr,
                 X.indices.data.ptr,
                 X.data.data.ptr,
-                sums_cells.data.ptr,
-                sums_genes.data.ptr,
-                residuals.data.ptr,
-                inv_sum_total,
-                clip,
-                inv_theta,
-                int(X.shape[0]),
-                int(X.shape[1]),
-                int(cp.dtype(X.dtype).itemsize),
-                int(cp.cuda.get_current_stream().ptr),
+                sums_cells=sums_cells.data.ptr,
+                sums_genes=sums_genes.data.ptr,
+                residuals=residuals.data.ptr,
+                inv_sum_total=float(inv_sum_total),
+                clip=float(clip),
+                inv_theta=float(inv_theta),
+                n_cells=X.shape[0],
+                n_genes=X.shape[1],
+                itemsize=cp.dtype(X.dtype).itemsize,
+                stream=cp.cuda.get_current_stream().ptr,
             )
         elif sparse.isspmatrix_csr(X):
             _pr.sparse_norm_res_csr(
                 X.indptr.data.ptr,
                 X.indices.data.ptr,
                 X.data.data.ptr,
-                sums_cells.data.ptr,
-                sums_genes.data.ptr,
-                residuals.data.ptr,
-                inv_sum_total,
-                clip,
-                inv_theta,
-                int(X.shape[0]),
-                int(X.shape[1]),
-                int(cp.dtype(X.dtype).itemsize),
-                int(cp.cuda.get_current_stream().ptr),
+                sums_cells=sums_cells.data.ptr,
+                sums_genes=sums_genes.data.ptr,
+                residuals=residuals.data.ptr,
+                inv_sum_total=float(inv_sum_total),
+                clip=float(clip),
+                inv_theta=float(inv_theta),
+                n_cells=X.shape[0],
+                n_genes=X.shape[1],
+                itemsize=cp.dtype(X.dtype).itemsize,
+                stream=cp.cuda.get_current_stream().ptr,
             )
         else:
             raise ValueError(
@@ -407,16 +407,16 @@ def normalize_pearson_residuals(
 
         _pr.dense_norm_res(
             X.data.ptr,
-            residuals.data.ptr,
-            sums_cells.data.ptr,
-            sums_genes.data.ptr,
-            inv_sum_total,
-            clip,
-            inv_theta,
-            int(residuals.shape[0]),
-            int(residuals.shape[1]),
-            int(cp.dtype(X.dtype).itemsize),
-            int(cp.cuda.get_current_stream().ptr),
+            residuals=residuals.data.ptr,
+            sums_cells=sums_cells.data.ptr,
+            sums_genes=sums_genes.data.ptr,
+            inv_sum_total=float(inv_sum_total),
+            clip=float(clip),
+            inv_theta=float(inv_theta),
+            n_cells=residuals.shape[0],
+            n_genes=residuals.shape[1],
+            itemsize=cp.dtype(X.dtype).itemsize,
+            stream=cp.cuda.get_current_stream().ptr,
         )
 
     if inplace is True:

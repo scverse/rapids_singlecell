@@ -18,8 +18,8 @@ static inline void launch_rev_cummin64(std::uintptr_t x, std::uintptr_t y, int n
 NB_MODULE(_pv_cuda, m) {
   m.def(
       "rev_cummin64",
-      [](std::uintptr_t x, std::uintptr_t y, int n_rows, int m, std::uintptr_t stream) {
-        launch_rev_cummin64(x, y, n_rows, m, (cudaStream_t)stream);
+      [](std::uintptr_t x, std::uintptr_t out, int n_rows, int m, std::uintptr_t stream) {
+        launch_rev_cummin64(x, out, n_rows, m, (cudaStream_t)stream);
       },
-      "x"_a, "y"_a, "n_rows"_a, "m"_a, "stream"_a = 0);
+      "x"_a, nb::kw_only(), "out"_a, "n_rows"_a, "m"_a, "stream"_a = 0);
 }

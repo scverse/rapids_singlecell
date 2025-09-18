@@ -24,10 +24,10 @@ def _sparse_to_dense(X: spmatrix, order: Literal["C", "F"] | None = None) -> cp.
 
     if isspmatrix_csr(X):
         major, minor = X.shape[0], X.shape[1]
-        switcher = True if order == "C" else False
+        switcher = order == "C"
     elif isspmatrix_csc(X):
         major, minor = X.shape[1], X.shape[0]
-        switcher = False if order == "C" else True
+        switcher = order != "C"
     else:
         raise ValueError("Input matrix must be a sparse `csc` or `csr` matrix")
 
@@ -37,12 +37,12 @@ def _sparse_to_dense(X: spmatrix, order: Literal["C", "F"] | None = None) -> cp.
         X.indptr.data.ptr,
         X.indices.data.ptr,
         X.data.data.ptr,
-        dense.data.ptr,
-        int(major),
-        int(minor),
-        switcher,
-        int(max_nnz),
-        int(cp.dtype(X.dtype).itemsize),
+        out=dense.data.ptr,
+        major=major,
+        minor=minor,
+        c_switch=switcher,
+        max_nnz=max_nnz,
+        itemsize=cp.dtype(X.dtype).itemsize,
     )
     return dense
 
@@ -73,12 +73,12 @@ def _mean_var_major(X, major, minor):
         X.indptr.data.ptr,
         X.indices.data.ptr,
         X.data.data.ptr,
-        mean.data.ptr,
-        var.data.ptr,
-        int(major),
-        int(minor),
-        int(cp.dtype(X.data.dtype).itemsize),
-        int(cp.cuda.get_current_stream().ptr),
+        means=mean.data.ptr,
+        vars=var.data.ptr,
+        major=major,
+        minor=minor,
+        itemsize=cp.dtype(X.data.dtype).itemsize,
+        stream=cp.cuda.get_current_stream().ptr,
     )
     mean = mean / minor
     var = var / minor
@@ -95,11 +95,11 @@ def _mean_var_minor(X, major, minor):
     _mv.mean_var_minor(
         X.indices.data.ptr,
         X.data.data.ptr,
-        mean.data.ptr,
-        var.data.ptr,
-        int(X.nnz),
-        int(cp.dtype(X.data.dtype).itemsize),
-        int(cp.cuda.get_current_stream().ptr),
+        means=mean.data.ptr,
+        vars=var.data.ptr,
+        nnz=X.nnz,
+        itemsize=cp.dtype(X.data.dtype).itemsize,
+        stream=cp.cuda.get_current_stream().ptr,
     )
     mean /= major
     var /= major
@@ -121,11 +121,11 @@ def _mean_var_minor_dask(X, major, minor):
         _mv.mean_var_minor(
             X_part.indices.data.ptr,
             X_part.data.data.ptr,
-            mean.data.ptr,
-            var.data.ptr,
-            int(X_part.nnz),
-            int(cp.dtype(X_part.data.dtype).itemsize),
-            int(cp.cuda.get_current_stream().ptr),
+            means=mean.data.ptr,
+            vars=var.data.ptr,
+            nnz=X_part.nnz,
+            itemsize=cp.dtype(X_part.data.dtype).itemsize,
+            stream=cp.cuda.get_current_stream().ptr,
         )
         return cp.vstack([mean, var])[None, ...]  # new axis for summing
 
@@ -158,12 +158,12 @@ def _mean_var_major_dask(X, major, minor):
             X_part.indptr.data.ptr,
             X_part.indices.data.ptr,
             X_part.data.data.ptr,
-            mean.data.ptr,
-            var.data.ptr,
-            int(X_part.shape[0]),
-            int(minor),
-            int(cp.dtype(X_part.data.dtype).itemsize),
-            int(cp.cuda.get_current_stream().ptr),
+            means=mean.data.ptr,
+            vars=var.data.ptr,
+            major=X_part.shape[0],
+            minor=minor,
+            itemsize=cp.dtype(X_part.data.dtype).itemsize,
+            stream=cp.cuda.get_current_stream().ptr,
         )
         return cp.stack([mean, var], axis=1)
 

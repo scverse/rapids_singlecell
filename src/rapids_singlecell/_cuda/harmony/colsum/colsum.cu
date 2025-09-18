@@ -43,7 +43,7 @@ NB_MODULE(_harmony_colsum_cuda, m) {
           throw nb::value_error("Unsupported dtype_code (expected 0/1/2 or 4/8)");
         }
       },
-      "A"_a, "out"_a, "rows"_a, "cols"_a, "dtype_code"_a, "stream"_a = 0);
+      "A"_a, nb::kw_only(), "out"_a, "rows"_a, "cols"_a, "dtype_code"_a, "stream"_a = 0);
 
   m.def(
       "colsum_atomic",
@@ -59,5 +59,5 @@ NB_MODULE(_harmony_colsum_cuda, m) {
           throw nb::value_error("Unsupported dtype_code (expected 0/1/2 or 4/8)");
         }
       },
-      "A"_a, "out"_a, "rows"_a, "cols"_a, "dtype_code"_a, "stream"_a = 0);
+      "A"_a, nb::kw_only(), "out"_a, "rows"_a, "cols"_a, "dtype_code"_a, "stream"_a = 0);
 }

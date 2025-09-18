@@ -31,5 +31,6 @@ NB_MODULE(_harmony_pen_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "R"_a, "penalty"_a, "cats"_a, "n_rows"_a, "n_cols"_a, "itemsize"_a, "stream"_a = 0);
+      "R"_a, nb::kw_only(), "penalty"_a, "cats"_a, "n_rows"_a, "n_cols"_a, "itemsize"_a,
+      "stream"_a = 0);
 }

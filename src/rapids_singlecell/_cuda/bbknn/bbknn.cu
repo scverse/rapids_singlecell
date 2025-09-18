@@ -40,7 +40,7 @@ NB_MODULE(_bbknn_cuda, m) {
          std::uintptr_t stream) {
         launch_find_top_k_per_row(data, indptr, n_rows, trim, vals, (cudaStream_t)stream);
       },
-      "data"_a, "indptr"_a, "n_rows"_a, "trim"_a, "vals"_a, "stream"_a = 0);
+      "data"_a, "indptr"_a, nb::kw_only(), "n_rows"_a, "trim"_a, "vals"_a, "stream"_a = 0);
 
   m.def(
       "cut_smaller",
@@ -48,5 +48,5 @@ NB_MODULE(_bbknn_cuda, m) {
          int n_rows, std::uintptr_t stream) {
         launch_cut_smaller(indptr, index, data, vals, n_rows, (cudaStream_t)stream);
       },
-      "indptr"_a, "index"_a, "data"_a, "vals"_a, "n_rows"_a, "stream"_a = 0);
+      "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "vals"_a, "n_rows"_a, "stream"_a = 0);
 }
