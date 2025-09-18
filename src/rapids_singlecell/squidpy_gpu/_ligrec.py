@@ -536,8 +536,8 @@ def ligrec(
             )
             _lc.interaction(
                 interactions_.data.ptr,
-                interaction_clusters.data.ptr,
-                mean_cp.data.ptr,
+                interaction_clusters=interaction_clusters.data.ptr,
+                mean=mean_cp.data.ptr,
                 res=res.data.ptr,
                 mask=mask_cp.data.ptr,
                 g=g.data.ptr,
@@ -571,8 +571,8 @@ def ligrec(
             )
             _lc.interaction(
                 interactions_.data.ptr,
-                interaction_clusters.data.ptr,
-                mean_cp.data.ptr,
+                interaction_clusters=interaction_clusters.data.ptr,
+                mean=mean_cp.data.ptr,
                 res=res.data.ptr,
                 mask=mask_cp.data.ptr,
                 g=g.data.ptr,
@@ -589,8 +589,8 @@ def ligrec(
 
     _lc.res_mean(
         interactions_.data.ptr,
-        interaction_clusters.data.ptr,
-        mean_cp.data.ptr,
+        interaction_clusters=interaction_clusters.data.ptr,
+        mean=mean_cp.data.ptr,
         res_mean=res_mean.data.ptr,
         n_inter=len(interactions_),
         n_inter_clust=len(interaction_clusters),

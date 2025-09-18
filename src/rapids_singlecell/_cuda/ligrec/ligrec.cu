@@ -189,7 +189,7 @@ NB_MODULE(_ligrec_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "interactions"_a, "interaction_clusters"_a, "mean"_a, nb::kw_only(), "res"_a, "mask"_a, "g"_a,
+      "interactions"_a, nb::kw_only(), "interaction_clusters"_a, "mean"_a, "res"_a, "mask"_a, "g"_a,
       "n_iter"_a, "n_inter_clust"_a, "ncls"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
@@ -207,6 +207,6 @@ NB_MODULE(_ligrec_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      "interactions"_a, "interaction_clusters"_a, "mean"_a, nb::kw_only(), "res_mean"_a,
+      "interactions"_a, nb::kw_only(), "interaction_clusters"_a, "mean"_a, "res_mean"_a,
       "n_inter"_a, "n_inter_clust"_a, "ncls"_a, "itemsize"_a, "stream"_a = 0);
 }
