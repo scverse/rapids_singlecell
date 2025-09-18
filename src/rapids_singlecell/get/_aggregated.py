@@ -173,11 +173,11 @@ class Aggregate:
             out=out.data.ptr,
             cats=self.groupby.data.ptr,
             mask=mask.data.ptr,
-            n_cells=int(self.data.shape[0]),
-            n_genes=int(self.data.shape[1]),
-            n_groups=int(self.n_cells.shape[0]),
+            n_cells=self.data.shape[0],
+            n_genes=self.data.shape[1],
+            n_groups=self.n_cells.shape[0],
             is_csc=self.data.format == "csc",
-            dtype_itemsize=int(self.data.data.dtype.itemsize),
+            dtype_itemsize=self.data.data.dtype.itemsize,
         )
         sums, counts, sq_sums = out[0, :], out[1, :], out[2, :]
         sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])
