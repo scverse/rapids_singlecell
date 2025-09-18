@@ -6,6 +6,7 @@
 #include "kernels_spca.cuh"
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 template <typename T>
 static inline void launch_gram_csr_upper(std::uintptr_t indptr_ptr, std::uintptr_t index_ptr,
@@ -68,8 +69,7 @@ NB_MODULE(_spca_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("indptr"), nb::arg("index"), nb::arg("data"), nb::arg("nrows"), nb::arg("ncols"),
-      nb::arg("out"), nb::arg("itemsize"), nb::arg("stream") = 0);
+      "indptr"_a, "index"_a, "data"_a, "nrows"_a, "ncols"_a, "out"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "copy_upper_to_lower",
@@ -82,7 +82,7 @@ NB_MODULE(_spca_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("out"), nb::arg("ncols"), nb::arg("itemsize"), nb::arg("stream") = 0);
+      "out"_a, "ncols"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "cov_from_gram",
@@ -96,8 +96,7 @@ NB_MODULE(_spca_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("cov"), nb::arg("gram"), nb::arg("meanx"), nb::arg("meany"), nb::arg("ncols"),
-      nb::arg("itemsize"), nb::arg("stream") = 0);
+      "cov"_a, "gram"_a, "meanx"_a, "meany"_a, "ncols"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "check_zero_genes",
@@ -105,6 +104,5 @@ NB_MODULE(_spca_cuda, m) {
          std::uintptr_t stream) {
         launch_check_zero_genes(indices, genes, nnz, num_genes, (cudaStream_t)stream);
       },
-      nb::arg("indices"), nb::arg("genes"), nb::arg("nnz"), nb::arg("num_genes"),
-      nb::arg("stream") = 0);
+      "indices"_a, "genes"_a, "nnz"_a, "num_genes"_a, "stream"_a = 0);
 }

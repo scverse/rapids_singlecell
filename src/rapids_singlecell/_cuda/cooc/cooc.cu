@@ -5,6 +5,7 @@
 #include "kernels_cooc.cuh"
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 static inline void launch_count_pairwise(std::uintptr_t spatial, std::uintptr_t thresholds,
                                          std::uintptr_t labels, std::uintptr_t result, int n, int k,
@@ -90,24 +91,21 @@ NB_MODULE(_cooc_cuda, m) {
         launch_count_pairwise(spatial, thresholds, labels, result, n, k, l_val,
                               (cudaStream_t)stream);
       },
-      nb::arg("spatial"), nb::arg("thresholds"), nb::arg("labels"), nb::arg("result"), nb::arg("n"),
-      nb::arg("k"), nb::arg("l_val"), nb::arg("stream") = 0);
+      "spatial"_a, "thresholds"_a, "labels"_a, "result"_a, "n"_a, "k"_a, "l_val"_a, "stream"_a = 0);
   m.def(
       "reduce_shared",
       [](std::uintptr_t result, std::uintptr_t out, int k, int l_val, int format,
          std::uintptr_t stream) {
         return launch_reduce_shared(result, out, k, l_val, format, (cudaStream_t)stream);
       },
-      nb::arg("result"), nb::arg("out"), nb::arg("k"), nb::arg("l_val"), nb::arg("format"),
-      nb::arg("stream") = 0);
+      "result"_a, "out"_a, "k"_a, "l_val"_a, "format"_a, "stream"_a = 0);
   m.def(
       "reduce_global",
       [](std::uintptr_t result, std::uintptr_t inter_out, std::uintptr_t out, int k, int l_val,
          int format, std::uintptr_t stream) {
         launch_reduce_global(result, inter_out, out, k, l_val, format, (cudaStream_t)stream);
       },
-      nb::arg("result"), nb::arg("inter_out"), nb::arg("out"), nb::arg("k"), nb::arg("l_val"),
-      nb::arg("format"), nb::arg("stream") = 0);
+      "result"_a, "inter_out"_a, "out"_a, "k"_a, "l_val"_a, "format"_a, "stream"_a = 0);
   m.def(
       "count_csr_catpairs_auto",
       [](std::uintptr_t spatial, std::uintptr_t thresholds, std::uintptr_t cat_offsets,
@@ -117,7 +115,6 @@ NB_MODULE(_cooc_cuda, m) {
                                               pair_left, pair_right, counts_delta, num_pairs, k,
                                               l_val, (cudaStream_t)stream);
       },
-      nb::arg("spatial"), nb::arg("thresholds"), nb::arg("cat_offsets"), nb::arg("cell_indices"),
-      nb::arg("pair_left"), nb::arg("pair_right"), nb::arg("counts_delta"), nb::arg("num_pairs"),
-      nb::arg("k"), nb::arg("l_val"), nb::arg("stream") = 0);
+      "spatial"_a, "thresholds"_a, "cat_offsets"_a, "cell_indices"_a, "pair_left"_a, "pair_right"_a,
+      "counts_delta"_a, "num_pairs"_a, "k"_a, "l_val"_a, "stream"_a = 0);
 }

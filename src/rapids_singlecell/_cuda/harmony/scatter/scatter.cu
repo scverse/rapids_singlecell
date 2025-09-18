@@ -5,6 +5,7 @@
 #include "kernels_scatter.cuh"
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 template <typename T>
 static inline void launch_scatter_add(std::uintptr_t v, std::uintptr_t cats, std::size_t n_cells,
@@ -65,8 +66,7 @@ NB_MODULE(_harmony_scatter_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("v"), nb::arg("cats"), nb::arg("n_cells"), nb::arg("n_pcs"), nb::arg("switcher"),
-      nb::arg("a"), nb::arg("itemsize"), nb::arg("stream") = 0);
+      "v"_a, "cats"_a, "n_cells"_a, "n_pcs"_a, "switcher"_a, "a"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "aggregated_matrix",
@@ -82,8 +82,7 @@ NB_MODULE(_harmony_scatter_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("aggregated_matrix"), nb::arg("sum"), nb::arg("top_corner"), nb::arg("n_batches"),
-      nb::arg("itemsize"), nb::arg("stream") = 0);
+      "aggregated_matrix"_a, "sum"_a, "top_corner"_a, "n_batches"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "scatter_add_cat0",
@@ -97,8 +96,7 @@ NB_MODULE(_harmony_scatter_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("v"), nb::arg("n_cells"), nb::arg("n_pcs"), nb::arg("a"), nb::arg("bias"),
-      nb::arg("itemsize"), nb::arg("stream") = 0);
+      "v"_a, "n_cells"_a, "n_pcs"_a, "a"_a, "bias"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "scatter_add_block",
@@ -115,7 +113,6 @@ NB_MODULE(_harmony_scatter_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("v"), nb::arg("cat_offsets"), nb::arg("cell_indices"), nb::arg("n_cells"),
-      nb::arg("n_pcs"), nb::arg("n_batches"), nb::arg("a"), nb::arg("bias"), nb::arg("itemsize"),
-      nb::arg("stream") = 0);
+      "v"_a, "cat_offsets"_a, "cell_indices"_a, "n_cells"_a, "n_pcs"_a, "n_batches"_a, "a"_a,
+      "bias"_a, "itemsize"_a, "stream"_a = 0);
 }

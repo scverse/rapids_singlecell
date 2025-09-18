@@ -6,6 +6,7 @@
 #include "kernels_pr_hvg.cuh"
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 template <typename T>
 static inline void launch_sparse_norm_res_csc(std::uintptr_t indptr, std::uintptr_t index,
@@ -96,10 +97,9 @@ NB_MODULE(_pr_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      nb::arg("indptr"), nb::arg("index"), nb::arg("data"), nb::arg("sums_cells"),
-      nb::arg("sums_genes"), nb::arg("residuals"), nb::arg("inv_sum_total"), nb::arg("clip"),
-      nb::arg("inv_theta"), nb::arg("n_cells"), nb::arg("n_genes"), nb::arg("itemsize"),
-      nb::arg("stream") = 0);
+      "indptr"_a, "index"_a, "data"_a, "sums_cells"_a, "sums_genes"_a, "residuals"_a,
+      "inv_sum_total"_a, "clip"_a, "inv_theta"_a, "n_cells"_a, "n_genes"_a, "itemsize"_a,
+      "stream"_a = 0);
 
   m.def(
       "sparse_norm_res_csr",
@@ -118,10 +118,9 @@ NB_MODULE(_pr_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      nb::arg("indptr"), nb::arg("index"), nb::arg("data"), nb::arg("sums_cells"),
-      nb::arg("sums_genes"), nb::arg("residuals"), nb::arg("inv_sum_total"), nb::arg("clip"),
-      nb::arg("inv_theta"), nb::arg("n_cells"), nb::arg("n_genes"), nb::arg("itemsize"),
-      nb::arg("stream") = 0);
+      "indptr"_a, "index"_a, "data"_a, "sums_cells"_a, "sums_genes"_a, "residuals"_a,
+      "inv_sum_total"_a, "clip"_a, "inv_theta"_a, "n_cells"_a, "n_genes"_a, "itemsize"_a,
+      "stream"_a = 0);
 
   m.def(
       "dense_norm_res",
@@ -138,9 +137,8 @@ NB_MODULE(_pr_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      nb::arg("X"), nb::arg("residuals"), nb::arg("sums_cells"), nb::arg("sums_genes"),
-      nb::arg("inv_sum_total"), nb::arg("clip"), nb::arg("inv_theta"), nb::arg("n_cells"),
-      nb::arg("n_genes"), nb::arg("itemsize"), nb::arg("stream") = 0);
+      "X"_a, "residuals"_a, "sums_cells"_a, "sums_genes"_a, "inv_sum_total"_a, "clip"_a,
+      "inv_theta"_a, "n_cells"_a, "n_genes"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "csc_hvg_res",
@@ -159,10 +157,9 @@ NB_MODULE(_pr_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      nb::arg("indptr"), nb::arg("index"), nb::arg("data"), nb::arg("sums_genes"),
-      nb::arg("sums_cells"), nb::arg("residuals"), nb::arg("inv_sum_total"), nb::arg("clip"),
-      nb::arg("inv_theta"), nb::arg("n_genes"), nb::arg("n_cells"), nb::arg("itemsize"),
-      nb::arg("stream") = 0);
+      "indptr"_a, "index"_a, "data"_a, "sums_genes"_a, "sums_cells"_a, "residuals"_a,
+      "inv_sum_total"_a, "clip"_a, "inv_theta"_a, "n_genes"_a, "n_cells"_a, "itemsize"_a,
+      "stream"_a = 0);
 
   m.def(
       "dense_hvg_res",
@@ -179,7 +176,6 @@ NB_MODULE(_pr_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      nb::arg("data"), nb::arg("sums_genes"), nb::arg("sums_cells"), nb::arg("residuals"),
-      nb::arg("inv_sum_total"), nb::arg("clip"), nb::arg("inv_theta"), nb::arg("n_genes"),
-      nb::arg("n_cells"), nb::arg("itemsize"), nb::arg("stream") = 0);
+      "data"_a, "sums_genes"_a, "sums_cells"_a, "residuals"_a, "inv_sum_total"_a, "clip"_a,
+      "inv_theta"_a, "n_genes"_a, "n_cells"_a, "itemsize"_a, "stream"_a = 0);
 }

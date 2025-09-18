@@ -5,6 +5,7 @@
 #include "kernels_s2d.cuh"
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 template <typename T, bool C_ORDER>
 static inline void launch_typed(const int* indptr, const int* index, const T* data, T* out,
@@ -55,7 +56,6 @@ NB_MODULE(_sparse2dense_cuda, m) {
           throw nb::value_error("Unsupported itemsize for sparse2dense (expected 4 or 8)");
         }
       },
-      nb::arg("indptr"), nb::arg("index"), nb::arg("data"), nb::arg("out"), nb::arg("major"),
-      nb::arg("minor"), nb::arg("c_switch"), nb::arg("max_nnz"), nb::arg("itemsize"),
-      nb::arg("stream") = 0);
+      "indptr"_a, "index"_a, "data"_a, "out"_a, "major"_a, "minor"_a, "c_switch"_a, "max_nnz"_a,
+      "itemsize"_a, "stream"_a = 0);
 }

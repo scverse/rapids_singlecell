@@ -5,6 +5,7 @@
 #include "kernels_scale.cuh"
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 template <typename T>
 static inline void launch_csc_scale_diff(std::uintptr_t indptr, std::uintptr_t data,
@@ -66,8 +67,7 @@ NB_MODULE(_scale_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
       },
-      nb::arg("indptr"), nb::arg("data"), nb::arg("std"), nb::arg("ncols"), nb::arg("itemsize"),
-      nb::arg("stream") = 0);
+      "indptr"_a, "data"_a, "std"_a, "ncols"_a, "itemsize"_a, "stream"_a = 0);
   m.def(
       "csr_scale_diff",
       [](std::uintptr_t indptr, std::uintptr_t indices, std::uintptr_t data, std::uintptr_t std,
@@ -81,8 +81,8 @@ NB_MODULE(_scale_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
       },
-      nb::arg("indptr"), nb::arg("indices"), nb::arg("data"), nb::arg("std"), nb::arg("mask"),
-      nb::arg("clipper"), nb::arg("nrows"), nb::arg("itemsize"), nb::arg("stream") = 0);
+      "indptr"_a, "indices"_a, "data"_a, "std"_a, "mask"_a, "clipper"_a, "nrows"_a, "itemsize"_a,
+      "stream"_a = 0);
   m.def(
       "dense_scale_center_diff",
       [](std::uintptr_t data, std::uintptr_t mean, std::uintptr_t std, std::uintptr_t mask,
@@ -96,8 +96,8 @@ NB_MODULE(_scale_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
       },
-      nb::arg("data"), nb::arg("mean"), nb::arg("std"), nb::arg("mask"), nb::arg("clipper"),
-      nb::arg("nrows"), nb::arg("ncols"), nb::arg("itemsize"), nb::arg("stream") = 0);
+      "data"_a, "mean"_a, "std"_a, "mask"_a, "clipper"_a, "nrows"_a, "ncols"_a, "itemsize"_a,
+      "stream"_a = 0);
   m.def(
       "dense_scale_diff",
       [](std::uintptr_t data, std::uintptr_t std, std::uintptr_t mask, double clipper,
@@ -111,6 +111,5 @@ NB_MODULE(_scale_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
       },
-      nb::arg("data"), nb::arg("std"), nb::arg("mask"), nb::arg("clipper"), nb::arg("nrows"),
-      nb::arg("ncols"), nb::arg("itemsize"), nb::arg("stream") = 0);
+      "data"_a, "std"_a, "mask"_a, "clipper"_a, "nrows"_a, "ncols"_a, "itemsize"_a, "stream"_a = 0);
 }

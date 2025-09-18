@@ -5,6 +5,7 @@
 #include "kernels_normalize.cuh"
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 template <typename T>
 static inline void launch_normalize(std::uintptr_t X, long long rows, long long cols,
@@ -26,5 +27,5 @@ NB_MODULE(_harmony_normalize_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("X"), nb::arg("rows"), nb::arg("cols"), nb::arg("itemsize"), nb::arg("stream") = 0);
+      "X"_a, "rows"_a, "cols"_a, "itemsize"_a, "stream"_a = 0);
 }

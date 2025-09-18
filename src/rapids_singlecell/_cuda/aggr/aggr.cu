@@ -3,6 +3,7 @@
 #include <cstdint>
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 #include "kernels_aggr.cuh"
 
@@ -150,15 +151,13 @@ static inline void launch_sparse_var(std::uintptr_t indptr, std::uintptr_t index
 }
 
 NB_MODULE(_aggr_cuda, m) {
-  m.def("sparse_aggr", &sparse_aggr_dispatch, nb::arg("indptr"), nb::arg("index"), nb::arg("data"),
-        nb::arg("out"), nb::arg("cats"), nb::arg("mask"), nb::arg("n_cells"), nb::arg("n_genes"),
-        nb::arg("n_groups"), nb::arg("is_csc"), nb::arg("dtype_itemsize"), nb::arg("stream") = 0);
-  m.def("dense_aggr", &dense_aggr_dispatch, nb::arg("data"), nb::arg("out"), nb::arg("cats"),
-        nb::arg("mask"), nb::arg("n_cells"), nb::arg("n_genes"), nb::arg("n_groups"),
-        nb::arg("is_fortran"), nb::arg("dtype_itemsize"), nb::arg("stream") = 0);
-  m.def("csr_to_coo", &csr_to_coo_dispatch, nb::arg("indptr"), nb::arg("index"), nb::arg("data"),
-        nb::arg("row"), nb::arg("col"), nb::arg("ndata"), nb::arg("cats"), nb::arg("mask"),
-        nb::arg("n_cells"), nb::arg("dtype_itemsize"), nb::arg("stream") = 0);
+  m.def("sparse_aggr", &sparse_aggr_dispatch, "indptr"_a, "index"_a, "data"_a, "out"_a, "cats"_a,
+        "mask"_a, "n_cells"_a, "n_genes"_a, "n_groups"_a, "is_csc"_a, "dtype_itemsize"_a,
+        "stream"_a = 0);
+  m.def("dense_aggr", &dense_aggr_dispatch, "data"_a, "out"_a, "cats"_a, "mask"_a, "n_cells"_a,
+        "n_genes"_a, "n_groups"_a, "is_fortran"_a, "dtype_itemsize"_a, "stream"_a = 0);
+  m.def("csr_to_coo", &csr_to_coo_dispatch, "indptr"_a, "index"_a, "data"_a, "row"_a, "col"_a,
+        "ndata"_a, "cats"_a, "mask"_a, "n_cells"_a, "dtype_itemsize"_a, "stream"_a = 0);
   m.def(
       "sparse_var",
       [](std::uintptr_t indptr, std::uintptr_t index, std::uintptr_t data, std::uintptr_t mean_data,
@@ -166,6 +165,6 @@ NB_MODULE(_aggr_cuda, m) {
         launch_sparse_var(indptr, index, data, mean_data, n_cells, dof, n_groups,
                           (cudaStream_t)stream);
       },
-      nb::arg("indptr"), nb::arg("index"), nb::arg("data"), nb::arg("mean_data"),
-      nb::arg("n_cells"), nb::arg("dof"), nb::arg("n_groups"), nb::arg("stream") = 0);
+      "indptr"_a, "index"_a, "data"_a, "mean_data"_a, "n_cells"_a, "dof"_a, "n_groups"_a,
+      "stream"_a = 0);
 }

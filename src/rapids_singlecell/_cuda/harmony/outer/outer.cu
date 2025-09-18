@@ -5,6 +5,7 @@
 #include "kernels_outer.cuh"
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 template <typename T>
 static inline void launch_outer(std::uintptr_t E, std::uintptr_t Pr_b, std::uintptr_t R_sum,
@@ -43,8 +44,8 @@ NB_MODULE(_harmony_outer_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("E"), nb::arg("Pr_b"), nb::arg("R_sum"), nb::arg("n_cats"), nb::arg("n_pcs"),
-      nb::arg("switcher"), nb::arg("itemsize"), nb::arg("stream") = 0);
+      "E"_a, "Pr_b"_a, "R_sum"_a, "n_cats"_a, "n_pcs"_a, "switcher"_a, "itemsize"_a,
+      "stream"_a = 0);
 
   m.def(
       "harmony_corr",
@@ -58,6 +59,5 @@ NB_MODULE(_harmony_outer_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("Z"), nb::arg("W"), nb::arg("cats"), nb::arg("R"), nb::arg("n_cells"),
-      nb::arg("n_pcs"), nb::arg("itemsize"), nb::arg("stream") = 0);
+      "Z"_a, "W"_a, "cats"_a, "R"_a, "n_cells"_a, "n_pcs"_a, "itemsize"_a, "stream"_a = 0);
 }

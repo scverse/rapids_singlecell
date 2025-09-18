@@ -5,6 +5,7 @@
 #include "kernels_pv.cuh"
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 static inline void launch_rev_cummin64(std::uintptr_t x, std::uintptr_t y, int n_rows, int m,
                                        cudaStream_t stream) {
@@ -20,5 +21,5 @@ NB_MODULE(_pv_cuda, m) {
       [](std::uintptr_t x, std::uintptr_t y, int n_rows, int m, std::uintptr_t stream) {
         launch_rev_cummin64(x, y, n_rows, m, (cudaStream_t)stream);
       },
-      nb::arg("x"), nb::arg("y"), nb::arg("n_rows"), nb::arg("m"), nb::arg("stream") = 0);
+      "x"_a, "y"_a, "n_rows"_a, "m"_a, "stream"_a = 0);
 }

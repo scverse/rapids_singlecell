@@ -5,6 +5,7 @@
 #include "kernels_norm.cuh"
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 template <typename T>
 static inline void launch_dense_row_scale(std::uintptr_t data_ptr, int nrows, int ncols,
@@ -51,8 +52,7 @@ NB_MODULE(_norm_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("data"), nb::arg("nrows"), nb::arg("ncols"), nb::arg("target_sum"),
-      nb::arg("itemsize"), nb::arg("stream") = 0);
+      "data"_a, "nrows"_a, "ncols"_a, "target_sum"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "mul_csr",
@@ -66,8 +66,7 @@ NB_MODULE(_norm_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("indptr"), nb::arg("data"), nb::arg("nrows"), nb::arg("target_sum"),
-      nb::arg("itemsize"), nb::arg("stream") = 0);
+      "indptr"_a, "data"_a, "nrows"_a, "target_sum"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "sum_major",
@@ -81,6 +80,5 @@ NB_MODULE(_norm_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("indptr"), nb::arg("data"), nb::arg("sums"), nb::arg("major"), nb::arg("itemsize"),
-      nb::arg("stream") = 0);
+      "indptr"_a, "data"_a, "sums"_a, "major"_a, "itemsize"_a, "stream"_a = 0);
 }

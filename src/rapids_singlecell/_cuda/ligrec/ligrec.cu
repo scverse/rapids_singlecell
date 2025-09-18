@@ -5,6 +5,7 @@
 #include "kernels_ligrec.cuh"
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 template <typename T>
 static inline void launch_sum_count_dense(std::uintptr_t data, std::uintptr_t clusters,
@@ -103,8 +104,8 @@ NB_MODULE(_ligrec_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("data"), nb::arg("clusters"), nb::arg("sum"), nb::arg("count"), nb::arg("rows"),
-      nb::arg("cols"), nb::arg("ncls"), nb::arg("itemsize"), nb::arg("stream") = 0);
+      "data"_a, "clusters"_a, "sum"_a, "count"_a, "rows"_a, "cols"_a, "ncls"_a, "itemsize"_a,
+      "stream"_a = 0);
 
   m.def(
       "sum_count_sparse",
@@ -121,9 +122,8 @@ NB_MODULE(_ligrec_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("indptr"), nb::arg("index"), nb::arg("data"), nb::arg("clusters"), nb::arg("sum"),
-      nb::arg("count"), nb::arg("rows"), nb::arg("ncls"), nb::arg("itemsize"),
-      nb::arg("stream") = 0);
+      "indptr"_a, "index"_a, "data"_a, "clusters"_a, "sum"_a, "count"_a, "rows"_a, "ncls"_a,
+      "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "mean_dense",
@@ -137,8 +137,7 @@ NB_MODULE(_ligrec_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("data"), nb::arg("clusters"), nb::arg("g"), nb::arg("rows"), nb::arg("cols"),
-      nb::arg("ncls"), nb::arg("itemsize"), nb::arg("stream") = 0);
+      "data"_a, "clusters"_a, "g"_a, "rows"_a, "cols"_a, "ncls"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "mean_sparse",
@@ -154,8 +153,8 @@ NB_MODULE(_ligrec_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("indptr"), nb::arg("index"), nb::arg("data"), nb::arg("clusters"), nb::arg("g"),
-      nb::arg("rows"), nb::arg("ncls"), nb::arg("itemsize"), nb::arg("stream") = 0);
+      "indptr"_a, "index"_a, "data"_a, "clusters"_a, "g"_a, "rows"_a, "ncls"_a, "itemsize"_a,
+      "stream"_a = 0);
 
   m.def(
       "elementwise_diff",
@@ -171,8 +170,7 @@ NB_MODULE(_ligrec_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("g"), nb::arg("total_counts"), nb::arg("n_genes"), nb::arg("n_clusters"),
-      nb::arg("itemsize"), nb::arg("stream") = 0);
+      "g"_a, "total_counts"_a, "n_genes"_a, "n_clusters"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "interaction",
@@ -189,9 +187,8 @@ NB_MODULE(_ligrec_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("interactions"), nb::arg("interaction_clusters"), nb::arg("mean"), nb::arg("res"),
-      nb::arg("mask"), nb::arg("g"), nb::arg("n_iter"), nb::arg("n_inter_clust"), nb::arg("ncls"),
-      nb::arg("itemsize"), nb::arg("stream") = 0);
+      "interactions"_a, "interaction_clusters"_a, "mean"_a, "res"_a, "mask"_a, "g"_a, "n_iter"_a,
+      "n_inter_clust"_a, "ncls"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "res_mean",
@@ -208,7 +205,6 @@ NB_MODULE(_ligrec_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("interactions"), nb::arg("interaction_clusters"), nb::arg("mean"),
-      nb::arg("res_mean"), nb::arg("n_inter"), nb::arg("n_inter_clust"), nb::arg("ncls"),
-      nb::arg("itemsize"), nb::arg("stream") = 0);
+      "interactions"_a, "interaction_clusters"_a, "mean"_a, "res_mean"_a, "n_inter"_a,
+      "n_inter_clust"_a, "ncls"_a, "itemsize"_a, "stream"_a = 0);
 }

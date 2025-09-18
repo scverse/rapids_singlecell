@@ -3,6 +3,7 @@
 #include <cstdint>
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 __global__ void auc_kernel(const int* __restrict__ ranks, int R, int C,
                            const int* __restrict__ cnct, const int* __restrict__ starts,
@@ -50,7 +51,6 @@ NB_MODULE(_aucell_cuda, m) {
         launch_auc(ranks, R, C, cnct, starts, lens, n_sets, n_up, max_aucs, es,
                    (cudaStream_t)stream);
       },
-      nb::arg("ranks"), nb::arg("R"), nb::arg("C"), nb::arg("cnct"), nb::arg("starts"),
-      nb::arg("lens"), nb::arg("n_sets"), nb::arg("n_up"), nb::arg("max_aucs"), nb::arg("es"),
-      nb::arg("stream") = 0);
+      "ranks"_a, "R"_a, "C"_a, "cnct"_a, "starts"_a, "lens"_a, "n_sets"_a, "n_up"_a, "max_aucs"_a,
+      "es"_a, "stream"_a = 0);
 }

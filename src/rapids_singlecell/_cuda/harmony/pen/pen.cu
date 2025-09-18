@@ -5,6 +5,7 @@
 #include "kernels_pen.cuh"
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 template <typename T>
 static inline void launch_pen(std::uintptr_t R, std::uintptr_t penalty, std::uintptr_t cats,
@@ -30,6 +31,5 @@ NB_MODULE(_harmony_pen_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("R"), nb::arg("penalty"), nb::arg("cats"), nb::arg("n_rows"), nb::arg("n_cols"),
-      nb::arg("itemsize"), nb::arg("stream") = 0);
+      "R"_a, "penalty"_a, "cats"_a, "n_rows"_a, "n_cols"_a, "itemsize"_a, "stream"_a = 0);
 }

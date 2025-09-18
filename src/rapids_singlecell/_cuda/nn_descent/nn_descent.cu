@@ -5,6 +5,7 @@
 #include "kernels_dist.cuh"
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 static inline void launch_sqeuclidean(std::uintptr_t data, std::uintptr_t out, std::uintptr_t pairs,
                                       long long n_samples, long long n_features,
@@ -44,22 +45,19 @@ NB_MODULE(_nn_descent_cuda, m) {
         launch_sqeuclidean(data, out, pairs, n_samples, n_features, n_neighbors,
                            (cudaStream_t)stream);
       },
-      nb::arg("data"), nb::arg("out"), nb::arg("pairs"), nb::arg("n_samples"),
-      nb::arg("n_features"), nb::arg("n_neighbors"), nb::arg("stream") = 0);
+      "data"_a, "out"_a, "pairs"_a, "n_samples"_a, "n_features"_a, "n_neighbors"_a, "stream"_a = 0);
   m.def(
       "cosine",
       [](std::uintptr_t data, std::uintptr_t out, std::uintptr_t pairs, long long n_samples,
          long long n_features, long long n_neighbors, std::uintptr_t stream) {
         launch_cosine(data, out, pairs, n_samples, n_features, n_neighbors, (cudaStream_t)stream);
       },
-      nb::arg("data"), nb::arg("out"), nb::arg("pairs"), nb::arg("n_samples"),
-      nb::arg("n_features"), nb::arg("n_neighbors"), nb::arg("stream") = 0);
+      "data"_a, "out"_a, "pairs"_a, "n_samples"_a, "n_features"_a, "n_neighbors"_a, "stream"_a = 0);
   m.def(
       "inner",
       [](std::uintptr_t data, std::uintptr_t out, std::uintptr_t pairs, long long n_samples,
          long long n_features, long long n_neighbors, std::uintptr_t stream) {
         launch_inner(data, out, pairs, n_samples, n_features, n_neighbors, (cudaStream_t)stream);
       },
-      nb::arg("data"), nb::arg("out"), nb::arg("pairs"), nb::arg("n_samples"),
-      nb::arg("n_features"), nb::arg("n_neighbors"), nb::arg("stream") = 0);
+      "data"_a, "out"_a, "pairs"_a, "n_samples"_a, "n_features"_a, "n_neighbors"_a, "stream"_a = 0);
 }

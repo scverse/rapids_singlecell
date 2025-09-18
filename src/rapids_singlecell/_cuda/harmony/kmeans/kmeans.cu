@@ -5,6 +5,7 @@
 #include "kernels_kmeans.cuh"
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 template <typename T>
 static inline void launch_kmeans_err(std::uintptr_t r, std::uintptr_t dot, std::size_t n,
@@ -28,6 +29,5 @@ NB_MODULE(_harmony_kmeans_cuda, m) {
           throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
         }
       },
-      nb::arg("r"), nb::arg("dot"), nb::arg("n"), nb::arg("out"), nb::arg("itemsize"),
-      nb::arg("stream") = 0);
+      "r"_a, "dot"_a, "n"_a, "out"_a, "itemsize"_a, "stream"_a = 0);
 }

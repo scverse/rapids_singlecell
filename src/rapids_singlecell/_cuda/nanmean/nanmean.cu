@@ -5,6 +5,7 @@
 #include "kernels_nanmean.cuh"
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 template <typename T>
 static inline void launch_nan_mean_minor(std::uintptr_t index, std::uintptr_t data,
@@ -43,8 +44,7 @@ NB_MODULE(_nanmean_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      nb::arg("index"), nb::arg("data"), nb::arg("means"), nb::arg("nans"), nb::arg("mask"),
-      nb::arg("nnz"), nb::arg("itemsize"), nb::arg("stream") = 0);
+      "index"_a, "data"_a, "means"_a, "nans"_a, "mask"_a, "nnz"_a, "itemsize"_a, "stream"_a = 0);
 
   m.def(
       "nan_mean_major",
@@ -60,7 +60,6 @@ NB_MODULE(_nanmean_cuda, m) {
         else
           throw nb::value_error("Unsupported itemsize");
       },
-      nb::arg("indptr"), nb::arg("index"), nb::arg("data"), nb::arg("means"), nb::arg("nans"),
-      nb::arg("mask"), nb::arg("major"), nb::arg("minor"), nb::arg("itemsize"),
-      nb::arg("stream") = 0);
+      "indptr"_a, "index"_a, "data"_a, "means"_a, "nans"_a, "mask"_a, "major"_a, "minor"_a,
+      "itemsize"_a, "stream"_a = 0);
 }

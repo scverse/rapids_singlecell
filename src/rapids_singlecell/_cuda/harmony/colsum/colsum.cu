@@ -5,6 +5,7 @@
 #include "kernels_colsum.cuh"
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 template <typename T>
 static inline void launch_colsum(std::uintptr_t A, std::uintptr_t out, std::size_t rows,
@@ -42,8 +43,7 @@ NB_MODULE(_harmony_colsum_cuda, m) {
           throw nb::value_error("Unsupported dtype_code (expected 0/1/2 or 4/8)");
         }
       },
-      nb::arg("A"), nb::arg("out"), nb::arg("rows"), nb::arg("cols"), nb::arg("dtype_code"),
-      nb::arg("stream") = 0);
+      "A"_a, "out"_a, "rows"_a, "cols"_a, "dtype_code"_a, "stream"_a = 0);
 
   m.def(
       "colsum_atomic",
@@ -59,6 +59,5 @@ NB_MODULE(_harmony_colsum_cuda, m) {
           throw nb::value_error("Unsupported dtype_code (expected 0/1/2 or 4/8)");
         }
       },
-      nb::arg("A"), nb::arg("out"), nb::arg("rows"), nb::arg("cols"), nb::arg("dtype_code"),
-      nb::arg("stream") = 0);
+      "A"_a, "out"_a, "rows"_a, "cols"_a, "dtype_code"_a, "stream"_a = 0);
 }

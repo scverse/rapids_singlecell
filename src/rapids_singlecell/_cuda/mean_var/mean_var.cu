@@ -6,6 +6,7 @@
 
 namespace nb = nanobind;
 using nb::handle;
+using namespace nb::literals;
 
 template <typename T>
 static inline void launch_mean_var_major(std::uintptr_t indptr_ptr, std::uintptr_t indices_ptr,
@@ -64,8 +65,8 @@ NB_MODULE(_mean_var_cuda, m) {
           throw nb::value_error("Unsupported itemsize for mean_var_major (expected 4 or 8)");
         }
       },
-      nb::arg("indptr"), nb::arg("indices"), nb::arg("data"), nb::arg("means"), nb::arg("vars"),
-      nb::arg("major"), nb::arg("minor"), nb::arg("itemsize"), nb::arg("stream") = 0);
+      "indptr"_a, "indices"_a, "data"_a, "means"_a, "vars"_a, "major"_a, "minor"_a, "itemsize"_a,
+      "stream"_a = 0);
   m.def(
       "mean_var_minor",
       [](std::uintptr_t indices, std::uintptr_t data, std::uintptr_t means, std::uintptr_t vars,
@@ -78,6 +79,5 @@ NB_MODULE(_mean_var_cuda, m) {
           throw nb::value_error("Unsupported itemsize for mean_var_minor (expected 4 or 8)");
         }
       },
-      nb::arg("indices"), nb::arg("data"), nb::arg("means"), nb::arg("vars"), nb::arg("nnz"),
-      nb::arg("itemsize"), nb::arg("stream") = 0);
+      "indices"_a, "data"_a, "means"_a, "vars"_a, "nnz"_a, "itemsize"_a, "stream"_a = 0);
 }

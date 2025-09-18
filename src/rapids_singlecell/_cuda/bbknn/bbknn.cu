@@ -5,6 +5,7 @@
 #include "kernels_bbknn.cuh"
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
 static inline void launch_find_top_k_per_row(std::uintptr_t data_ptr, std::uintptr_t indptr_ptr,
                                              int n_rows, int trim, std::uintptr_t vals_ptr,
@@ -39,8 +40,7 @@ NB_MODULE(_bbknn_cuda, m) {
          std::uintptr_t stream) {
         launch_find_top_k_per_row(data, indptr, n_rows, trim, vals, (cudaStream_t)stream);
       },
-      nb::arg("data"), nb::arg("indptr"), nb::arg("n_rows"), nb::arg("trim"), nb::arg("vals"),
-      nb::arg("stream") = 0);
+      "data"_a, "indptr"_a, "n_rows"_a, "trim"_a, "vals"_a, "stream"_a = 0);
 
   m.def(
       "cut_smaller",
@@ -48,6 +48,5 @@ NB_MODULE(_bbknn_cuda, m) {
          int n_rows, std::uintptr_t stream) {
         launch_cut_smaller(indptr, index, data, vals, n_rows, (cudaStream_t)stream);
       },
-      nb::arg("indptr"), nb::arg("index"), nb::arg("data"), nb::arg("vals"), nb::arg("n_rows"),
-      nb::arg("stream") = 0);
+      "indptr"_a, "index"_a, "data"_a, "vals"_a, "n_rows"_a, "stream"_a = 0);
 }
