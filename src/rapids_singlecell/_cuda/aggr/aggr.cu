@@ -151,13 +151,14 @@ static inline void launch_sparse_var(std::uintptr_t indptr, std::uintptr_t index
 }
 
 NB_MODULE(_aggr_cuda, m) {
-  m.def("sparse_aggr", &sparse_aggr_dispatch, "indptr"_a, "index"_a, "data"_a, "out"_a, "cats"_a,
-        "mask"_a, "n_cells"_a, "n_genes"_a, "n_groups"_a, "is_csc"_a, "dtype_itemsize"_a,
+  m.def("sparse_aggr", &sparse_aggr_dispatch, "indptr"_a, "index"_a, "data"_a, nb::kw_only(),
+        "out"_a, "cats"_a, "mask"_a, "n_cells"_a, "n_genes"_a, "n_groups"_a, "is_csc"_a,
+        "dtype_itemsize"_a, "stream"_a = 0);
+  m.def("dense_aggr", &dense_aggr_dispatch, "data"_a, nb::kw_only(), "out"_a, "cats"_a, "mask"_a,
+        "n_cells"_a, "n_genes"_a, "n_groups"_a, "is_fortran"_a, "dtype_itemsize"_a, "stream"_a = 0);
+  m.def("csr_to_coo", &csr_to_coo_dispatch, "indptr"_a, "index"_a, "data"_a, nb::kw_only(),
+        "out_row"_a, "out_col"_a, "out_data"_a, "cats"_a, "mask"_a, "n_cells"_a, "dtype_itemsize"_a,
         "stream"_a = 0);
-  m.def("dense_aggr", &dense_aggr_dispatch, "data"_a, "out"_a, "cats"_a, "mask"_a, "n_cells"_a,
-        "n_genes"_a, "n_groups"_a, "is_fortran"_a, "dtype_itemsize"_a, "stream"_a = 0);
-  m.def("csr_to_coo", &csr_to_coo_dispatch, "indptr"_a, "index"_a, "data"_a, "row"_a, "col"_a,
-        "ndata"_a, "cats"_a, "mask"_a, "n_cells"_a, "dtype_itemsize"_a, "stream"_a = 0);
   m.def(
       "sparse_var",
       [](std::uintptr_t indptr, std::uintptr_t index, std::uintptr_t data, std::uintptr_t mean_data,
@@ -165,6 +166,6 @@ NB_MODULE(_aggr_cuda, m) {
         launch_sparse_var(indptr, index, data, mean_data, n_cells, dof, n_groups,
                           (cudaStream_t)stream);
       },
-      "indptr"_a, "index"_a, "data"_a, "mean_data"_a, "n_cells"_a, "dof"_a, "n_groups"_a,
+      "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "means"_a, "n_cells"_a, "dof"_a, "n_groups"_a,
       "stream"_a = 0);
 }
