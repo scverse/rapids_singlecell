@@ -157,6 +157,12 @@ def neighbors(
 
             * 'nn_descent': Uses the NN-descent algorithm to approximate the k-nearest neighbors.
 
+            * 'all_neighbors': Uses the all-neighbors algorithm to approximate the k-nearest neighbors.
+
+            * 'mg_ivfflat': Uses the Multi-GPU inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
+
+            * 'mg_ivfpq': Combines Multi-GPU inverted file indexing with product quantization to encode sub-vectors of the dataset, facilitating faster distance computation.
+
         Please ensure that the chosen algorithm is compatible with your dataset and the specific requirements of your search problem.
     metric
         A known metric's name or a callable that returns a distance.
@@ -171,6 +177,16 @@ def neighbors(
         For 'nn_descent' algorithm, the following parameters can be specified:
         * 'intermediate_graph_degree': The degree of the intermediate graph. Default is None.
         It is recommended to set it to `>= 1.5 * n_neighbors`.
+        For 'all_neighbors' algorithm, the following parameters can be specified:
+        * 'algo': The algorithm to use. Valid options are: 'ivf_pq' and 'nn_descent'. Default is 'nn_descent'.
+        * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
+        * 'n_probes': Number of lists to probe during search. Default is 20. Higher values
+        increase accuracy but reduce speed.
+        For 'mg_ivfflat' and 'mg_ivfpq' algorithms, the following parameters can be specified:
+        * 'distribution_mode': The distribution mode to use. Valid options are: 'replicated' and 'distributed'. Default is 'replicated'.
+        * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
+        * 'n_probes': Number of lists to probe during search. Default is 20. Higher values
+        increase accuracy but reduce speed.
 
     key_added
         If not specified, the neighbors data is stored in .uns['neighbors'],

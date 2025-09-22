@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import itertools
 
+import cuvs
 import numpy as np
 import pytest
+from packaging.version import parse as parse_version
 from scanpy.datasets import pbmc68k_reduced
 
 import rapids_singlecell as rsc
@@ -29,6 +31,9 @@ def _calc_recall(distances, reference_distances, tolerance=0.9):
 
 @pytest.mark.parametrize("algo", ["mg_ivfflat", "mg_ivfpq"])
 def test_mg_neighbors(algo):
+    if parse_version(cuvs.__version__) <= parse_version("25.08"):
+        pytest.skip("Skipping Multi-GPU neighbors")
+
     if algo == "mg_ivfflat":
         other_algo = "ivfflat"
     else:
@@ -49,6 +54,8 @@ def test_mg_neighbors(algo):
 
 @pytest.mark.parametrize("algo", ["nn_descent", "ivfpq"])
 def test_all_neighbors(algo):
+    if parse_version(cuvs.__version__) <= parse_version("25.08"):
+        pytest.skip("Skipping All-Neighbors")
     adata = pbmc68k_reduced()
     n_rows = adata.shape[0]
     if algo == "ivfpq":
