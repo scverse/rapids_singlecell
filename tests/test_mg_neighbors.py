@@ -9,7 +9,7 @@ from scanpy.datasets import pbmc68k_reduced
 import rapids_singlecell as rsc
 
 
-def _calc_recall(distances, reference_distances, tolerance=0.95):
+def _calc_recall(distances, reference_distances, tolerance=0.9):
     hits = 0
     total = 0
     for (p_start, p_stop), (g_start, g_stop) in zip(

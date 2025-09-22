@@ -45,7 +45,7 @@ def _mg_ivf_flat_knn(
         merge_mode="merge_on_root_rank",
         n_probes=n_probes,
     )
-    distances, neighbors = mg_ivf_flat.search(search_params, index, X, k=k)
+    distances, neighbors = mg_ivf_flat.search(search_params, index, Y, k=k)
     distances = cp.asarray(distances)
     neighbors = cp.asarray(neighbors)
     return neighbors, distances
