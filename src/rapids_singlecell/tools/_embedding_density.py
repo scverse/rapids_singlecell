@@ -158,7 +158,7 @@ def _calc_density(x: cp.ndarray, y: cp.ndarray, batchsize: int):
     for batch in range(n_batches):
         start_idx = batch * batchsize
         stop_idx = min(batch * batchsize + batchsize, xy.shape[0])
-        z[start_idx:stop_idx] = kde.score_samples(xy[start_idx:stop_idx, :])
+        z[start_idx:stop_idx] = cp.array(kde.score_samples(xy[start_idx:stop_idx, :]))
     min_z = cp.min(z)
     max_z = cp.max(z)
 
