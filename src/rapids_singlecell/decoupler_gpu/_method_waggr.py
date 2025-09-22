@@ -30,15 +30,73 @@ def _ridx(
         idx = cp.array(idx)
     return idx
 
+# _wsum_kernel = cp.ReductionKernel(
+#     'T x, T w',  # Input parameters: data (x) and weights (w)
+#     'T out',     # Output parameter
+#     'x * w',     # map_expr: map each element to the product of value and weight
+#     'a + b',     # reduce_expr: sum the mapped values
+#     'out = a',   # post_map_expr: assign the final sum to the output
+#     '0',         # identity: initial value for the sum
+#     'wsum'
+# )
 
-def _wsum(x: cp.ndarray, w: cp.ndarray) -> float:
-    return float(cp.sum(x*w))
+_wsum_kernel = cp.RawKernel(
+    r"""
+extern "C" __global__ void matmul_kernel(const float* x, const float* w, float* C, int n_obs, int n_var, int n_src) {
+    // x is n_obs x n_var, w is n_var x n_src, C is n_obs x n_src
+    
+    // Get the row and column index of the output matrix C for this thread
+    const int row = blockIdx.y * blockDim.y + threadIdx.y;
+    const int src = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    if (row < n_obs && src < n_src) {
+        double sum = 0.0;  // Use double precision for accumulation
+        for (int k = 0; k < n_var; ++k) {
+            sum += (double)x[row * n_var + k] * (double)w[k * n_src + src];
+        }
+        C[row * n_src + src] = (float)sum;  // Convert back to float for output
+    }
+}
+""",
+    "matmul_kernel",
+)
 
+def _wsum(x: cp.ndarray, w: cp.ndarray) -> cp.ndarray:
+    n_obs, n_var = x.shape
+    n_var, n_src = w.shape
+    es = cp.zeros((n_obs, n_src), dtype=cp.float32)
+    
+    # Use 2D thread blocks for better performance
+    threads_per_block = (16, 16)  # 2D thread block: (x, y)
+    
+    # Calculate grid size to cover all output elements
+    grid_x = (n_src + threads_per_block[0] - 1) // threads_per_block[0]
+    grid_y = (n_obs + threads_per_block[1] - 1) // threads_per_block[1]
+    
+    _wsum_kernel((grid_x, grid_y), threads_per_block, (x.astype(cp.float32), w.astype(cp.float32), es, n_obs, n_var, n_src))
+    return es
+    # return _wsum_kernel(x,w.T, axis=1)
 
 def _wmean(x: cp.ndarray, w: cp.ndarray) -> cp.ndarray:
     agg = _wsum(x, w)
-    div: float = float(cp.sum(cp.abs(w)))
+    div = cp.sum(cp.abs(w), axis=0)
     return agg / div
+
+def _wsum_cp(x: cp.ndarray, w: cp.ndarray) -> cp.ndarray:
+    return x.dot(w)
+
+def _wmean_cp(x: cp.ndarray, w: cp.ndarray) -> cp.ndarray:
+    agg = _wsum_cp(x, w)
+    div = cp.sum(cp.abs(w), axis=0)
+    return agg / div
+
+# def _wsum(x: cp.ndarray, w: cp.ndarray) -> cp.ndarray:
+#     return cp.sum(x.dot(w), axis=1)
+
+# def _wmean(x: cp.ndarray, w: cp.ndarray) -> cp.ndarray:
+#     agg = _wsum(x, w)
+#     div = cp.sum(cp.abs(w), axis=0)
+#     return agg / div
 
 def _fun(
     f: Callable,
@@ -47,12 +105,14 @@ def _fun(
     def _f(mat, adj):
         nobs, nvar = mat.shape
         nvar, nsrc = adj.shape
-        es = cp.zeros((nobs, nsrc))
-        for i in range(nobs):
-            x = mat[i]
-            for j in range(nsrc):
-                w = adj[:, j]
-                es[i, j] = f(x, w)
+        # es = cp.zeros((nobs, nsrc))
+        
+        # for i in range(nobs):
+        #     x = mat[i]
+        #     for j in range(nsrc):
+        #         w = adj[:, j]
+        #         es[i, j] = f(x, w)
+        es = f(mat, adj)
         return es
 
     _f.__name__ = f.__name__
@@ -64,6 +124,8 @@ def _fun(
 _fun_dict = {
     "wsum": _wsum,
     "wmean": _wmean,
+    "wsum_cp": _wsum_cp,
+    "wmean_cp": _wmean_cp,
 }
 
 _cfuncs: dict = {}
@@ -91,11 +153,13 @@ def _validate_func(
     verbose: bool,
 ) -> None:
     fun = _validate_args(fun=fun, verbose=verbose)
-    x = cp.array([1.0, 2.0, 3.0])
-    w = cp.array([-1.0, 0.0, 2.0])
+    x = cp.array([[1.0, 2.0, 3.0],[4.0, 5.0, 6.0]])
+    w = cp.array([[-1.0, 0.0, 2.0],[3.0, 4.0, 5.0]]).T
     try:
         res = fun(x=x, w=w)
-        assert isinstance(res, int | float), "output of fun must be a single numerical value"
+        assert isinstance(res, cp.ndarray), "output of fun must be a cp.ndarray"
+        assert res.shape == (x.shape[0], w.shape[1]), "output of fun must be a cp.ndarray with shape (x.shape[0], w.shape[1])"
+        # assert isinstance(res, int | float), "output of fun must be a single numerical value"
     except Exception as err:
         raise ValueError(f"fun failed to run with test data: fun(x={x}), w={w}") from err
     m = f"waggr - using function {fun.__name__}"
@@ -113,33 +177,69 @@ def _perm(
     nobs, nvar = mat.shape
     nvar, nsrc = adj.shape
     times, nvar = idx.shape
-    null_dst = cp.zeros((nobs, nsrc, times))
-    pvals = cp.zeros((nobs, nsrc))
+    # null_dst = cp.zeros((nobs, nsrc, times))
+    # pvals = cp.zeros((nobs, nsrc))
+    es_abs = cp.abs(es)
+    # Initialize accumulators for statistics
+    sum_null = cp.zeros((nobs, nsrc), dtype=cp.float64)
+    sum_null_sq = cp.zeros((nobs, nsrc), dtype=cp.float64)
+    extreme_count = cp.zeros((nobs, nsrc), dtype=cp.int32)
     # Permute
     for i in range(times):
-        null_dst[:, :, i] = fun(mat[:, idx[i]], adj)
-        pvals += cp.abs(null_dst[:, :, i]) > cp.abs(es)
-    # Compute z-score
-    nes = cp.zeros(es.shape)
-    for i in range(nobs):
-        for j in range(nsrc):
-            e = es[i, j]
-            d = _std(null_dst[i, j, :], 1)
-            if d != 0.0:
-                n = (e - cp.mean(null_dst[i, j, :])) / d
-            else:
-                if e != 0.0:
-                    n = cp.inf
-                else:
-                    n = 0.0
-            nes[i, j] = n
+        # null_dst[:, :, i] = fun(mat[:, idx[i]], adj)
+        # pvals += cp.abs(null_dst[:, :, i]) > cp.abs(es)
+        mat_perm = mat[:, idx[i]]
+        # Apply the function
+        perm_result = fun(mat_perm, adj)
+        perm_result = perm_result.astype(cp.float64)  # Use double precision for accumulation
+        # Update running statistics
+        sum_null += perm_result
+        sum_null_sq += perm_result * perm_result
+        extreme_count += (cp.abs(perm_result) > es_abs).astype(cp.int32)
+        # Clean up intermediate results
+        del mat_perm, perm_result
+        
+    
+    # Compute final statistics
+    null_mean = sum_null / times
+    # Var(X) = E[X²] - (E[X])²
+    null_var = (sum_null_sq / times) - (null_mean * null_mean)
+    null_std = cp.sqrt(cp.maximum(null_var, 1e-10))
+    
+    # Compute NES
+    nes = cp.where(
+        null_std > 1e-10, 
+        (
+            es.astype(cp.float64) - null_mean) / null_std,
+            cp.where(cp.abs(es) > 1e-10, 
+            cp.sign(es.astype(cp.float64)) * 1e6, 
+            0.0
+        )
+    )
+    # # Compute z-score
+    # nes = cp.zeros(es.shape)
+    # for i in range(nobs):
+    #     for j in range(nsrc):
+    #         e = es[i, j]
+    #         d = _std(null_dst[i, j, :], 1)
+    #         if d != 0.0:
+    #             n = (e - cp.mean(null_dst[i, j, :])) / d
+    #         else:
+    #             if e != 0.0:
+    #                 n = cp.inf
+    #             else:
+    #                 n = 0.0
+    #         nes[i, j] = n
+    
     # Compute empirical p-value
+    pvals = extreme_count.astype(cp.float32)
     pvals = cp.where(pvals == 0.0, 1.0, pvals)
     pvals = cp.where(pvals == times, times - 1, pvals)
     pvals = pvals / times
-    pvals = cp.where(pvals >= 0.5, 1 - (pvals), pvals)
-    pvals = pvals * 2
-    return nes, pvals
+    pvals = cp.where(pvals >= 0.5, 1 - pvals, pvals)
+    pvals = pvals * 2  # Two-tailed test
+    
+    return nes.astype(cp.float32), pvals
 
 @docs.dedent
 def _func_waggr(
