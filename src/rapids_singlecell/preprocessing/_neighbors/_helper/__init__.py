@@ -5,9 +5,11 @@ from typing import TYPE_CHECKING
 
 import cuml.internals.logger as logger
 import cupy as cp
+import cuvs
 import numpy as np
 from cuml.manifold.simpl_set import fuzzy_simplicial_set
 from cupyx.scipy import sparse as cp_sparse
+from packaging.version import parse as parse_version
 from scipy import sparse as sc_sparse
 
 from rapids_singlecell._utils import _get_logger_level
@@ -21,6 +23,10 @@ def _compute_nlist(N):
     base = math.sqrt(N)
     next_pow2 = 2 ** math.ceil(math.log2(base))
     return int(next_pow2 * 2)
+
+
+def _cuvs_switch():
+    return parse_version(cuvs.__version__) > parse_version("24.10")
 
 
 def _check_neighbors_X(
