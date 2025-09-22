@@ -129,9 +129,7 @@ def embedding_density(
         embed_x = adata.obsm[f"X_{basis}"][:, components[0]]
         embed_y = adata.obsm[f"X_{basis}"][:, components[1]]
 
-        adata.obs[density_covariate] = _calc_density(
-            cp.array(embed_x), cp.array(embed_y), batchsize
-        )
+        adata.obs[density_covariate] = _calc_density(embed_x, embed_y, batchsize)
 
     # Reduce diffmap components for labeling
     # Note: plot_scatter takes care of correcting diffmap components
@@ -152,8 +150,8 @@ def _calc_density(x: cp.ndarray, y: cp.ndarray, batchsize: int):
     from cuml.neighbors import KernelDensity
 
     # Calculate the point density
-    xy = cp.vstack([x, y]).T
-    bandwidth = cp.power(xy.shape[0], (-1.0 / (xy.shape[1] + 4)))
+    xy = np.vstack([x, y]).T
+    bandwidth = np.power(xy.shape[0], (-1.0 / (xy.shape[1] + 4)))
     kde = KernelDensity(kernel="gaussian", bandwidth=bandwidth).fit(xy)
     z = cp.zeros(xy.shape[0])
     n_batches = math.ceil(xy.shape[0] / batchsize)
