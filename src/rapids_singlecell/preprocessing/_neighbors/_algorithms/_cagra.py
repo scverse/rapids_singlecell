@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
 import cupy as cp
+
+from rapids_singlecell.preprocessing._neighbors._helper import _cuvs_switch
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -19,11 +22,28 @@ def _cagra_knn(
     metric_kwds: Mapping,
     algorithm_kwds: Mapping,
 ) -> tuple[cp.ndarray, cp.ndarray]:
-    from cuvs.neighbors import cagra
+    if not _cuvs_switch():
+        try:
+            from pylibraft.neighbors import cagra
+        except ImportError:
+            raise ImportError(
+                "The 'cagra' module is not available in your current RAFT installation. "
+                "Please update RAFT to a version that supports 'cagra'."
+            )
+        from pylibraft.common import DeviceResources
 
-    resources = None
-    build_kwargs = {}
-    search_kwargs = {}
+        resources = DeviceResources()
+        build_kwargs = {"handle": resources}
+        search_kwargs = {"handle": resources}
+        warnings.warn(
+            "Using `pylibraft` for ANN was removed in RAFT 24.12 and is deprecated in rapids-singlecell. Please update RAPIDS to use `cuvs` for ANN."
+        )
+    else:
+        from cuvs.neighbors import cagra
+
+        resources = None
+        build_kwargs = {}
+        search_kwargs = {}
 
     if metric == "euclidean":
         metric_to_use = "sqeuclidean"
