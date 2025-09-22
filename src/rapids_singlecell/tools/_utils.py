@@ -14,7 +14,7 @@ def _choose_representation(adata, use_rep=None, n_pcs=None):
     if use_rep is None and n_pcs == 0:  # backwards compat for specifying `.X`
         use_rep = "X"
     if use_rep is None:
-        if adata.n_vars > 50:
+        if adata.n_vars > 50 or adata.X is None:
             if "X_pca" in adata.obsm.keys():
                 if n_pcs is not None and n_pcs > adata.obsm["X_pca"].shape[1]:
                     raise ValueError(
