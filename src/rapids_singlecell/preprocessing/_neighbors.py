@@ -261,20 +261,39 @@ def _nn_descent_knn(
         dataset=X,
     )
     neighbors = cp.array(idx.graph).astype(cp.uint32)
-    if metric == "euclidean" or metric == "sqeuclidean":
-        from ._kernels._nn_descent import calc_distance_kernel as dist_func
-    elif metric == "cosine":
-        from ._kernels._nn_descent import calc_distance_kernel_cos as dist_func
-    elif metric == "inner_product":
-        from ._kernels._nn_descent import calc_distance_kernel_inner as dist_func
-    grid_size = (X.shape[0] + 32 - 1) // 32
-    distances = cp.zeros((X.shape[0], neighbors.shape[1]), dtype=cp.float32)
+    from rapids_singlecell._cuda import _nn_descent_cuda as _nd
 
-    dist_func(
-        (grid_size,),
-        (32,),
-        (X, distances, neighbors, X.shape[0], X.shape[1], neighbors.shape[1]),
-    )
+    distances = cp.zeros((X.shape[0], neighbors.shape[1]), dtype=cp.float32)
+    if metric == "euclidean" or metric == "sqeuclidean":
+        _nd.sqeuclidean(
+            X.data.ptr,
+            out=distances.data.ptr,
+            pairs=neighbors.data.ptr,
+            n_samples=X.shape[0],
+            n_features=X.shape[1],
+            n_neighbors=neighbors.shape[1],
+            stream=cp.cuda.get_current_stream().ptr,
+        )
+    elif metric == "cosine":
+        _nd.cosine(
+            X.data.ptr,
+            out=distances.data.ptr,
+            pairs=neighbors.data.ptr,
+            n_samples=X.shape[0],
+            n_features=X.shape[1],
+            n_neighbors=neighbors.shape[1],
+            stream=cp.cuda.get_current_stream().ptr,
+        )
+    elif metric == "inner_product":
+        _nd.inner(
+            X.data.ptr,
+            out=distances.data.ptr,
+            pairs=neighbors.data.ptr,
+            n_samples=X.shape[0],
+            n_features=X.shape[1],
+            n_neighbors=neighbors.shape[1],
+            stream=cp.cuda.get_current_stream().ptr,
+        )
     if metric == "euclidean":
         distances = cp.sqrt(distances)
     if metric in ("cosine", "euclidean", "sqeuclidean"):
@@ -399,28 +418,29 @@ def _get_connectivities(
 
 
 def _trimming(cnts: cp_sparse.csr_matrix, trim: int) -> cp_sparse.csr_matrix:
-    from ._kernels._bbknn import cut_smaller_func, find_top_k_per_row_kernel
+    from rapids_singlecell._cuda import _bbknn_cuda as _bb
 
     n_rows = cnts.shape[0]
     vals_gpu = cp.zeros(n_rows, dtype=cp.float32)
 
-    threads_per_block = 64
-    blocks_per_grid = (n_rows + threads_per_block - 1) // threads_per_block
-
-    shared_mem_per_thread = trim * cp.dtype(cp.float32).itemsize
-    shared_mem_size = threads_per_block * shared_mem_per_thread
-
-    find_top_k_per_row_kernel(
-        (blocks_per_grid,),
-        (threads_per_block,),
-        (cnts.data, cnts.indptr, cnts.shape[0], trim, vals_gpu),
-        shared_mem=shared_mem_size,
+    _bb.find_top_k_per_row(
+        cnts.data.data.ptr,
+        cnts.indptr.data.ptr,
+        n_rows=cnts.shape[0],
+        trim=int(trim),
+        vals=vals_gpu.data.ptr,
+        stream=cp.cuda.get_current_stream().ptr,
     )
-    cut_smaller_func(
-        (cnts.shape[0],),
-        (64,),
-        (cnts.indptr, cnts.indices, cnts.data, vals_gpu, cnts.shape[0]),
+
+    _bb.cut_smaller(
+        cnts.indptr.data.ptr,
+        cnts.indices.data.ptr,
+        cnts.data.data.ptr,
+        vals=vals_gpu.data.ptr,
+        n_rows=cnts.shape[0],
+        stream=cp.cuda.get_current_stream().ptr,
     )
+
     cnts.eliminate_zeros()
     return cnts
 
