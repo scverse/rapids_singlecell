@@ -81,3 +81,25 @@ def test_all_neighbors(algo):
     distances = adata.obsp["distances"].copy()
     rsc.pp.neighbors(adata, n_pcs=50, n_neighbors=15, algorithm=algo)
     _calc_recall(distances, adata.obsp["distances"], tolerance=tolerance)
+
+
+@pytest.mark.parametrize("algo", ["mg_ivfflat", "mg_ivfpq"])
+def test_mg_bbknn(algo):
+    if parse_version(cuvs.__version__) <= parse_version("25.08"):
+        pytest.skip("Skipping Multi-GPU neighbors")
+
+    if algo == "mg_ivfflat":
+        other_algo = "ivfflat"
+    else:
+        other_algo = "ivfpq"
+
+    adata = pbmc68k_reduced()
+    n_rows = adata.shape[0]
+    rsc.pp.bbknn(adata, algorithm=algo, batch_key="phase")
+
+    assert adata.obsp["distances"].shape == (n_rows, n_rows)
+    assert adata.obsp["connectivities"].shape == (n_rows, n_rows)
+    distances = adata.obsp["distances"].copy()
+    rsc.pp.bbknn(adata, batch_key="phase", algorithm=other_algo)
+    np.testing.assert_array_equal(adata.obsp["distances"].indptr, distances.indptr)
+    _calc_recall(distances, adata.obsp["distances"])
