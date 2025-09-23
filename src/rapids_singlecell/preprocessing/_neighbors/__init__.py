@@ -147,21 +147,29 @@ def neighbors(
         A numpy random seed.
     algorithm
         The query algorithm to use. Valid options are:
-            * 'brute': Brute-force search that computes distances to all data points, guaranteeing exact results.
+            `'brute'`
+                Brute-force search that computes distances to all data points, guaranteeing exact results.
 
-            * 'ivfflat': Uses inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
+            `'ivfflat'`
+                Uses inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
 
-            * 'ivfpq': Combines inverted file indexing with product quantization to encode sub-vectors of the dataset, facilitating faster distance computation.
+            `'ivfpq'`
+                Combines inverted file indexing with product quantization to encode sub-vectors of the dataset, facilitating faster distance computation.
 
-            * 'cagra': Employs the Compressed, Accurate Graph-based search to quickly find nearest neighbors by traversing a graph structure.
+            `'cagra'`
+                Employs the Compressed, Accurate Graph-based search to quickly find nearest neighbors by traversing a graph structure.
 
-            * 'nn_descent': Uses the NN-descent algorithm to approximate the k-nearest neighbors.
+            `'nn_descent'`
+                Uses the NN-descent algorithm to approximate the k-nearest neighbors.
 
-            * 'all_neighbors': Uses the all-neighbors algorithm to approximate the k-nearest neighbors.
+            `'all_neighbors'`
+                Uses the all-neighbors algorithm to approximate the k-nearest neighbors.
 
-            * 'mg_ivfflat': Uses the Multi-GPU inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
+            `'mg_ivfflat'`
+                Uses the Multi-GPU inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
 
-            * 'mg_ivfpq': Combines Multi-GPU inverted file indexing with product quantization to encode sub-vectors of the dataset, facilitating faster distance computation.
+            `'mg_ivfpq'`
+                Combines Multi-GPU inverted file indexing with product quantization to encode sub-vectors of the dataset, facilitating faster distance computation.
 
         Please ensure that the chosen algorithm is compatible with your dataset and the specific requirements of your search problem.
     metric
@@ -170,19 +178,19 @@ def neighbors(
         Options for the metric.
     algorithm_kwds
         Options for the algorithm.
-        For 'ivfflat' and 'ivfpq' algorithms, the following parameters can be specified:
+        For `ivfflat` and `ivfpq` algorithms, the following parameters can be specified:
 
         * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
 
         * 'n_probes': Number of lists to probe during search. Default is 20. Higher values
         increase accuracy but reduce speed.
 
-        For 'nn_descent' algorithm, the following parameters can be specified:
+        For `nn_descent` algorithm, the following parameters can be specified:
 
         * 'intermediate_graph_degree': The degree of the intermediate graph. Default is None.
         It is recommended to set it to `>= 1.5 * n_neighbors`.
 
-        For 'all_neighbors' algorithm, the following parameters can be specified:
+        For `all_neighbors` algorithm, the following parameters can be specified:
 
         * 'algo': The algorithm to use. Valid options are: 'ivf_pq' and 'nn_descent'. Default is 'nn_descent'.
 
@@ -190,14 +198,14 @@ def neighbors(
 
         * 'overlap_factor': Number of clusters each point is assigned to (must be < n_clusters). Default is 1.
 
-        * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)). Only available for 'ivf_pq' algorithm.
+        * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)). Only available for `ivf_pq` algorithm.
 
         * 'n_probes': Number of lists to probe during search. Default is 20. Higher values
-        increase accuracy but reduce speed. Only available for 'ivf_pq' algorithm.
+        increase accuracy but reduce speed. Only available for `ivf_pq` algorithm.
 
-        * 'intermediate_graph_degree': The degree of the intermediate graph. Default is None. It is recommended to set it to `>= 1.5 * n_neighbors`. Only available for 'nn_descent' algorithm.
+        * 'intermediate_graph_degree': The degree of the intermediate graph. Default is None. It is recommended to set it to `>= 1.5 * n_neighbors`. Only available for `nn_descent` algorithm.
 
-        For 'mg_ivfflat' and 'mg_ivfpq' algorithms, the following parameters can be specified:
+        For `mg_ivfflat` and `mg_ivfpq` algorithms, the following parameters can be specified:
 
         * 'distribution_mode': The distribution mode to use. Valid options are: 'replicated' and 'shared'. Default is 'replicated'.
 
@@ -367,14 +375,14 @@ def bbknn(
     metric_kwds
         Options for the metric.
     algorithm_kwds
-        Options for the algorithm. For 'ivfflat' and 'ivfpq' algorithms, the following
+        Options for the algorithm. For `ivfflat` and `ivfpq` algorithms, the following
         parameters can be specified:
 
         * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
         * 'nprobes': Number of lists to probe during search. Default is 1. Higher values
           increase accuracy but reduce speed.
 
-        For 'mg_ivfflat' and 'mg_ivfpq' algorithms, the following parameters can be specified:
+        For `mg_ivfflat` and `mg_ivfpq` algorithms, the following parameters can be specified:
 
         * 'distribution_mode': The distribution mode to use. Valid options are: 'replicated' and 'shared'. Default is 'replicated'.
 
