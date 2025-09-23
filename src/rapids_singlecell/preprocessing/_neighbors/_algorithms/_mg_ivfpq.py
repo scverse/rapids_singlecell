@@ -9,12 +9,14 @@ from rapids_singlecell.preprocessing._neighbors._helper import _compute_nlist
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    import numpy as np
+
     from rapids_singlecell.preprocessing._neighbors import _Metrics
 
 
 def _mg_ivf_pq_knn(
-    X: cp.ndarray,
-    Y: cp.ndarray,
+    X: np.ndarray,
+    Y: np.ndarray,
     k: int,
     *,
     metric: _Metrics,

@@ -9,12 +9,14 @@ from rapids_singlecell.preprocessing._neighbors._helper import _compute_nlist
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    import numpy as np
+
     from rapids_singlecell.preprocessing._neighbors import _Metrics
 
 
 def _mg_ivf_flat_knn(
-    X: cp.ndarray,
-    Y: cp.ndarray,
+    X: np.ndarray,
+    Y: np.ndarray,
     k: int,
     *,
     metric: _Metrics,
@@ -29,6 +31,7 @@ def _mg_ivf_flat_knn(
             "Please update your cuvs installation."
         )
     distribution_mode = algorithm_kwds.get("distribution_mode", "replicated")
+    assert distribution_mode in ["replicated", "shared"], "Invalid distribution mode"
     n_lists = algorithm_kwds.get("n_lists", _compute_nlist(X.shape[0]))
     n_probes = algorithm_kwds.get("n_probes", 20)
     # Build multi-GPU index

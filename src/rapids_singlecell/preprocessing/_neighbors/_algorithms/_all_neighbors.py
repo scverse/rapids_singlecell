@@ -14,8 +14,8 @@ if TYPE_CHECKING:
 
 
 def _all_neighbors_knn(
-    X: cp.ndarray,
-    Y: cp.ndarray,
+    X: np.ndarray,
+    Y: np.ndarray,
     k: int,
     *,
     metric: _Metrics,
@@ -71,7 +71,7 @@ def _all_neighbors_knn(
     neighbors = cp.zeros([X.shape[0], k], dtype=np.int64)
     distances = cp.zeros([X.shape[0], k], dtype=np.float32)
 
-    neighbors, distances = all_neighbors.build(
+    all_neighbors.build(
         dataset=X,
         k=k,
         params=build_params,

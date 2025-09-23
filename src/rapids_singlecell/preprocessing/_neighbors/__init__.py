@@ -169,22 +169,40 @@ def neighbors(
     metric_kwds
         Options for the metric.
     algorithm_kwds
-        Options for the algorithm. For 'ivfflat' and 'ivfpq' algorithms, the following
-        parameters can be specified:
+        Options for the algorithm.
+        For 'ivfflat' and 'ivfpq' algorithms, the following parameters can be specified:
+
         * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
+
         * 'n_probes': Number of lists to probe during search. Default is 20. Higher values
         increase accuracy but reduce speed.
+
         For 'nn_descent' algorithm, the following parameters can be specified:
+
         * 'intermediate_graph_degree': The degree of the intermediate graph. Default is None.
         It is recommended to set it to `>= 1.5 * n_neighbors`.
+
         For 'all_neighbors' algorithm, the following parameters can be specified:
+
         * 'algo': The algorithm to use. Valid options are: 'ivf_pq' and 'nn_descent'. Default is 'nn_descent'.
-        * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
+
+        * 'n_clusters': Number of clusters/batches to partition the dataset into (> overlap_factor). Default is number of GPUs.
+
+        * 'overlap_factor': Number of clusters each point is assigned to (must be < n_clusters). Default is 1.
+
+        * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)). Only available for 'ivf_pq' algorithm.
+
         * 'n_probes': Number of lists to probe during search. Default is 20. Higher values
-        increase accuracy but reduce speed.
+        increase accuracy but reduce speed. Only available for 'ivf_pq' algorithm.
+
+        * 'intermediate_graph_degree': The degree of the intermediate graph. Default is None. It is recommended to set it to `>= 1.5 * n_neighbors`. Only available for 'nn_descent' algorithm.
+
         For 'mg_ivfflat' and 'mg_ivfpq' algorithms, the following parameters can be specified:
-        * 'distribution_mode': The distribution mode to use. Valid options are: 'replicated' and 'distributed'. Default is 'replicated'.
+
+        * 'distribution_mode': The distribution mode to use. Valid options are: 'replicated' and 'shared'. Default is 'replicated'.
+
         * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
+
         * 'n_probes': Number of lists to probe during search. Default is 20. Higher values
         increase accuracy but reduce speed.
 
@@ -337,6 +355,12 @@ def bbknn(
         `'cagra'`
             Employs the Compressed, Accurate Graph-based search to quickly find nearest neighbors by traversing a graph structure.
 
+        `'mg_ivfflat'`
+            Uses the Multi-GPU inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
+
+        `'mg_ivfpq'`
+            Combines Multi-GPU inverted file indexing with product quantization to encode sub-vectors of the dataset, facilitating faster distance computation.
+
         Please ensure that the chosen algorithm is compatible with your dataset and the specific requirements of your search problem.
     metric
         A known metric's name or a callable that returns a distance.
@@ -349,6 +373,16 @@ def bbknn(
         * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
         * 'nprobes': Number of lists to probe during search. Default is 1. Higher values
           increase accuracy but reduce speed.
+
+        For 'mg_ivfflat' and 'mg_ivfpq' algorithms, the following parameters can be specified:
+
+        * 'distribution_mode': The distribution mode to use. Valid options are: 'replicated' and 'shared'. Default is 'replicated'.
+
+        * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
+
+        * 'n_probes': Number of lists to probe during search. Default is 20. Higher values
+        increase accuracy but reduce speed.
+
     trim
         Trim the neighbours of each cell to these many top connectivities.
         May help with population independence and improve the tidiness of clustering.
