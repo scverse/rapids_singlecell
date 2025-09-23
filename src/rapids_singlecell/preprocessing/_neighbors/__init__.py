@@ -200,9 +200,6 @@ def neighbors(
 
         * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)). Only available for `ivf_pq` algorithm.
 
-        * 'n_probes': Number of lists to probe during search. Default is 20. Higher values
-        increase accuracy but reduce speed. Only available for `ivf_pq` algorithm.
-
         * 'intermediate_graph_degree': The degree of the intermediate graph. Default is None. It is recommended to set it to `>= 1.5 * n_neighbors`. Only available for `nn_descent` algorithm.
 
         For `mg_ivfflat` and `mg_ivfpq` algorithms, the following parameters can be specified:
