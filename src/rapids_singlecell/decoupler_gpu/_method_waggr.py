@@ -97,15 +97,6 @@ def _fun(
     verbose: bool = False,
 ):
     def _f(mat, adj):
-        nobs, nvar = mat.shape
-        nvar, nsrc = adj.shape
-        # es = cp.zeros((nobs, nsrc))
-        
-        # for i in range(nobs):
-        #     x = mat[i]
-        #     for j in range(nsrc):
-        #         w = adj[:, j]
-        #         es[i, j] = f(x, w)
         es = f(mat, adj)
         return es
 

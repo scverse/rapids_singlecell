@@ -17,8 +17,7 @@ def test_funcs(rng):
 
 def test_wsum_wmean(mat, adjmat):
     
-    # Test with the actual test data
-    print("\n=== Testing with actual test data ===")
+    print("\n=== Testing with test data ===")
     X, obs, var = mat
     X = cp.array(X, dtype=cp.float32)
     adjmat = cp.array(adjmat, dtype=cp.float32)
@@ -28,7 +27,7 @@ def test_wsum_wmean(mat, adjmat):
     print(f"X min/max: {cp.min(X):.6f} / {cp.max(X):.6f}")
     print(f"adjmat min/max: {cp.min(adjmat):.6f} / {cp.max(adjmat):.6f}")
     
-    # Test _wsum with actual data
+    # Test _wsum
     result_actual = dc._method_waggr._wsum(X, adjmat)
     expected_actual = X @ adjmat
     
@@ -41,7 +40,7 @@ def test_wsum_wmean(mat, adjmat):
 
     assert is_close_actual, "_wsum test failed"
 
-    # Test _wmean with actual data
+    # Test _wmean
     result_wmean = dc._method_waggr._wmean(X, adjmat)
     div = cp.sum(cp.abs(adjmat), axis=0)
     expected_wmean = expected_actual / div
