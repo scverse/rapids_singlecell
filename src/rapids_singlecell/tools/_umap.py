@@ -159,9 +159,10 @@ def umap(
     n_epochs = (
         500 if maxiter is None else maxiter
     )  # 0 is not a valid value for rapids, unlike original umap
-
+    if neighbors["connectivities"].nnz > np.iinfo(np.int32).max:
+        use_umap = True
     n_obs = adata.shape[0]
-    if parse_version(cuml.__version__) < parse_version("24.10"):
+    if parse_version(cuml.__version__) < parse_version("24.10") or use_umap:
         # `simplicial_set_embedding` is bugged in cuml<24.10. This is why we use `UMAP` instead.
         n_neighbors = neigh_params["n_neighbors"]
         if neigh_params.get("method") == "rapids":

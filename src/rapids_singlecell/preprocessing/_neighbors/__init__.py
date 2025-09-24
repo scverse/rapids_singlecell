@@ -8,6 +8,7 @@ import cuml.internals.logger as logger
 import cupy as cp
 import numpy as np
 from cupyx.scipy import sparse as cp_sparse
+from scipy import sparse as sc_sparse
 
 from rapids_singlecell.preprocessing._neighbors._algorithms._all_neighbors import (
     _all_neighbors_knn,
@@ -263,9 +264,16 @@ def neighbors(
 
     n_nonzero = n_obs * n_neighbors
     rowptr = cp.arange(0, n_nonzero + 1, n_neighbors)
-    distances = cp_sparse.csr_matrix(
-        (cp.ravel(knn_dist), cp.ravel(knn_indices), rowptr), shape=(n_obs, n_obs)
-    )
+    if n_nonzero >= np.iinfo(np.int32).max:
+        distances = sc_sparse.csr_matrix(
+            (cp.ravel(knn_dist).get(), cp.ravel(knn_indices).get(), rowptr.get()),
+            shape=(n_obs, n_obs),
+        )
+    else:
+        distances = cp_sparse.csr_matrix(
+            (cp.ravel(knn_dist), cp.ravel(knn_indices), rowptr), shape=(n_obs, n_obs)
+        )
+        distances = distances.get()
 
     connectivities = _get_connectivities(
         n_neighbors=n_neighbors,
@@ -275,8 +283,10 @@ def neighbors(
         knn_indices=knn_indices,
         knn_dist=knn_dist,
     )
-    connectivities = connectivities.tocsr().get()
-    distances = distances.get()
+    if connectivities.nnz >= np.iinfo(np.int32).max:
+        connectivities = connectivities.get().tocsr()
+    else:
+        connectivities = connectivities.tocsr().get()
     if key_added is None:
         key_added = "neighbors"
         conns_key = "connectivities"
@@ -471,9 +481,17 @@ def bbknn(
 
     n_nonzero = n_obs * total_neighbors
     rowptr = cp.arange(0, n_nonzero + 1, total_neighbors)
-    distances = cp_sparse.csr_matrix(
-        (cp.ravel(knn_dist), cp.ravel(knn_indices), rowptr), shape=(n_obs, n_obs)
-    )
+    if rowptr.max() >= np.iinfo(np.int32).max:
+        distances = sc_sparse.csr_matrix(
+            (cp.ravel(knn_dist).get(), cp.ravel(knn_indices).get(), rowptr.get()),
+            shape=(n_obs, n_obs),
+        )
+    else:
+        distances = cp_sparse.csr_matrix(
+            (cp.ravel(knn_dist), cp.ravel(knn_indices), rowptr), shape=(n_obs, n_obs)
+        )
+        distances = distances.get()
+
     connectivities = _get_connectivities(
         total_neighbors,
         n_obs=n_obs,
@@ -490,7 +508,6 @@ def bbknn(
         connectivities = _trimming(connectivities, trim)
 
     connectivities = connectivities.get()
-    distances = distances.get()
     if key_added is None:
         key_added = "neighbors"
         conns_key = "connectivities"
