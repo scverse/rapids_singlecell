@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import cupy as cp
 import numpy as np
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from rapids_singlecell.decoupler_gpu._helper._docs import docs
 from rapids_singlecell.decoupler_gpu._helper._log import _log
@@ -98,6 +101,7 @@ def _wmean(x: cp.ndarray, w: cp.ndarray) -> cp.ndarray:
 
 def _fun(
     f: Callable,
+    *,  # keyword-only arguments after this
     verbose: bool = False,
 ):
     def _f(mat, adj):
@@ -123,6 +127,7 @@ _cfuncs: dict = {}
 
 def _validate_args(
     fun: Callable,
+    *,  # keyword-only arguments after this
     verbose: bool,
 ) -> Callable:
     args = inspect.signature(fun).parameters
@@ -143,6 +148,7 @@ def _validate_args(
 
 def _validate_func(
     fun: Callable,
+    *,  # keyword-only arguments after this
     verbose: bool,
 ) -> None:
     fun = _validate_args(fun=fun, verbose=verbose)
@@ -224,6 +230,7 @@ def _func_waggr(
     mat: cp.ndarray,
     adj: cp.ndarray,
     fun: str | Callable = "wmean",
+    *,  # keyword-only arguments after this
     times: int | float = 1000,
     seed: int | float = 42,
     verbose: bool = False,

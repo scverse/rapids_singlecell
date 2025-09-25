@@ -8,8 +8,8 @@ import rapids_singlecell.decoupler_gpu as dc
 
 
 def test_funcs(rng):
-    x = cp.array([[1, 2, 3, 4]], dtype=float)
-    w = cp.array([rng.random(x.size)], dtype=float)
+    x = cp.array([[1, 2, 3, 4]], dtype=cp.float32)
+    w = cp.array([rng.random(x.size)], dtype=cp.float32).T
     es = dc._method_waggr._wsum(x=x, w=w)
     assert isinstance(es, cp.ndarray)
     es = dc._method_waggr._wmean(x=x, w=w)
