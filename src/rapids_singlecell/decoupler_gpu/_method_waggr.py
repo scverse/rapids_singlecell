@@ -248,7 +248,7 @@ def _func_waggr(
     - :math:`ES_{rand}` are the enrichment scores of the random permutations
     - :math:`P` is the total number of permutations
 
-    Additionaly, :math:`ES` is updated to a normalized enrichment score :math:`NES`.
+    Additionally, :math:`ES` is updated to a normalized enrichment score :math:`NES`.
 
     .. math::
 
@@ -265,7 +265,7 @@ def _func_waggr(
 
     fun
         Function to compute enrichment statistic from omics readouts (``x``) and feature weights (``w``).
-        Provided function must contain ``x`` and ``w`` arguments and ouput a single float.
+        Provided function must contain ``x`` and ``w`` arguments and output a single float.
         By default, 'wmean' and 'wsum' are implemented.
     %(times)s
     %(seed)s
