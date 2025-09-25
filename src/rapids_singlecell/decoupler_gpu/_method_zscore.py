@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import cupy as cp
 import numpy as np
-
 from cupyx.scipy.special import erfc
+
 from rapids_singlecell.decoupler_gpu._helper._docs import docs
 from rapids_singlecell.decoupler_gpu._helper._log import _log
 from rapids_singlecell.decoupler_gpu._helper._Method import Method, MethodMeta
@@ -14,7 +14,7 @@ def _func_zscore(
     mat: cp.ndarray,
     adj: cp.ndarray,
     flavor: str = "RoKAI",
-    verbose: bool = False, 
+    verbose: bool = False,
 ) -> tuple[cp.ndarray, cp.ndarray]:
     r"""
     Z-score (ZSCORE) :cite:`zscore`.
@@ -69,8 +69,10 @@ def _func_zscore(
         adata, net = dc.ds.toy()
         rsc.dcg.zscore(adata, net, tmin=3)
     """
-    
-    assert isinstance(flavor, str) and flavor in ["KSEA", "RoKAI"], "flavor must be str and KSEA or RoKAI"
+
+    assert isinstance(flavor, str) and flavor in ["KSEA", "RoKAI"], (
+        "flavor must be str and KSEA or RoKAI"
+    )
     nobs, nvar = mat.shape
     nvar, nsrc = adj.shape
     m = f"zscore - calculating {nsrc} scores with flavor={flavor}"
@@ -86,6 +88,7 @@ def _func_zscore(
     pv = erfc(cp.abs(es) / cp.sqrt(2.0))
     return es.get(), pv.get()
 
+
 _zscore = MethodMeta(
     name="zscore",
     desc="Z-score (ZSCORE)",
@@ -98,8 +101,3 @@ _zscore = MethodMeta(
     reference="https://doi.org/10.1038/s41467-021-21211-6",
 )
 zscore = Method(_method=_zscore)
-
-
-
-   
-   
