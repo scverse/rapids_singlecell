@@ -29,7 +29,7 @@ from rmm.allocators.cupy import rmm_cupy_allocator
 
 def set_mem_pool():
     # Prefer pool allocator for performance and NVLink (managed memory can degrade P2P)
-    rmm.reinitialize(managed_memory=False, pool_allocator=True)
+    rmm.reinitialize(managed_memory=True, pool_allocator=False)
     cp.cuda.set_allocator(rmm_cupy_allocator)
 
 client.run(set_mem_pool)
