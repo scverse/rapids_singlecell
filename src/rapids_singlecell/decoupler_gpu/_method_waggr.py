@@ -1,13 +1,15 @@
 from __future__ import annotations
+
 import inspect
 from collections.abc import Callable
 
 import cupy as cp
 import numpy as np
-from numba import cuda
+
 from rapids_singlecell.decoupler_gpu._helper._docs import docs
 from rapids_singlecell.decoupler_gpu._helper._log import _log
 from rapids_singlecell.decoupler_gpu._helper._Method import Method, MethodMeta
+
 
 def _ridx(
     times: int,
@@ -23,15 +25,16 @@ def _ridx(
         idx = cp.array(idx)
     return idx
 
+
 _wsum_kernel = cp.RawKernel(
     r"""
 extern "C" __global__ void matmul_kernel(const float* x, const float* w, float* C, int n_obs, int n_var, int n_src) {
     // x is n_obs x n_var, w is n_var x n_src, C is n_obs x n_src
-    
+
     // Get the row and column index of the output matrix C for this thread
     const int row = blockIdx.y * blockDim.y + threadIdx.y;
     const int src = blockIdx.x * blockDim.x + threadIdx.x;
-    
+
     // Bounds checking
     if (row < n_obs && src < n_src) {
         float sum = 0.0f;  // Use float precision for accumulation
@@ -45,39 +48,47 @@ extern "C" __global__ void matmul_kernel(const float* x, const float* w, float* 
     "matmul_kernel",
 )
 
+
 def _wsum_raw(x: cp.ndarray, w: cp.ndarray) -> cp.ndarray:
     n_obs, n_var = x.shape
     n_var, n_src = w.shape
     es = cp.zeros((n_obs, n_src), dtype=cp.float32)
-    
+
     # Ensure input matrices are contiguous and of correct type
     if x.flags.c_contiguous and x.dtype == cp.float32:
         x_contig = x
     else:
         x_contig = cp.ascontiguousarray(x, dtype=cp.float32)
-    
+
     if w.flags.c_contiguous and w.dtype == cp.float32:
         w_contig = w
     else:
         w_contig = cp.ascontiguousarray(w, dtype=cp.float32)
-    
+
     # Use 2D thread blocks for better performance
     threads_per_block = (16, 16)
-    
+
     # Calculate grid size to cover all output elements
     grid_x = (n_src + threads_per_block[0] - 1) // threads_per_block[0]
     grid_y = (n_obs + threads_per_block[1] - 1) // threads_per_block[1]
-    
-    _wsum_kernel((grid_x, grid_y), threads_per_block, (x_contig, w_contig, es, n_obs, n_var, n_src))
+
+    _wsum_kernel(
+        (grid_x, grid_y),
+        threads_per_block,
+        (x_contig, w_contig, es, n_obs, n_var, n_src),
+    )
     return es
+
 
 def _wmean_raw(x: cp.ndarray, w: cp.ndarray) -> cp.ndarray:
     agg = _wsum_raw(x, w)
     div = cp.sum(cp.abs(w), axis=0)
     return agg / div
 
+
 def _wsum(x: cp.ndarray, w: cp.ndarray) -> cp.ndarray:
     return x.dot(w)
+
 
 def _wmean(x: cp.ndarray, w: cp.ndarray) -> cp.ndarray:
     agg = _wsum(x, w)
@@ -99,6 +110,7 @@ def _fun(
         m = f"waggr - using {_f.__name__}"
         _log(m, level="info", verbose=verbose)
 
+
 _fun_dict = {
     "wsum": _wsum,
     "wmean": _wmean,
@@ -117,13 +129,16 @@ def _validate_args(
     required_args = ["x", "w"]
     for arg in required_args:
         if arg not in args:
-            assert AssertionError(), f"fun={fun.__name__} must contain arguments x and w"
+            assert AssertionError(), (
+                f"fun={fun.__name__} must contain arguments x and w"
+            )
     # Check if any additional arguments have default values
     for param in args.values():
         if param.name not in required_args and param.default == inspect.Parameter.empty:
-            assert AssertionError(), f"fun={fun.__name__} has an argument {param.name} without a default value"
+            assert AssertionError(), (
+                f"fun={fun.__name__} has an argument {param.name} without a default value"
+            )
     return fun
-
 
 
 def _validate_func(
@@ -131,17 +146,22 @@ def _validate_func(
     verbose: bool,
 ) -> None:
     fun = _validate_args(fun=fun, verbose=verbose)
-    x = cp.array([[1.0, 2.0, 3.0],[4.0, 5.0, 6.0]])
+    x = cp.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
     w = cp.array([[-1.0, 3.0], [0.0, 4.0], [2.0, 5.0]])
     try:
         res = fun(x=x, w=w)
         assert isinstance(res, cp.ndarray), "output of fun must be a cp.ndarray"
-        assert res.shape == (x.shape[0], w.shape[1]), "output of fun must be a cp.ndarray with shape (x.shape[0], w.shape[1])"
+        assert res.shape == (x.shape[0], w.shape[1]), (
+            "output of fun must be a cp.ndarray with shape (x.shape[0], w.shape[1])"
+        )
     except Exception as err:
-        raise ValueError(f"fun failed to run with test data: fun(x={x}), w={w}") from err
+        raise ValueError(
+            f"fun failed to run with test data: fun(x={x}), w={w}"
+        ) from err
     m = f"waggr - using function {fun.__name__}"
     _log(m, level="info", verbose=verbose)
     _fun(f=fun, verbose=verbose)
+
 
 def _perm(
     fun: Callable,
@@ -165,30 +185,27 @@ def _perm(
         mat_perm = mat[:, idx[i]]
         # Apply the function
         perm_result = fun(mat_perm, adj)
-        perm_result = perm_result.astype(cp.float64)  # Use double precision for accumulation
+        perm_result = perm_result.astype(
+            cp.float64
+        )  # Use double precision for accumulation
         # Update running statistics
         sum_null += perm_result
         sum_null_sq += perm_result * perm_result
         extreme_count += (cp.abs(perm_result) > es_abs).astype(cp.int32)
         # Clean up intermediate results
         del mat_perm, perm_result
-        
-    
+
     # Compute final statistics
     null_mean = sum_null / times
     # Var(X) = E[X²] - (E[X])²
     null_var = (sum_null_sq / times) - (null_mean * null_mean)
     null_std = cp.sqrt(cp.maximum(null_var, 1e-10))
-    
+
     # Compute NES
     nes = cp.where(
-        null_std > 1e-10, 
-        (
-            es.astype(cp.float64) - null_mean) / null_std,
-            cp.where(cp.abs(es) > 1e-10, 
-            cp.sign(es.astype(cp.float64)) * 1e6, 
-            0.0
-        )
+        null_std > 1e-10,
+        (es.astype(cp.float64) - null_mean) / null_std,
+        cp.where(cp.abs(es) > 1e-10, cp.sign(es.astype(cp.float64)) * 1e6, 0.0),
     )
 
     # Compute empirical p-value
@@ -198,8 +215,9 @@ def _perm(
     pvals = pvals / times
     pvals = cp.where(pvals >= 0.5, 1 - pvals, pvals)
     pvals = pvals * 2  # Two-tailed test
-    
+
     return nes.astype(cp.float32), pvals
+
 
 @docs.dedent
 def _func_waggr(
@@ -289,7 +307,9 @@ def _func_waggr(
         f_fun = fun
     _validate_func(f_fun, verbose=verbose)
     vfun = _cfuncs[f_fun.__name__]
-    assert isinstance(times, int | float) and times >= 0, "times must be numeric and >= 0"
+    assert isinstance(times, int | float) and times >= 0, (
+        "times must be numeric and >= 0"
+    )
     assert isinstance(seed, int | float) and seed >= 0, "seed must be numeric and >= 0"
     times, seed = int(times), int(seed)
     nobs, nvar = mat.shape
@@ -305,6 +325,7 @@ def _func_waggr(
     else:
         pv = cp.ones(es.shape)
     return es.get(), pv.get()
+
 
 _waggr = MethodMeta(
     name="waggr",
