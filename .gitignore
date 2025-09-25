@@ -17,3 +17,23 @@ __pycache__/
 
 # Venvs
 *venv/
+
+# Build artifacts (CMake / scikit-build)
+/build/
+/CMakeFiles/
+/CMakeCache.txt
+/cmake_install.cmake
+/build.ninja
+/.ninja_deps
+/.ninja_log
+/libnanobind-static.a
+/install_manifest__mean_var_cuda.txt
+/_skbuild/
+/*.egg-info/
+
+# Compiled CUDA extension copied for editable installs
+*.so
+
+# Test/coverage caches
+/.pytest_cache/
+/.coverage
