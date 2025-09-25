@@ -9,13 +9,6 @@ from rapids_singlecell.decoupler_gpu._helper._docs import docs
 from rapids_singlecell.decoupler_gpu._helper._log import _log
 from rapids_singlecell.decoupler_gpu._helper._Method import Method, MethodMeta
 
-def _std(x: cp.ndarray, ddof: int) -> float:
-    N = x.shape[0]
-    m = cp.mean(x)
-    var = cp.sum((x - m) ** 2) / (N - ddof)
-    sd = cp.sqrt(var)
-    return float(sd)
-
 def _ridx(
     times: int,
     nvar: int,
@@ -103,7 +96,7 @@ def _fun(
     _f.__name__ = f.__name__
     if _f.__name__ not in _cfuncs:
         _cfuncs[f.__name__] = _f
-        m = f"waggr - using {_f.__name__} for the first time, will need to be compiled"
+        m = f"waggr - using {_f.__name__}"
         _log(m, level="info", verbose=verbose)
 
 _fun_dict = {
@@ -144,7 +137,6 @@ def _validate_func(
         res = fun(x=x, w=w)
         assert isinstance(res, cp.ndarray), "output of fun must be a cp.ndarray"
         assert res.shape == (x.shape[0], w.shape[1]), "output of fun must be a cp.ndarray with shape (x.shape[0], w.shape[1])"
-        # assert isinstance(res, int | float), "output of fun must be a single numerical value"
     except Exception as err:
         raise ValueError(f"fun failed to run with test data: fun(x={x}), w={w}") from err
     m = f"waggr - using function {fun.__name__}"
