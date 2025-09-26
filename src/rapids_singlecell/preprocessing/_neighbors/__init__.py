@@ -162,9 +162,11 @@ def neighbors(
 
             `'nn_descent'`
                 Uses the NN-descent algorithm to approximate the k-nearest neighbors.
+                Note: Performance may be degraded when Dask is active.
 
             `'all_neighbors'`
                 Uses the all-neighbors algorithm to approximate the k-nearest neighbors.
+                Note: Performance may be degraded when Dask is active and algorithm is `nn_descent`.
 
             `'mg_ivfflat'`
                 Uses the Multi-GPU inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
