@@ -74,7 +74,7 @@ jobs:
         run: uvx hatch -v env create ${{ matrix.env.name }}
 
       - name: Run tests
-        run: uvx hatch run ${{ matrix.env.name }}:run
+        run: uvx hatch run ${{ matrix.env.name }}:run -- -p no:randomly
 
   remove-label:
     name: Remove 'run-gpu-ci' Label
