@@ -88,6 +88,10 @@ _tval = """\
 tval
     Whether to return the t-value (`tval=True`) the coefficient of the fitted model (`tval=False`)."""
 
+_adj_pv_gpu = """\
+adj_pv_gpu
+    Whether to use GPU for adjusting p-values."""
+
 _params = f"""\
 Parameters
 ----------
@@ -99,7 +103,8 @@ Parameters
 {_empty}
 {_bsize}
 {_verbose}
-{_pre_load}"""
+{_pre_load}
+{_adj_pv_gpu}"""
 
 docs = DocstringProcessor(
     net=_net,

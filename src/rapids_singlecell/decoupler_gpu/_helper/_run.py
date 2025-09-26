@@ -97,9 +97,10 @@ def _run(
     layer: str | None = None,
     raw: bool = False,
     empty: bool = True,
-    bsize: int | float = 250_000,
+    bsize: int | float = 5000,
     verbose: bool = False,
     pre_load: bool = False,
+    adj_pv_gpu: bool = False,
     **kwargs,
 ) -> tuple[pd.DataFrame, pd.DataFrame] | AnnData | None:
     _log(f"{name} - Running {name}", level="info", verbose=verbose)
@@ -173,7 +174,7 @@ def _run(
         pv = pd.DataFrame(pv, index=obs, columns=sources)
         if name != "mlm":
             _log(f"{name} - adjusting p-values by FDR", level="info", verbose=verbose)
-            pv.loc[:, :] = fdr_bh_axis1(pv.values)
+            pv.loc[:, :] = fdr_bh_axis1(pv.values, if_gpu=adj_pv_gpu)
     else:
         pv = None
     _log(f"{name} - done", level="info", verbose=verbose)
