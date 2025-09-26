@@ -66,9 +66,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@v6
         with:
-          enable-cache: true
           python-version: ${{ matrix.env.python }}
-          cache-dependency-glob: pyproject.toml
 
       - name: Install dependencies
         run: uvx hatch -v env create ${{ matrix.env.name }}
