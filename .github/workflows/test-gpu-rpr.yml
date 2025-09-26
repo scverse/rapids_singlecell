@@ -1,0 +1,59 @@
+name: GPU-CI-RAPIDS-PRE
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types:
+      - labeled
+      - opened
+      - synchronize
+
+# Cancel the job if new commits are pushed
+# https://stackoverflow.com/questions/66335225/how-to-cancel-previous-runs-in-the-pr-when-you-push-new-commitsupdate-the-curre
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: flying-sheep/check@v1
+        with:
+          success: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-gpu-ci') }}
+  test:
+    name: GPU Tests
+    needs: check
+    runs-on: "cirun-aws-gpu--${{ github.run_id }}"
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Nvidia SMI sanity check
+        run: nvidia-smi
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: ci/environment_alpha.yml
+          init-shell: >-
+            bash
+          post-cleanup: 'all'
+
+      - name: Install rapids-singlecell
+        run: >-
+          pip install -e .[test]
+          "scanpy @ git+https://github.com/scverse/scanpy.git"
+          "anndata @ git+https://github.com/scverse/anndata.git"
+
+      - name: Pip list
+        run: pip list
+
+      - name: Run test
+        run: pytest
