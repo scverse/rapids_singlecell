@@ -13,7 +13,7 @@ import rmm
 from rmm.allocators.cupy import rmm_cupy_allocator
 
 import rapids_singlecell as rsc
-from rapids_singlecell.pertpy_gpu._distances_standalone import pairwise_edistance_gpu
+from rapids_singlecell.pertpy_gpu._edistance import pertpy_edistance
 
 rmm.reinitialize(
     managed_memory=False,  # Allows oversubscription
@@ -48,17 +48,20 @@ if __name__ == "__main__":
 
     start_time = time.time()
     if not bootstrap:
-        df_gpu = pairwise_edistance_gpu(
+        res = pertpy_edistance(
             adata, groupby=obs_key, obsm_key="X_pca", bootstrap=bootstrap
         )
+        df_gpu = res.distances
     else:
-        df_gpu, df_gpu_var = pairwise_edistance_gpu(
+        res = pertpy_edistance(
             adata,
             groupby=obs_key,
             obsm_key="X_pca",
             bootstrap=bootstrap,
             n_bootstrap=100,
         )
+        df_gpu = res.distances
+        df_gpu_var = res.distances_var
     end_time = time.time()
     print(f"Time taken: {end_time - start_time} seconds")
 

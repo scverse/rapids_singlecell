@@ -1,14 +1,24 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, NamedTuple
 
 import cupy as cp
 import numpy as np
 import pandas as pd
-from anndata import AnnData
 
-from ..preprocessing._harmony._helper import _create_category_index_mapping
-from ..squidpy_gpu._utils import _assert_categorical_obs
+from rapids_singlecell.preprocessing._harmony._helper import (
+    _create_category_index_mapping,
+)
+from rapids_singlecell.squidpy_gpu._utils import _assert_categorical_obs
+
+if TYPE_CHECKING:
+    from anndata import AnnData
+
+
+class EDistanceResult(NamedTuple):
+    distances: pd.DataFrame
+    distances_var: pd.DataFrame | None
 
 
 # Load CUDA kernels from separate file
@@ -35,7 +45,87 @@ def _load_edistance_kernels():
 compute_group_distances_kernel = _load_edistance_kernels()
 
 
-def compute_pairwise_means_gpu(
+def pertpy_edistance(
+    adata: AnnData,
+    groupby: str,
+    *,
+    obsm_key: str = "X_pca",
+    groups: list[str] | None = None,
+    inplace: bool = False,
+    bootstrap: bool = False,
+    n_bootstrap: int = 100,
+    random_state: int = 0,
+) -> pd.DataFrame:
+    """
+    GPU-accelerated pairwise edistance computation with decomposed components.
+
+    Returns d_itself, d_other arrays and final edistance DataFrame where:
+    df[a,b] = 2*d_other[a,b] - d_itself[a] - d_itself[b]
+
+    Parameters
+    ----------
+    adata : AnnData
+        Annotated data matrix
+    groupby : str
+        Key in adata.obs for grouping
+    obsm_key : str
+        Key in adata.obsm for embeddings
+    groups : list[str] | None
+        Specific groups to compute (if None, use all)
+    copy : bool
+        Whether to return a copy
+
+    Returns
+    -------
+    df : pd.DataFrame
+        Final edistance matrix
+    """
+    _assert_categorical_obs(adata, key=groupby)
+
+    embedding = cp.array(adata.obsm[obsm_key]).astype(np.float32)
+    original_groups = adata.obs[groupby]
+    group_map = {v: i for i, v in enumerate(original_groups.cat.categories.values)}
+    group_labels = cp.array([group_map[c] for c in original_groups], dtype=cp.int32)
+
+    # Use harmony's category mapping
+    k = len(group_map)
+    cat_offsets, cell_indices = _create_category_index_mapping(group_labels, k)
+
+    groups_list = (
+        list(original_groups.cat.categories.values) if groups is None else groups
+    )
+    result = None
+    if not bootstrap:
+        df = _prepare_edistance_df(
+            embedding=embedding,
+            cat_offsets=cat_offsets,
+            cell_indices=cell_indices,
+            k=k,
+            groups_list=groups_list,
+            groupby=groupby,
+        )
+        result = EDistanceResult(distances=df, distances_var=None)
+
+    else:
+        df, df_var = _prepare_edistance_df_bootstrap(
+            embedding=embedding,
+            cat_offsets=cat_offsets,
+            cell_indices=cell_indices,
+            k=k,
+            groups_list=groups_list,
+            groupby=groupby,
+            n_bootstrap=n_bootstrap,
+            random_state=random_state,
+        )
+        result = EDistanceResult(distances=df, distances_var=df_var)
+
+    if inplace:
+        adata.uns[f"{groupby}_pairwise_edistance"] = dict(result)
+
+    return result
+
+
+def _pairwise_means(
     embedding: cp.ndarray, cat_offsets: cp.ndarray, cell_indices: cp.ndarray, k: int
 ) -> cp.ndarray:
     """
@@ -122,7 +212,7 @@ def compute_pairwise_means_gpu(
     return pairwise_means
 
 
-def generate_bootstrap_indices(
+def _generate_bootstrap_indices(
     cat_offsets: cp.ndarray,
     k: int,
     n_bootstrap: int = 100,
@@ -233,7 +323,7 @@ def _bootstrap_sample_cells_from_indices(
     return new_cat_offsets, cp.array(new_cell_indices, dtype=cp.int32)
 
 
-def compute_pairwise_means_gpu_bootstrap(
+def _pairwise_means_bootstrap(
     embedding: cp.ndarray,
     *,
     cat_offsets: cp.ndarray,
@@ -251,7 +341,7 @@ def compute_pairwise_means_gpu_bootstrap(
         variances: [k, k] matrix of bootstrap variances
     """
     # Generate all bootstrap indices upfront using CPU-compatible logic
-    bootstrap_indices = generate_bootstrap_indices(
+    bootstrap_indices = _generate_bootstrap_indices(
         cat_offsets, k, n_bootstrap, random_state
     )
 
@@ -267,7 +357,7 @@ def compute_pairwise_means_gpu_bootstrap(
         )
 
         # Compute distances with bootstrapped samples
-        pairwise_means = compute_pairwise_means_gpu(
+        pairwise_means = _pairwise_means(
             embedding=embedding,
             cat_offsets=boot_cat_offsets,
             cell_indices=boot_cell_indices,
@@ -283,97 +373,7 @@ def compute_pairwise_means_gpu_bootstrap(
     return means, variances
 
 
-def pairwise_edistance_gpu(
-    adata: AnnData,
-    groupby: str,
-    *,
-    obsm_key: str = "X_pca",
-    groups: list[str] | None = None,
-    inplace: bool = False,
-    bootstrap: bool = False,
-    n_bootstrap: int = 100,
-    random_state: int = 0,
-) -> pd.DataFrame:
-    """
-    GPU-accelerated pairwise edistance computation with decomposed components.
-
-    Returns d_itself, d_other arrays and final edistance DataFrame where:
-    df[a,b] = 2*d_other[a,b] - d_itself[a] - d_itself[b]
-
-    Parameters
-    ----------
-    adata : AnnData
-        Annotated data matrix
-    groupby : str
-        Key in adata.obs for grouping
-    obsm_key : str
-        Key in adata.obsm for embeddings
-    groups : list[str] | None
-        Specific groups to compute (if None, use all)
-    copy : bool
-        Whether to return a copy
-
-    Returns
-    -------
-    d_itself : cp.ndarray
-        Within-group mean distances [k]
-    d_other : cp.ndarray
-        Between-group mean distances [k, k]
-    df : pd.DataFrame
-        Final edistance matrix
-    """
-    _assert_categorical_obs(adata, key=groupby)
-
-    embedding = cp.array(adata.obsm[obsm_key]).astype(
-        np.float32
-    )  # Changed from float64
-    original_groups = adata.obs[groupby]
-    group_map = {v: i for i, v in enumerate(original_groups.cat.categories.values)}
-    group_labels = cp.array([group_map[c] for c in original_groups], dtype=cp.int32)
-
-    # 2. Use harmony's category mapping
-    k = len(group_map)
-    cat_offsets, cell_indices = _create_category_index_mapping(group_labels, k)
-
-    groups_list = (
-        list(original_groups.cat.categories.values) if groups is None else groups
-    )
-    if not bootstrap:
-        df = compute_pairwise_means_gpu_edistance(
-            embedding=embedding,
-            cat_offsets=cat_offsets,
-            cell_indices=cell_indices,
-            k=k,
-            groups_list=groups_list,
-            groupby=groupby,
-        )
-        if inplace:
-            adata.uns[f"{groupby}_pairwise_edistance"] = {
-                "distances": df,
-            }
-        return df
-
-    else:
-        df, df_var = compute_pairwise_means_gpu_edistance_bootstrap(
-            embedding=embedding,
-            cat_offsets=cat_offsets,
-            cell_indices=cell_indices,
-            k=k,
-            groups_list=groups_list,
-            groupby=groupby,
-            n_bootstrap=n_bootstrap,
-            random_state=random_state,
-        )
-
-        if inplace:
-            adata.uns[f"{groupby}_pairwise_edistance"] = {
-                "distances": df,
-                "distances_var": df_var,
-            }
-        return df, df_var
-
-
-def compute_pairwise_means_gpu_edistance_bootstrap(
+def _prepare_edistance_df_bootstrap(
     embedding: cp.ndarray,
     *,
     cat_offsets: cp.ndarray,
@@ -385,7 +385,7 @@ def compute_pairwise_means_gpu_edistance_bootstrap(
     random_state: int = 0,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     # Bootstrap computation
-    pairwise_means_boot, pairwise_vars_boot = compute_pairwise_means_gpu_bootstrap(
+    pairwise_means_boot, pairwise_vars_boot = _pairwise_means_bootstrap(
         embedding=embedding,
         cat_offsets=cat_offsets,
         cell_indices=cell_indices,
@@ -394,7 +394,7 @@ def compute_pairwise_means_gpu_edistance_bootstrap(
         random_state=random_state,
     )
 
-    # 4. Compute final edistance for means and variances
+    # Compute final edistance for means and variances
     edistance_means = cp.zeros((k, k), dtype=np.float32)
     edistance_vars = cp.zeros((k, k), dtype=np.float32)
 
@@ -434,7 +434,7 @@ def compute_pairwise_means_gpu_edistance_bootstrap(
     return df_mean, df_var
 
 
-def compute_pairwise_means_gpu_edistance(
+def _prepare_edistance_df(
     embedding: cp.ndarray,
     *,
     cat_offsets: cp.ndarray,
@@ -443,11 +443,10 @@ def compute_pairwise_means_gpu_edistance(
     groups_list: list[str],
     groupby: str,
 ) -> pd.DataFrame:
-    # 3. Compute decomposed components
-    # d_itself = compute_d_itself_gpu(embedding, cat_offsets, cell_indices, k)
-    pairwise_means = compute_pairwise_means_gpu(embedding, cat_offsets, cell_indices, k)
+    # Compute means
+    pairwise_means = _pairwise_means(embedding, cat_offsets, cell_indices, k)
 
-    # 4. Compute final edistance: df[a,b] = 2*d_other[a,b] - d_itself[a] - d_itself[b]
+    # Compute final edistance: df[a,b] = 2*d_other[a,b] - d_itself[a] - d_itself[b]
     edistance_matrix = cp.zeros((k, k), dtype=np.float32)
     for a in range(k):
         for b in range(a + 1, k):
@@ -456,8 +455,7 @@ def compute_pairwise_means_gpu_edistance(
             )
             edistance_matrix[b, a] = edistance_matrix[a, b]
 
-    # 5. Create output DataFrame
-
+    # Create output DataFrame
     df = pd.DataFrame(edistance_matrix.get(), index=groups_list, columns=groups_list)
     df.index.name = groupby
     df.columns.name = groupby

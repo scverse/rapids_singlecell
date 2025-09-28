@@ -1,3 +1,3 @@
 from __future__ import annotations
 
-from ._distances import Distance
+from ._edistance import pertpy_edistance
