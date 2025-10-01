@@ -19,14 +19,18 @@ def small_adata() -> AnnData:
 
     cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(np.float32)
     groups = [f"g{idx}" for idx in range(n_groups) for _ in range(cells_per_group)]
-    obs = pd.DataFrame({"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])})
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])}
+    )
 
     adata = AnnData(cpu_embedding.copy(), obs=obs)
     adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
     return adata
 
 
-def _compute_cpu_reference(adata: AnnData, obsm_key: str, group_key: str) -> tuple[np.ndarray, np.ndarray]:
+def _compute_cpu_reference(
+    adata: AnnData, obsm_key: str, group_key: str
+) -> tuple[np.ndarray, np.ndarray]:
     embedding = adata.obsm[obsm_key].get()
     group_series = adata.obs[group_key]
     categories = list(group_series.cat.categories)
@@ -44,7 +48,7 @@ def _compute_cpu_reference(adata: AnnData, obsm_key: str, group_key: str) -> tup
                 distances = []
                 for idx in idx_i:
                     diffs = embedding[idx] - embedding[idx_j]
-                    distances.append(np.sqrt(np.sum(diffs ** 2, axis=1)))
+                    distances.append(np.sqrt(np.sum(diffs**2, axis=1)))
                 stacked = np.concatenate(distances)
                 mean_distance = stacked.mean(dtype=np.float64)
             pair_means[i, j] = pair_means[j, i] = np.float32(mean_distance)
@@ -115,6 +119,8 @@ def test_pertpy_edistance_requires_categorical_obs(small_adata: AnnData) -> None
 
 
 @pytest.mark.parametrize("missing_key", ["missing", "other"])
-def test_pertpy_edistance_missing_group_raises(small_adata: AnnData, missing_key: str) -> None:
+def test_pertpy_edistance_missing_group_raises(
+    small_adata: AnnData, missing_key: str
+) -> None:
     with pytest.raises(KeyError):
         pertpy_edistance(small_adata, groupby=missing_key, obsm_key="X_pca")

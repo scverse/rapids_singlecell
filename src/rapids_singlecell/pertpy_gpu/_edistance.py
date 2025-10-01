@@ -25,6 +25,7 @@ class EDistanceResult(NamedTuple):
 
 compute_group_distances_kernel = get_compute_group_distances_kernel()
 
+
 def pertpy_edistance(
     adata: AnnData,
     groupby: str,
