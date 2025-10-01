@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 import cupy as cp
 import numpy as np
 import pandas as pd
 
+from rapids_singlecell.pertpy_gpu._kernels._edistance import (
+    get_compute_group_distances_kernel,
+)
 from rapids_singlecell.preprocessing._harmony._helper import (
     _create_category_index_mapping,
 )
@@ -21,29 +23,7 @@ class EDistanceResult(NamedTuple):
     distances_var: pd.DataFrame | None
 
 
-# Load CUDA kernels from separate file
-def _load_edistance_kernels():
-    """Load CUDA kernels from separate .cu file"""
-    kernel_dir = Path(__file__).parent / "kernels"
-    kernel_file = kernel_dir / "edistance_kernels.cu"
-
-    if not kernel_file.exists():
-        raise FileNotFoundError(f"CUDA kernel file not found: {kernel_file}")
-
-    with open(kernel_file) as f:
-        kernel_code = f.read()
-
-    # Compile kernels
-    compute_group_distances_kernel = cp.RawKernel(
-        kernel_code, "compute_group_distances"
-    )
-
-    return compute_group_distances_kernel
-
-
-# Load kernels at module import time
-compute_group_distances_kernel = _load_edistance_kernels()
-
+compute_group_distances_kernel = get_compute_group_distances_kernel()
 
 def pertpy_edistance(
     adata: AnnData,
@@ -166,7 +146,7 @@ def _pairwise_means(
     num_pairs = len(pair_left)  # k * (k-1) pairs instead of k²
 
     # Allocate output for off-diagonal distances only
-    d_other_offdiag = cp.zeros(num_pairs, dtype=np.float32)
+    d_other_offdiag = cp.zeros(num_pairs, dtype=embedding.dtype)
 
     # Choose optimal block size
     props = cp.cuda.runtime.getDeviceProperties(0)
