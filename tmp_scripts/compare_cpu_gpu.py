@@ -93,14 +93,15 @@ def main():
     spearman_corr, spearman_pval = spearmanr(
         comparison["CPU_Score"], comparison["GPU_Score"]
     )
-    
+
     # Also calculate Spearman on explicit ranks for clarity
     spearman_rank_corr, spearman_rank_pval = spearmanr(
         comparison["CPU_Rank"], comparison["GPU_Rank"]
     )
-    
+
     # Pearson correlation (on scores)
     from scipy.stats import pearsonr
+
     pearson_corr, pearson_pval = pearsonr(
         comparison["CPU_Score"], comparison["GPU_Score"]
     )
@@ -108,9 +109,15 @@ def main():
     # Display overall metrics
     print(f"\n{'CORRELATION METRICS':^80}")
     print("=" * 80)
-    print(f"Spearman Rank Correlation: {spearman_corr:.6f} (p-value: {spearman_pval:.2e})")
-    print(f"  (on explicit ranks):     {spearman_rank_corr:.6f} (p-value: {spearman_rank_pval:.2e})")
-    print(f"Pearson Correlation:       {pearson_corr:.6f} (p-value: {pearson_pval:.2e})")
+    print(
+        f"Spearman Rank Correlation: {spearman_corr:.6f} (p-value: {spearman_pval:.2e})"
+    )
+    print(
+        f"  (on explicit ranks):     {spearman_rank_corr:.6f} (p-value: {spearman_rank_pval:.2e})"
+    )
+    print(
+        f"Pearson Correlation:       {pearson_corr:.6f} (p-value: {pearson_pval:.2e})"
+    )
     print(f"\nSpeedup: {cpu_time / gpu_time:.2f}x")
 
     # Side-by-side comparison with ranks

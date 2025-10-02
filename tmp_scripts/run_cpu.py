@@ -22,7 +22,11 @@ if __name__ == "__main__":
     genes = adata.var_names.values[:100]
     # sc.pp.normalize_total(adata)
     result = sepal(
-        adata, max_neighs=6, genes=genes, n_iter=30000, copy=True, 
+        adata,
+        max_neighs=6,
+        genes=genes,
+        n_iter=30000,
+        copy=True,
     )
     end_time = time.time()
     print(f"Time taken: {end_time - start_time} seconds")

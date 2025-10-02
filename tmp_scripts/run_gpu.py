@@ -10,9 +10,9 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 import anndata as ad
-from rapids_singlecell.squidpy_gpu import sepal
 
 import rapids_singlecell as rsc
+from rapids_singlecell.squidpy_gpu import sepal
 
 HOME = Path(os.path.expanduser("~"))
 if __name__ == "__main__":
@@ -29,9 +29,7 @@ if __name__ == "__main__":
     start_time = time.time()
     genes = adata.var_names.values[:100]
     # genes = ["Gm29570"]
-    result = sepal(
-        adata, max_neighs=6, genes=genes, n_iter=30000, copy=True
-    )
+    result = sepal(adata, max_neighs=6, genes=genes, n_iter=30000, copy=True)
     end_time = time.time()
     print(f"Time taken: {end_time - start_time} seconds")
 
