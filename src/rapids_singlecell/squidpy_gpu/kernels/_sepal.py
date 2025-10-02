@@ -102,8 +102,7 @@ extern "C" {
             double val = conc[i];
             if (val > 0.0) {
                 double normalized = val / total_sum;
-                normalized = fmax(normalized, eps);  // Avoid log(0)
-                local_entropy += -normalized * log(normalized);
+                local_entropy += -normalized * log(fmax(normalized, eps));
             }
         }
 

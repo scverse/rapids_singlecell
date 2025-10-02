@@ -10,7 +10,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 import anndata as ad
-from utils.sepal_gpu import sepal_gpu
+from rapids_singlecell.squidpy_gpu import sepal
 
 import rapids_singlecell as rsc
 
@@ -27,10 +27,10 @@ if __name__ == "__main__":
     )
     adata.obsm["spatial"] = rsc.get.X_to_GPU(adata.obsm["spatial"])
     start_time = time.time()
-    genes = adata.var_names.values[:1000]
+    genes = adata.var_names.values[:100]
     # genes = ["Gm29570"]
-    result = sepal_gpu(
-        adata, max_neighs=6, genes=genes, n_iter=30000, copy=True, debug=args.debug
+    result = sepal(
+        adata, max_neighs=6, genes=genes, n_iter=30000, copy=True
     )
     end_time = time.time()
     print(f"Time taken: {end_time - start_time} seconds")
