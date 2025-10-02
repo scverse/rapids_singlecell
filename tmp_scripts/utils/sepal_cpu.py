@@ -199,7 +199,7 @@ def _score_helper(
     return np.array(score)
 
 
-@njit(fastmath=True)
+@njit(fastmath=False)
 def _diffusion(
     conc: NDArrayA,
     laplacian: Callable[[NDArrayA, NDArrayA], float],
@@ -240,7 +240,7 @@ def _diffusion(
 
 
 # taken from https://github.com/almaan/sepal/blob/master/sepal/models.py
-@njit(parallel=False, fastmath=True)
+@njit(parallel=False, fastmath=False)
 def _laplacian_rect(
     centers: NDArrayA,
     nbrs: NDArrayA,
@@ -255,7 +255,7 @@ def _laplacian_rect(
 
 
 # taken from https://github.com/almaan/sepal/blob/master/sepal/models.py
-@njit(fastmath=True)
+@njit(fastmath=False)
 def _laplacian_hex(
     centers: NDArrayA,
     nbrs: NDArrayA,
@@ -274,7 +274,7 @@ def _laplacian_hex(
 
 
 # taken from https://github.com/almaan/sepal/blob/master/sepal/models.py
-@njit(fastmath=True)
+@njit(fastmath=False)
 def _entropy(
     xx: NDArrayA,
 ) -> float:
