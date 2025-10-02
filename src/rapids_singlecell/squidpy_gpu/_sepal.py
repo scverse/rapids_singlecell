@@ -101,7 +101,6 @@ def sepal(
         f"Calculating sepal score for `{len(genes)}` genes using scalable GPU kernel"
     )
 
-
     if cp_isspmatrix_csr(vals) or cp_isspmatrix_csc(vals):
         vals = vals.toarray()
 
