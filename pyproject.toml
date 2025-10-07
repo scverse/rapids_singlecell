@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-rapids12 = [ "cupy-cuda12x", "cudf-cu12==25.08.*", "cuml-cu12==25.08.*", "cugraph-cu12==25.08.*" ]
+rapids12 = [ "cupy-cuda12x", "cudf-cu12", "cuml-cu12", "cugraph-cu12" ]
 rapids = [ "rapids_singlecell[rapids12]" ]
 doc = [
     "sphinx>=4.5.0",
