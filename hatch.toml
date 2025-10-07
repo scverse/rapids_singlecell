@@ -13,7 +13,6 @@ extra_index_urls = [
 ]
 
 [envs.hatch-test]
-detached = true
 features = [ "test", "rapids12" ]
 
 overrides.matrix.deps.env-vars = [
