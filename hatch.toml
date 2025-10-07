@@ -15,6 +15,9 @@ extra_index_urls = [
 [envs.hatch-test]
 features = [ "test", "rapids12" ]
 
+[envs.hatch-test.env-vars]
+PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"
+
 overrides.matrix.deps.env-vars = [
     { if = [
         "dev",
