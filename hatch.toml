@@ -14,7 +14,6 @@ extra_index_urls = [
 
 [envs.hatch-test]
 features = [ "test", "rapids12" ]
-scripts.run = "pytest"
 
 overrides.matrix.deps.env-vars = [
     { if = [
