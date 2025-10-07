@@ -43,6 +43,7 @@ doc = [
 ]
 test-minimal = [
     "pytest",
+    "anyio",
     "profimp",
     "scanpy>=1.10.0",
     "bbknn",
@@ -113,6 +114,8 @@ addopts = [
     "no:randomly",
     "-p",
     "no:cov",
+    "-p",
+    "anyio",
 ]
 markers = [
     "gpu: tests that use a GPU (currently unused, but needs to be specified here as we import anndata.tests.helpers, which uses it)",
