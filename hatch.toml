@@ -13,11 +13,8 @@ extra_index_urls = [
 ]
 
 [envs.hatch-test]
-default-args = [  ]
 features = [ "test", "rapids12" ]
-extra-dependencies = [
-    "pytest",
-]
+scripts.run = "pytest"
 
 overrides.matrix.deps.env-vars = [
     { if = [
