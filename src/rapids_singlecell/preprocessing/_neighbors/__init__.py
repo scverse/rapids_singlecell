@@ -263,6 +263,7 @@ def neighbors(
         metric_kwds=metric_kwds,
         algorithm_kwds=algorithm_kwds,
     )
+    knn_dist[:, 0] = 0.0
 
     n_nonzero = n_obs * n_neighbors
     rowptr = cp.arange(0, n_nonzero + 1, n_neighbors)
