@@ -65,6 +65,7 @@ extern "C" {
     __device__ double compute_entropy_cooperative(
         const double* __restrict__ conc,
         int n_sat,
+        const int* __restrict__ sat_nodes,
         int tid,
         int blockSize
     ) {
@@ -76,7 +77,7 @@ extern "C" {
         // Each thread accumulates its portion of nodes
         double local_sum = 0.0;
         for (int i = tid; i < n_sat; i += blockSize) {
-            double val = conc[i];
+            double val = conc[sat_nodes[i]];
             if (val > eps) local_sum += val;
         }
 
@@ -99,7 +100,7 @@ extern "C" {
         // Each thread computes entropy for its portion
         double local_entropy = 0.0;
         for (int i = tid; i < n_sat; i += blockSize) {
-            double val = conc[i];
+            double val = conc[sat_nodes[i]];
             if (val > eps) {
                 double normalized = val / total_sum;
                 local_entropy += -normalized * log(fmax(normalized, eps));
@@ -165,11 +166,10 @@ extern "C" {
             // Phase 1: Update derivatives for saturated nodes
             for (int i = tid; i < n_sat; i += blockSize) {
                 double neighbor_sum = 0.0;
-                int sat_global_idx = sat_nodes[i];
                 for (int j = 0; j < max_neighs; j++) {
-                    neighbor_sum += concentration[sat_idx[sat_global_idx * max_neighs + j]];
+                    neighbor_sum += concentration[sat_idx[i * max_neighs + j]];
                 }
-
+                int sat_global_idx = sat_nodes[i];
                 double center = concentration[sat_global_idx];
                 double d2 = 0.0;
 
@@ -201,7 +201,7 @@ extern "C" {
             // Check convergence using entropy
             if (!converged_flag) {
                 double current_entropy = compute_entropy_cooperative(
-                    concentration, n_sat, tid, blockSize
+                    concentration, n_sat, sat_nodes, tid, blockSize
                 );
 
                 if (tid == 0) {
