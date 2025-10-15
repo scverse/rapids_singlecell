@@ -71,13 +71,13 @@ extern "C" {
         __shared__ double total_sum_shared[256];
         __shared__ double entropy_shared[256];
         // np.finfo(np.float64).eps  # ~2.22e-16
-        const double eps = 2.22e-16;
+        const double eps = 2.220446049250313e-16;
 
         // Each thread accumulates its portion of nodes
         double local_sum = 0.0;
         for (int i = tid; i < n_sat; i += blockSize) {
             double val = conc[i];
-            if (val > 0.0) local_sum += val;
+            if (val > eps) local_sum += val;
         }
 
         total_sum_shared[tid] = local_sum;
@@ -92,7 +92,7 @@ extern "C" {
         }
 
         double total_sum = total_sum_shared[0];
-        if (total_sum <= 0.0) return 0.0;
+        if (total_sum < eps) return 0.0;
         // see here why
         // https://stats.stackexchange.com/questions/57069/alternative-to-shannons-entropy-when-probability-equal-to-zero/433096
 
@@ -100,7 +100,7 @@ extern "C" {
         double local_entropy = 0.0;
         for (int i = tid; i < n_sat; i += blockSize) {
             double val = conc[i];
-            if (val > 0.0) {
+            if (val > eps) {
                 double normalized = val / total_sum;
                 local_entropy += -normalized * log(fmax(normalized, eps));
             }
@@ -124,7 +124,9 @@ extern "C" {
     __global__ void sepal_simulation(
         double* __restrict__ concentration_all,
         double* __restrict__ derivatives_all,
+        const int* __restrict__ sat_nodes,
         const int* __restrict__ sat_idx,
+        const int* __restrict__ unsat_nodes,
         const int* __restrict__ unsat_idx,
         double* __restrict__ results,
         int n_cells,
@@ -163,11 +165,12 @@ extern "C" {
             // Phase 1: Update derivatives for saturated nodes
             for (int i = tid; i < n_sat; i += blockSize) {
                 double neighbor_sum = 0.0;
+                int sat_global_idx = sat_nodes[i];
                 for (int j = 0; j < max_neighs; j++) {
-                    neighbor_sum += concentration[sat_idx[i * max_neighs + j]];
+                    neighbor_sum += concentration[sat_idx[sat_global_idx * max_neighs + j]];
                 }
 
-                double center = concentration[i];
+                double center = concentration[sat_global_idx];
                 double d2 = 0.0;
 
                 if (max_neighs == 4) {
@@ -175,20 +178,21 @@ extern "C" {
                 } else if (max_neighs == 6) {
                     d2 = (2.0 * neighbor_sum - 12.0 * center) / 3.0;
                 }
-                derivatives[i] = d2;
+                derivatives[sat_global_idx] = d2;
             }
             __syncthreads();
 
             // Phase 2: Update saturated node concentrations
             for (int i = tid; i < n_sat; i += blockSize) {
-                concentration[i] += derivatives[i] * dt;
-                concentration[i] = fmax(0.0, concentration[i]);
+                int sat_global_idx = sat_nodes[i];
+                concentration[sat_global_idx] += derivatives[sat_global_idx] * dt;
+                concentration[sat_global_idx] = fmax(0.0, concentration[sat_global_idx]);
             }
             __syncthreads();
 
             // Phase 3: Update unsaturated nodes based on nearest saturated
             for (int i = tid; i < n_unsat; i += blockSize) {
-                int unsat_global_idx = n_sat + i;
+                int unsat_global_idx = unsat_nodes[i];
                 concentration[unsat_global_idx] += derivatives[unsat_idx[i]] * dt;
                 concentration[unsat_global_idx] = fmax(0.0, concentration[unsat_global_idx]);
             }

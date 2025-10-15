@@ -81,7 +81,7 @@ def sepal(
             f"Expected `max_neighs={max_neighs}`, found node with `{max_n}` neighbors."
         )
 
-    sat, sat_idx, unsat, unsat_to_nearest_sat = _compute_idxs_gpu(
+    sat, sat_idx, unsat, unsat_to_nearest_sat = _compute_idxs(
         g=g,
         degrees=degrees,
         spatial=spatial,
@@ -157,12 +157,6 @@ def _cuda_kernel_diffusion_gpu(
     n_sat = len(sat)
     n_unsat = len(unsat)
 
-    # Reorder: [sat_nodes, unsat_nodes] for coalesced access
-    reorder_indices = cp.concatenate([sat, unsat])
-    vals_reordered = vals[reorder_indices, :]  # (n_cells, n_genes) reordered
-
-    # Create a flat mapping for unsat nodes to their nearest saturated
-    unsat_to_nearest_sat_remapped = cp.searchsorted(sat, unsat_to_nearest_sat[unsat])
 
     # Grid/block configuration following established patterns:
     # threads_per_block = 256 (as in src/rapids_singlecell/preprocessing/_harmony/_helper.py)
@@ -171,7 +165,7 @@ def _cuda_kernel_diffusion_gpu(
 
     # Allocate arrays for ALL genes at once
     concentration_all = cp.ascontiguousarray(
-        vals_reordered.T, dtype=cp.float64
+        vals.T, dtype=cp.float64
     )  # (n_genes, n_cells)
     derivatives_all = cp.zeros((n_genes, n_cells), dtype=cp.float64)
     results_all = cp.full(n_genes, -999999.0, dtype=cp.float64)  # Results for ALL genes
@@ -191,8 +185,10 @@ def _cuda_kernel_diffusion_gpu(
         (
             concentration_all,  # (n_genes, n_cells) - all genes
             derivatives_all,  # (n_genes, n_cells) - all derivatives
+            sat,
             sat_idx,
-            unsat_to_nearest_sat_remapped,
+            unsat,
+            unsat_to_nearest_sat,
             results_all,  # (n_genes,) - results for all genes
             n_cells,  # n_cells (can be 1M+)
             n_genes,  # Number of genes to process
@@ -212,7 +208,7 @@ def _cuda_kernel_diffusion_gpu(
     return final_scores  # Shape: (n_genes,)
 
 
-def _compute_idxs_gpu(
+def _compute_idxs(
     g: cp_csr_matrix,
     degrees: cp.ndarray,
     spatial: cp.ndarray,
@@ -251,7 +247,7 @@ def _compute_idxs_gpu(
             (threads_per_block,),
             (
                 unsat,  # unsaturated nodes (read only int32)
-                spatial,  # spatial coordinates [n_nodes, 2] (read only float32)
+                spatial,  # spatial coordinates [n_nodes, 2] (read only float64)
                 sat,  # saturated node list (read only int32)
                 g.indptr,  # CSR indptr (read only int32)
                 g.indices,  # CSR indices (read only int32)

@@ -25,8 +25,8 @@ def compare_indices(adata_cpu):
     print("🔍 Comparing CPU vs GPU index computation...")
 
     # Import the helper functions
-    from utils.sepal_cpu import _compute_idxs
-    from utils.sepal_gpu import _compute_idxs_gpu
+    from utils._sepal import _compute_idxs as _compute_idxs_cpu
+    from rapids_singlecell.squidpy_gpu._sepal import _compute_idxs as _compute_idxs_gpu
 
     # Get connectivity and spatial data
     adata_gpu = ad.read_h5ad(HOME / "data/visium_hne_adata.h5ad")
@@ -50,7 +50,7 @@ def compare_indices(adata_cpu):
     print("GPU indices computed in ", end - start, "seconds")
 
     start = time.time()
-    sat_cpu, sat_idx_cpu, unsat_cpu, unsat_idx_cpu = _compute_idxs(
+    sat_cpu, sat_idx_cpu, unsat_cpu, unsat_idx_cpu = _compute_idxs_cpu(
         g, spatial_cpu, 6, "l1"
     )
     end = time.time()
