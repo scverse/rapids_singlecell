@@ -8,10 +8,9 @@ import pandas as pd
 from anndata import AnnData
 from numba import njit
 from scanpy import logging as logg
-from scipy.sparse import csr_matrix, issparse, isspmatrix_csr, spmatrix
+from scipy.sparse import csr_matrix, isspmatrix_csr, spmatrix
 from sklearn.metrics import pairwise_distances
 from spatialdata import SpatialData
-
 from squidpy._constants._pkg_constants import Key
 from squidpy._docs import d, inject_docs
 from squidpy._utils import NDArrayA, Signal, SigQueue, _get_n_cores, parallelize
@@ -98,7 +97,9 @@ def sepal(
     _assert_connectivity_key(adata, connectivity_key)
     _assert_spatial_basis(adata, key=spatial_key)
     if max_neighs not in (4, 6):
-        raise ValueError(f"Expected `max_neighs` to be either `4` or `6`, found `{max_neighs}`.")
+        raise ValueError(
+            f"Expected `max_neighs` to be either `4` or `6`, found `{max_neighs}`."
+        )
 
     spatial = adata.obsm[spatial_key].astype(np.float64)
 
@@ -117,14 +118,18 @@ def sepal(
 
     max_n = np.diff(g.indptr).max()
     if max_n != max_neighs:
-        raise ValueError(f"Expected `max_neighs={max_neighs}`, found node with `{max_n}` neighbors.")
+        raise ValueError(
+            f"Expected `max_neighs={max_neighs}`, found node with `{max_n}` neighbors."
+        )
 
     # get saturated/unsaturated nodes
     sat, sat_idx, unsat, unsat_idx = _compute_idxs(g, spatial, max_neighs, "l1")
 
     # get counts
     vals, genes = _extract_expression(adata, genes=genes, use_raw=use_raw, layer=layer)
-    start = logg.info(f"Calculating sepal score for `{len(genes)}` genes using `{n_jobs}` core(s)")
+    start = logg.info(
+        f"Calculating sepal score for `{len(genes)}` genes using `{n_jobs}` core(s)"
+    )
 
     score = parallelize(
         _score_helper,
@@ -150,7 +155,9 @@ def sepal(
     sepal_score = pd.DataFrame(score, index=genes, columns=[key_added])
 
     if sepal_score[key_added].isna().any():
-        logg.warning("Found `NaN` in sepal scores, consider increasing `n_iter` to a higher value")
+        logg.warning(
+            "Found `NaN` in sepal scores, consider increasing `n_iter` to a higher value"
+        )
     sepal_score = sepal_score.sort_values(by=key_added, ascending=False)
 
     if copy:
@@ -178,7 +185,9 @@ def _score_helper(
     elif max_neighs == 6:
         fun = _laplacian_hex
     else:
-        raise NotImplementedError(f"Laplacian for `{max_neighs}` neighbors is not yet implemented.")
+        raise NotImplementedError(
+            f"Laplacian for `{max_neighs}` neighbors is not yet implemented."
+        )
 
     score = []
     for i in ixs:
@@ -187,7 +196,9 @@ def _score_helper(
         else:
             conc = vals[:, i].copy()  # vals is assumed to be a NumPy array here
 
-        time_iter = _diffusion(conc, fun, n_iter, sat, sat_idx, unsat, unsat_idx, dt=dt, thresh=thresh)
+        time_iter = _diffusion(
+            conc, fun, n_iter, sat, sat_idx, unsat, unsat_idx, dt=dt, thresh=thresh
+        )
         score.append(dt * time_iter)
 
         if queue is not None:
@@ -299,7 +310,9 @@ def _compute_idxs(
     """Get saturated and unsaturated nodes and neighborhood indices."""
     sat, unsat = _get_sat_unsat_idx(g.indptr, g.shape[0], sat_thresh)
 
-    sat_idx, nearest_sat, un_unsat = _get_nhood_idx(sat, unsat, g.indptr, g.indices, sat_thresh)
+    sat_idx, nearest_sat, un_unsat = _get_nhood_idx(
+        sat, unsat, g.indptr, g.indices, sat_thresh
+    )
 
     # compute dist btwn remaining unsat and all sat
     dist = pairwise_distances(spatial[un_unsat], spatial[sat], metric=metric)
@@ -310,7 +323,9 @@ def _compute_idxs(
 
 
 @njit
-def _get_sat_unsat_idx(g_indptr: NDArrayA, g_shape: int, sat_thresh: int) -> tuple[NDArrayA, NDArrayA]:
+def _get_sat_unsat_idx(
+    g_indptr: NDArrayA, g_shape: int, sat_thresh: int
+) -> tuple[NDArrayA, NDArrayA]:
     """Get saturated and unsaturated nodes based on thresh."""
     n_indices = np.diff(g_indptr)
     unsat = np.arange(g_shape)[n_indices < sat_thresh]

@@ -10,10 +10,10 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 import anndata as ad
+from utils._sepal import sepal as sepal_cpu
 
 import rapids_singlecell as rsc
 from rapids_singlecell.squidpy_gpu import sepal as sepal_gpu
-from utils._sepal import sepal as sepal_cpu
 
 HOME = Path(os.path.expanduser("~"))
 if __name__ == "__main__":

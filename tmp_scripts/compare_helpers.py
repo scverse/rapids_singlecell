@@ -26,6 +26,7 @@ def compare_indices(adata_cpu):
 
     # Import the helper functions
     from utils._sepal import _compute_idxs as _compute_idxs_cpu
+
     from rapids_singlecell.squidpy_gpu._sepal import _compute_idxs as _compute_idxs_gpu
 
     # Get connectivity and spatial data

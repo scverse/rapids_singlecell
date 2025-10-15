@@ -157,7 +157,6 @@ def _cuda_kernel_diffusion_gpu(
     n_sat = len(sat)
     n_unsat = len(unsat)
 
-
     # Grid/block configuration following established patterns:
     # threads_per_block = 256 (as in src/rapids_singlecell/preprocessing/_harmony/_helper.py)
     threads_per_block = 256
