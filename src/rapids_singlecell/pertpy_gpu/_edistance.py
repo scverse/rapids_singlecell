@@ -36,12 +36,15 @@ def pertpy_edistance(
     bootstrap: bool = False,
     n_bootstrap: int = 100,
     random_state: int = 0,
-) -> pd.DataFrame:
+) -> EDistanceResult:
     """
     GPU-accelerated pairwise edistance computation with decomposed components.
 
-    Returns d_itself, d_other arrays and final edistance DataFrame where:
-    df[a,b] = 2*d_other[a,b] - d_itself[a] - d_itself[b]
+    Returns EDistanceResult containing the distances and distances_var.
+    The distances DataFrame is where:
+    distances[a,b] = 2*d[a,b] - d[a] - d[b]
+    The distances_var DataFrame is where:
+    distances_var[a,b] = 4*d_var[a,b] + d_var[a] + d_var[b]
 
     Parameters
     ----------
@@ -58,8 +61,8 @@ def pertpy_edistance(
 
     Returns
     -------
-    df : pd.DataFrame
-        Final edistance matrix
+    result : EDistanceResult
+        EDistanceResult containing the distances and if bootstrap is True, the distances_var.
     """
     _assert_categorical_obs(adata, key=groupby)
 
@@ -101,7 +104,7 @@ def pertpy_edistance(
         result = EDistanceResult(distances=df, distances_var=df_var)
 
     if inplace:
-        adata.uns[f"{groupby}_pairwise_edistance"] = dict(result)
+        adata.uns[f"{groupby}_pairwise_edistance"] = result._asdict()
 
     return result
 
