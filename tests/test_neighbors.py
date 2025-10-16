@@ -12,7 +12,7 @@ from scanpy.datasets import pbmc68k_reduced
 
 from rapids_singlecell.get import X_to_GPU
 from rapids_singlecell.pp import bbknn, neighbors
-from rapids_singlecell.preprocessing._neighbors import _trimming as trimming_gpu
+from rapids_singlecell.preprocessing._neighbors._helper import _trimming as trimming_gpu
 
 # the input data
 X = np.array([[1, 0], [3, 0], [5, 6], [0, 4]])
@@ -87,19 +87,19 @@ def test_indices_approx_nn(algo):
     assert counter / b_stop > 0.9
 
 
-key = "test"
+KEY = "test"
 
 
 def test_neighbors_key_added():
     adata = pbmc68k_reduced()
     del adata.obsp
     neighbors(adata, n_neighbors=5, random_state=0)
-    neighbors(adata, n_neighbors=5, random_state=0, key_added=key)
+    neighbors(adata, n_neighbors=5, random_state=0, key_added=KEY)
 
-    conns_key = adata.uns[key]["connectivities_key"]
-    dists_key = adata.uns[key]["distances_key"]
+    conns_key = adata.uns[KEY]["connectivities_key"]
+    dists_key = adata.uns[KEY]["distances_key"]
 
-    assert adata.uns["neighbors"]["params"] == adata.uns[key]["params"]
+    assert adata.uns["neighbors"]["params"] == adata.uns[KEY]["params"]
     assert np.allclose(
         adata.obsp["connectivities"].toarray(), adata.obsp[conns_key].toarray()
     )
