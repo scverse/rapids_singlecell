@@ -5,10 +5,11 @@ import time
 from argparse import ArgumentParser
 from pathlib import Path
 
-import rapids_singlecell as rsc
-from rapids_singlecell.pertpy_gpu._edistance import pertpy_edistance
 import anndata as ad
 from pertpy.tools import Distance
+
+import rapids_singlecell as rsc
+from rapids_singlecell.pertpy_gpu._edistance import pertpy_edistance
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -31,13 +32,19 @@ if __name__ == "__main__":
     start_time = time.time()
     if gpu:
         res = pertpy_edistance(
-            adata, groupby=obs_key, obsm_key="X_pca", bootstrap=bootstrap, n_bootstrap=100
+            adata,
+            groupby=obs_key,
+            obsm_key="X_pca",
+            bootstrap=bootstrap,
+            n_bootstrap=100,
         )
         df_gpu = res.distances
         df_gpu_var = res.distances_var
     else:
         if bootstrap:
-            df, df_var = dist.pairwise(adata, groupby=obs_key, bootstrap=bootstrap, n_bootstrap=100)
+            df, df_var = dist.pairwise(
+                adata, groupby=obs_key, bootstrap=bootstrap, n_bootstrap=100
+            )
         else:
             df = dist.pairwise(adata, groupby=obs_key)
             df_var = None
