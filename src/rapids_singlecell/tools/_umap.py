@@ -160,7 +160,9 @@ def umap(
         500 if maxiter is None else maxiter
     )  # 0 is not a valid value for rapids, unlike original umap
     use_umap = False
-    if neighbors["connectivities"].nnz > np.iinfo(np.int32).max:
+    if neighbors["connectivities"].nnz > np.iinfo(np.int32).max and parse_version(
+        cuml.__version__
+    ) < parse_version("25.10"):
         use_umap = True
     n_obs = adata.shape[0]
     if parse_version(cuml.__version__) < parse_version("24.10") or use_umap:
