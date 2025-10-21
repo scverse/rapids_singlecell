@@ -2,6 +2,9 @@
 installer = "uv"
 features = [ "dev" ]
 
+[envs.hatch-test]
+features = [ "test", "rapids12" ]
+
 [envs.docs]
 features = [ "doc" ]
 scripts.build = "sphinx-build -M html docs docs/_build {args}"
@@ -11,32 +14,3 @@ scripts.clean = "git clean -fXd docs"
 extra_index_urls = [
     "https://pypi.nvidia.com",
 ]
-
-[envs.hatch-test]
-features = [ "test", "rapids12" ]
-
-[envs.hatch-test.env-vars]
-PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"
-
-overrides.matrix.deps.env-vars = [
-    { if = [
-        "dev",
-    ], key = "UV_PRERELEASE", value = "allow" },
-]
-
-overrides.matrix.deps.python = [
-    { if = [ "stable" ], value = "3.12" },
-    { if = [ "dev" ], value = "3.13" },
-]
-
-overrides.matrix.deps.extra-dependencies = [
-    { if = [
-        "dev",
-    ], value = "anndata @ git+https://github.com/scverse/anndata.git" },
-    { if = [
-        "dev",
-    ], value = "scanpy @ git+https://github.com/scverse/scanpy.git" },
-]
-
-[[envs.hatch-test.matrix]]
-deps = [ "stable", "dev" ]

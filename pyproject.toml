@@ -27,8 +27,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-rapids12 = [ "cupy-cuda12x", "cudf-cu12==25.08.*", "cuml-cu12==25.08.*", "cugraph-cu12==25.08.*" ]
-rapids = [ "rapids_singlecell[rapids12]" ]
+rapids13 = [ "cupy-cuda13x", "cudf-cu13>=25.10", "cuml-cu13>=25.10", "cugraph-cu13>=25.10", "cuvs-cu13>=25.10" ]
+rapids12 = [ "cupy-cuda12x", "cudf-cu12>=25.10", "cuml-cu12>=25.10", "cugraph-cu12>=25.10", "cuvs-cu12>=25.10" ]
+
 doc = [
     "sphinx>=4.5.0",
     "sphinx-copybutton",
@@ -108,12 +109,6 @@ required-imports = [ "from __future__ import annotations" ]
 addopts = [
     "--import-mode=importlib",
     "--strict-markers",
-    "-p",
-    "anyio",
-    "-p",
-    "fast-array-utils",
-    "-p",
-    "zarr",
 ]
 markers = [
     "gpu: tests that use a GPU (currently unused, but needs to be specified here as we import anndata.tests.helpers, which uses it)",
