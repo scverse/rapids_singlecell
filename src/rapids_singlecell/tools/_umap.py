@@ -127,6 +127,7 @@ def umap(
         `adata.uns['umap' | key_added]['params']` : :class:`dict`
             UMAP parameters `a`, `b`, and `random_state` (if specified).
     """
+
     adata = adata.copy() if copy else adata
 
     if neighbors_key is None:
@@ -138,7 +139,6 @@ def umap(
         )
 
     neighbors = NeighborsView(adata, neighbors_key)
-
     if a is None or b is None:
         a, b = find_ab_params(spread, min_dist)
 
@@ -159,18 +159,15 @@ def umap(
     n_epochs = (
         500 if maxiter is None else maxiter
     )  # 0 is not a valid value for rapids, unlike original umap
-
+    use_umap = False
+    if neighbors["connectivities"].nnz > np.iinfo(np.int32).max and parse_version(
+        cuml.__version__
+    ) < parse_version("25.10"):
+        use_umap = True
     n_obs = adata.shape[0]
-    if parse_version(cuml.__version__) < parse_version("24.10"):
+    if parse_version(cuml.__version__) < parse_version("24.10") or use_umap:
         # `simplicial_set_embedding` is bugged in cuml<24.10. This is why we use `UMAP` instead.
         n_neighbors = neigh_params["n_neighbors"]
-        if neigh_params.get("method") == "rapids":
-            knn_dist = neighbors["distances"].data.reshape(n_obs, n_neighbors)
-            knn_indices = neighbors["distances"].indices.reshape(n_obs, n_neighbors)
-            pre_knn = (knn_indices, knn_dist)
-        else:
-            pre_knn = None
-
         if init_pos not in ["auto", "spectral", "random"]:
             raise ValueError(
                 f"Invalid init_pos: {init_pos}",
@@ -181,7 +178,8 @@ def umap(
 
         if init_pos == "auto":
             init_pos = "spectral" if n_obs < 1000000 else "random"
-
+        pre_knn = neighbors["connectivities"]
+        pre_knn = sparse.coo_matrix(pre_knn)
         umap = UMAP(
             n_neighbors=n_neighbors,
             n_components=n_components,
