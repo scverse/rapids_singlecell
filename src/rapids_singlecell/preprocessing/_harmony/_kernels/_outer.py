@@ -132,7 +132,7 @@ _colsum_atomic_code = r"""
         v = A[row * cols + col];
     }
 
-    // warp‐level sum over the 32 rows in this tile‐column
+    // warp-level sum over the 32 rows in this tile-column
     for (int off = 16; off > 0; off >>= 1) {
         v += __shfl_down_sync(0xffffffff, v, off);
     }

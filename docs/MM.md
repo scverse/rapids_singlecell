@@ -18,7 +18,7 @@ Why not both? Pool allocation and managed memory target different trade-offs. Po
 - Trade-off: slower than fully-in-VRAM; slowdown grows with how much you spill.
 - Good for: very large datasets that otherwise OOM; exploratory or batch runs where correctness matters more than peak speed.
 
-```
+```python
 # Enable `managed_memory`
 import rmm
 import cupy as cp
@@ -35,7 +35,7 @@ cp.cuda.set_allocator(rmm_cupy_allocator)
 - Trade-off: keeps memory reserved; needs sufficient VRAM.
 - Good for: allocation-heavy steps (e.g., neighbor graphs, harmony integration) and repeated runs.
 
-```
+```python
 # Enable `pool_allocator`
 import rmm
 import cupy as cp
