@@ -13,6 +13,7 @@ from rapids_singlecell.decoupler_gpu._helper._Method import Method, MethodMeta
 def _func_zscore(
     mat: cp.ndarray,
     adj: cp.ndarray,
+    *,
     flavor: str = "RoKAI",
     verbose: bool = False,
 ) -> tuple[cp.ndarray, cp.ndarray]:
@@ -77,14 +78,14 @@ def _func_zscore(
     nvar, nsrc = adj.shape
     m = f"zscore - calculating {nsrc} scores with flavor={flavor}"
     _log(m, level="info", verbose=verbose)
-    stds = cp.std(mat, axis=1, ddof=1)
+    stds = cp.std(mat, axis=1, ddof=1, keepdims=True)
     if flavor == "RoKAI":
-        mean_all = cp.mean(mat, axis=1)
+        mean_all = cp.mean(mat, axis=1, keepdims=True)
     elif flavor == "KSEA":
-        mean_all = cp.zeros(stds.shape)
+        mean_all = cp.zeros(stds.shape, dtype=mat.dtype)
     n = cp.sqrt(cp.count_nonzero(adj, axis=0))
     mean = mat.dot(adj) / cp.sum(cp.abs(adj), axis=0)
-    es = ((mean - mean_all.reshape(-1, 1)) * n) / stds.reshape(-1, 1)
+    es = ((mean - mean_all) * n) / stds
     pv = erfc(cp.abs(es) / cp.sqrt(2.0))
     return es.get(), pv.get()
 
