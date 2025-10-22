@@ -25,7 +25,7 @@ adata.X = adata.X.get() # moves `.X` back to the CPU
 
 You can also use {mod}`rapids_singlecell.get` to move arrays and matrices.
 
-```
+```python
 rsc.get.anndata_to_GPU(adata) # moves `.X` to the GPU
 rsc.get.anndata_to_CPU(adata) # moves `.X` to the CPU
 ```
@@ -35,7 +35,7 @@ rsc.get.anndata_to_CPU(adata) # moves `.X` to the CPU
 The preprocessing can be handled by the functions in {mod}`~.pp`. They offer accelerated versions of functions within {mod}`scanpy.pp`.
 
 Example:
-```
+```python
 rsc.pp.highly_variable_genes(adata, n_top_genes=5000, flavor="seurat_v3", batch_key= "PatientNumber", layer = "counts")
 adata = adata[:,adata.var["highly_variable"]==True]
 rsc.pp.regress_out(adata,keys=["n_counts", "percent_MT"])
@@ -47,7 +47,7 @@ rsc.pp.scale(adata,max_value=10)
 The functions provided in {mod}`~.tl` are designed to as near drop-in replacements for the functions in {mod}`scanpy.tl`, but offer significantly improved performance. Consequently, you can continue to use scanpy's plotting API.
 
 Example:
-```
+```python
 rsc.tl.tsne(adata)
 sc.pl.tsne(adata, color="leiden")
 ```
@@ -57,7 +57,7 @@ sc.pl.tsne(adata, color="leiden")
 `dcg` offers accelerated drop in replacements for {func}`~rapids_singlecell.dcg.mlm`, {func}`~rapids_singlecell.dcg.ulm` and {func}`~rapids_singlecell.dcg.aucell`
 
 Example:
-```
+```python
 import decoupler as dc
 model = dc.op.resource("PanglaoDB", organism="human")
 rsc.dcg.ulm(adata, model , tmin=3)
