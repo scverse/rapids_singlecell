@@ -29,68 +29,10 @@ def _ridx(
     return idx
 
 
-_wsum_kernel = cp.RawKernel(
-    r"""
-extern "C" __global__ void matmul_kernel(const float* x, const float* w, float* C, int n_obs, int n_var, int n_src) {
-    // x is n_obs x n_var, w is n_var x n_src, C is n_obs x n_src
-
-    // Get the row and column index of the output matrix C for this thread
-    const int row = blockIdx.y * blockDim.y + threadIdx.y;
-    const int src = blockIdx.x * blockDim.x + threadIdx.x;
-
-    // Bounds checking
-    if (row < n_obs && src < n_src) {
-        float sum = 0.0f;  // Use float precision for accumulation
-        for (int k = 0; k < n_var; ++k) {
-            sum += x[row * n_var + k] * w[k * n_src + src];
-        }
-        C[row * n_src + src] = sum;
-    }
-}
-""",
-    "matmul_kernel",
-)
-
-
-def _wsum_raw(x: cp.ndarray, w: cp.ndarray) -> cp.ndarray:
-    n_obs, n_var = x.shape
-    n_var, n_src = w.shape
-    es = cp.zeros((n_obs, n_src), dtype=cp.float32)
-
-    # Ensure input matrices are contiguous and of correct type
-    if x.flags.c_contiguous and x.dtype == cp.float32:
-        x_contig = x
-    else:
-        x_contig = cp.ascontiguousarray(x, dtype=cp.float32)
-
-    if w.flags.c_contiguous and w.dtype == cp.float32:
-        w_contig = w
-    else:
-        w_contig = cp.ascontiguousarray(w, dtype=cp.float32)
-
-    # Use 2D thread blocks for better performance
-    threads_per_block = (16, 16)
-
-    # Calculate grid size to cover all output elements
-    grid_x = (n_src + threads_per_block[0] - 1) // threads_per_block[0]
-    grid_y = (n_obs + threads_per_block[1] - 1) // threads_per_block[1]
-
-    _wsum_kernel(
-        (grid_x, grid_y),
-        threads_per_block,
-        (x_contig, w_contig, es, n_obs, n_var, n_src),
-    )
-    return es
-
-
-def _wmean_raw(x: cp.ndarray, w: cp.ndarray) -> cp.ndarray:
-    agg = _wsum_raw(x, w)
-    div = cp.sum(cp.abs(w), axis=0)
-    return agg / div
-
-
 def _wsum(x: cp.ndarray, w: cp.ndarray) -> cp.ndarray:
-    return x.dot(w)
+    out = cp.zeros((x.shape[0], w.shape[1]), dtype=x.dtype, order="F")
+    cp.cublas.gemm("N", "N", a=x, b=w, out=out)
+    return out
 
 
 def _wmean(x: cp.ndarray, w: cp.ndarray) -> cp.ndarray:
@@ -118,8 +60,6 @@ def _fun(
 _fun_dict = {
     "wsum": _wsum,
     "wmean": _wmean,
-    "wsum_raw": _wsum_raw,
-    "wmean_raw": _wmean_raw,
 }
 
 _cfuncs: dict = {}
@@ -171,35 +111,34 @@ def _validate_func(
 
 def _perm(
     fun: Callable,
-    es: np.ndarray,
-    mat: np.ndarray,
-    adj: np.ndarray,
-    idx: np.ndarray,
+    es: cp.ndarray,
+    mat: cp.ndarray,
+    *,
+    adj: cp.ndarray,
+    idx: cp.ndarray,
 ):
     # Init
     nobs, nvar = mat.shape
     nvar, nsrc = adj.shape
     times, nvar = idx.shape
-
     es_abs = cp.abs(es)
     # Initialize accumulators for statistics
-    sum_null = cp.zeros((nobs, nsrc), dtype=cp.float64)
-    sum_null_sq = cp.zeros((nobs, nsrc), dtype=cp.float64)
-    extreme_count = cp.zeros((nobs, nsrc), dtype=cp.int32)
+    sum_null = cp.zeros((nobs, nsrc), dtype=mat.dtype, order="C")
+    sum_null_sq = cp.zeros((nobs, nsrc), dtype=mat.dtype, order="C")
+    extreme_count = cp.zeros((nobs, nsrc), dtype=cp.int32, order="C")
+
+    mat = mat.T.copy()
+    adj = cp.asfortranarray(adj)
     # Permute
     for i in range(times):
-        mat_perm = mat[:, idx[i]]
+        mat_perm = mat[idx[i], :].T
+        # mat_perm = mat[:, idx[i]]
         # Apply the function
         perm_result = fun(mat_perm, adj)
-        perm_result = perm_result.astype(
-            cp.float64
-        )  # Use double precision for accumulation
         # Update running statistics
         sum_null += perm_result
-        sum_null_sq += perm_result * perm_result
-        extreme_count += (cp.abs(perm_result) > es_abs).astype(cp.int32)
-        # Clean up intermediate results
-        del mat_perm, perm_result
+        sum_null_sq += perm_result**2
+        extreme_count += cp.abs(perm_result) > es_abs
 
     # Compute final statistics
     null_mean = sum_null / times
@@ -210,8 +149,8 @@ def _perm(
     # Compute NES
     nes = cp.where(
         null_std > 1e-10,
-        (es.astype(cp.float64) - null_mean) / null_std,
-        cp.where(cp.abs(es) > 1e-10, cp.sign(es.astype(cp.float64)) * 1e6, 0.0),
+        (es - null_mean) / null_std,
+        cp.where(cp.abs(es) > 1e-10, cp.sign(es) * 1e6, 0.0),
     )
 
     # Compute empirical p-value
