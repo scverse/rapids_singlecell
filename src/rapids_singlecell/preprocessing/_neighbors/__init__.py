@@ -31,6 +31,7 @@ from rapids_singlecell.preprocessing._neighbors._algorithms._nn_descent import (
 from rapids_singlecell.preprocessing._neighbors._helper import (
     _check_metrics,
     _check_neighbors_X,
+    _fix_self_distances,
     _get_connectivities,
     _trimming,
 )
@@ -263,7 +264,7 @@ def neighbors(
         metric_kwds=metric_kwds,
         algorithm_kwds=algorithm_kwds,
     )
-    knn_dist[:, 0] = 0.0
+    knn_dist = _fix_self_distances(knn_dist, metric)
 
     n_nonzero = n_obs * n_neighbors
     rowptr = cp.arange(0, n_nonzero + 1, n_neighbors)
