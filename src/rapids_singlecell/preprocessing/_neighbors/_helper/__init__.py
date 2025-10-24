@@ -116,6 +116,25 @@ def _check_metrics(algorithm: _Algorithms, metric: _Metrics) -> bool:
     return True
 
 
+def _fix_self_distances(knn_dist: cp.ndarray, metric: _Metrics) -> cp.ndarray:
+    """Ensure zero self-distances for all definitionally applicable metrics.
+
+    Parameters
+    ----------
+    knn_dist (cupy.ndarray): Array of distances to nearest neighbors.
+    metric (str): The metric for distance computation.
+
+    Returns
+    -------
+    knn_dist (cupy.ndarray): Array with self-distances set to zero if definitionally required by metric.
+
+    """
+    if metric not in ["inner_product"]:
+        knn_dist[:, 0] = 0.0
+
+    return knn_dist
+
+
 def _get_connectivities(
     n_neighbors: int,
     *,
