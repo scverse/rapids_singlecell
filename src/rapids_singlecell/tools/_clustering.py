@@ -37,6 +37,7 @@ def _create_graph(adjacency, dtype=np.float64, *, use_weights=True):
 
     sources, targets = adjacency.nonzero()
     weights = adjacency[sources, targets]
+    vertices = list(range(adjacency.shape[0]))
     if isinstance(weights, np.matrix):
         weights = weights.A1
     df = cudf.DataFrame({"source": sources, "destination": targets, "weights": weights})
@@ -46,10 +47,19 @@ def _create_graph(adjacency, dtype=np.float64, *, use_weights=True):
         warnings.simplefilter("ignore")
         if use_weights:
             g.from_cudf_edgelist(
-                df, source="source", destination="destination", weight="weights"
+                df,
+                source="source",
+                destination="destination",
+                weight="weights",
+                vertices=vertices,
             )
         else:
-            g.from_cudf_edgelist(df, source="source", destination="destination")
+            g.from_cudf_edgelist(
+                df,
+                source="source",
+                destination="destination",
+                vertices=vertices,
+            )
     return g
 
 
