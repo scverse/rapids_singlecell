@@ -23,9 +23,6 @@ class EDistanceResult(NamedTuple):
     distances_var: pd.DataFrame | None
 
 
-compute_group_distances_kernel = get_compute_group_distances_kernel()
-
-
 def pertpy_edistance(
     adata: AnnData,
     groupby: str,
@@ -150,24 +147,12 @@ def _pairwise_means(
     num_pairs = len(pair_left)  # k * (k-1) pairs instead of k²
 
     # Allocate output for off-diagonal distances only
-    d_other_offdiag = cp.zeros(num_pairs, dtype=embedding.dtype)
+    pairwise_means = cp.zeros((k, k), dtype=embedding.dtype)
 
-    # Choose optimal block size
-    props = cp.cuda.runtime.getDeviceProperties(0)
-    max_smem = int(props.get("sharedMemPerBlock", 48 * 1024))
-
-    chosen_threads = None
-    shared_mem_size = 0  # TODO: think of a better way to do this
-    for tpb in (1024, 512, 256, 128, 64, 32):
-        required = tpb * cp.dtype(cp.float32).itemsize
-        if required <= max_smem:
-            chosen_threads = tpb
-            shared_mem_size = required
-            break
-
+    compute_group_distances_kernel = get_compute_group_distances_kernel(embedding.dtype)
     # Launch kernel - one block per OFF-DIAGONAL group pair only
     grid = (num_pairs,)
-    block = (chosen_threads,)
+    block = (1024,)
     compute_group_distances_kernel(
         grid,
         block,
@@ -177,21 +162,11 @@ def _pairwise_means(
             cell_indices,
             pair_left,
             pair_right,
-            d_other_offdiag,
+            pairwise_means,
             k,
             n_features,
         ),
-        shared_mem=shared_mem_size,
     )
-
-    # Build full k x k matrix
-    pairwise_means = cp.zeros((k, k), dtype=np.float32)
-
-    # Fill the full matrix
-    for i, idx in enumerate(pair_indices.get()):
-        a, b = divmod(idx, k)
-        pairwise_means[a, b] = d_other_offdiag[i]
-        pairwise_means[b, a] = d_other_offdiag[i]
 
     return pairwise_means
 

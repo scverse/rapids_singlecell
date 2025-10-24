@@ -3,21 +3,20 @@ from __future__ import annotations
 from cuml.common.kernel_utils import cuda_kernel_factory
 
 _compute_group_distances_kernel = r"""
-(const float* __restrict__ embedding,
+(const {0}* __restrict__ embedding,
  const int* __restrict__ cat_offsets,
  const int* __restrict__ cell_indices,
  const int* __restrict__ pair_left,
  const int* __restrict__ pair_right,
- float* __restrict__ d_other,
+ {0}* __restrict__ pairwise_means,
  int k,
  int n_features) {
-    extern __shared__ float shared_sums[];
 
     const int thread_id = threadIdx.x;
     const int block_id = blockIdx.x;
     const int block_size = blockDim.x;
 
-    float local_sum = 0.0f;
+    {0} local_sum = ({0})(0.0);
 
     const int a = pair_left[block_id];
     const int b = pair_right[block_id];
@@ -36,37 +35,46 @@ _compute_group_distances_kernel = r"""
         for (int jb = start_b; jb < end_b; ++jb) {
             const int idx_j = cell_indices[jb];
 
-            double dist_sq = 0.0;
+            {0} dist_sq = ({0})(0.0);
             for (int feat = 0; feat < n_features; ++feat) {
-                double diff = (double)embedding[idx_i * n_features + feat] -
-                              (double)embedding[idx_j * n_features + feat];
+                {0} diff = embedding[idx_i * n_features + feat] -
+                              embedding[idx_j * n_features + feat];
                 dist_sq += diff * diff;
             }
 
-            local_sum += (float)sqrt(dist_sq);
+            local_sum += sqrt(dist_sq);
         }
     }
 
-    shared_sums[thread_id] = local_sum;
+    // --- warp-shuffle reduction -------------
+    #pragma unroll
+    for (int offset = 16; offset > 0; offset >>= 1)
+        local_sum += __shfl_down_sync(0xffffffff, local_sum, offset);
+
+    // --- block reduce -----------------------
+    static __shared__ {0} s[32];              // one per warp
+    if ((threadIdx.x & 31) == 0) s[threadIdx.x>>5] = local_sum;
     __syncthreads();
 
-    for (int stride = block_size / 2; stride > 0; stride >>= 1) {
-        if (thread_id < stride) {
-            shared_sums[thread_id] += shared_sums[thread_id + stride];
+    if (threadIdx.x < 32) {
+        {0} val = (threadIdx.x < (blockDim.x>>5)) ? s[threadIdx.x] : ({0})(0.0);
+        #pragma unroll
+        for (int offset = 16; offset > 0; offset >>= 1)
+            val += __shfl_down_sync(0xffffffff, val, offset);
+        if (threadIdx.x == 0) {
+            {0} mean = val/(({0})(n_a) * ({0})(n_b));
+            pairwise_means[a * k + b] = mean;
+            pairwise_means[b * k + a] = mean;
         }
-        __syncthreads();
-    }
 
-    if (thread_id == 0) {
-        d_other[block_id] = shared_sums[0] / (float)(n_a * n_b);
     }
 }
 """
 
 
-def get_compute_group_distances_kernel():
+def get_compute_group_distances_kernel(dtype):
     return cuda_kernel_factory(
         _compute_group_distances_kernel,
-        (),
+        (dtype,),
         "compute_group_distances",
     )
