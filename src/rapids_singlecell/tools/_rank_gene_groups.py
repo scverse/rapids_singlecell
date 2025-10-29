@@ -437,8 +437,7 @@ def rank_genes_groups_wilcoxon(
             adjusted = np.array([], dtype=float)
 
         if all_scores.size:
-            sort_keys = np.column_stack((all_scores, -all_genes))
-            order = np.lexsort((sort_keys[:, 1], sort_keys[:, 0]))[::-1]
+            order = np.argsort(all_scores)[::-1]
         else:
             order = np.empty(0, dtype=int)
         keep = order[: min(n_top, order.size)]
