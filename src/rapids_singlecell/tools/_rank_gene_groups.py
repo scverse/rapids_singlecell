@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
 import cupyx.scipy.special as cupyx_special
 import numpy as np
 import pandas as pd
-import warnings
 from statsmodels.stats.multitest import multipletests
 
 from rapids_singlecell._compat import DaskArray, _meta_dense
@@ -261,9 +261,7 @@ def _average_ranks(matrix: cp.ndarray) -> cp.ndarray:
         )
         dense = cp.empty(column.size, dtype=cp.int64)
         dense[sorter] = cp.cumsum(unique)
-        boundaries = cp.concatenate(
-            (cp.flatnonzero(unique), cp.array([unique.size]))
-        )
+        boundaries = cp.concatenate((cp.flatnonzero(unique), cp.array([unique.size])))
         ranks[:, idx] = 0.5 * (boundaries[dense] + boundaries[dense - 1] + 1.0)
     return ranks
 
@@ -359,7 +357,7 @@ def rank_genes_groups_wilcoxon(
 
     base = adata.uns.get("log1p", {}).get("base")
     if base is not None:
-        log_expm1 = lambda arr: cp.expm1(arr * cp.log(base))  # noqa: E731
+        log_expm1 = lambda arr: cp.expm1(arr * cp.log(base))
     else:
         log_expm1 = cp.expm1
 
