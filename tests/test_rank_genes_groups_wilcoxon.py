@@ -134,8 +134,8 @@ def test_rank_genes_groups_wilcoxon_with_renamed_categories():
 
     rsc.tl.rank_genes_groups_wilcoxon(adata, "blobs")
     renamed_names = adata.uns["rank_genes_groups"]["names"]
+    assert tuple(renamed_names[0]) == first_run
     assert renamed_names.dtype.names == ("Zero", "One", "Two")
-    assert tuple(renamed_names["Zero"]) == first_run
 
 
 def test_rank_genes_groups_wilcoxon_with_unsorted_groups():
