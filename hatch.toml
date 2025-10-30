@@ -2,8 +2,32 @@
 installer = "uv"
 features = [ "dev" ]
 
-[envs.hatch-test]
+[envs.hatch-test-cu12]
+overrides.matrix.deps.python = [
+    { if = [ "stable" ], value = "3.12" },
+    { if = [ "dev" ], value = "3.13" },
+]
+overrides.matrix.deps.extra-dependencies = [
+    { if = [
+        "dev",
+    ], value = "anndata @ git+https://github.com/scverse/anndata.git" },
+    { if = [
+        "dev",
+    ], value = "scanpy @ git+https://github.com/scverse/scanpy.git" },
+]
+overrides.matrix.deps.env-vars = [
+    { if = [
+        "dev",
+    ], key = "UV_PRERELEASE", value = "allow" },
+]
+default-args = [  ]
 features = [ "test", "rapids12" ]
+scripts.run = "pytest"
+
+[envs.hatch-test-cu13]
+default-args = [  ]
+features = [ "test", "rapids13" ]
+scripts.run = "pytest"
 
 [envs.docs]
 features = [ "doc" ]
@@ -14,3 +38,7 @@ scripts.clean = "git clean -fXd docs"
 extra_index_urls = [
     "https://pypi.nvidia.com",
 ]
+
+
+[[envs.hatch-test-cu12.matrix]]
+deps = [ "stable", "dev" ]
