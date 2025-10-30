@@ -2,32 +2,25 @@
 installer = "uv"
 features = [ "dev" ]
 
-[envs.hatch-test-cu12]
+[envs.hatch-test]
+default-args = [  ]
+features = [ "test" ]
+scripts.run = "pytest"
+
+# Select CUDA feature per matrix
+overrides.matrix.cuda.features = [
+    { if = [ "12" ], value = "rapids12" },
+    { if = [ "13" ], value = "rapids13" },
+]
+
+# Python per deps
 overrides.matrix.deps.python = [
     { if = [ "stable" ], value = "3.12" },
     { if = [ "dev" ], value = "3.13" },
-    { if = [ "rapids_prerelease" ], value = "3.12" },
+    { if = [ "rapids_prerelease" ], value = "3.13" },
 ]
-overrides.matrix.deps.extra-dependencies = [
-    { if = [
-        "dev",
-    ], value = "anndata @ git+https://github.com/scverse/anndata.git" },
-    { if = [
-        "dev",
-    ], value = "scanpy @ git+https://github.com/scverse/scanpy.git" },
-    { if = [
-        "rapids_prerelease",
-    ], value = "cudf-cu12>=25.12.0a0,<=25.12" },
-    { if = [
-        "rapids_prerelease",
-    ], value = "cuml-cu12>=25.12.0a0,<=25.12" },
-    { if = [
-        "rapids_prerelease",
-    ], value = "cugraph-cu12>=25.12.0a0,<=25.12" },
-    { if = [
-        "rapids_prerelease",
-    ], value = "cuvs-cu12>=25.12.0a0,<=25.12" },
-]
+
+# Allow prereleases and use RAPIDS nightly index only for prerelease
 overrides.matrix.deps.env-vars = [
     { if = [
         "dev",
@@ -38,14 +31,17 @@ overrides.matrix.deps.env-vars = [
     ], key = "UV_EXTRA_INDEX_URL", value = "https://pypi.anaconda.org/rapidsai-wheels-nightly/simple" },
 ]
 
-default-args = [  ]
-features = [ "test", "rapids12" ]
-scripts.run = "pytest"
+# Dev: use upstream heads for anndata/scanpy
+overrides.matrix.deps.extra-dependencies = [
+    { if = [
+        "dev",
+    ], value = "anndata @ git+https://github.com/scverse/anndata.git" },
+    { if = [
+        "dev",
+    ], value = "scanpy @ git+https://github.com/scverse/scanpy.git" },
+]
 
-[envs.hatch-test-cu13]
-default-args = [  ]
-features = [ "test", "rapids13" ]
-scripts.run = "pytest"
+## For prerelease we rely on UV_PRERELEASE + nightly index; features select cu12/cu13
 
 [envs.docs]
 features = [ "doc" ]
@@ -58,5 +54,6 @@ extra_index_urls = [
 ]
 
 
-[[envs.hatch-test-cu12.matrix]]
+[[envs.hatch-test.matrix]]
 deps = [ "stable", "dev", "rapids_prerelease" ]
+cuda = [ "12", "13" ]
