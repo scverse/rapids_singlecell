@@ -36,8 +36,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Nvidia SMI sanity check
-        run: nvidia-smi
+      ##- name: Nvidia SMI sanity check
+      #  run: nvidia-smi
 
       - uses: mamba-org/setup-micromamba@v2
         with:
