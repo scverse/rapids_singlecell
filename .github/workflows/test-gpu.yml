@@ -85,6 +85,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
   all-green:
+    name: All Tests Green
     if: always()
     needs:
       - get-envs
