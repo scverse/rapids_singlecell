@@ -17,16 +17,16 @@ overrides.matrix.deps.extra-dependencies = [
     ], value = "scanpy @ git+https://github.com/scverse/scanpy.git" },
     { if = [
         "rapids_prerelease",
-    ], value = "cudf-cu13>=25.12.0a0,<=25.12" },
+    ], value = "cudf-cu12>=25.12.0a0,<=25.12" },
     { if = [
         "rapids_prerelease",
-    ], value = "cuml-cu13>=25.12.0a0,<=25.12" },
+    ], value = "cuml-cu12>=25.12.0a0,<=25.12" },
     { if = [
         "rapids_prerelease",
-    ], value = "cugraph-cu13>=25.12.0a0,<=25.12" },
+    ], value = "cugraph-cu12>=25.12.0a0,<=25.12" },
     { if = [
         "rapids_prerelease",
-    ], value = "cuvs-cu13>=25.12.0a0,<=25.12" },
+    ], value = "cuvs-cu12>=25.12.0a0,<=25.12" },
 ]
 overrides.matrix.deps.env-vars = [
     { if = [
