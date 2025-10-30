@@ -6,7 +6,7 @@ features = [ "dev" ]
 overrides.matrix.deps.python = [
     { if = [ "stable" ], value = "3.12" },
     { if = [ "dev" ], value = "3.13" },
-    { if = [ "rapids_prerelease" ], value = "3.13" },
+    { if = [ "rapids_prerelease" ], value = "3.12" },
 ]
 overrides.matrix.deps.extra-dependencies = [
     { if = [
@@ -33,12 +33,11 @@ overrides.matrix.deps.env-vars = [
         "dev",
         "rapids_prerelease",
     ], key = "UV_PRERELEASE", value = "allow" },
-]
-overrides.matrix.pip.extra_index_urls = [
     { if = [
         "rapids_prerelease",
-    ], value = "https://pypi.anaconda.org/rapidsai-wheels-nightly/simple" },
+    ], key = "UV_EXTRA_INDEX_URL", value = "https://pypi.anaconda.org/rapidsai-wheels-nightly/simple" },
 ]
+
 default-args = [  ]
 features = [ "test", "rapids12" ]
 scripts.run = "pytest"
