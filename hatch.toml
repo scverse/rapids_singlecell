@@ -6,6 +6,7 @@ features = [ "dev" ]
 overrides.matrix.deps.python = [
     { if = [ "stable" ], value = "3.12" },
     { if = [ "dev" ], value = "3.13" },
+    { if = [ "rapids_prerelease" ], value = "3.13" },
 ]
 overrides.matrix.deps.extra-dependencies = [
     { if = [
@@ -14,11 +15,29 @@ overrides.matrix.deps.extra-dependencies = [
     { if = [
         "dev",
     ], value = "scanpy @ git+https://github.com/scverse/scanpy.git" },
+    { if = [
+        "rapids_prerelease",
+    ], value = "cudf-cu13>=25.12.0a0,<=25.12" },
+    { if = [
+        "rapids_prerelease",
+    ], value = "cuml-cu13>=25.12.0a0,<=25.12" },
+    { if = [
+        "rapids_prerelease",
+    ], value = "cugraph-cu13>=25.12.0a0,<=25.12" },
+    { if = [
+        "rapids_prerelease",
+    ], value = "cuvs-cu13>=25.12.0a0,<=25.12" },
 ]
 overrides.matrix.deps.env-vars = [
     { if = [
         "dev",
+        "rapids_prerelease",
     ], key = "UV_PRERELEASE", value = "allow" },
+]
+overrides.matrix.pip.extra_index_urls = [
+    { if = [
+        "rapids_prerelease",
+    ], value = "https://pypi.anaconda.org/rapidsai-wheels-nightly/simple" },
 ]
 default-args = [  ]
 features = [ "test", "rapids12" ]
@@ -41,4 +60,4 @@ extra_index_urls = [
 
 
 [[envs.hatch-test-cu12.matrix]]
-deps = [ "stable", "dev" ]
+deps = [ "stable", "dev", "rapids_prerelease" ]
