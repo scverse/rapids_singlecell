@@ -45,6 +45,7 @@ jobs:
               }
             )')
           echo "envs=${ENVS_JSON}" | tee $GITHUB_OUTPUT
+
   test:
     needs: get-envs
     runs-on: "cirun-aws-gpu--${{ github.run_id }}"
