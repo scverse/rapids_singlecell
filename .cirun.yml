@@ -1,7 +1,7 @@
 runners:
   - name: aws-gpu-runner
     cloud: aws
-    instance_type: g6e.2xlarge
+    instance_type: g5.xlarge
     machine_image: ami-0285bfb786db80af3
     region: eu-west-1
     preemptible:
