@@ -1,4 +1,5 @@
-name: GPU-CI
+name: GPU Tests
+
 on:
   push:
     branches: [main]
@@ -48,7 +49,7 @@ jobs:
 
   test:
     needs: get-envs
-    runs-on: "cirun-aws-gpu--${{ github.run_id }}"
+    runs-on: cirun-aws-gpu
     timeout-minutes: 30
     strategy:
       matrix:
@@ -84,6 +85,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
   all-green:
+    name: All Tests Green
     if: always()
     needs:
       - get-envs
