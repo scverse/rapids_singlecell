@@ -90,7 +90,6 @@ jobs:
     needs:
       - get-envs
       - test
-      - remove-label
     runs-on: ubuntu-latest
     steps:
       - uses: re-actors/alls-green@release/v1
