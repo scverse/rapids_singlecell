@@ -34,7 +34,7 @@ def test_louvain_dtype(adata_neighbors, dtype, use_weights):
 
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
 def test_create_graph_dtype(adata_neighbors, dtype):
-    g = _create_graph(adata_neighbors.X, dtype, use_weights=True)
+    g = _create_graph(adata_neighbors.obsp["connectivities"], dtype, use_weights=True)
     df = g.view_edge_list()
     assert df.weight.dtype == dtype
 
