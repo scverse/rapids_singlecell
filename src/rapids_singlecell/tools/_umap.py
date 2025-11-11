@@ -6,8 +6,7 @@ import cuml
 import cuml.internals.logger as logger
 import cupy as cp
 import numpy as np
-from cuml.manifold.umap import UMAP, simplicial_set_embedding
-from cuml.manifold.umap_utils import find_ab_params
+from cuml.manifold.umap import UMAP, find_ab_params, simplicial_set_embedding
 from cuml.thirdparty_adapters import check_array as check_array_cuml
 from cupyx.scipy import sparse
 from packaging.version import parse as parse_version
