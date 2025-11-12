@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import partial, singledispatch
+from importlib.metadata import version
 from typing import TYPE_CHECKING, Any
 
 import cupy as cp
@@ -13,6 +14,7 @@ from cupyx.scipy import sparse as cusparse
 from cupyx.scipy.sparse import csr_matrix as CupyCSRMatrix
 from cupyx.scipy.sparse import spmatrix as CupySparseMatrix
 from dask.array import Array as DaskArray
+from packaging.version import Version
 from scipy import sparse
 from scipy.sparse import sparray as CSArray
 from scipy.sparse import spmatrix as CSMatrix
@@ -118,19 +120,13 @@ def _(
 
 def _as_sparse_dask_inner(
     a: NDArray | CSArray | CSMatrix, *, typ: type[CSArray | CSMatrix | CupyCSRMatrix]
-) -> CSArray | CSMatrix:
+) -> CSArray | CSMatrix | CupyCSRMatrix:
     """Convert into a a sparse container that dask supports (or complain)."""
     if issubclass(typ, CSArray) and not DASK_CAN_SPARRAY:
-        # Fallback: convert requested sparse array into sparse matrix variant
-        # Map common array classes to their matrix counterparts
-        fallback_map = {
-            getattr(sparse, "csr_array", object): sparse.csr_matrix,
-            getattr(sparse, "csc_array", object): sparse.csc_matrix,
-            getattr(sparse, "coo_array", object): sparse.coo_matrix,
-        }
-        typ = fallback_map.get(typ, sparse.csr_matrix)  # type: ignore[assignment]
+        msg = "Dask <2025.3 doesn’t support sparse arrays"
+        raise TypeError(msg)
     if issubclass(typ, CupySparseMatrix):
-        a = as_cupy(a)  # Cupy sparse constructors don’t accept numpy ndarrays
+        a = as_cupy(a)
     return typ(a)
 
 
@@ -156,10 +152,10 @@ def as_dense_cupy_dask_array(X):
 
 # Minimal feature detection: SciPy provides sparse arrays; dask support varies but
 # we optimistically enable and fallback to spmatrix at runtime if needed.
-DASK_CAN_SPARRAY = hasattr(sparse, "csr_array")
+DASK_CAN_SPARRAY = Version(version("dask")) >= version("2025.3.0")
 
 
-def as_cupy(a: NDArray | CSArray | CSMatrix):
+def as_cupy(a: NDArray | CSArray | CSMatrix) -> CupyCSRMatrix | cp.ndarray:
     """Convert numpy/scipy sparse to cupy/cupyx sparse where appropriate."""
     if isinstance(a, np.ndarray):
         return cp.asarray(a)
