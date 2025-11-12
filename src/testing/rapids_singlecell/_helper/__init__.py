@@ -152,7 +152,7 @@ def as_dense_cupy_dask_array(X):
 
 # Minimal feature detection: SciPy provides sparse arrays; dask support varies but
 # we optimistically enable and fallback to spmatrix at runtime if needed.
-DASK_CAN_SPARRAY = Version(version("dask")) >= version("2025.3.0")
+DASK_CAN_SPARRAY = Version(version("dask")) >= Version("2025.3.0")
 
 
 def as_cupy(a: NDArray | CSArray | CSMatrix) -> CupyCSRMatrix | cp.ndarray:
