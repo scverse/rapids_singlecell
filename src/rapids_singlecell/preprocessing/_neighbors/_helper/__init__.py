@@ -7,7 +7,7 @@ import cuml.internals.logger as logger
 import cupy as cp
 import cuvs
 import numpy as np
-from cuml.manifold.simpl_set import fuzzy_simplicial_set
+from cuml.manifold.umap import fuzzy_simplicial_set
 from cupyx.scipy import sparse as cp_sparse
 from packaging.version import parse as parse_version
 from scipy import sparse as sc_sparse

@@ -9,10 +9,10 @@ from cupyx.scipy.sparse import csc_matrix as csc_matrix_gpu
 from cupyx.scipy.sparse import csr_matrix as csr_matrix_gpu
 from dask.array import Array as DaskArray
 from scanpy.get import _get_obs_rep, _set_obs_rep
+from scipy.sparse import csc_array as csc_array_cpu
 from scipy.sparse import csc_matrix as csc_matrix_cpu
+from scipy.sparse import csr_array as csr_array_cpu
 from scipy.sparse import csr_matrix as csr_matrix_cpu
-from scipy.sparse import isspmatrix_csc as isspmatrix_csc_cpu
-from scipy.sparse import isspmatrix_csr as isspmatrix_csr_cpu
 
 from rapids_singlecell._compat import (
     _meta_dense,
@@ -92,13 +92,21 @@ def X_to_GPU(
     if isinstance(X, GPU_ARRAY_TYPE):
         pass
     elif isinstance(X, DaskArray):
-        if isinstance(X._meta, csr_matrix_cpu | np.ndarray):
-            meta = _meta_sparse if isinstance(X._meta, csr_matrix_cpu) else _meta_dense
+        if isinstance(X._meta, csr_matrix_cpu | csr_array_cpu | np.ndarray):
+            meta = (
+                _meta_sparse
+                if isinstance(X._meta, csr_matrix_cpu | csr_array_cpu)
+                else _meta_dense
+            )
             X = X.map_blocks(X_to_GPU, meta=meta(X.dtype))
-    elif isspmatrix_csr_cpu(X):
-        X = csr_matrix_gpu(X)
-    elif isspmatrix_csc_cpu(X):
-        X = csc_matrix_gpu(X)
+    elif isinstance(X, csr_array_cpu | csr_matrix_cpu):
+        X = csr_matrix_gpu(
+            (X_to_GPU(X.data), X_to_GPU(X.indices), X_to_GPU(X.indptr)), shape=X.shape
+        )
+    elif isinstance(X, csc_array_cpu | csc_matrix_cpu):
+        X = csc_matrix_gpu(
+            (X_to_GPU(X.data), X_to_GPU(X.indices), X_to_GPU(X.indptr)), shape=X.shape
+        )
     elif isinstance(X, np.ndarray):
         X = cp.array(X)
     else:
