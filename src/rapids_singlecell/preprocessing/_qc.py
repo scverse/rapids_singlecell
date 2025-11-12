@@ -4,7 +4,6 @@ import math
 from typing import TYPE_CHECKING
 
 import cupy as cp
-from cuml.internals.memory_utils import with_cupy_rmm
 from cupyx.scipy import sparse
 from scanpy.get import _get_obs_rep
 
@@ -184,7 +183,6 @@ def _basic_qc(
     return sums_cells, sums_genes, genes_per_cell, cells_per_gene
 
 
-@with_cupy_rmm
 def _basic_qc_dask(
     X: DaskArray,
 ) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, cp.ndarray]:
@@ -377,7 +375,6 @@ def _geneset_qc(X: ArrayTypesDask, mask: cp.ndarray) -> cp.ndarray:
     return sums_cells_sub
 
 
-@with_cupy_rmm
 def _geneset_qc_dask(X: DaskArray, mask: cp.ndarray) -> cp.ndarray:
     if isinstance(X._meta, sparse.csr_matrix):
         from ._kernels._qc_kernels import _sparse_qc_csr_sub
