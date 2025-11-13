@@ -3,12 +3,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import cupy as cp
-from packaging.version import parse as parse_version
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from rapids_singlecell.preprocessing._neighbors import _Metrics
+
+
+try:
+    from cuvs.neighbors import nn_descent
+except ImportError:
+    nn_descent = None
 
 
 def _nn_descent_knn(
@@ -20,14 +25,11 @@ def _nn_descent_knn(
     metric_kwds: Mapping,
     algorithm_kwds: Mapping,
 ) -> tuple[cp.ndarray, cp.ndarray]:
-    from cuvs import __version__ as cuvs_version
-
-    if parse_version(cuvs_version) <= parse_version("24.12"):
-        raise ValueError(
+    if nn_descent is None:
+        raise ImportError(
             "The 'nn_descent' algorithm is only available in cuvs >= 25.02. "
             "Please update your cuvs installation."
         )
-    from cuvs.neighbors import nn_descent
 
     # Extract intermediate_graph_degree from algorithm_kwds, with default
     intermediate_graph_degree = algorithm_kwds.get("intermediate_graph_degree", None)
