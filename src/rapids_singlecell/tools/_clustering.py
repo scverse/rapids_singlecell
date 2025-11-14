@@ -4,6 +4,7 @@ import warnings
 from typing import TYPE_CHECKING
 
 import cudf
+import cupy as cp
 import numpy as np
 import pandas as pd
 from natsort import natsorted
@@ -15,7 +16,6 @@ from ._utils import _choose_representation
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    import cupy as cp
     from anndata import AnnData
     from scipy import sparse
 
@@ -63,6 +63,63 @@ def _create_graph(adjacency, dtype=np.float64, *, use_weights=True):
     return g
 
 
+def coo_partition(coo_adjacency, row_start, row_end):
+    import cudf  # or pandas, but sounds like you want cudf
+
+    mask = (coo_adjacency.row >= row_start) & (coo_adjacency.row < row_end)
+
+    # Adjust dtypes to what you want (int32/float32 etc.)
+    return cudf.DataFrame(
+        {
+            "src": coo_adjacency.row[mask],
+            "dst": coo_adjacency.col[mask],
+            "weight": coo_adjacency.data[mask],
+        }
+    )
+
+
+def _create_graph_dask(adjacency, dtype=np.float64, *, use_weights=True):
+    import dask.dataframe as dd
+    from cugraph import Graph
+
+    coo_adjacency = adjacency.tocoo()
+    vertices = list(range(adjacency.shape[0]))
+    n_devices = cp.cuda.runtime.getDeviceCount()
+    chunksize = int((coo_adjacency.shape[0] + n_devices - 1) / n_devices)
+    boundaries = list(range(0, coo_adjacency.shape[0], chunksize))
+    pairs = [
+        (start, min(start + chunksize, coo_adjacency.shape[0])) for start in boundaries
+    ]
+
+    def mapper(pair):
+        start, end = pair
+        return coo_partition(coo_adjacency, start, end)
+
+    # meta must match the actual columns
+    meta = {
+        "src": coo_adjacency.row.dtype,
+        "dst": coo_adjacency.col.dtype,
+        "weight": coo_adjacency.data.dtype,
+    }
+
+    ddf = dd.from_map(mapper, pairs, meta=meta)
+    ddf = ddf.to_backend("cudf")
+    ddf.weight = ddf.weight.astype(dtype)
+    import cugraph.dask.comms.comms as Comms
+
+    Comms.initialize(p2p=True)
+    g = Graph()
+    if use_weights:
+        g.from_dask_cudf_edgelist(
+            ddf, source="src", destination="dst", weight="weight", vertices=vertices
+        )
+    else:
+        g.from_dask_cudf_edgelist(
+            ddf, source="src", destination="dst", vertices=vertices
+        )
+    return g
+
+
 def leiden(
     adata: AnnData,
     resolution: float = 1.0,
@@ -77,6 +134,7 @@ def leiden(
     neighbors_key: str | None = None,
     obsp: str | None = None,
     dtype: str | np.dtype | cp.dtype = np.float32,
+    use_dask: bool = False,
     copy: bool = False,
 ) -> AnnData | None:
     """
@@ -140,11 +198,13 @@ def leiden(
         dtype
             Data type to use for the adjacency matrix.
 
+        use_dask
+            If `True`, use Dask to create the graph and cluster. This will use all GPUs available. This feature is experimental.
+
         copy
             Whether to copy `adata` or modify it in place.
     """
     # Adjacency graph
-    from cugraph import leiden as culeiden
 
     adata = adata.copy() if copy else adata
 
@@ -160,8 +220,14 @@ def leiden(
             restrict_categories=restrict_categories,
             adjacency=adjacency,
         )
+    if use_dask:
+        from cugraph.dask import leiden as culeiden
 
-    g = _create_graph(adjacency, dtype, use_weights=use_weights)
+        g = _create_graph_dask(adjacency, dtype, use_weights=use_weights)
+    else:
+        from cugraph import leiden as culeiden
+
+        g = _create_graph(adjacency, dtype, use_weights=use_weights)
     # Cluster
     leiden_parts, _ = culeiden(
         g,
@@ -170,11 +236,16 @@ def leiden(
         theta=theta,
         max_iter=n_iterations,
     )
+    if use_dask:
+        import cugraph.dask.comms.comms as Comms
+
+        leiden_parts = leiden_parts.to_backend("pandas").compute()
+        Comms.destroy()
+    else:
+        leiden_parts = leiden_parts.to_pandas()
 
     # Format output
-    groups = (
-        leiden_parts.to_pandas().sort_values("vertex")[["partition"]].to_numpy().ravel()
-    )
+    groups = leiden_parts.sort_values("vertex")[["partition"]].to_numpy().ravel()
     if restrict_to is not None:
         if key_added == "leiden":
             key_added += "_R"
