@@ -63,19 +63,21 @@ def _create_graph(adjacency, dtype=np.float64, *, use_weights=True):
     return g
 
 
-def coo_partition(coo_adjacency, row_start, row_end):
-    import cudf  # or pandas, but sounds like you want cudf
+def coo_partition(coo_adjacency, row_start, row_end, dtype=np.float64):
+    import cudf
 
-    mask = (coo_adjacency.row >= row_start) & (coo_adjacency.row < row_end)
+    src = coo_adjacency.row[row_start:row_end].astype(np.int64)
+    dst = coo_adjacency.col[row_start:row_end].astype(np.int64)
+    weight = coo_adjacency.data[row_start:row_end].astype(dtype)
 
-    # Adjust dtypes to what you want (int32/float32 etc.)
-    return cudf.DataFrame(
+    df = cudf.DataFrame(
         {
-            "src": coo_adjacency.row[mask],
-            "dst": coo_adjacency.col[mask],
-            "weight": coo_adjacency.data[mask],
+            "src": src,
+            "dst": dst,
+            "weight": weight,
         }
     )
+    return df
 
 
 def _create_graph_dask(adjacency, dtype=np.float64, *, use_weights=True):
@@ -83,39 +85,40 @@ def _create_graph_dask(adjacency, dtype=np.float64, *, use_weights=True):
     from cugraph import Graph
 
     coo_adjacency = adjacency.tocoo()
-    vertices = list(range(adjacency.shape[0]))
     n_devices = cp.cuda.runtime.getDeviceCount()
-    chunksize = int((coo_adjacency.shape[0] + n_devices - 1) / n_devices)
-    boundaries = list(range(0, coo_adjacency.shape[0], chunksize))
-    pairs = [
-        (start, min(start + chunksize, coo_adjacency.shape[0])) for start in boundaries
-    ]
+    chunksize = int((coo_adjacency.nnz + n_devices - 1) / n_devices)
+
+    boundaries = list(range(0, coo_adjacency.nnz, chunksize))
+    pairs = [(start, min(start + chunksize, coo_adjacency.nnz)) for start in boundaries]
 
     def mapper(pair):
         start, end = pair
-        return coo_partition(coo_adjacency, start, end)
+        return coo_partition(coo_adjacency, start, end, dtype)
 
     # meta must match the actual columns
     meta = {
-        "src": coo_adjacency.row.dtype,
-        "dst": coo_adjacency.col.dtype,
-        "weight": coo_adjacency.data.dtype,
+        "src": np.int64,
+        "dst": np.int64,
+        "weight": dtype,
     }
 
-    ddf = dd.from_map(mapper, pairs, meta=meta)
-    ddf = ddf.to_backend("cudf")
-    ddf.weight = ddf.weight.astype(dtype)
+    ddf = dd.from_map(mapper, pairs, meta=meta).to_backend("cudf").persist()
     import cugraph.dask.comms.comms as Comms
 
     Comms.initialize(p2p=True)
     g = Graph()
     if use_weights:
         g.from_dask_cudf_edgelist(
-            ddf, source="src", destination="dst", weight="weight", vertices=vertices
+            ddf,
+            source="src",
+            destination="dst",
+            weight="weight",
         )
     else:
         g.from_dask_cudf_edgelist(
-            ddf, source="src", destination="dst", vertices=vertices
+            ddf,
+            source="src",
+            destination="dst",
         )
     return g
 
@@ -199,7 +202,7 @@ def leiden(
             Data type to use for the adjacency matrix.
 
         use_dask
-            If `True`, use Dask to create the graph and cluster. This will use all GPUs available. This feature is experimental.
+            If `True`, use Dask to create the graph and cluster. This will use all GPUs available. This feature is experimental. For datasets with less than 10 Million cells, it is recommended to use `use_dask=False`.
 
         copy
             Whether to copy `adata` or modify it in place.
@@ -284,6 +287,7 @@ def louvain(
     neighbors_key: int | None = None,
     obsp: str | None = None,
     dtype: str | np.dtype | cp.dtype = np.float32,
+    use_dask: bool = False,
     copy: bool = False,
 ) -> AnnData | None:
     """
@@ -346,12 +350,14 @@ def louvain(
         dtype
             Data type to use for the adjacency matrix.
 
+        use_dask
+            If `True`, use Dask to create the graph and cluster. This will use all GPUs available. This feature is experimental. For datasets with less than 10 Million cells, it is recommended to use `use_dask=False`.
+
         copy
             Whether to copy `adata` or modify it in place.
 
     """
     # Adjacency graph
-    from cugraph import louvain as culouvain
 
     dtype = _check_dtype(dtype)
 
@@ -367,23 +373,37 @@ def louvain(
             adjacency=adjacency,
         )
 
-    g = _create_graph(adjacency, dtype, use_weights=use_weights)
+    if use_dask:
+        from cugraph.dask import louvain as culouvain
+
+        g = _create_graph_dask(adjacency, dtype, use_weights=use_weights)
+    else:
+        g = _create_graph(adjacency, dtype, use_weights=use_weights)
 
     # Cluster
-    louvain_parts, _ = culouvain(
-        g,
-        resolution=resolution,
-        max_level=n_iterations,
-        threshold=threshold,
-    )
+    if use_dask:
+        louvain_parts, _ = culouvain.dask(
+            g,
+            resolution=resolution,
+            max_level=n_iterations,
+            threshold=threshold,
+        )
+    else:
+        from cugraph import louvain as culouvain
+
+        louvain_parts, _ = culouvain(
+            g,
+            resolution=resolution,
+            max_level=n_iterations,
+            threshold=threshold,
+        )
+    if use_dask:
+        louvain_parts = louvain_parts.to_backend("pandas").compute()
+    else:
+        louvain_parts = louvain_parts.to_pandas()
 
     # Format output
-    groups = (
-        louvain_parts.to_pandas()
-        .sort_values("vertex")[["partition"]]
-        .to_numpy()
-        .ravel()
-    )
+    groups = louvain_parts.sort_values("vertex")[["partition"]].to_numpy().ravel()
     if restrict_to is not None:
         if key_added == "louvain":
             key_added += "_R"
