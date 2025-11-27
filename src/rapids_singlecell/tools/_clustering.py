@@ -63,37 +63,32 @@ def _create_graph(adjacency, dtype=np.float64, *, use_weights=True):
     return g
 
 
-def coo_partition(coo_adjacency, row_start, row_end, dtype=np.float64):
-    import cudf
-
-    src = coo_adjacency.row[row_start:row_end].astype(np.int64)
-    dst = coo_adjacency.col[row_start:row_end].astype(np.int64)
-    weight = coo_adjacency.data[row_start:row_end].astype(dtype)
-
-    df = cudf.DataFrame(
-        {
-            "src": src,
-            "dst": dst,
-            "weight": weight,
-        }
-    )
-    return df
-
-
 def _create_graph_dask(adjacency, dtype=np.float64, *, use_weights=True):
+    import cudf
     import dask.dataframe as dd
     from cugraph import Graph
 
-    coo_adjacency = adjacency.tocoo()
-    n_devices = cp.cuda.runtime.getDeviceCount()
-    chunksize = int((coo_adjacency.nnz + n_devices - 1) / n_devices)
+    rows = np.repeat(np.arange(adjacency.shape[0]), np.diff(adjacency.indptr)).astype(
+        np.int32
+    )
+    cols = adjacency.indices
+    weights = adjacency.data
 
-    boundaries = list(range(0, coo_adjacency.nnz, chunksize))
-    pairs = [(start, min(start + chunksize, coo_adjacency.nnz)) for start in boundaries]
+    n_devices = cp.cuda.runtime.getDeviceCount()
+    chunksize = int((adjacency.nnz + n_devices - 1) / n_devices)
+
+    boundaries = list(range(0, adjacency.nnz, chunksize))
+    pairs = [(start, min(start + chunksize, adjacency.nnz)) for start in boundaries]
 
     def mapper(pair):
         start, end = pair
-        return coo_partition(coo_adjacency, start, end, dtype)
+        return cudf.DataFrame(
+            {
+                "src": rows[start:end].astype(np.int64),
+                "dst": cols[start:end].astype(np.int64),
+                "weight": weights[start:end].astype(dtype),
+            }
+        )
 
     # meta must match the actual columns
     meta = {
@@ -125,7 +120,7 @@ def _create_graph_dask(adjacency, dtype=np.float64, *, use_weights=True):
 
 def leiden(
     adata: AnnData,
-    resolution: float = 1.0,
+    resolution: float | list[float] = 1.0,
     *,
     random_state: int | None = 0,
     theta: float = 1.0,
@@ -154,9 +149,9 @@ def leiden(
             annData object
 
         resolution
-            A parameter value controlling the coarseness of the clustering.
+            A parameter value or a list of parameter values controlling the coarseness of the clustering.
             (called gamma in the modularity formula). Higher values lead to
-            more clusters.
+            more clusters. If a list of values is provided, the Leiden algorithm will be run for each value in the list.
 
         random_state
             Change the initialization of the optimization. Defaults to 0.
@@ -232,42 +227,52 @@ def leiden(
 
         g = _create_graph(adjacency, dtype, use_weights=use_weights)
     # Cluster
-    leiden_parts, _ = culeiden(
-        g,
-        resolution=resolution,
-        random_state=random_state,
-        theta=theta,
-        max_iter=n_iterations,
-    )
+    if isinstance(resolution, float | int):
+        resolutions = [resolution]
+    else:
+        resolutions = resolution
+    for resolution in resolutions:
+        leiden_parts, _ = culeiden(
+            g,
+            resolution=resolution,
+            random_state=random_state,
+            theta=theta,
+            max_iter=n_iterations,
+        )
+        if use_dask:
+            leiden_parts = leiden_parts.to_backend("pandas").compute()
+        else:
+            leiden_parts = leiden_parts.to_pandas()
+
+        # Format output
+        groups = leiden_parts.sort_values("vertex")[["partition"]].to_numpy().ravel()
+        key_added_to_use = key_added
+        if restrict_to is not None:
+            if key_added == "leiden":
+                key_added_to_use += "_R"
+            groups = rename_groups(
+                adata,
+                key_added=key_added_to_use,
+                restrict_key=restrict_key,
+                restrict_categories=restrict_categories,
+                restrict_indices=restrict_indices,
+                groups=groups,
+            )
+        if len(resolutions) > 1:
+            key_added_to_use += f"_{resolution}"
+
+        adata.obs[key_added_to_use] = pd.Categorical(
+            values=groups.astype("U"),
+            categories=natsorted(map(str, np.unique(groups))),
+        )
     if use_dask:
         import cugraph.dask.comms.comms as Comms
 
-        leiden_parts = leiden_parts.to_backend("pandas").compute()
         Comms.destroy()
-    else:
-        leiden_parts = leiden_parts.to_pandas()
-
-    # Format output
-    groups = leiden_parts.sort_values("vertex")[["partition"]].to_numpy().ravel()
-    if restrict_to is not None:
-        if key_added == "leiden":
-            key_added += "_R"
-        groups = rename_groups(
-            adata,
-            key_added=key_added,
-            restrict_key=restrict_key,
-            restrict_categories=restrict_categories,
-            restrict_indices=restrict_indices,
-            groups=groups,
-        )
-    adata.obs[key_added] = pd.Categorical(
-        values=groups.astype("U"),
-        categories=natsorted(map(str, np.unique(groups))),
-    )
     # store information on the clustering parameters
     adata.uns[key_added] = {}
     adata.uns[key_added]["params"] = {
-        "resolution": resolution,
+        "resolution": resolutions,
         "random_state": random_state,
         "n_iterations": n_iterations,
     }
@@ -276,7 +281,7 @@ def leiden(
 
 def louvain(
     adata: AnnData,
-    resolution: float = 1.0,
+    resolution: float | list[float] = 1.0,
     *,
     restrict_to: tuple[str, Sequence[str]] | None = None,
     key_added: str = "louvain",
@@ -304,9 +309,9 @@ def louvain(
             annData object
 
         resolution
-            A parameter value controlling the coarseness of the clustering
+            A parameter value or a list of parameter values controlling the coarseness of the clustering.
             (called gamma in the modularity formula). Higher values lead to
-            more clusters.
+            more clusters. If a list of values is provided, the Leiden algorithm will be run for each value in the list.
 
         restrict_to
             Restrict the clustering to the categories within the key for
@@ -358,7 +363,6 @@ def louvain(
 
     """
     # Adjacency graph
-
     dtype = _check_dtype(dtype)
 
     adata = adata.copy() if copy else adata
@@ -372,57 +376,60 @@ def louvain(
             restrict_categories=restrict_categories,
             adjacency=adjacency,
         )
-
+    # Cluster
     if use_dask:
         from cugraph.dask import louvain as culouvain
 
         g = _create_graph_dask(adjacency, dtype, use_weights=use_weights)
     else:
-        g = _create_graph(adjacency, dtype, use_weights=use_weights)
-
-    # Cluster
-    if use_dask:
-        louvain_parts, _ = culouvain.dask(
-            g,
-            resolution=resolution,
-            max_level=n_iterations,
-            threshold=threshold,
-        )
-    else:
         from cugraph import louvain as culouvain
 
+        g = _create_graph(adjacency, dtype, use_weights=use_weights)
+
+    if isinstance(resolution, float | int):
+        resolutions = [resolution]
+    else:
+        resolutions = resolution
+    for resolution in resolutions:
         louvain_parts, _ = culouvain(
             g,
             resolution=resolution,
             max_level=n_iterations,
             threshold=threshold,
         )
-    if use_dask:
-        louvain_parts = louvain_parts.to_backend("pandas").compute()
-    else:
-        louvain_parts = louvain_parts.to_pandas()
+        if use_dask:
+            louvain_parts = louvain_parts.to_backend("pandas").compute()
+        else:
+            louvain_parts = louvain_parts.to_pandas()
 
-    # Format output
-    groups = louvain_parts.sort_values("vertex")[["partition"]].to_numpy().ravel()
-    if restrict_to is not None:
-        if key_added == "louvain":
-            key_added += "_R"
-        groups = rename_groups(
-            adata,
-            key_added=key_added,
-            restrict_key=restrict_key,
-            restrict_categories=restrict_categories,
-            restrict_indices=restrict_indices,
-            groups=groups,
+        # Format output
+        groups = louvain_parts.sort_values("vertex")[["partition"]].to_numpy().ravel()
+        key_added_to_use = key_added
+        if restrict_to is not None:
+            if key_added == "louvain":
+                key_added_to_use += "_R"
+            groups = rename_groups(
+                adata,
+                key_added=key_added_to_use,
+                restrict_key=restrict_key,
+                restrict_categories=restrict_categories,
+                restrict_indices=restrict_indices,
+                groups=groups,
+            )
+        if len(resolutions) > 1:
+            key_added_to_use += f"_{resolution}"
+
+        adata.obs[key_added_to_use] = pd.Categorical(
+            values=groups.astype("U"),
+            categories=natsorted(map(str, np.unique(groups))),
         )
+    if use_dask:
+        import cugraph.dask.comms.comms as Comms
 
-    adata.obs[key_added] = pd.Categorical(
-        values=groups.astype("U"),
-        categories=natsorted(map(str, np.unique(groups))),
-    )
+        Comms.destroy()
     adata.uns[key_added] = {}
     adata.uns[key_added]["params"] = {
-        "resolution": resolution,
+        "resolution": resolutions,
         "n_iterations": n_iterations,
         "threshold": threshold,
     }
