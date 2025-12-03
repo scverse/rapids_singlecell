@@ -24,11 +24,9 @@ def test_dask_clustering(client, clustering_function):
 @pytest.mark.parametrize("resolution", [0.1, [0.5, 1.0]])
 def test_dask_clustering_resolution(client, clustering_function, resolution):
     adata = pbmc3k_processed()
-    print(resolution)
     clustering_function(
         adata, use_dask=True, key_added="test_dask", resolution=resolution
     )
-    print(adata.obs.columns)
     if isinstance(resolution, list):
         for r in resolution:
             assert f"test_dask_{r}" in adata.obs.columns
