@@ -110,6 +110,7 @@ required-imports = [ "from __future__ import annotations" ]
 addopts = [
     "--import-mode=importlib",
     "--strict-markers",
+    "-p no:randomly",
 ]
 markers = [
     "gpu: tests that use a GPU (currently unused, but needs to be specified here as we import anndata.tests.helpers, which uses it)",
