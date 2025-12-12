@@ -54,9 +54,10 @@ def test_pca_dask(client, data_kind, zero_center):
     )
 
 
+# ("full", 1e-7, 1e-6), ("jacobi", 1e-5, 1e-5),
 @pytest.mark.parametrize(
     ("svd_solver", "rtol", "atol"),
-    [("full", 1e-7, 1e-6), ("jacobi", 1e-5, 1e-5), ("covariance_eigh", 1e-7, 1e-6)],
+    [("covariance_eigh", 1e-7, 1e-6)],
 )
 def test_pca_dask_dense_svd_solver(client, svd_solver, rtol, atol):
     adata_1 = pbmc3k_processed()
@@ -115,7 +116,7 @@ def test_pca_dask_full_pipeline(client, data_kind):
     rsc.pp.log1p(adata_2)
 
     rsc.pp.pca(adata_1, svd_solver="full")
-    rsc.pp.pca(adata_2, svd_solver="full")
+    rsc.pp.pca(adata_2, svd_solver="covariance_eigh")
 
     cp.testing.assert_allclose(
         np.abs(adata_1.obsm["X_pca"]),

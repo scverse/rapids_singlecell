@@ -46,6 +46,7 @@ doc = [
 test-minimal = [
     "pytest",
     "anyio",
+    "pooch",
     "profimp",
     "scanpy>=1.10.0",
     "bbknn",
