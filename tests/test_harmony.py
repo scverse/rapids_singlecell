@@ -31,14 +31,17 @@ def _get_measure(x, base, norm):
 def adata_reference():
     X_pca_file = pooch.retrieve(
         "https://github.com/slowkow/harmonypy/raw/refs/heads/master/data/pbmc_3500_pcs.tsv.gz",
+        known_hash="md5:27e319b3ddcc0c00d98e70aa8e677b10",
     )
     X_pca = pd.read_csv(X_pca_file, delimiter="\t")
     X_pca_harmony_file = pooch.retrieve(
         "https://github.com/slowkow/harmonypy/raw/refs/heads/master/data/pbmc_3500_pcs_harmonized.tsv.gz",
+        known_hash="md5:a7c4ce4b98c390997c66d63d48e09221",
     )
     X_pca_harmony = pd.read_csv(X_pca_harmony_file, delimiter="\t")
     meta_file = pooch.retrieve(
         "https://github.com/slowkow/harmonypy/raw/refs/heads/master/data/pbmc_3500_meta.tsv.gz",
+        known_hash="md5:8c7ca20e926513da7cf0def1211baecb",
     )
     meta = pd.read_csv(meta_file, delimiter="\t")
     adata = ad.AnnData(
