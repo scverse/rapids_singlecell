@@ -4,6 +4,7 @@ import anndata as ad
 import cupy as cp
 import numpy as np
 import pandas as pd
+import pooch
 import pytest
 import scanpy as sc
 from scipy.stats import pearsonr
@@ -28,18 +29,18 @@ def _get_measure(x, base, norm):
 
 @pytest.fixture
 def adata_reference():
-    X_pca = pd.read_csv(
+    X_pca_file = pooch.retrieve(
         "https://github.com/slowkow/harmonypy/raw/refs/heads/master/data/pbmc_3500_pcs.tsv.gz",
-        delimiter="\t",
     )
-    X_pca_harmony = pd.read_csv(
+    X_pca = pd.read_csv(X_pca_file, delimiter="\t")
+    X_pca_harmony_file = pooch.retrieve(
         "https://github.com/slowkow/harmonypy/raw/refs/heads/master/data/pbmc_3500_pcs_harmonized.tsv.gz",
-        delimiter="\t",
     )
-    meta = pd.read_csv(
+    X_pca_harmony = pd.read_csv(X_pca_harmony_file, delimiter="\t")
+    meta_file = pooch.retrieve(
         "https://github.com/slowkow/harmonypy/raw/refs/heads/master/data/pbmc_3500_meta.tsv.gz",
-        delimiter="\t",
     )
+    meta = pd.read_csv(meta_file, delimiter="\t")
     adata = ad.AnnData(
         X=None,
         obs=meta,
