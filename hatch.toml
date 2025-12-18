@@ -3,7 +3,55 @@ installer = "uv"
 features = [ "dev" ]
 
 [envs.hatch-test]
-features = [ "test", "rapids12" ]
+default-args = [  ]
+features = [ "test" ]
+scripts.run = "pytest"
+
+# Select CUDA feature per matrix
+overrides.matrix.cuda.features = [
+    { if = [ "12" ], value = "rapids12" },
+    { if = [ "13" ], value = "rapids13" },
+]
+
+# Python per deps
+overrides.matrix.deps.python = [
+    { if = [ "stable" ], value = "3.12" },
+    { if = [ "dev" ], value = "3.13" },
+    { if = [ "rapids_prerelease" ], value = "3.13" },
+]
+
+# Allow prereleases and use RAPIDS nightly index only for prerelease
+overrides.matrix.deps.env-vars = [
+    { if = [
+        "dev",
+        "rapids_prerelease",
+    ], key = "UV_PRERELEASE", value = "allow" },
+    { if = [
+        "rapids_prerelease",
+    ], key = "UV_EXTRA_INDEX_URL", value = "https://pypi.anaconda.org/rapidsai-wheels-nightly/simple" },
+]
+
+# Dev: use upstream heads for anndata/scanpy
+overrides.matrix.deps.extra-dependencies = [
+    { if = [
+        "dev",
+    ], value = "anndata @ git+https://github.com/scverse/anndata.git" },
+    { if = [
+        "dev",
+    ], value = "scanpy @ git+https://github.com/scverse/scanpy.git" },
+]
+overrides.matrix.cuda.extra-dependencies = [
+    { if = [ "13" ], value = "cuml-cu13<26.4" },
+    { if = [ "13" ], value = "cudf-cu13<26.4" },
+    { if = [ "13" ], value = "cugraph-cu13<26.4" },
+    { if = [ "13" ], value = "cuvs-cu13<26.4" },
+    { if = [ "12" ], value = "cuml-cu12<26.4" },
+    { if = [ "12" ], value = "cudf-cu12<26.4" },
+    { if = [ "12" ], value = "cugraph-cu12<26.4" },
+    { if = [ "12" ], value = "cuvs-cu12<26.4" },
+]
+
+## For prerelease we rely on UV_PRERELEASE + nightly index; features select cu12/cu13
 
 [envs.docs]
 features = [ "doc" ]
@@ -14,3 +62,8 @@ scripts.clean = "git clean -fXd docs"
 extra_index_urls = [
     "https://pypi.nvidia.com",
 ]
+
+
+[[envs.hatch-test.matrix]]
+deps = [ "stable", "dev", "rapids_prerelease" ]
+cuda = [ "12", "13" ]

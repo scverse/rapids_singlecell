@@ -2,11 +2,13 @@
 
 # Release notes
 
-## Version 0.14.0
-```{include} /release-notes/0.14.0.md
-```
-
 ## Version 0.13.0
+```{include} /release-notes/0.13.5.md
+```
+```{include} /release-notes/0.13.4.md
+```
+```{include} /release-notes/0.13.3.md
+```
 ```{include} /release-notes/0.13.2.md
 ```
 ```{include} /release-notes/0.13.1.md

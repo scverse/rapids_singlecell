@@ -5,43 +5,51 @@ Process datasets larger than GPU memory by chunking work with Dask while keeping
 
 ## Start a Dask CUDA cluster
 
+Choose one of these presets:
+
+---
+
+### A) NVLink / Performance preset (UCX + RMM pool, no managed memory)
+
+Best when the data fits across GPUs and you want fast P2P.
+
 ```python
 from dask.distributed import Client
 from dask_cuda import LocalCUDACluster
 
-# Single or multi-GPU: set CUDA_VISIBLE_DEVICES accordingly (e.g., "0,1")
-# Use one thread per worker for GPU tasks to avoid contention and VRAM spikes
-cluster = LocalCUDACluster(CUDA_VISIBLE_DEVICES="0", threads_per_worker=1)
+# Example: use 8 local GPUs
+cluster = LocalCUDACluster(
+    CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7",
+    protocol="ucx",
+    threads_per_worker=1,           # GPU-safe default
+    rmm_pool_size="80%",            # per-worker pool; % of free VRAM at start
+    rmm_managed_memory=False,       # avoid UM to maximize P2P
+    rmm_allocator_external_lib="cupy",  # auto-patch CuPy to use RMM
+)
+client = Client(cluster)
+```
+### B) Capacity / Robustness preset (TCP + Managed memory)
+
+Best when you need to stretch VRAM (slower P2P, but fewer OOMs).
+```python
+from dask.distributed import Client
+from dask_cuda import LocalCUDACluster
+
+cluster = LocalCUDACluster(
+    CUDA_VISIBLE_DEVICES="0,1",     # scale as needed
+    protocol="tcp",                 # TCP is often more predictable with UVM
+    threads_per_worker=1,
+    rmm_managed_memory=True,        # allow oversubscription (paging)
+    rmm_allocator_external_lib="cupy",
+)
 client = Client(cluster)
 ```
 
-Notes:
-- `threads_per_worker=1` is recommended for GPU workloads. More threads can be faster but often increase temporary allocations, causing VRAM spikes/overflows; some dask-cuda releases also showed leaks with multi-threaded workers. With row chunks around ~20,000, 4–5 threads can still work on many GPUs.
-- For capacity over speed, enable RMM managed memory (see {doc}`MM`). For highest peer‑to‑peer (NVLink) performance, prefer the RMM pool allocator and avoid managed memory.
-- Multi‑GPU transport: use UCX (`protocol="ucx"`) to enable NVLink. UCX typically uses more memory and can appear leaky; TCP is more stable but slower.
-- UCX is not compatible with CUDA managed memory. For UCX/NVLink, disable managed memory. TCP can be used with managed memory.
-
-```python
-# Configure RMM on all workers
-import cupy as cp
-import rmm
-from rmm.allocators.cupy import rmm_cupy_allocator
-
-def set_mem_pool():
-    # Prefer pool allocator for performance and NVLink (managed memory can degrade P2P)
-    rmm.reinitialize(managed_memory=False, pool_allocator=True)
-    cp.cuda.set_allocator(rmm_cupy_allocator)
-
-client.run(set_mem_pool)
-```
-
-UCX example (optional):
-
-```python
-# Use UCX transport (NVLink capable) instead of TCP
-cluster = LocalCUDACluster(CUDA_VISIBLE_DEVICES="0,1", threads_per_worker=1, protocol="ucx")
-client = Client(cluster)
-```
+### Notes
+* `threads_per_worker=1` is recommended for GPU workloads. More threads can be faster but often increase temporary allocations, causing VRAM spikes/overflows; some dask-cuda releases also showed leaks with multi-threaded workers. With row chunks around ~20,000, 4–5 threads can still work on many GPUs.
+* For capacity over speed, enable RMM managed memory (see {doc}MM). For highest peer-to-peer (NVLink) performance, prefer the RMM pool allocator and avoid managed memory.
+* Multi-GPU transport: use UCX (`protocol="ucx"`) to enable NVLink. UCX typically uses more memory; TCP is more stable but slower.
+* UCX is not compatible with CUDA managed memory. For UCX/NVLink, disable managed memory. TCP can be used with managed memory.
 
 ## Loading AnnData lazily from Zarr (from the multi-GPU notebook)
 

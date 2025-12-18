@@ -3,8 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import cupy as cp
-
-# from cuml.internals.memory_utils import with_cupy_rmm
 from cupyx.scipy import sparse
 from scanpy.get import _get_obs_rep
 

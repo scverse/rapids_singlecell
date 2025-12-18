@@ -7,14 +7,34 @@ from typing import TYPE_CHECKING, Any, Literal, get_args
 import cuml.internals.logger as logger
 import cupy as cp
 import numpy as np
-import pylibraft
-from cuml.manifold.simpl_set import fuzzy_simplicial_set
 from cupyx.scipy import sparse as cp_sparse
-from packaging.version import parse as parse_version
-from pylibraft.common import DeviceResources
 from scipy import sparse as sc_sparse
 
-from rapids_singlecell._utils import _get_logger_level
+from rapids_singlecell.preprocessing._neighbors._algorithms._all_neighbors import (
+    _all_neighbors_knn,
+)
+from rapids_singlecell.preprocessing._neighbors._algorithms._brute import _brute_knn
+from rapids_singlecell.preprocessing._neighbors._algorithms._cagra import _cagra_knn
+from rapids_singlecell.preprocessing._neighbors._algorithms._ivfflat import (
+    _ivf_flat_knn,
+)
+from rapids_singlecell.preprocessing._neighbors._algorithms._ivfpq import _ivf_pq_knn
+from rapids_singlecell.preprocessing._neighbors._algorithms._mg_ivfflat import (
+    _mg_ivf_flat_knn,
+)
+from rapids_singlecell.preprocessing._neighbors._algorithms._mg_ivfpq import (
+    _mg_ivf_pq_knn,
+)
+from rapids_singlecell.preprocessing._neighbors._algorithms._nn_descent import (
+    _nn_descent_knn,
+)
+from rapids_singlecell.preprocessing._neighbors._helper import (
+    _check_metrics,
+    _check_neighbors_X,
+    _fix_self_distances,
+    _get_connectivities,
+    _trimming,
+)
 from rapids_singlecell.tools._utils import _choose_representation
 
 if TYPE_CHECKING:
@@ -24,8 +44,19 @@ if TYPE_CHECKING:
 
 AnyRandom = None | int | np.random.RandomState
 
-_Algorithms_bbknn = Literal["brute", "cagra", "ivfflat", "ivfpq"]
-_Algorithms = Literal["brute", "cagra", "ivfflat", "ivfpq", "nn_descent"]
+_Algorithms_bbknn = Literal[
+    "brute", "cagra", "ivfflat", "ivfpq", "mg_ivfflat", "mg_ivfpq"
+]
+_Algorithms = Literal[
+    "brute",
+    "cagra",
+    "ivfflat",
+    "ivfpq",
+    "nn_descent",
+    "all_neighbors",
+    "mg_ivfflat",
+    "mg_ivfpq",
+]
 _MetricsDense = Literal[
     "l2",
     "chebyshev",
@@ -65,384 +96,16 @@ _MetricsSparse = Literal[
 _Metrics = _MetricsDense | _MetricsSparse
 
 
-def _cuvs_switch():
-    return parse_version(pylibraft.__version__) > parse_version("24.10")
-
-
-def _brute_knn(
-    X: cp_sparse.spmatrix | cp.ndarray,
-    Y: cp_sparse.spmatrix | cp.ndarray,
-    k: int,
-    *,
-    metric: _Metrics,
-    metric_kwds: Mapping,
-    algorithm_kwds: Mapping,
-) -> tuple[cp.ndarray, cp.ndarray]:
-    from cuml.neighbors import NearestNeighbors
-
-    nn = NearestNeighbors(
-        n_neighbors=k,
-        algorithm="brute",
-        metric=metric,
-        output_type="cupy",
-        metric_params=metric_kwds,
-    )
-    nn.fit(X)
-    distances, neighbors = nn.kneighbors(Y)
-    return neighbors, distances
-
-
-def _cagra_knn(
-    X: cp.ndarray,
-    Y: cp.ndarray,
-    k: int,
-    *,
-    metric: _Metrics,
-    metric_kwds: Mapping,
-    algorithm_kwds: Mapping,
-) -> tuple[cp.ndarray, cp.ndarray]:
-    if not _cuvs_switch():
-        try:
-            from pylibraft.neighbors import cagra
-        except ImportError:
-            raise ImportError(
-                "The 'cagra' module is not available in your current RAFT installation. "
-                "Please update RAFT to a version that supports 'cagra'."
-            )
-        resources = DeviceResources()
-        build_kwargs = {"handle": resources}
-        search_kwargs = {"handle": resources}
-    else:
-        from cuvs.neighbors import cagra
-
-        resources = None
-        build_kwargs = {}
-        search_kwargs = {}
-
-    if metric == "euclidean":
-        metric_to_use = "sqeuclidean"
-    else:
-        metric_to_use = metric
-    build_params = cagra.IndexParams(
-        metric=metric_to_use, graph_degree=k, build_algo="nn_descent"
-    )
-    index = cagra.build(build_params, X, **build_kwargs)
-
-    search_params = cagra.SearchParams()
-    distances, neighbors = cagra.search(search_params, index, Y, k, **search_kwargs)
-
-    if resources is not None:
-        resources.sync()
-
-    neighbors = cp.asarray(neighbors)
-    distances = cp.asarray(distances)
-
-    if metric == "euclidean":
-        distances = cp.sqrt(distances)
-
-    return neighbors, distances
-
-
-def _compute_nlist(N):
-    base = math.sqrt(N)
-    next_pow2 = 2 ** math.ceil(math.log2(base))
-    return int(next_pow2 * 2)
-
-
-def _ivf_flat_knn(
-    X: cp.ndarray,
-    Y: cp.ndarray,
-    k: int,
-    *,
-    metric: _Metrics,
-    metric_kwds: Mapping,
-    algorithm_kwds: Mapping,
-) -> tuple[cp.ndarray, cp.ndarray]:
-    if not _cuvs_switch():
-        from pylibraft.neighbors import ivf_flat
-
-        resources = DeviceResources()
-        build_kwargs = {"handle": resources}  # pylibraft uses 'handle'
-        search_kwargs = {"handle": resources}
-    else:
-        from cuvs.neighbors import ivf_flat
-
-        resources = None
-        build_kwargs = {}  # cuvs does not need handle/resources
-        search_kwargs = {}
-
-    # Extract n_lists and nprobes from algorithm_kwds, with defaults
-    n_lists = algorithm_kwds.get("n_lists", _compute_nlist(X.shape[0]))
-    n_probes = algorithm_kwds.get("n_probes", 20)
-    index_params = ivf_flat.IndexParams(n_lists=n_lists, metric=metric)
-    index = ivf_flat.build(index_params, X, **build_kwargs)
-
-    # Create SearchParams with nprobes if provided
-    search_params = ivf_flat.SearchParams(n_probes=n_probes)
-    distances, neighbors = ivf_flat.search(search_params, index, Y, k, **search_kwargs)
-
-    if resources is not None:
-        resources.sync()
-
-    distances = cp.asarray(distances)
-    neighbors = cp.asarray(neighbors)
-
-    return neighbors, distances
-
-
-def _ivf_pq_knn(
-    X: cp.ndarray,
-    Y: cp.ndarray,
-    k: int,
-    *,
-    metric: _Metrics,
-    metric_kwds: Mapping,
-    algorithm_kwds: Mapping,
-) -> tuple[cp.ndarray, cp.ndarray]:
-    if not _cuvs_switch():
-        from pylibraft.neighbors import ivf_pq
-
-        resources = DeviceResources()
-        build_kwargs = {"handle": resources}
-        search_kwargs = {"handle": resources}
-    else:
-        from cuvs.neighbors import ivf_pq
-
-        resources = None
-        build_kwargs = {}
-        search_kwargs = {}
-
-    # Extract n_lists and nprobes from algorithm_kwds, with defaults
-    n_lists = algorithm_kwds.get("n_lists", _compute_nlist(X.shape[0]))
-    n_probes = algorithm_kwds.get("n_probes", 20)
-
-    index_params = ivf_pq.IndexParams(n_lists=n_lists, metric=metric)
-    index = ivf_pq.build(index_params, X, **build_kwargs)
-    # Create SearchParams with nprobes if provided
-    search_params = ivf_pq.SearchParams(n_probes=n_probes)
-    distances, neighbors = ivf_pq.search(search_params, index, Y, k, **search_kwargs)
-    if resources is not None:
-        resources.sync()
-
-    distances = cp.asarray(distances)
-    neighbors = cp.asarray(neighbors)
-
-    return neighbors, distances
-
-
-def _nn_descent_knn(
-    X: cp.ndarray,
-    Y: cp.ndarray,
-    k: int,
-    *,
-    metric: _Metrics,
-    metric_kwds: Mapping,
-    algorithm_kwds: Mapping,
-) -> tuple[cp.ndarray, cp.ndarray]:
-    from cuvs import __version__ as cuvs_version
-
-    if parse_version(cuvs_version) <= parse_version("24.12"):
-        raise ValueError(
-            "The 'nn_descent' algorithm is only available in cuvs >= 25.02. "
-            "Please update your cuvs installation."
-        )
-    from cuvs.neighbors import nn_descent
-
-    # Extract intermediate_graph_degree from algorithm_kwds, with default
-    intermediate_graph_degree = algorithm_kwds.get("intermediate_graph_degree", None)
-
-    idxparams = nn_descent.IndexParams(
-        graph_degree=k,
-        intermediate_graph_degree=intermediate_graph_degree,
-        metric="sqeuclidean" if metric == "euclidean" else metric,
-    )
-    idx = nn_descent.build(
-        idxparams,
-        dataset=X,
-    )
-    neighbors = cp.array(idx.graph).astype(cp.uint32)
-    from rapids_singlecell._cuda import _nn_descent_cuda as _nd
-
-    distances = cp.zeros((X.shape[0], neighbors.shape[1]), dtype=cp.float32)
-    if metric == "euclidean" or metric == "sqeuclidean":
-        _nd.sqeuclidean(
-            X.data.ptr,
-            out=distances.data.ptr,
-            pairs=neighbors.data.ptr,
-            n_samples=X.shape[0],
-            n_features=X.shape[1],
-            n_neighbors=neighbors.shape[1],
-            stream=cp.cuda.get_current_stream().ptr,
-        )
-    elif metric == "cosine":
-        _nd.cosine(
-            X.data.ptr,
-            out=distances.data.ptr,
-            pairs=neighbors.data.ptr,
-            n_samples=X.shape[0],
-            n_features=X.shape[1],
-            n_neighbors=neighbors.shape[1],
-            stream=cp.cuda.get_current_stream().ptr,
-        )
-    elif metric == "inner_product":
-        _nd.inner(
-            X.data.ptr,
-            out=distances.data.ptr,
-            pairs=neighbors.data.ptr,
-            n_samples=X.shape[0],
-            n_features=X.shape[1],
-            n_neighbors=neighbors.shape[1],
-            stream=cp.cuda.get_current_stream().ptr,
-        )
-    if metric == "euclidean":
-        distances = cp.sqrt(distances)
-    if metric in ("cosine", "euclidean", "sqeuclidean"):
-        # Add self-neighbors and self-distances for distance metrics.
-        # This is not needed for inner_product, as it is a similarity metric.
-        add_self_neighbors = cp.arange(X.shape[0], dtype=cp.uint32)
-        neighbors = cp.concatenate(
-            (add_self_neighbors[:, None], neighbors[:, :-1]), axis=1
-        )
-        add_self_distances = cp.zeros((X.shape[0], 1), dtype=cp.float32)
-        distances = cp.concatenate((add_self_distances, distances[:, :-1]), axis=1)
-    return neighbors, distances
-
-
 KNN_ALGORITHMS = {
     "brute": _brute_knn,
     "cagra": _cagra_knn,
     "ivfflat": _ivf_flat_knn,
     "ivfpq": _ivf_pq_knn,
     "nn_descent": _nn_descent_knn,
+    "all_neighbors": _all_neighbors_knn,
+    "mg_ivfflat": _mg_ivf_flat_knn,
+    "mg_ivfpq": _mg_ivf_pq_knn,
 }
-
-
-def _check_neighbors_X(
-    X: cp_sparse.spmatrix | sc_sparse.spmatrix | np.ndarray | cp.ndarray,
-    algorithm: _Algorithms,
-) -> cp_sparse.spmatrix | cp.ndarray:
-    """Check and convert input X to the expected format based on algorithm.
-
-    Parameters
-    ----------
-    X (array-like or sparse matrix): Input data.
-    algorithm (str): The algorithm to be used.
-
-    Returns
-    -------
-    X_contiguous (cupy.ndarray or sparse.csr_matrix): Contiguous array or CSR matrix.
-
-    """
-    if cp_sparse.issparse(X) or sc_sparse.issparse(X):
-        if algorithm != "brute":
-            raise ValueError(
-                f"Sparse input is not supported for {algorithm} algorithm. Use 'brute' instead."
-            )
-        X_contiguous = X.tocsr()
-
-    else:
-        if isinstance(X, np.ndarray):
-            X_contiguous = cp.asarray(X, order="C", dtype=np.float32)
-        elif isinstance(X, cp.ndarray):
-            X_contiguous = cp.ascontiguousarray(X, dtype=np.float32)
-        else:
-            raise TypeError(
-                "Unsupported type for X. Expected ndarray or sparse matrix."
-            )
-
-    return X_contiguous
-
-
-def _check_metrics(algorithm: _Algorithms, metric: _Metrics) -> bool:
-    """Check if the provided metric is compatible with the chosen algorithm.
-
-    Parameters
-    ----------
-    algorithm (str): The algorithm to be used.
-    metric (str): The metric for distance computation.
-
-    Returns
-    -------
-    bool: True if the metric is compatible, otherwise ValueError is raised.
-
-    """
-    if algorithm == "brute":
-        # 'brute' support all metrics, no need to check further.
-        return True
-    elif algorithm == "cagra":
-        if metric not in ["euclidean", "sqeuclidean", "inner_product"]:
-            raise ValueError(
-                "cagra only supports 'euclidean', 'inner_product' and 'sqeuclidean' metrics."
-            )
-    elif algorithm in ["ivfpq", "ivfflat"]:
-        if metric not in ["euclidean", "sqeuclidean", "inner_product"]:
-            raise ValueError(
-                f"{algorithm} only supports 'euclidean', 'sqeuclidean', and 'inner_product' metrics."
-            )
-    elif algorithm == "nn_descent":
-        if metric not in ["euclidean", "sqeuclidean", "cosine", "inner_product"]:
-            raise ValueError(
-                "nn_descent only supports 'euclidean', 'sqeuclidean', 'inner_product' and 'cosine' metrics."
-            )
-    else:
-        raise NotImplementedError(f"The {algorithm} algorithm is not implemented yet.")
-
-    return True
-
-
-def _get_connectivities(
-    n_neighbors: int,
-    *,
-    n_obs: int,
-    random_state: AnyRandom,
-    metric: _Metrics,
-    knn_indices: cp.ndarray,
-    knn_dist: cp.ndarray,
-) -> cp_sparse.coo_matrix:
-    set_op_mix_ratio = 1.0
-    local_connectivity = 1.0
-    X_conn = cp.empty((n_obs, 1), dtype=np.float32)
-    logger_level = _get_logger_level(logger)
-    connectivities = fuzzy_simplicial_set(
-        X_conn,
-        n_neighbors,
-        random_state,
-        metric=metric,
-        knn_indices=knn_indices,
-        knn_dists=knn_dist,
-        set_op_mix_ratio=set_op_mix_ratio,
-        local_connectivity=local_connectivity,
-    )
-    logger.set_level(logger_level)
-    return connectivities
-
-
-def _trimming(cnts: cp_sparse.csr_matrix, trim: int) -> cp_sparse.csr_matrix:
-    from rapids_singlecell._cuda import _bbknn_cuda as _bb
-
-    n_rows = cnts.shape[0]
-    vals_gpu = cp.zeros(n_rows, dtype=cp.float32)
-
-    _bb.find_top_k_per_row(
-        cnts.data.data.ptr,
-        cnts.indptr.data.ptr,
-        n_rows=cnts.shape[0],
-        trim=int(trim),
-        vals=vals_gpu.data.ptr,
-        stream=cp.cuda.get_current_stream().ptr,
-    )
-
-    _bb.cut_smaller(
-        cnts.indptr.data.ptr,
-        cnts.indices.data.ptr,
-        cnts.data.data.ptr,
-        vals=vals_gpu.data.ptr,
-        n_rows=cnts.shape[0],
-        stream=cp.cuda.get_current_stream().ptr,
-    )
-
-    cnts.eliminate_zeros()
-    return cnts
 
 
 def neighbors(
@@ -486,15 +149,31 @@ def neighbors(
         A numpy random seed.
     algorithm
         The query algorithm to use. Valid options are:
-            * 'brute': Brute-force search that computes distances to all data points, guaranteeing exact results.
+            `'brute'`
+                Brute-force search that computes distances to all data points, guaranteeing exact results.
 
-            * 'ivfflat': Uses inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
+            `'ivfflat'`
+                Uses inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
 
-            * 'ivfpq': Combines inverted file indexing with product quantization to encode sub-vectors of the dataset, facilitating faster distance computation.
+            `'ivfpq'`
+                Combines inverted file indexing with product quantization to encode sub-vectors of the dataset, facilitating faster distance computation.
 
-            * 'cagra': Employs the Compressed, Accurate Graph-based search to quickly find nearest neighbors by traversing a graph structure.
+            `'cagra'`
+                Employs the Compressed, Accurate Graph-based search to quickly find nearest neighbors by traversing a graph structure.
 
-            * 'nn_descent': Uses the NN-descent algorithm to approximate the k-nearest neighbors.
+            `'nn_descent'`
+                Uses the NN-descent algorithm to approximate the k-nearest neighbors.
+                Note: Performance may be degraded when Dask is active.
+
+            `'all_neighbors'`
+                Uses the all-neighbors algorithm to approximate the k-nearest neighbors.
+                Note: Performance may be degraded when Dask is active and algorithm is `nn_descent`.
+
+            `'mg_ivfflat'`
+                Uses the Multi-GPU inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
+
+            `'mg_ivfpq'`
+                Combines Multi-GPU inverted file indexing with product quantization to encode sub-vectors of the dataset, facilitating faster distance computation.
 
         Please ensure that the chosen algorithm is compatible with your dataset and the specific requirements of your search problem.
     metric
@@ -502,14 +181,39 @@ def neighbors(
     metric_kwds
         Options for the metric.
     algorithm_kwds
-        Options for the algorithm. For 'ivfflat' and 'ivfpq' algorithms, the following
-        parameters can be specified:
+        Options for the algorithm.
+        For `ivfflat` and `ivfpq` algorithms, the following parameters can be specified:
+
         * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
+
         * 'n_probes': Number of lists to probe during search. Default is 20. Higher values
         increase accuracy but reduce speed.
-        For 'nn_descent' algorithm, the following parameters can be specified:
+
+        For `nn_descent` algorithm, the following parameters can be specified:
+
         * 'intermediate_graph_degree': The degree of the intermediate graph. Default is None.
         It is recommended to set it to `>= 1.5 * n_neighbors`.
+
+        For `all_neighbors` algorithm, the following parameters can be specified:
+
+        * 'algo': The algorithm to use. Valid options are: 'ivf_pq' and 'nn_descent'. Default is 'nn_descent'.
+
+        * 'n_clusters': Number of clusters/batches to partition the dataset into (> overlap_factor). Default is number of GPUs.
+
+        * 'overlap_factor': Number of clusters each point is assigned to (must be < n_clusters). Default is 1.
+
+        * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)). Only available for `ivf_pq` algorithm.
+
+        * 'intermediate_graph_degree': The degree of the intermediate graph. Default is None. It is recommended to set it to `>= 1.5 * n_neighbors`. Only available for `nn_descent` algorithm.
+
+        For `mg_ivfflat` and `mg_ivfpq` algorithms, the following parameters can be specified:
+
+        * 'distribution_mode': The distribution mode to use. Valid options are: 'replicated' and 'shared'. Default is 'replicated'.
+
+        * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
+
+        * 'n_probes': Number of lists to probe during search. Default is 20. Higher values
+        increase accuracy but reduce speed.
 
     key_added
         If not specified, the neighbors data is stored in .uns['neighbors'],
@@ -560,12 +264,20 @@ def neighbors(
         metric_kwds=metric_kwds,
         algorithm_kwds=algorithm_kwds,
     )
+    knn_dist = _fix_self_distances(knn_dist, metric)
 
     n_nonzero = n_obs * n_neighbors
     rowptr = cp.arange(0, n_nonzero + 1, n_neighbors)
-    distances = cp_sparse.csr_matrix(
-        (cp.ravel(knn_dist), cp.ravel(knn_indices), rowptr), shape=(n_obs, n_obs)
-    )
+    if n_nonzero >= np.iinfo(np.int32).max:
+        distances = sc_sparse.csr_matrix(
+            (cp.ravel(knn_dist).get(), cp.ravel(knn_indices).get(), rowptr.get()),
+            shape=(n_obs, n_obs),
+        )
+    else:
+        distances = cp_sparse.csr_matrix(
+            (cp.ravel(knn_dist), cp.ravel(knn_indices), rowptr), shape=(n_obs, n_obs)
+        )
+        distances = distances.get()
 
     connectivities = _get_connectivities(
         n_neighbors=n_neighbors,
@@ -575,8 +287,10 @@ def neighbors(
         knn_indices=knn_indices,
         knn_dist=knn_dist,
     )
-    connectivities = connectivities.tocsr().get()
-    distances = distances.get()
+    if connectivities.nnz >= np.iinfo(np.int32).max:
+        connectivities = connectivities.get().tocsr()
+    else:
+        connectivities = connectivities.tocsr().get()
     if key_added is None:
         key_added = "neighbors"
         conns_key = "connectivities"
@@ -660,18 +374,34 @@ def bbknn(
         `'cagra'`
             Employs the Compressed, Accurate Graph-based search to quickly find nearest neighbors by traversing a graph structure.
 
+        `'mg_ivfflat'`
+            Uses the Multi-GPU inverted file indexing to partition the dataset into coarse quantizer cells and performs the search within the relevant cells.
+
+        `'mg_ivfpq'`
+            Combines Multi-GPU inverted file indexing with product quantization to encode sub-vectors of the dataset, facilitating faster distance computation.
+
         Please ensure that the chosen algorithm is compatible with your dataset and the specific requirements of your search problem.
     metric
         A known metric's name or a callable that returns a distance.
     metric_kwds
         Options for the metric.
     algorithm_kwds
-        Options for the algorithm. For 'ivfflat' and 'ivfpq' algorithms, the following
+        Options for the algorithm. For `ivfflat` and `ivfpq` algorithms, the following
         parameters can be specified:
 
         * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
         * 'nprobes': Number of lists to probe during search. Default is 1. Higher values
           increase accuracy but reduce speed.
+
+        For `mg_ivfflat` and `mg_ivfpq` algorithms, the following parameters can be specified:
+
+        * 'distribution_mode': The distribution mode to use. Valid options are: 'replicated' and 'shared'. Default is 'replicated'.
+
+        * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
+
+        * 'n_probes': Number of lists to probe during search. Default is 20. Higher values
+        increase accuracy but reduce speed.
+
     trim
         Trim the neighbours of each cell to these many top connectivities.
         May help with population independence and improve the tidiness of clustering.
@@ -755,9 +485,17 @@ def bbknn(
 
     n_nonzero = n_obs * total_neighbors
     rowptr = cp.arange(0, n_nonzero + 1, total_neighbors)
-    distances = cp_sparse.csr_matrix(
-        (cp.ravel(knn_dist), cp.ravel(knn_indices), rowptr), shape=(n_obs, n_obs)
-    )
+    if rowptr.max() >= np.iinfo(np.int32).max:
+        distances = sc_sparse.csr_matrix(
+            (cp.ravel(knn_dist).get(), cp.ravel(knn_indices).get(), rowptr.get()),
+            shape=(n_obs, n_obs),
+        )
+    else:
+        distances = cp_sparse.csr_matrix(
+            (cp.ravel(knn_dist), cp.ravel(knn_indices), rowptr), shape=(n_obs, n_obs)
+        )
+        distances = distances.get()
+
     connectivities = _get_connectivities(
         total_neighbors,
         n_obs=n_obs,
@@ -774,7 +512,6 @@ def bbknn(
         connectivities = _trimming(connectivities, trim)
 
     connectivities = connectivities.get()
-    distances = distances.get()
     if key_added is None:
         key_added = "neighbors"
         conns_key = "connectivities"

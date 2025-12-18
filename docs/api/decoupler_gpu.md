@@ -12,4 +12,6 @@
     dcg.mlm
     dcg.ulm
     dcg.aucell
+    dcg.waggr
+    dcg.zscore
 ```

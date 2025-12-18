@@ -24,11 +24,10 @@ def harmony_integrate(
     **kwargs,
 ) -> None:
     """
-    Use harmonypy to integrate different experiments.
-    Harmony is an algorithm for integrating single-cell
-    data from multiple experiments. This function uses the python
-    gpu-computing based port of Harmony, to integrate single-cell data
-    stored in an AnnData object. As Harmony works by adjusting the
+    Integrate different experiments using the Harmony algorithm.
+
+    This GPU-accelerated implementation is based on the `harmony-pytorch` package.
+    As Harmony works by adjusting the
     principal components, this function should be run after performing
     PCA but before computing the neighbor graph.
 
