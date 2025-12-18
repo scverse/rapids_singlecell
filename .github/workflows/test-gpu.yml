@@ -67,6 +67,12 @@ jobs:
         with:
           python-version: ${{ matrix.env.python }}
 
+      - name: Check CUDA version
+        run: nvcc --version
+
+      - name: Check NVIDIA SMI
+        run: nvidia-smi
+
       - name: Install dependencies
         run: uvx hatch -v env create ${{ matrix.env.name }}
 
