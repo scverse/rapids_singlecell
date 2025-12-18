@@ -67,6 +67,11 @@ jobs:
         with:
           python-version: ${{ matrix.env.python }}
 
+      - name: Add CUDA to PATH
+        run: |
+          echo "/usr/local/cuda/bin" >> $GITHUB_PATH
+          echo "LD_LIBRARY_PATH=/usr/local/cuda/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" >> $GITHUB_ENV
+
       - name: Check CUDA version
         run: nvcc --version
 
