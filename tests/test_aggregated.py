@@ -338,7 +338,7 @@ def test_factors():
         X=cp.arange(obs.shape[0]).reshape(-1, 1),
         obs=obs,
     )
-
+    adata.X = adata.X.astype(np.float32)
     res = rsc.get.aggregate(adata, by=["a", "b", "c", "d"], func="sum")
     cp.testing.assert_array_equal(res.layers["sum"], adata.X)
 
