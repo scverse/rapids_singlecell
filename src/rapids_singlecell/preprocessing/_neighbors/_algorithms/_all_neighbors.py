@@ -7,6 +7,10 @@ import numpy as np
 
 from rapids_singlecell.preprocessing._neighbors._helper import _compute_nlist
 
+try:
+    from cuvs.neighbors import all_neighbors
+except ImportError:
+    all_neighbors = None
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -22,9 +26,7 @@ def _all_neighbors_knn(
     metric_kwds: Mapping,
     algorithm_kwds: Mapping,
 ) -> tuple[cp.ndarray, cp.ndarray]:
-    try:
-        from cuvs.neighbors import all_neighbors
-    except ImportError:
+    if all_neighbors is None:
         raise ImportError(
             "The 'all_neighbors' algorithm is only available in cuvs >= 25.10. "
             "Please update your cuvs installation."

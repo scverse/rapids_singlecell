@@ -30,7 +30,7 @@ If you like scverse® and want to support our mission, please consider making a 
 
 :::{grid-item-card} Installation {octicon}`plug;1em;`
 :link: Installation
-:link-type: doc
+ :link-type: doc
 
 New to *rapids-singlecell*? Check out the installation guide.
 :::
@@ -47,7 +47,7 @@ The tutorials walk you through real-world applications of rapids-singlecell.
 :link-type: doc
 
 The API reference contains a detailed description of
-the rapids-singelcell API.
+the rapids-singlecell API.
 :::
 
 :::{grid-item-card} GitHub {octicon}`mark-github;1em;`
