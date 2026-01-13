@@ -6,6 +6,8 @@ import cudf
 import cupy as cp
 import numpy as np
 
+from ._clustering import _create_graph
+
 if TYPE_CHECKING:
     from anndata import AnnData
 
@@ -41,18 +43,11 @@ def draw_graph(
             X_draw_graph_layout_fa : `adata.obsm`
                 Coordinates of graph layout.
     """
-    from cugraph import Graph
     from cugraph.layout import force_atlas2
 
     # Adjacency graph
     adjacency = adata.obsp["connectivities"]
-    offsets = cudf.Series(adjacency.indptr)
-    indices = cudf.Series(adjacency.indices)
-    g = Graph()
-    if hasattr(g, "add_adj_list"):
-        g.add_adj_list(offsets, indices, None)
-    else:
-        g.from_cudf_adjlist(offsets, indices, None)
+    g = _create_graph(adjacency, use_weights=False, dtype=np.float32)
     # Get Initial Positions
     if init_pos in adata.obsm.keys():
         init_coords = adata.obsm[init_pos]
