@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING
 import cudf
 import cupy as cp
 import numpy as np
+from cuml.thirdparty_adapters import check_array as check_array_cuml
+from scanpy.tools._utils import get_init_pos_from_paga
 
 from ._clustering import _create_graph
 
@@ -49,33 +51,23 @@ def draw_graph(
     adjacency = adata.obsp["connectivities"]
     g = _create_graph(adjacency, use_weights=False, dtype=np.float32)
     # Get Initial Positions
-    if init_pos in adata.obsm.keys():
-        init_coords = adata.obsm[init_pos]
-    elif init_pos == "paga" or init_pos:
-        if "paga" in adata.uns and "pos" in adata.uns["paga"]:
-            groups = adata.obs[adata.uns["paga"]["groups"]]
-            pos = adata.uns["paga"]["pos"]
-            connectivities_coarse = adata.uns["paga"]["connectivities"]
-            init_coords = np.ones((adjacency.shape[0], 2))
-            for i, group_pos in enumerate(pos):
-                subset = (groups == groups.cat.categories[i]).values
-                neighbors = connectivities_coarse[i].nonzero()
-                if len(neighbors[1]) > 0:
-                    connectivities = connectivities_coarse[i][neighbors]
-                    nearest_neighbor = neighbors[1][np.argmax(connectivities)]
-                    noise = np.random.random((len(subset[subset]), 2))
-                    dist = pos[i] - pos[nearest_neighbor]
-                    noise = noise * dist
-                    init_coords[subset] = group_pos - 0.5 * dist + noise
-                else:
-                    init_coords[subset] = group_pos
-        else:
-            raise ValueError(
-                "Plot PAGA first, so that adata.uns['paga']with key 'pos'."
+    match init_pos:
+        case str() if init_pos in adata.obsm:
+            init_coords = adata.obsm[init_pos]
+        case str() if init_pos == "paga":
+            init_coords = get_init_pos_from_paga(
+                adata, random_state=0, neighbors_key="connectivities"
             )
-
-    else:
-        init_coords = None
+        case _:
+            init_coords = init_pos
+    if hasattr(init_coords, "dtype"):
+        init_coords = check_array_cuml(
+            init_coords, dtype=np.float32, accept_sparse=False
+        )
+        if init_coords.shape[1] != 2:
+            raise ValueError(
+                f"Expected 2 columns but got {init_coords.shape[1]} columns."
+            )
 
     if init_coords is not None:
         x, y = np.hsplit(init_coords, init_coords.shape[1])
@@ -99,6 +91,7 @@ def draw_graph(
         scaling_ratio=2.0,
         strong_gravity_mode=False,
         gravity=1.0,
+        random_state=0,
     )
     positions = cp.vstack((positions["x"].to_cupy(), positions["y"].to_cupy())).T
     layout = "fa"
