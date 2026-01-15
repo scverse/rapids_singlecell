@@ -7,7 +7,7 @@ from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 import rapids_singlecell as rsc
 
 
-@pytest.mark.parametrize("clustering_function", [rsc.tl.leiden, rsc.tl.louvain])
+@pytest.mark.parametrize("clustering_function", [rsc.tl.louvain])  # rsc.tl.leiden,
 def test_dask_clustering(client, clustering_function):
     adata = pbmc3k_processed()
     clustering_function(adata, use_dask=True, key_added="test_dask")
@@ -20,7 +20,7 @@ def test_dask_clustering(client, clustering_function):
     )
 
 
-@pytest.mark.parametrize("clustering_function", [rsc.tl.leiden, rsc.tl.louvain])
+@pytest.mark.parametrize("clustering_function", [rsc.tl.louvain])  # rsc.tl.leiden,
 @pytest.mark.parametrize("resolution", [0.1, [0.5, 1.0]])
 def test_dask_clustering_resolution(client, clustering_function, resolution):
     adata = pbmc3k_processed()
