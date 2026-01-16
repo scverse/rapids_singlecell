@@ -71,6 +71,87 @@ def test_pca_transform(run_sparse):
     assert np.linalg.norm(A_svd_abs[:, :4] - np.abs(adata.obsm["X_pca"])) < 2e-05
 
 
+@pytest.mark.parametrize("svd_solver", ["covariance_eigh", "randomized"])
+def test_pca_transform_sparse_solvers(svd_solver):
+    """Test sparse SVD solvers against reference PCA values on small matrix."""
+    A = sparse.csr_matrix(np.array(A_list).astype("float64"))
+    A_pca_abs = np.abs(A_pca)
+
+    adata = AnnData(A)
+    rsc.pp.pca(
+        adata, n_comps=4, zero_center=True, svd_solver=svd_solver, random_state=0
+    )
+
+    X_pca = adata.obsm["X_pca"]
+    if hasattr(X_pca, "get"):
+        X_pca = X_pca.get()
+
+    assert np.linalg.norm(A_pca_abs[:, :4] - np.abs(X_pca)) < 2e-05
+
+
+def test_pca_transform_sparse_lanczos():
+    """Test Lanczos sparse SVD solver matches covariance_eigh closely."""
+    # Lanczos is designed for large sparse matrices; use a larger test matrix
+    rng = np.random.RandomState(42)
+    X = sparse.random(200, 50, density=0.2, random_state=rng, format="csr")
+    X = X.astype(np.float64)
+
+    # Get reference from covariance_eigh
+    ref = AnnData(X.copy())
+    rsc.pp.pca(ref, n_comps=10, svd_solver="covariance_eigh")
+    ref_pca = ref.obsm["X_pca"]
+    if hasattr(ref_pca, "get"):
+        ref_pca = ref_pca.get()
+
+    # Test Lanczos solver (exact method)
+    test = AnnData(X.copy())
+    rsc.pp.pca(test, n_comps=10, svd_solver="lanczos", random_state=0)
+    test_pca = test.obsm["X_pca"]
+    if hasattr(test_pca, "get"):
+        test_pca = test_pca.get()
+
+    # Lanczos should match closely
+    np.testing.assert_allclose(
+        np.abs(test_pca),
+        np.abs(ref_pca),
+        rtol=1e-4,
+        atol=1e-4,
+    )
+    np.testing.assert_allclose(
+        test.uns["pca"]["variance_ratio"],
+        ref.uns["pca"]["variance_ratio"],
+        rtol=1e-5,
+        atol=1e-7,
+    )
+
+
+def test_pca_transform_sparse_block_krylov():
+    """Test block_krylov sparse SVD solver (approximate method)."""
+    rng = np.random.RandomState(42)
+    X = sparse.random(200, 50, density=0.2, random_state=rng, format="csr")
+    X = X.astype(np.float64)
+
+    # Get reference from covariance_eigh
+    ref = AnnData(X.copy())
+    rsc.pp.pca(ref, n_comps=10, svd_solver="covariance_eigh")
+
+    # Test block_krylov solver (approximate method)
+    test = AnnData(X.copy())
+    rsc.pp.pca(test, n_comps=10, svd_solver="block_krylov", random_state=0)
+
+    # block_krylov is approximate; check variance capture is reasonable
+    ref_var_total = np.sum(ref.uns["pca"]["variance_ratio"])
+    test_var_total = np.sum(test.uns["pca"]["variance_ratio"])
+    assert test_var_total > 0.95 * ref_var_total  # captures at least 95% of variance
+
+    # Check first few variance ratios are in the right ballpark
+    np.testing.assert_allclose(
+        test.uns["pca"]["variance_ratio"][:3],
+        ref.uns["pca"]["variance_ratio"][:3],
+        rtol=0.05,
+    )
+
+
 def test_pca_shapes():
     adata = AnnData(np.random.randn(30, 20))
     rsc.pp.pca(adata)
@@ -369,15 +450,15 @@ def test_pca_layer_mask():
 
 
 def test_pca_lanczos_accuracy():
-    """Test that Lanczos matches covariance_eigh closely."""
+    """Test that Lanczos matches covariance_eigh closely with float64."""
     pbmc = pbmc3k_processed()
     pbmc.X = sparse.csr_matrix(pbmc.X.astype(np.float64))
 
     ref = pbmc.copy()
-    rsc.pp.pca(ref, svd_solver="covariance_eigh", n_comps=30)
+    rsc.pp.pca(ref, svd_solver="covariance_eigh", n_comps=10)
 
     test = pbmc.copy()
-    rsc.pp.pca(test, svd_solver="lanczos", random_state=0, n_comps=30)
+    rsc.pp.pca(test, svd_solver="lanczos", random_state=0, n_comps=10)
 
     ref_pca = ref.obsm["X_pca"]
     test_pca = test.obsm["X_pca"]
@@ -386,16 +467,18 @@ def test_pca_lanczos_accuracy():
     if hasattr(test_pca, "get"):
         test_pca = test_pca.get()
 
-    # Lanczos should match closely
+    # First 7 components (well-separated singular values) should match at machine precision
     np.testing.assert_allclose(
-        np.abs(test_pca[:, :20]),
-        np.abs(ref_pca[:, :20]),
-        rtol=0.05,
-        atol=0.05,
+        np.abs(test_pca[:, :7]),
+        np.abs(ref_pca[:, :7]),
+        rtol=1e-7,
+        atol=1e-7,
     )
+
+    # Variance ratios should match very closely for all components
     np.testing.assert_allclose(
-        test.uns["pca"]["variance_ratio"][:20],
-        ref.uns["pca"]["variance_ratio"][:20],
-        rtol=0.02,
-        atol=0.01,
+        test.uns["pca"]["variance_ratio"],
+        ref.uns["pca"]["variance_ratio"],
+        rtol=1e-6,
+        atol=1e-9,
     )
