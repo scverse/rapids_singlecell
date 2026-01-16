@@ -111,6 +111,47 @@ def test_pca_chunked():
     )
 
 
+@pytest.mark.parametrize(
+    "svd_solver", ["lanczos", "randomized", "block_krylov", "covariance_eigh"]
+)
+def test_pca_sparse_solvers(svd_solver):
+    """Test all sparse SVD solvers produce valid output."""
+    rng = np.random.RandomState(42)
+    X = sparse.random(200, 50, density=0.2, random_state=rng, format="csr")
+    adata = AnnData(X.astype(np.float64))
+
+    rsc.pp.pca(adata, n_comps=20, svd_solver=svd_solver, random_state=0)
+
+    assert adata.obsm["X_pca"].shape == (200, 20)
+    # Variance should be positive and decreasing
+    var = adata.uns["pca"]["variance"]
+    assert np.all(var > 0)
+    assert np.all(var[:-1] >= var[1:])
+
+
+@pytest.mark.parametrize("svd_solver", ["lanczos", "randomized", "block_krylov"])
+def test_pca_sparse_solver_reproducibility(svd_solver):
+    """Test sparse solvers are reproducible with same random_state."""
+    rng = np.random.RandomState(42)
+    X = sparse.random(200, 50, density=0.2, random_state=rng, format="csr")
+    X = X.astype(np.float64)
+
+    adata1 = AnnData(X.copy())
+    adata2 = AnnData(X.copy())
+
+    rsc.pp.pca(adata1, n_comps=10, svd_solver=svd_solver, random_state=42)
+    rsc.pp.pca(adata2, n_comps=10, svd_solver=svd_solver, random_state=42)
+
+    X_pca1 = adata1.obsm["X_pca"]
+    X_pca2 = adata2.obsm["X_pca"]
+    if hasattr(X_pca1, "get"):
+        X_pca1 = X_pca1.get()
+    if hasattr(X_pca2, "get"):
+        X_pca2 = X_pca2.get()
+
+    np.testing.assert_allclose(X_pca1, X_pca2, rtol=1e-5, atol=1e-6)
+
+
 def test_pca_reproducible():
     pbmc = pbmc3k_processed()
     pbmc.X = pbmc.X.astype(np.float32)
@@ -153,6 +194,21 @@ def test_pca_sparse(zero_center, rtol, atol):
         rtol=rtol,
         atol=atol,
     )
+
+
+@pytest.mark.parametrize(
+    "svd_solver", ["lanczos", "randomized", "block_krylov", "covariance_eigh"]
+)
+def test_pca_sparse_zero_center_false(svd_solver):
+    """Test sparse solvers with zero_center=False."""
+    rng = np.random.RandomState(42)
+    X = sparse.random(200, 50, density=0.2, random_state=rng, format="csr")
+    adata = AnnData(X.astype(np.float64))
+
+    rsc.pp.pca(adata, n_comps=10, svd_solver=svd_solver, zero_center=False)
+
+    assert adata.obsm["X_pca"].shape == (200, 10)
+    assert adata.uns["pca"]["params"]["zero_center"] is False
 
 
 def test_mask_length_error():
@@ -210,6 +266,22 @@ def test_mask():
     )
 
 
+@pytest.mark.parametrize("svd_solver", ["lanczos", "randomized", "block_krylov"])
+def test_mask_sparse_solvers(svd_solver):
+    """Test sparse solvers with variable mask."""
+    adata = sc.datasets.blobs(n_variables=30, n_centers=3, n_observations=100)
+    adata.X = sparse.csr_matrix(adata.X.astype(np.float64))
+    mask_var = np.zeros(adata.shape[1], dtype=bool)
+    mask_var[:20] = True
+
+    adata_masked = adata[:, mask_var].copy()
+    rsc.pp.pca(adata, svd_solver=svd_solver, mask_var=mask_var, n_comps=5)
+    rsc.pp.pca(adata_masked, svd_solver=svd_solver, n_comps=5)
+
+    masked_var_loadings = adata.varm["PCs"][~mask_var]
+    np.testing.assert_equal(masked_var_loadings, np.zeros_like(masked_var_loadings))
+
+
 @pytest.mark.parametrize("float_dtype", ["float32", "float64"])
 def test_mask_defaults(float_dtype):
     """
@@ -230,6 +302,32 @@ def test_mask_defaults(float_dtype):
     assert not np.array_equal(without_var.obsm["X_pca"], with_var.obsm["X_pca"])
     with_no_mask = rsc.pp.pca(adata, mask_var=None, copy=True, dtype=float_dtype)
     assert np.array_equal(without_var.obsm["X_pca"], with_no_mask.obsm["X_pca"])
+
+
+@pytest.mark.parametrize("svd_solver", ["lanczos", "randomized", "block_krylov"])
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_pca_sparse_solver_dtypes(svd_solver, dtype):
+    """Test sparse solvers with different dtypes."""
+    rng = np.random.RandomState(42)
+    X = sparse.random(100, 50, density=0.3, random_state=rng, format="csr")
+    adata = AnnData(X.astype(dtype))
+
+    rsc.pp.pca(adata, svd_solver=svd_solver, n_comps=10, dtype=dtype)
+
+    assert adata.obsm["X_pca"].dtype == np.dtype(dtype)
+
+
+@pytest.mark.parametrize("svd_solver", ["lanczos", "randomized", "block_krylov"])
+def test_pca_cupy_sparse_input(svd_solver):
+    """Test sparse solvers with CuPy sparse input."""
+    rng = np.random.RandomState(42)
+    X_np = sparse.random(200, 100, density=0.2, random_state=rng, format="csr")
+    X_cp = cusparse.csr_matrix(X_np.astype(np.float64))
+    adata = AnnData(X_cp)
+
+    rsc.pp.pca(adata, svd_solver=svd_solver, n_comps=20)
+
+    assert adata.obsm["X_pca"].shape == (200, 20)
 
 
 def test_pca_layer():
@@ -270,275 +368,34 @@ def test_pca_layer_mask():
         rsc.pp.pca(adata)
 
 
-# =============================================================================
-# Tests for sparse matrix SVD solvers
-# =============================================================================
+def test_pca_lanczos_accuracy():
+    """Test that Lanczos matches covariance_eigh closely."""
+    pbmc = pbmc3k_processed()
+    pbmc.X = sparse.csr_matrix(pbmc.X.astype(np.float64))
 
+    ref = pbmc.copy()
+    rsc.pp.pca(ref, svd_solver="covariance_eigh", n_comps=30)
 
-class TestSparseSVDSolvers:
-    """Test all sparse SVD solvers through the PCA interface."""
+    test = pbmc.copy()
+    rsc.pp.pca(test, svd_solver="lanczos", random_state=0, n_comps=30)
 
-    @pytest.fixture
-    def sparse_adata(self):
-        """Create a sparse test dataset."""
-        rng = np.random.RandomState(42)
-        X = sparse.random(500, 100, density=0.2, random_state=rng, format="csr")
-        X = X.astype(np.float64)
-        return AnnData(X)
+    ref_pca = ref.obsm["X_pca"]
+    test_pca = test.obsm["X_pca"]
+    if hasattr(ref_pca, "get"):
+        ref_pca = ref_pca.get()
+    if hasattr(test_pca, "get"):
+        test_pca = test_pca.get()
 
-    @pytest.fixture
-    def pbmc_sparse(self):
-        """Get pbmc3k_processed with sparse matrix."""
-        pbmc = pbmc3k_processed()
-        pbmc.X = sparse.csr_matrix(pbmc.X.astype(np.float64))
-        return pbmc
-
-    @pytest.mark.parametrize(
-        "svd_solver", ["lanczos", "randomized", "block_krylov", "covariance_eigh"]
+    # Lanczos should match closely
+    np.testing.assert_allclose(
+        np.abs(test_pca[:, :20]),
+        np.abs(ref_pca[:, :20]),
+        rtol=0.05,
+        atol=0.05,
     )
-    def test_solver_basic(self, sparse_adata, svd_solver):
-        """Test that all solvers produce valid PCA output."""
-        adata = sparse_adata.copy()
-        rsc.pp.pca(adata, n_comps=20, svd_solver=svd_solver, random_state=0)
-
-        assert "X_pca" in adata.obsm
-        assert adata.obsm["X_pca"].shape == (500, 20)
-        assert "pca" in adata.uns
-        assert "variance" in adata.uns["pca"]
-        assert "variance_ratio" in adata.uns["pca"]
-        assert len(adata.uns["pca"]["variance"]) == 20
-        # Variance should be positive and decreasing
-        var = adata.uns["pca"]["variance"]
-        assert np.all(var > 0)
-        assert np.all(var[:-1] >= var[1:])
-
-    @pytest.mark.parametrize(
-        "svd_solver", ["lanczos", "randomized", "block_krylov", "covariance_eigh"]
+    np.testing.assert_allclose(
+        test.uns["pca"]["variance_ratio"][:20],
+        ref.uns["pca"]["variance_ratio"][:20],
+        rtol=0.02,
+        atol=0.01,
     )
-    def test_solver_zero_center_false(self, sparse_adata, svd_solver):
-        """Test solvers with zero_center=False (truncated SVD mode)."""
-        adata = sparse_adata.copy()
-        rsc.pp.pca(
-            adata, n_comps=10, svd_solver=svd_solver, zero_center=False, random_state=0
-        )
-
-        assert adata.obsm["X_pca"].shape == (500, 10)
-        assert adata.uns["pca"]["params"]["zero_center"] is False
-
-    @pytest.mark.parametrize("svd_solver", ["lanczos", "randomized", "block_krylov"])
-    def test_solver_reproducibility(self, sparse_adata, svd_solver):
-        """Test that solvers produce reproducible results with same random_state."""
-        adata1 = sparse_adata.copy()
-        adata2 = sparse_adata.copy()
-
-        rsc.pp.pca(adata1, n_comps=10, svd_solver=svd_solver, random_state=42)
-        rsc.pp.pca(adata2, n_comps=10, svd_solver=svd_solver, random_state=42)
-
-        X_pca1 = adata1.obsm["X_pca"]
-        X_pca2 = adata2.obsm["X_pca"]
-        if hasattr(X_pca1, "get"):
-            X_pca1 = X_pca1.get()
-        if hasattr(X_pca2, "get"):
-            X_pca2 = X_pca2.get()
-
-        np.testing.assert_allclose(X_pca1, X_pca2, rtol=1e-5, atol=1e-6)
-        np.testing.assert_allclose(
-            adata1.uns["pca"]["variance"],
-            adata2.uns["pca"]["variance"],
-            rtol=1e-5,
-            atol=1e-6,
-        )
-
-    @pytest.mark.parametrize("svd_solver", ["lanczos", "randomized", "block_krylov"])
-    @pytest.mark.parametrize("dtype", ["float32", "float64"])
-    def test_solver_dtypes(self, svd_solver, dtype):
-        """Test solvers with different data types."""
-        rng = np.random.RandomState(42)
-        X = sparse.random(100, 50, density=0.3, random_state=rng, format="csr")
-        X = X.astype(dtype)
-        adata = AnnData(X)
-
-        rsc.pp.pca(adata, svd_solver=svd_solver, n_comps=10, dtype=dtype)
-
-        assert adata.obsm["X_pca"].dtype == np.dtype(dtype)
-
-    @pytest.mark.parametrize("svd_solver", ["lanczos", "randomized", "block_krylov"])
-    def test_solver_cupy_sparse_input(self, svd_solver):
-        """Test solvers with CuPy sparse matrix input."""
-        rng = np.random.RandomState(42)
-        X_np = sparse.random(200, 100, density=0.2, random_state=rng, format="csr")
-        X_cp = cusparse.csr_matrix(X_np.astype(np.float64))
-        adata = AnnData(X_cp)
-
-        rsc.pp.pca(adata, svd_solver=svd_solver, n_comps=20, random_state=0)
-
-        assert adata.obsm["X_pca"].shape == (200, 20)
-
-    def test_lanczos_accuracy(self, pbmc_sparse):
-        """Test that Lanczos solver matches covariance_eigh accurately."""
-        ref = pbmc_sparse.copy()
-        rsc.pp.pca(ref, svd_solver="covariance_eigh", n_comps=30)
-
-        test = pbmc_sparse.copy()
-        rsc.pp.pca(test, svd_solver="lanczos", random_state=0, n_comps=30)
-
-        ref_pca = ref.obsm["X_pca"]
-        test_pca = test.obsm["X_pca"]
-        if hasattr(ref_pca, "get"):
-            ref_pca = ref_pca.get()
-        if hasattr(test_pca, "get"):
-            test_pca = test_pca.get()
-
-        # Lanczos should match very closely (allowing for sign differences)
-        np.testing.assert_allclose(
-            np.abs(test_pca[:, :20]),
-            np.abs(ref_pca[:, :20]),
-            rtol=0.05,
-            atol=0.05,
-        )
-
-        # Variance ratios should be very close
-        np.testing.assert_allclose(
-            test.uns["pca"]["variance_ratio"][:20],
-            ref.uns["pca"]["variance_ratio"][:20],
-            rtol=0.02,
-            atol=0.01,
-        )
-
-    @pytest.mark.parametrize("svd_solver", ["randomized", "block_krylov"])
-    def test_approximate_solver_variance(self, pbmc_sparse, svd_solver):
-        """Test that approximate solvers capture reasonable variance."""
-        ref = pbmc_sparse.copy()
-        rsc.pp.pca(ref, svd_solver="covariance_eigh", n_comps=30)
-
-        test = pbmc_sparse.copy()
-        rsc.pp.pca(test, svd_solver=svd_solver, random_state=0, n_comps=30)
-
-        # Total variance captured should be similar (within 20%)
-        ref_total_var = ref.uns["pca"]["variance_ratio"].sum()
-        test_total_var = test.uns["pca"]["variance_ratio"].sum()
-        assert test_total_var > ref_total_var * 0.8, (
-            f"{svd_solver} captured much less variance: {test_total_var:.3f} vs {ref_total_var:.3f}"
-        )
-
-        # First few components should capture similar variance
-        np.testing.assert_allclose(
-            test.uns["pca"]["variance_ratio"][:5],
-            ref.uns["pca"]["variance_ratio"][:5],
-            rtol=0.15,
-            atol=0.02,
-            err_msg=f"{svd_solver} variance ratio mismatch for top 5 components",
-        )
-
-    @pytest.mark.parametrize("svd_solver", ["lanczos", "randomized", "block_krylov"])
-    def test_solver_with_mask(self, svd_solver):
-        """Test solvers with variable mask."""
-        adata = sc.datasets.blobs(n_variables=30, n_centers=3, n_observations=100)
-        adata.X = sparse.csr_matrix(adata.X.astype(np.float64))
-        mask_var = np.zeros(adata.shape[1], dtype=bool)
-        mask_var[:20] = True  # Use first 20 variables
-
-        adata_masked = adata[:, mask_var].copy()
-        rsc.pp.pca(adata, svd_solver=svd_solver, mask_var=mask_var, n_comps=5)
-        rsc.pp.pca(adata_masked, svd_solver=svd_solver, n_comps=5)
-
-        # Masked variables should have zero loadings
-        masked_var_loadings = adata.varm["PCs"][~mask_var]
-        np.testing.assert_equal(masked_var_loadings, np.zeros_like(masked_var_loadings))
-
-        # Results should match
-        X_pca = adata.obsm["X_pca"]
-        X_pca_masked = adata_masked.obsm["X_pca"]
-        if hasattr(X_pca, "get"):
-            X_pca = X_pca.get()
-        if hasattr(X_pca_masked, "get"):
-            X_pca_masked = X_pca_masked.get()
-
-        np.testing.assert_allclose(
-            np.abs(X_pca),
-            np.abs(X_pca_masked),
-            rtol=1e-4,
-            atol=1e-4,
-        )
-
-
-class TestMeanCenteredOperator:
-    """Test the mean-centered sparse matrix operator."""
-
-    def test_mean_centered_matvec(self):
-        """Test that mean-centered matvec is computed correctly."""
-        from rapids_singlecell.preprocessing._sparse_pca._operators import (
-            MeanCenteredOperator,
-        )
-
-        rng = np.random.RandomState(42)
-        m, n = 50, 20
-        X_np = rng.randn(m, n).astype(np.float64)
-        X_sparse = cusparse.csr_matrix(cp.array(X_np))
-        mean = cp.array(X_np.mean(axis=0))
-
-        wrapper = MeanCenteredOperator(X_sparse, mean)
-        v = cp.array(rng.randn(n).astype(np.float64))
-
-        # Compute using wrapper
-        result_wrapper = wrapper.dot(v)
-
-        # Compute reference (X - mean) @ v
-        X_centered = X_np - mean.get()
-        result_ref = X_centered @ v.get()
-
-        np.testing.assert_allclose(
-            cp.asnumpy(result_wrapper), result_ref, rtol=1e-10, atol=1e-10
-        )
-
-    def test_mean_centered_transpose_matvec(self):
-        """Test that transpose matvec is computed correctly."""
-        from rapids_singlecell.preprocessing._sparse_pca._operators import (
-            MeanCenteredOperator,
-        )
-
-        rng = np.random.RandomState(42)
-        m, n = 50, 20
-        X_np = rng.randn(m, n).astype(np.float64)
-        X_sparse = cusparse.csr_matrix(cp.array(X_np))
-        mean = cp.array(X_np.mean(axis=0))
-
-        wrapper = MeanCenteredOperator(X_sparse, mean)
-        v = cp.array(rng.randn(m).astype(np.float64))
-
-        # Compute using wrapper transpose
-        result_wrapper = wrapper.T.dot(v)
-
-        # Compute reference (X - mean).T @ v
-        X_centered = X_np - mean.get()
-        result_ref = X_centered.T @ v.get()
-
-        np.testing.assert_allclose(
-            cp.asnumpy(result_wrapper), result_ref, rtol=1e-10, atol=1e-10
-        )
-
-    def test_mean_centered_matrix_multiply(self):
-        """Test mean-centered operator with matrix (not vector) input."""
-        from rapids_singlecell.preprocessing._sparse_pca._operators import (
-            MeanCenteredOperator,
-        )
-
-        rng = np.random.RandomState(42)
-        m, n, k = 50, 20, 5
-        X_np = rng.randn(m, n).astype(np.float64)
-        X_sparse = cusparse.csr_matrix(cp.array(X_np))
-        mean = cp.array(X_np.mean(axis=0))
-
-        wrapper = MeanCenteredOperator(X_sparse, mean)
-        V = cp.array(rng.randn(n, k).astype(np.float64))
-
-        # Compute using wrapper
-        result_wrapper = wrapper.dot(V)
-
-        # Compute reference (X - mean) @ V
-        X_centered = X_np - mean.get()
-        result_ref = X_centered @ V.get()
-
-        np.testing.assert_allclose(
-            cp.asnumpy(result_wrapper), result_ref, rtol=1e-10, atol=1e-10
-        )
