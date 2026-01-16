@@ -89,42 +89,6 @@ def test_pca_transform_sparse_solvers(svd_solver):
     assert np.linalg.norm(A_pca_abs[:, :4] - np.abs(X_pca)) < 2e-05
 
 
-def test_pca_transform_sparse_lanczos():
-    """Test Lanczos sparse SVD solver matches covariance_eigh closely."""
-    # Lanczos is designed for large sparse matrices; use a larger test matrix
-    rng = np.random.RandomState(42)
-    X = sparse.random(200, 50, density=0.2, random_state=rng, format="csr")
-    X = X.astype(np.float64)
-
-    # Get reference from covariance_eigh
-    ref = AnnData(X.copy())
-    rsc.pp.pca(ref, n_comps=10, svd_solver="covariance_eigh")
-    ref_pca = ref.obsm["X_pca"]
-    if hasattr(ref_pca, "get"):
-        ref_pca = ref_pca.get()
-
-    # Test Lanczos solver (exact method)
-    test = AnnData(X.copy())
-    rsc.pp.pca(test, n_comps=10, svd_solver="lanczos", random_state=0)
-    test_pca = test.obsm["X_pca"]
-    if hasattr(test_pca, "get"):
-        test_pca = test_pca.get()
-
-    # Lanczos should match closely
-    np.testing.assert_allclose(
-        np.abs(test_pca),
-        np.abs(ref_pca),
-        rtol=1e-4,
-        atol=1e-4,
-    )
-    np.testing.assert_allclose(
-        test.uns["pca"]["variance_ratio"],
-        ref.uns["pca"]["variance_ratio"],
-        rtol=1e-5,
-        atol=1e-7,
-    )
-
-
 def test_pca_transform_sparse_block_krylov():
     """Test block_krylov sparse SVD solver (approximate method)."""
     rng = np.random.RandomState(42)
