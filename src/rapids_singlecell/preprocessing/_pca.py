@@ -60,18 +60,25 @@ def pca(
 
         svd_solver
             Solver to use for the PCA computation. \
-            Must be one of {'full', 'jacobi', 'auto', 'covariance_eigh'}. \
-            Defaults to 'auto'. Sparse matrices will always use `'covariance_eigh'`.
+            Must be one of {'full', 'jacobi', 'auto', 'covariance_eigh', 'lanczos'}. \
+            Defaults to 'auto'. Sparse matrices will use `'covariance_eigh'` or `'lanczos'`.
 
             `'covariance_eigh'`
-                Classic eigendecomposition of the covariance matrix, suited for tall-and-skinny matrices.
+                Classic eigendecomposition of the covariance matrix. Fast for matrices with
+                fewer than ~10,000 features due to optimized GPU kernels.
                 Works with dask, array must be CSR or dense and chunked as `(N, adata.shape[1])`.
+            `'lanczos'`
+                Lanczos bidiagonalization SVD. Memory efficient for large sparse matrices
+                with many features (>10,000). Faster than covariance_eigh when n_vars is large
+                and n_comps is small relative to n_vars. Does not support Dask arrays.
             `'full'`
                 From `cuml` for dense arrays uses a eigendecomposition of the covariance matrix then discards components.
             `'jacobi'`
                 From `cuml` for dense arrays. Jacobi is much faster as it iteratively corrects, but is less accurate.
             `'auto'`
-                Automatically chooses the best solver based on the shape of the data matrix. Will choose `'covariance_eigh'` for dense dask arrays.
+                Automatically chooses the best solver based on the shape of the data matrix.
+                For sparse matrices: uses `'lanczos'` when n_vars > 10,000 and n_comps < n_vars/10,
+                otherwise uses `'covariance_eigh'`. For dense dask arrays uses `'covariance_eigh'`.
 
         random_state
             Change to use different initial states for the optimization.
@@ -152,12 +159,28 @@ def pca(
             n_comps = min_dim - 1
         else:
             n_comps = 50
+
+    # Auto-select sparse solver based on matrix dimensions
+    # Lanczos is faster when n_vars is large (>10000) and k is small
+    # Covariance is faster for smaller matrices due to optimized kernels
+    if svd_solver == "auto" and (cpissparse(X) or issparse(X)):
+        n_vars = X.shape[1]
+        if n_vars > 10000 and n_comps < n_vars // 10:
+            svd_solver = "lanczos"
+        else:
+            svd_solver = "covariance_eigh"
+
     if isinstance(X, DaskArray):
         if chunked:
             raise ValueError(
                 "Dask arrays are not supported for chunked PCA computation."
             )
         _check_gpu_X(X, allow_dask=True)
+        if svd_solver == "lanczos":
+            raise NotImplementedError(
+                "Lanczos SVD solver does not support Dask arrays. "
+                "Use svd_solver='covariance_eigh' instead."
+            )
         if svd_solver == "auto":
             svd_solver = "covariance_eigh"
         if (
@@ -173,13 +196,23 @@ def pca(
         if chunked:
             pca_func, X_pca = _run_chunked_pca(X, n_comps, chunk_size)
         elif cpissparse(X) or issparse(X):
-            pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
+            if svd_solver == "lanczos":
+                pca_func, X_pca = _run_lanczos_pca(
+                    X, n_comps, zero_center, random_state=random_state
+                )
+            else:
+                pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
         else:
             pca_func, X_pca = _run_cuml_pca(X, n_comps, svd_solver=svd_solver)
 
     else:  # not zero_center
         if cpissparse(X) or issparse(X):
-            pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
+            if svd_solver == "lanczos":
+                pca_func, X_pca = _run_lanczos_pca(
+                    X, n_comps, zero_center, random_state=random_state
+                )
+            else:
+                pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
         else:
             pca_func, X_pca = _run_cuml_tsvd(X, n_comps, svd_solver=svd_solver)
 
@@ -218,6 +251,7 @@ def _as_numpy(X):
 
 
 def _run_covariance_pca(X, n_comps, zero_center):
+    """Run PCA using covariance matrix eigendecomposition."""
     if issparse(X):
         X = sparse_scipy_to_cp(X, dtype=X.dtype)
     from ._sparse_pca._sparse_pca import PCA_sparse
@@ -226,7 +260,28 @@ def _run_covariance_pca(X, n_comps, zero_center):
         X = X.tocsr()
     if issparse_cupy(X):
         X.sort_indices()
+
     pca_func = PCA_sparse(n_components=n_comps, zero_center=zero_center)
+    X_pca = pca_func.fit_transform(X)
+    return pca_func, X_pca
+
+
+def _run_lanczos_pca(X, n_comps, zero_center, *, random_state: int = 0):
+    """Run PCA using Lanczos bidiagonalization SVD."""
+    if issparse(X):
+        X = sparse_scipy_to_cp(X, dtype=X.dtype)
+    from ._sparse_pca._pca_lanczos import PCA_sparse_lanczos
+
+    if not isspmatrix_csr(X):
+        X = X.tocsr()
+    if issparse_cupy(X):
+        X.sort_indices()
+
+    pca_func = PCA_sparse_lanczos(
+        n_components=n_comps,
+        zero_center=zero_center,
+        random_state=random_state,
+    )
     X_pca = pca_func.fit_transform(X)
     return pca_func, X_pca
 
