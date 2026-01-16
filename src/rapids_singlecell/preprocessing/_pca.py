@@ -60,7 +60,7 @@ def pca(
 
         svd_solver
             Solver to use for the PCA computation. \
-            Must be one of {'full', 'jacobi', 'auto', 'covariance_eigh', 'lanczos'}. \
+            Must be one of {'full', 'jacobi', 'auto', 'covariance_eigh', 'lanczos', 'randomized', 'block_krylov'}. \
             Defaults to 'auto'. Sparse matrices will use `'covariance_eigh'` or `'lanczos'`.
 
             `'covariance_eigh'`
@@ -71,6 +71,15 @@ def pca(
                 Lanczos bidiagonalization SVD. Memory efficient for large sparse matrices
                 with many features (>10,000). Faster than covariance_eigh when n_vars is large
                 and n_comps is small relative to n_vars. Does not support Dask arrays.
+                Best accuracy (exact for converged components).
+            `'randomized'`
+                Randomized SVD based on Halko et al. (2009). Faster than Lanczos for very
+                large matrices when approximate results are acceptable. Accuracy depends
+                on the number of power iterations (default 4). Does not support Dask arrays.
+            `'block_krylov'`
+                Block Krylov method with CholeskyQR2 orthogonalization based on
+                Tomás et al. (2024). Uses efficient GPU GEMM operations. Faster than
+                Lanczos but approximate. Does not support Dask arrays.
             `'full'`
                 From `cuml` for dense arrays uses a eigendecomposition of the covariance matrix then discards components.
             `'jacobi'`
@@ -176,9 +185,9 @@ def pca(
                 "Dask arrays are not supported for chunked PCA computation."
             )
         _check_gpu_X(X, allow_dask=True)
-        if svd_solver == "lanczos":
+        if svd_solver in ("lanczos", "randomized", "block_krylov"):
             raise NotImplementedError(
-                "Lanczos SVD solver does not support Dask arrays. "
+                f"'{svd_solver}' SVD solver does not support Dask arrays. "
                 "Use svd_solver='covariance_eigh' instead."
             )
         if svd_solver == "auto":
@@ -200,6 +209,14 @@ def pca(
                 pca_func, X_pca = _run_lanczos_pca(
                     X, n_comps, zero_center, random_state=random_state
                 )
+            elif svd_solver == "randomized":
+                pca_func, X_pca = _run_randomized_pca(
+                    X, n_comps, random_state=random_state
+                )
+            elif svd_solver == "block_krylov":
+                pca_func, X_pca = _run_block_krylov_pca(
+                    X, n_comps, random_state=random_state
+                )
             else:
                 pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
         else:
@@ -210,6 +227,14 @@ def pca(
             if svd_solver == "lanczos":
                 pca_func, X_pca = _run_lanczos_pca(
                     X, n_comps, zero_center, random_state=random_state
+                )
+            elif svd_solver == "randomized":
+                pca_func, X_pca = _run_randomized_pca(
+                    X, n_comps, random_state=random_state
+                )
+            elif svd_solver == "block_krylov":
+                pca_func, X_pca = _run_block_krylov_pca(
+                    X, n_comps, random_state=random_state
                 )
             else:
                 pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
@@ -280,6 +305,44 @@ def _run_lanczos_pca(X, n_comps, zero_center, *, random_state: int = 0):
     pca_func = PCA_sparse_lanczos(
         n_components=n_comps,
         zero_center=zero_center,
+        random_state=random_state,
+    )
+    X_pca = pca_func.fit_transform(X)
+    return pca_func, X_pca
+
+
+def _run_randomized_pca(X, n_comps, *, random_state: int = 0):
+    """Run PCA using randomized SVD."""
+    if issparse(X):
+        X = sparse_scipy_to_cp(X, dtype=X.dtype)
+    from ._sparse_pca._rsvd import PCA_rsvd
+
+    if not isspmatrix_csr(X):
+        X = X.tocsr()
+    if issparse_cupy(X):
+        X.sort_indices()
+
+    pca_func = PCA_rsvd(
+        n_components=n_comps,
+        random_state=random_state,
+    )
+    X_pca = pca_func.fit_transform(X)
+    return pca_func, X_pca
+
+
+def _run_block_krylov_pca(X, n_comps, *, random_state: int = 0):
+    """Run PCA using block Krylov method with CholeskyQR2."""
+    if issparse(X):
+        X = sparse_scipy_to_cp(X, dtype=X.dtype)
+    from ._sparse_pca._block_lanczos import PCA_block_lanczos
+
+    if not isspmatrix_csr(X):
+        X = X.tocsr()
+    if issparse_cupy(X):
+        X.sort_indices()
+
+    pca_func = PCA_block_lanczos(
+        n_components=n_comps,
         random_state=random_state,
     )
     X_pca = pca_func.fit_transform(X)
