@@ -13,56 +13,72 @@ on:
 
 jobs:
   build_wheels:
-    name: Build wheels for ${{ matrix.os }}
+    name: Build wheels for ${{ matrix.os }}-cu${{ matrix.cuda_major }}
     runs-on: ${{ matrix.runs-on }}
     strategy:
       matrix:
         include:
+          # CUDA 12 wheels
           - os: linux-intel
+            cuda_major: "12"
             runs-on: ubuntu-latest
             cibw_image: "ghcr.io/scverse/rapids_singlecell:manylinux_2_28_x86_64_cuda12.9"
             dockerfile: "docker/manylinux_2_28_x86_64_cuda12.9.Dockerfile"
+            cuda_archs: "75-real;80-real;86-real;89-real;90-real;100-real;120"
           - os: linux-arm
+            cuda_major: "12"
             runs-on: ubuntu-24.04-arm
             cibw_image: "ghcr.io/scverse/rapids_singlecell:manylinux_2_28_aarch64_cuda12.9"
             dockerfile: "docker/manylinux_2_28_aarch64_cuda12.9.Dockerfile"
+            cuda_archs: "75-real;80-real;86-real;89-real;90-real;100-real;120"
+          # CUDA 13 wheels
+          - os: linux-intel
+            cuda_major: "13"
+            runs-on: ubuntu-latest
+            cibw_image: "ghcr.io/scverse/rapids_singlecell:manylinux_2_28_x86_64_cuda13.0"
+            dockerfile: "docker/manylinux_2_28_x86_64_cuda13.0.Dockerfile"
+            cuda_archs: "75-real;80-real;86-real;89-real;90-real;100-real;120"
+          - os: linux-arm
+            cuda_major: "13"
+            runs-on: ubuntu-24.04-arm
+            cibw_image: "ghcr.io/scverse/rapids_singlecell:manylinux_2_28_aarch64_cuda13.0"
+            dockerfile: "docker/manylinux_2_28_aarch64_cuda13.0.Dockerfile"
+            cuda_archs: "75-real;80-real;86-real;89-real;90-real;100-real;120"
 
     steps:
       - uses: actions/checkout@v5
+
+      - name: Set package name for CUDA ${{ matrix.cuda_major }}
+        run: |
+          sed -i 's/name = "rapids_singlecell"/name = "rapids_singlecell-cu${{ matrix.cuda_major }}"/' pyproject.toml
+          grep '^name' pyproject.toml
 
       - name: Build CUDA manylinux image
         run: |
           docker build -t "${{ matrix.cibw_image }}" -f "${{ matrix.dockerfile }}" docker
 
-      # cibuildwheel action (Linux-only wheels inside our custom manylinux+CUDA images)
-      - name: Build wheels (CUDA 12.9)
+      - name: Build wheels
         uses: pypa/cibuildwheel@v3.1.4
         env:
-          # Skip musllinux
           CIBW_SKIP: '*-musllinux*'
-          # Point cibuildwheel to our CUDA manylinux images (per-arch)
           CIBW_MANYLINUX_X86_64_IMAGE: ${{ matrix.os == 'linux-intel' && matrix.cibw_image || '' }}
           CIBW_MANYLINUX_AARCH64_IMAGE: ${{ matrix.os == 'linux-arm' && matrix.cibw_image || '' }}
-          # Make CUDA visible inside the build container
           CIBW_ENVIRONMENT: >
             CUDA_PATH=/usr/local/cuda
             LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
             PATH=/usr/local/cuda/bin:$PATH
-          # Tooling to build a nanobind/scikit-build-core extension
+            SKBUILD_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${{ matrix.cuda_archs }}"
           CIBW_BEFORE_BUILD: >
             python -m pip install -U pip
             scikit-build-core cmake ninja nanobind
-          # No runtime tests (CI has no GPU)
           CIBW_TEST_SKIP: "*"
           CIBW_TEST_COMMAND: ""
-          # Bundle redistributable CUDA libs & ensure manylinux compliance
           CIBW_REPAIR_WHEEL_COMMAND: "auditwheel repair -w {dest_dir} {wheel}"
-          # Be somewhat chatty to see compile/link flags
           CIBW_BUILD_VERBOSITY: "1"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          name: cibw-wheels-${{ matrix.os }}-cu${{ matrix.cuda_major }}-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
 
   build_sdist:
@@ -87,7 +103,6 @@ jobs:
     steps:
       - uses: actions/download-artifact@v5
         with:
-          # unpacks all CIBW artifacts into dist/
           pattern: cibw-*
           path: dist
           merge-multiple: true
