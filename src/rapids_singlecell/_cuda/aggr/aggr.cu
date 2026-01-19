@@ -7,7 +7,6 @@
 namespace nb = nanobind;
 using namespace nb::literals;
 
-// Templated cuda_array over dtype and contiguity
 template <typename T, typename Contig = nb::c_contig>
 using cuda_array = nb::ndarray<T, nb::device::cuda, Contig>;
 
@@ -32,19 +31,9 @@ static inline void launch_csc_aggr(const int* indptr, const int* index, const T*
 }
 
 template <typename T>
-static inline void launch_csr_to_coo(const int* indptr, const int* index, const T* data, int* row,
-                                     int* col, double* ndata, const int* cats, const bool* mask,
-                                     int n_cells, cudaStream_t stream) {
-  dim3 grid((unsigned)n_cells);
-  dim3 block(64);
-  csr_to_coo_kernel<T>
-      <<<grid, block, 0, stream>>>(indptr, index, data, row, col, ndata, cats, mask, n_cells);
-}
-
-template <typename T>
-static inline void launch_dense_C(const T* data, double* out, const int* cats, const bool* mask,
-                                  std::size_t n_cells, std::size_t n_genes, std::size_t n_groups,
-                                  cudaStream_t stream) {
+static inline void launch_dense_aggr_C(const T* data, double* out, const int* cats,
+                                       const bool* mask, std::size_t n_cells, std::size_t n_genes,
+                                       std::size_t n_groups, cudaStream_t stream) {
   dim3 block(256);
   dim3 grid((unsigned)((n_cells * n_genes + block.x - 1) / block.x));
   dense_aggr_kernel_C<T>
@@ -52,13 +41,23 @@ static inline void launch_dense_C(const T* data, double* out, const int* cats, c
 }
 
 template <typename T>
-static inline void launch_dense_F(const T* data, double* out, const int* cats, const bool* mask,
-                                  std::size_t n_cells, std::size_t n_genes, std::size_t n_groups,
-                                  cudaStream_t stream) {
+static inline void launch_dense_aggr_F(const T* data, double* out, const int* cats,
+                                       const bool* mask, std::size_t n_cells, std::size_t n_genes,
+                                       std::size_t n_groups, cudaStream_t stream) {
   dim3 block(256);
   dim3 grid((unsigned)((n_cells * n_genes + block.x - 1) / block.x));
   dense_aggr_kernel_F<T>
       <<<grid, block, 0, stream>>>(data, out, cats, mask, n_cells, n_genes, n_groups);
+}
+
+template <typename T>
+static inline void launch_csr_to_coo(const int* indptr, const int* index, const T* data, int* row,
+                                     int* col, double* ndata, const int* cats, const bool* mask,
+                                     int n_cells, cudaStream_t stream) {
+  dim3 grid((unsigned)n_cells);
+  dim3 block(64);
+  csr_to_coo_kernel<T>
+      <<<grid, block, 0, stream>>>(indptr, index, data, row, col, ndata, cats, mask, n_cells);
 }
 
 static inline void launch_sparse_var(const int* indptr, const int* index, double* data,
@@ -70,7 +69,6 @@ static inline void launch_sparse_var(const int* indptr, const int* index, double
                                                 n_groups);
 }
 
-// Helper to define sparse_aggr for a given dtype
 template <typename T>
 void def_sparse_aggr(nb::module_& m) {
   m.def(
@@ -91,27 +89,25 @@ void def_sparse_aggr(nb::module_& m) {
       "n_genes"_a, "n_groups"_a, "is_csc"_a, "stream"_a = 0);
 }
 
-// Helper to define dense_aggr for a given dtype and contiguity
-template <typename T, typename DataContig, bool IsFortran>
+template <typename T, typename DataContig>
 void def_dense_aggr(nb::module_& m) {
   m.def(
       "dense_aggr",
       [](cuda_array<const T, DataContig> data, cuda_array<double> out, cuda_array<const int> cats,
          cuda_array<const bool> mask, std::size_t n_cells, std::size_t n_genes,
          std::size_t n_groups, bool is_fortran, std::uintptr_t stream) {
-        if constexpr (IsFortran) {
-          launch_dense_F<T>(data.data(), out.data(), cats.data(), mask.data(), n_cells, n_genes,
-                            n_groups, (cudaStream_t)stream);
+        if constexpr (std::is_same_v<DataContig, nb::f_contig>) {
+          launch_dense_aggr_F<T>(data.data(), out.data(), cats.data(), mask.data(), n_cells,
+                                 n_genes, n_groups, (cudaStream_t)stream);
         } else {
-          launch_dense_C<T>(data.data(), out.data(), cats.data(), mask.data(), n_cells, n_genes,
-                            n_groups, (cudaStream_t)stream);
+          launch_dense_aggr_C<T>(data.data(), out.data(), cats.data(), mask.data(), n_cells,
+                                 n_genes, n_groups, (cudaStream_t)stream);
         }
       },
       "data"_a, nb::kw_only(), "out"_a, "cats"_a, "mask"_a, "n_cells"_a, "n_genes"_a, "n_groups"_a,
       "is_fortran"_a, "stream"_a = 0);
 }
 
-// Helper to define csr_to_coo for a given dtype
 template <typename T>
 void def_csr_to_coo(nb::module_& m) {
   m.def(
@@ -129,21 +125,18 @@ void def_csr_to_coo(nb::module_& m) {
 }
 
 NB_MODULE(_aggr_cuda, m) {
-  // sparse_aggr
   def_sparse_aggr<float>(m);
   def_sparse_aggr<double>(m);
 
-  // dense_aggr - F-order must come before C-order for proper dispatch
-  def_dense_aggr<float, nb::f_contig, true>(m);
-  def_dense_aggr<float, nb::c_contig, false>(m);
-  def_dense_aggr<double, nb::f_contig, true>(m);
-  def_dense_aggr<double, nb::c_contig, false>(m);
+  // F-order must come before C-order for proper dispatch
+  def_dense_aggr<float, nb::f_contig>(m);
+  def_dense_aggr<float, nb::c_contig>(m);
+  def_dense_aggr<double, nb::f_contig>(m);
+  def_dense_aggr<double, nb::c_contig>(m);
 
-  // csr_to_coo
   def_csr_to_coo<float>(m);
   def_csr_to_coo<double>(m);
 
-  // sparse_var
   m.def(
       "sparse_var",
       [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<double> data,
