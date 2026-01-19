@@ -18,4 +18,3 @@ build:
       html:
         - CMAKE_ARGS="-DRSC_BUILD_EXTENSIONS=OFF" uvx hatch run docs:build
         - mv docs/_build $READTHEDOCS_OUTPUT
-
