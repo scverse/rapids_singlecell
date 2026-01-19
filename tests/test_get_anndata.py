@@ -3,20 +3,21 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import scanpy as sc
-from scipy.sparse import csc_matrix, csr_matrix
+from scipy.sparse import csc_array, csc_matrix, csr_array, csr_matrix
 
 import rapids_singlecell as rsc
 from rapids_singlecell.preprocessing._utils import _check_gpu_X
 
 
-@pytest.mark.parametrize("mtype", ["csc", "csr", "dense"])
+@pytest.mark.parametrize(
+    "mtype", [csc_matrix, csr_matrix, csc_array, csr_array, "dense"]
+)
 def test_utils(mtype):
-    if mtype in {"csc", "csr"}:
-        adata = sc.datasets.pbmc3k()
-        if mtype == "csc":
-            adata.X = csc_matrix(adata.X)
-    elif mtype == "dense":
+    if mtype == "dense":
         adata = sc.datasets.pbmc68k_reduced()
+    else:
+        adata = sc.datasets.pbmc3k()
+        adata.X = mtype(adata.X)
     # check X
     rsc.get.anndata_to_GPU(adata)
     rsc.preprocessing._utils._check_gpu_X(adata.X)

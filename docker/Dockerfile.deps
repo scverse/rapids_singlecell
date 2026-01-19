@@ -1,4 +1,4 @@
-ARG CUDA_VER=12.9.0
+ARG CUDA_VER=13.0.2
 ARG LINUX_VER=ubuntu24.04
 
 FROM nvidia/cuda:${CUDA_VER}-base-${LINUX_VER}
