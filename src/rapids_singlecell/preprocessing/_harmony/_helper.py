@@ -50,10 +50,9 @@ def _normalize_cp_p1(X: cp.ndarray) -> cp.ndarray:
     rows, cols = X.shape
 
     _hc_norm.normalize(
-        X.data.ptr,
+        X,
         rows=rows,
         cols=cols,
-        itemsize=cp.dtype(X.dtype).itemsize,
         stream=cp.cuda.get_current_stream().ptr,
     )
     return X
@@ -72,13 +71,12 @@ def _scatter_add_cp(
     n_pcs = X.shape[1]
 
     _hc_sc.scatter_add(
-        X.data.ptr,
-        cats=cats.data.ptr,
+        X,
+        cats=cats,
         n_cells=n_cells,
         n_pcs=n_pcs,
         switcher=switcher,
-        a=out.data.ptr,
-        itemsize=cp.dtype(X.dtype).itemsize,
+        a=out,
         stream=cp.cuda.get_current_stream().ptr,
     )
 
@@ -96,13 +94,12 @@ def _Z_correction(
     n_pcs = Z.shape[1]
 
     _hc_out.harmony_corr(
-        Z.data.ptr,
-        W=W.data.ptr,
-        cats=cats.data.ptr,
-        R=R.data.ptr,
+        Z,
+        W=W,
+        cats=cats,
+        R=R,
         n_cells=n_cells,
         n_pcs=n_pcs,
-        itemsize=cp.dtype(Z.dtype).itemsize,
         stream=cp.cuda.get_current_stream().ptr,
     )
 
@@ -113,13 +110,12 @@ def _outer_cp(
     n_cats, n_pcs = E.shape
 
     _hc_out.outer(
-        E.data.ptr,
-        Pr_b=Pr_b.data.ptr,
-        R_sum=R_sum.data.ptr,
+        E,
+        Pr_b=Pr_b,
+        R_sum=R_sum,
         n_cats=n_cats,
         n_pcs=n_pcs,
         switcher=switcher,
-        itemsize=cp.dtype(E.dtype).itemsize,
         stream=cp.cuda.get_current_stream().ptr,
     )
 
@@ -143,11 +139,10 @@ def _get_aggregated_matrix(
     """
 
     _hc_sc.aggregated_matrix(
-        aggregated_matrix.data.ptr,
-        sum=sum.data.ptr,
+        aggregated_matrix,
+        sum=sum,
         top_corner=float(sum.sum()),
         n_batches=n_batches,
-        itemsize=cp.dtype(aggregated_matrix.dtype).itemsize,
         stream=cp.cuda.get_current_stream().ptr,
     )
 
@@ -219,12 +214,11 @@ def _scatter_add_cp_bias_csr(
 
     if n_cells < 300_000:
         _hc_sc.scatter_add_cat0(
-            X.data.ptr,
+            X,
             n_cells=n_cells,
             n_pcs=n_pcs,
-            a=out.data.ptr,
-            bias=bias.data.ptr,
-            itemsize=cp.dtype(X.dtype).itemsize,
+            a=out,
+            bias=bias,
             stream=cp.cuda.get_current_stream().ptr,
         )
 
@@ -232,15 +226,14 @@ def _scatter_add_cp_bias_csr(
         out[0] = X.T @ bias
 
     _hc_sc.scatter_add_block(
-        X.data.ptr,
-        cat_offsets=cat_offsets.data.ptr,
-        cell_indices=cell_indices.data.ptr,
+        X,
+        cat_offsets=cat_offsets,
+        cell_indices=cell_indices,
         n_cells=n_cells,
         n_pcs=n_pcs,
         n_batches=n_batches,
-        a=out.data.ptr,
-        bias=bias.data.ptr,
-        itemsize=cp.dtype(X.dtype).itemsize,
+        a=out,
+        bias=bias,
         stream=cp.cuda.get_current_stream().ptr,
     )
 
@@ -251,11 +244,10 @@ def _kmeans_error(R: cp.ndarray, dot: cp.ndarray) -> float:
 
     out = cp.zeros(1, dtype=R.dtype)
     _hc_km.kmeans_err(
-        R.data.ptr,
-        dot=dot.data.ptr,
+        R.ravel(),
+        dot=dot.ravel(),
         n=R.size,
-        out=out.data.ptr,
-        itemsize=cp.dtype(R.dtype).itemsize,
+        out=out,
         stream=cp.cuda.get_current_stream().ptr,
     )
     return out[0]
@@ -317,11 +309,10 @@ def _column_sum(X: cp.ndarray) -> cp.ndarray:
     out = cp.zeros(cols, dtype=X.dtype)
 
     _hc_cs.colsum(
-        X.data.ptr,
-        out=out.data.ptr,
+        X,
+        out=out,
         rows=rows,
         cols=cols,
-        dtype_code=_dtype_code(X.dtype),
         stream=cp.cuda.get_current_stream().ptr,
     )
 
@@ -341,11 +332,10 @@ def _column_sum_atomic(X: cp.ndarray) -> cp.ndarray:
     out = cp.zeros(cols, dtype=X.dtype)
 
     _hc_cs.colsum_atomic(
-        X.data.ptr,
-        out=out.data.ptr,
+        X,
+        out=out,
         rows=rows,
         cols=cols,
-        dtype_code=_dtype_code(X.dtype),
         stream=cp.cuda.get_current_stream().ptr,
     )
 
@@ -518,12 +508,11 @@ def _penalty_term(R: cp.ndarray, penalty: cp.ndarray, cats: cp.ndarray) -> cp.nd
     n_cats, n_pcs = R.shape
 
     _hc_pen.pen(
-        R.data.ptr,
-        penalty=penalty.data.ptr,
-        cats=cats.data.ptr,
+        R,
+        penalty=penalty,
+        cats=cats,
         n_rows=n_cats,
         n_cols=n_pcs,
-        itemsize=cp.dtype(R.dtype).itemsize,
         stream=cp.cuda.get_current_stream().ptr,
     )
 

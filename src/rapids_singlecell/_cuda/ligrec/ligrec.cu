@@ -1,6 +1,6 @@
 #include <cuda_runtime.h>
 #include <nanobind/nanobind.h>
-#include <cstdint>
+#include <nanobind/ndarray.h>
 
 #include "kernels_ligrec.cuh"
 
@@ -8,205 +8,234 @@ namespace nb = nanobind;
 using namespace nb::literals;
 
 template <typename T>
-static inline void launch_sum_count_dense(std::uintptr_t data, std::uintptr_t clusters,
-                                          std::uintptr_t sum, std::uintptr_t count, int rows,
-                                          int cols, int ncls, cudaStream_t stream) {
+using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
+
+template <typename T>
+static inline void launch_sum_count_dense(const T* data, const int* clusters, T* sum, int* count,
+                                          int rows, int cols, int ncls, cudaStream_t stream) {
   dim3 block(32, 32);
   dim3 grid((rows + block.x - 1) / block.x, (cols + block.y - 1) / block.y);
-  sum_and_count_dense_kernel<T><<<grid, block, 0, stream>>>(
-      reinterpret_cast<const T*>(data), reinterpret_cast<const int*>(clusters),
-      reinterpret_cast<T*>(sum), reinterpret_cast<int*>(count), rows, cols, ncls);
+  sum_and_count_dense_kernel<T>
+      <<<grid, block, 0, stream>>>(data, clusters, sum, count, rows, cols, ncls);
 }
 
 template <typename T>
-static inline void launch_sum_count_sparse(std::uintptr_t indptr, std::uintptr_t index,
-                                           std::uintptr_t data, std::uintptr_t clusters,
-                                           std::uintptr_t sum, std::uintptr_t count, int rows,
+static inline void launch_sum_count_sparse(const int* indptr, const int* index, const T* data,
+                                           const int* clusters, T* sum, int* count, int rows,
                                            int ncls, cudaStream_t stream) {
   dim3 block(32);
   dim3 grid((rows + block.x - 1) / block.x);
-  sum_and_count_sparse_kernel<T><<<grid, block, 0, stream>>>(
-      reinterpret_cast<const int*>(indptr), reinterpret_cast<const int*>(index),
-      reinterpret_cast<const T*>(data), reinterpret_cast<const int*>(clusters),
-      reinterpret_cast<T*>(sum), reinterpret_cast<int*>(count), rows, ncls);
+  sum_and_count_sparse_kernel<T>
+      <<<grid, block, 0, stream>>>(indptr, index, data, clusters, sum, count, rows, ncls);
 }
 
 template <typename T>
-static inline void launch_mean_dense(std::uintptr_t data, std::uintptr_t clusters, std::uintptr_t g,
-                                     int rows, int cols, int ncls, cudaStream_t stream) {
+static inline void launch_mean_dense(const T* data, const int* clusters, T* g, int rows, int cols,
+                                     int ncls, cudaStream_t stream) {
   dim3 block(32, 32);
   dim3 grid((rows + block.x - 1) / block.x, (cols + block.y - 1) / block.y);
-  mean_dense_kernel<T><<<grid, block, 0, stream>>>(reinterpret_cast<const T*>(data),
-                                                   reinterpret_cast<const int*>(clusters),
-                                                   reinterpret_cast<T*>(g), rows, cols, ncls);
+  mean_dense_kernel<T><<<grid, block, 0, stream>>>(data, clusters, g, rows, cols, ncls);
 }
 
 template <typename T>
-static inline void launch_mean_sparse(std::uintptr_t indptr, std::uintptr_t index,
-                                      std::uintptr_t data, std::uintptr_t clusters,
-                                      std::uintptr_t g, int rows, int ncls, cudaStream_t stream) {
+static inline void launch_mean_sparse(const int* indptr, const int* index, const T* data,
+                                      const int* clusters, T* g, int rows, int ncls,
+                                      cudaStream_t stream) {
   dim3 block(32);
   dim3 grid((rows + block.x - 1) / block.x);
-  mean_sparse_kernel<T><<<grid, block, 0, stream>>>(
-      reinterpret_cast<const int*>(indptr), reinterpret_cast<const int*>(index),
-      reinterpret_cast<const T*>(data), reinterpret_cast<const int*>(clusters),
-      reinterpret_cast<T*>(g), rows, ncls);
+  mean_sparse_kernel<T><<<grid, block, 0, stream>>>(indptr, index, data, clusters, g, rows, ncls);
 }
 
 template <typename T>
-static inline void launch_elementwise_diff(std::uintptr_t g, std::uintptr_t total_counts,
-                                           int n_genes, int n_clusters, cudaStream_t stream) {
+static inline void launch_elementwise_diff(T* g, const T* total_counts, int n_genes, int n_clusters,
+                                           cudaStream_t stream) {
   dim3 block(32, 32);
   dim3 grid((n_genes + block.x - 1) / block.x, (n_clusters + block.y - 1) / block.y);
-  elementwise_diff_kernel<T><<<grid, block, 0, stream>>>(
-      reinterpret_cast<T*>(g), reinterpret_cast<const T*>(total_counts), n_genes, n_clusters);
+  elementwise_diff_kernel<T><<<grid, block, 0, stream>>>(g, total_counts, n_genes, n_clusters);
 }
 
 template <typename T>
-static inline void launch_interaction(std::uintptr_t interactions,
-                                      std::uintptr_t interaction_clusters, std::uintptr_t mean,
-                                      std::uintptr_t res, std::uintptr_t mask, std::uintptr_t g,
+static inline void launch_interaction(const int* interactions, const int* interaction_clusters,
+                                      const T* mean, T* res, const bool* mask, const T* g,
                                       int n_iter, int n_inter_clust, int ncls,
                                       cudaStream_t stream) {
   dim3 block(32, 32);
   dim3 grid((n_iter + block.x - 1) / block.x, (n_inter_clust + block.y - 1) / block.y);
-  interaction_kernel<T><<<grid, block>>>(
-      reinterpret_cast<const int*>(interactions),
-      reinterpret_cast<const int*>(interaction_clusters), reinterpret_cast<const T*>(mean),
-      reinterpret_cast<T*>(res), reinterpret_cast<const bool*>(mask), reinterpret_cast<const T*>(g),
-      n_iter, n_inter_clust, ncls);
+  interaction_kernel<T><<<grid, block>>>(interactions, interaction_clusters, mean, res, mask, g,
+                                         n_iter, n_inter_clust, ncls);
 }
 
 template <typename T>
-static inline void launch_res_mean(std::uintptr_t interactions, std::uintptr_t interaction_clusters,
-                                   std::uintptr_t mean, std::uintptr_t res_mean, int n_inter,
-                                   int n_inter_clust, int ncls, cudaStream_t stream) {
+static inline void launch_res_mean(const int* interactions, const int* interaction_clusters,
+                                   const T* mean, T* res_mean, int n_inter, int n_inter_clust,
+                                   int ncls, cudaStream_t stream) {
   dim3 block(32, 32);
   dim3 grid((n_inter + block.x - 1) / block.x, (n_inter_clust + block.y - 1) / block.y);
-  res_mean_kernel<T><<<grid, block, 0, stream>>>(
-      reinterpret_cast<const int*>(interactions),
-      reinterpret_cast<const int*>(interaction_clusters), reinterpret_cast<const T*>(mean),
-      reinterpret_cast<T*>(res_mean), n_inter, n_inter_clust, ncls);
+  res_mean_kernel<T><<<grid, block, 0, stream>>>(interactions, interaction_clusters, mean, res_mean,
+                                                 n_inter, n_inter_clust, ncls);
 }
 
 NB_MODULE(_ligrec_cuda, m) {
+  // sum_count_dense - float32
   m.def(
       "sum_count_dense",
-      [](std::uintptr_t data, std::uintptr_t clusters, std::uintptr_t sum, std::uintptr_t count,
-         int rows, int cols, int ncls, int itemsize, std::uintptr_t stream) {
-        if (itemsize == 4) {
-          launch_sum_count_dense<float>(data, clusters, sum, count, rows, cols, ncls,
-                                        (cudaStream_t)stream);
-        } else if (itemsize == 8) {
-          launch_sum_count_dense<double>(data, clusters, sum, count, rows, cols, ncls,
-                                         (cudaStream_t)stream);
-        } else {
-          throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
-        }
+      [](cuda_array<const float> data, cuda_array<const int> clusters, cuda_array<float> sum,
+         cuda_array<int> count, int rows, int cols, int ncls, std::uintptr_t stream) {
+        launch_sum_count_dense<float>(data.data(), clusters.data(), sum.data(), count.data(), rows,
+                                      cols, ncls, (cudaStream_t)stream);
       },
       "data"_a, nb::kw_only(), "clusters"_a, "sum"_a, "count"_a, "rows"_a, "cols"_a, "ncls"_a,
-      "itemsize"_a, "stream"_a = 0);
+      "stream"_a = 0);
 
+  // sum_count_dense - float64
+  m.def(
+      "sum_count_dense",
+      [](cuda_array<const double> data, cuda_array<const int> clusters, cuda_array<double> sum,
+         cuda_array<int> count, int rows, int cols, int ncls, std::uintptr_t stream) {
+        launch_sum_count_dense<double>(data.data(), clusters.data(), sum.data(), count.data(), rows,
+                                       cols, ncls, (cudaStream_t)stream);
+      },
+      "data"_a, nb::kw_only(), "clusters"_a, "sum"_a, "count"_a, "rows"_a, "cols"_a, "ncls"_a,
+      "stream"_a = 0);
+
+  // sum_count_sparse - float32
   m.def(
       "sum_count_sparse",
-      [](std::uintptr_t indptr, std::uintptr_t index, std::uintptr_t data, std::uintptr_t clusters,
-         std::uintptr_t sum, std::uintptr_t count, int rows, int ncls, int itemsize,
-         std::uintptr_t stream) {
-        if (itemsize == 4) {
-          launch_sum_count_sparse<float>(indptr, index, data, clusters, sum, count, rows, ncls,
-                                         (cudaStream_t)stream);
-        } else if (itemsize == 8) {
-          launch_sum_count_sparse<double>(indptr, index, data, clusters, sum, count, rows, ncls,
-                                          (cudaStream_t)stream);
-        } else {
-          throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
-        }
+      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const float> data,
+         cuda_array<const int> clusters, cuda_array<float> sum, cuda_array<int> count, int rows,
+         int ncls, std::uintptr_t stream) {
+        launch_sum_count_sparse<float>(indptr.data(), index.data(), data.data(), clusters.data(),
+                                       sum.data(), count.data(), rows, ncls, (cudaStream_t)stream);
       },
       "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "clusters"_a, "sum"_a, "count"_a, "rows"_a,
-      "ncls"_a, "itemsize"_a, "stream"_a = 0);
+      "ncls"_a, "stream"_a = 0);
 
+  // sum_count_sparse - float64
+  m.def(
+      "sum_count_sparse",
+      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const double> data,
+         cuda_array<const int> clusters, cuda_array<double> sum, cuda_array<int> count, int rows,
+         int ncls, std::uintptr_t stream) {
+        launch_sum_count_sparse<double>(indptr.data(), index.data(), data.data(), clusters.data(),
+                                        sum.data(), count.data(), rows, ncls, (cudaStream_t)stream);
+      },
+      "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "clusters"_a, "sum"_a, "count"_a, "rows"_a,
+      "ncls"_a, "stream"_a = 0);
+
+  // mean_dense - float32
   m.def(
       "mean_dense",
-      [](std::uintptr_t data, std::uintptr_t clusters, std::uintptr_t g, int rows, int cols,
-         int ncls, int itemsize, std::uintptr_t stream) {
-        if (itemsize == 4) {
-          launch_mean_dense<float>(data, clusters, g, rows, cols, ncls, (cudaStream_t)stream);
-        } else if (itemsize == 8) {
-          launch_mean_dense<double>(data, clusters, g, rows, cols, ncls, (cudaStream_t)stream);
-        } else {
-          throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
-        }
+      [](cuda_array<const float> data, cuda_array<const int> clusters, cuda_array<float> g,
+         int rows, int cols, int ncls, std::uintptr_t stream) {
+        launch_mean_dense<float>(data.data(), clusters.data(), g.data(), rows, cols, ncls,
+                                 (cudaStream_t)stream);
       },
-      "data"_a, nb::kw_only(), "clusters"_a, "g"_a, "rows"_a, "cols"_a, "ncls"_a, "itemsize"_a,
-      "stream"_a = 0);
+      "data"_a, nb::kw_only(), "clusters"_a, "g"_a, "rows"_a, "cols"_a, "ncls"_a, "stream"_a = 0);
 
+  // mean_dense - float64
+  m.def(
+      "mean_dense",
+      [](cuda_array<const double> data, cuda_array<const int> clusters, cuda_array<double> g,
+         int rows, int cols, int ncls, std::uintptr_t stream) {
+        launch_mean_dense<double>(data.data(), clusters.data(), g.data(), rows, cols, ncls,
+                                  (cudaStream_t)stream);
+      },
+      "data"_a, nb::kw_only(), "clusters"_a, "g"_a, "rows"_a, "cols"_a, "ncls"_a, "stream"_a = 0);
+
+  // mean_sparse - float32
   m.def(
       "mean_sparse",
-      [](std::uintptr_t indptr, std::uintptr_t index, std::uintptr_t data, std::uintptr_t clusters,
-         std::uintptr_t g, int rows, int ncls, int itemsize, std::uintptr_t stream) {
-        if (itemsize == 4) {
-          launch_mean_sparse<float>(indptr, index, data, clusters, g, rows, ncls,
-                                    (cudaStream_t)stream);
-        } else if (itemsize == 8) {
-          launch_mean_sparse<double>(indptr, index, data, clusters, g, rows, ncls,
-                                     (cudaStream_t)stream);
-        } else {
-          throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
-        }
+      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const float> data,
+         cuda_array<const int> clusters, cuda_array<float> g, int rows, int ncls,
+         std::uintptr_t stream) {
+        launch_mean_sparse<float>(indptr.data(), index.data(), data.data(), clusters.data(),
+                                  g.data(), rows, ncls, (cudaStream_t)stream);
       },
       "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "clusters"_a, "g"_a, "rows"_a, "ncls"_a,
-      "itemsize"_a, "stream"_a = 0);
-
-  m.def(
-      "elementwise_diff",
-      [](std::uintptr_t g, std::uintptr_t total_counts, int n_genes, int n_clusters, int itemsize,
-         std::uintptr_t stream) {
-        if (itemsize == 4) {
-          launch_elementwise_diff<float>(g, total_counts, n_genes, n_clusters,
-                                         (cudaStream_t)stream);
-        } else if (itemsize == 8) {
-          launch_elementwise_diff<double>(g, total_counts, n_genes, n_clusters,
-                                          (cudaStream_t)stream);
-        } else {
-          throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
-        }
-      },
-      "g"_a, nb::kw_only(), "total_counts"_a, "n_genes"_a, "n_clusters"_a, "itemsize"_a,
       "stream"_a = 0);
 
+  // mean_sparse - float64
+  m.def(
+      "mean_sparse",
+      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const double> data,
+         cuda_array<const int> clusters, cuda_array<double> g, int rows, int ncls,
+         std::uintptr_t stream) {
+        launch_mean_sparse<double>(indptr.data(), index.data(), data.data(), clusters.data(),
+                                   g.data(), rows, ncls, (cudaStream_t)stream);
+      },
+      "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "clusters"_a, "g"_a, "rows"_a, "ncls"_a,
+      "stream"_a = 0);
+
+  // elementwise_diff - float32
+  m.def(
+      "elementwise_diff",
+      [](cuda_array<float> g, cuda_array<const float> total_counts, int n_genes, int n_clusters,
+         std::uintptr_t stream) {
+        launch_elementwise_diff<float>(g.data(), total_counts.data(), n_genes, n_clusters,
+                                       (cudaStream_t)stream);
+      },
+      "g"_a, nb::kw_only(), "total_counts"_a, "n_genes"_a, "n_clusters"_a, "stream"_a = 0);
+
+  // elementwise_diff - float64
+  m.def(
+      "elementwise_diff",
+      [](cuda_array<double> g, cuda_array<const double> total_counts, int n_genes, int n_clusters,
+         std::uintptr_t stream) {
+        launch_elementwise_diff<double>(g.data(), total_counts.data(), n_genes, n_clusters,
+                                        (cudaStream_t)stream);
+      },
+      "g"_a, nb::kw_only(), "total_counts"_a, "n_genes"_a, "n_clusters"_a, "stream"_a = 0);
+
+  // interaction - float32
   m.def(
       "interaction",
-      [](std::uintptr_t interactions, std::uintptr_t interaction_clusters, std::uintptr_t mean,
-         std::uintptr_t res, std::uintptr_t mask, std::uintptr_t g, int n_iter, int n_inter_clust,
-         int ncls, int itemsize, std::uintptr_t stream) {
-        if (itemsize == 4) {
-          launch_interaction<float>(interactions, interaction_clusters, mean, res, mask, g, n_iter,
-                                    n_inter_clust, ncls, (cudaStream_t)stream);
-        } else if (itemsize == 8) {
-          launch_interaction<double>(interactions, interaction_clusters, mean, res, mask, g, n_iter,
-                                     n_inter_clust, ncls, (cudaStream_t)stream);
-        } else {
-          throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
-        }
+      [](cuda_array<const int> interactions, cuda_array<const int> interaction_clusters,
+         cuda_array<const float> mean, cuda_array<float> res, cuda_array<const bool> mask,
+         cuda_array<const float> g, int n_iter, int n_inter_clust, int ncls,
+         std::uintptr_t stream) {
+        launch_interaction<float>(interactions.data(), interaction_clusters.data(), mean.data(),
+                                  res.data(), mask.data(), g.data(), n_iter, n_inter_clust, ncls,
+                                  (cudaStream_t)stream);
       },
       "interactions"_a, nb::kw_only(), "interaction_clusters"_a, "mean"_a, "res"_a, "mask"_a, "g"_a,
-      "n_iter"_a, "n_inter_clust"_a, "ncls"_a, "itemsize"_a, "stream"_a = 0);
+      "n_iter"_a, "n_inter_clust"_a, "ncls"_a, "stream"_a = 0);
 
+  // interaction - float64
+  m.def(
+      "interaction",
+      [](cuda_array<const int> interactions, cuda_array<const int> interaction_clusters,
+         cuda_array<const double> mean, cuda_array<double> res, cuda_array<const bool> mask,
+         cuda_array<const double> g, int n_iter, int n_inter_clust, int ncls,
+         std::uintptr_t stream) {
+        launch_interaction<double>(interactions.data(), interaction_clusters.data(), mean.data(),
+                                   res.data(), mask.data(), g.data(), n_iter, n_inter_clust, ncls,
+                                   (cudaStream_t)stream);
+      },
+      "interactions"_a, nb::kw_only(), "interaction_clusters"_a, "mean"_a, "res"_a, "mask"_a, "g"_a,
+      "n_iter"_a, "n_inter_clust"_a, "ncls"_a, "stream"_a = 0);
+
+  // res_mean - float32
   m.def(
       "res_mean",
-      [](std::uintptr_t interactions, std::uintptr_t interaction_clusters, std::uintptr_t mean,
-         std::uintptr_t res_mean, int n_inter, int n_inter_clust, int ncls, int itemsize,
-         std::uintptr_t stream) {
-        if (itemsize == 4) {
-          launch_res_mean<float>(interactions, interaction_clusters, mean, res_mean, n_inter,
-                                 n_inter_clust, ncls, (cudaStream_t)stream);
-        } else if (itemsize == 8) {
-          launch_res_mean<double>(interactions, interaction_clusters, mean, res_mean, n_inter,
-                                  n_inter_clust, ncls, (cudaStream_t)stream);
-        } else {
-          throw nb::value_error("Unsupported itemsize (expected 4 or 8)");
-        }
+      [](cuda_array<const int> interactions, cuda_array<const int> interaction_clusters,
+         cuda_array<const float> mean, cuda_array<float> res_mean, int n_inter, int n_inter_clust,
+         int ncls, std::uintptr_t stream) {
+        launch_res_mean<float>(interactions.data(), interaction_clusters.data(), mean.data(),
+                               res_mean.data(), n_inter, n_inter_clust, ncls, (cudaStream_t)stream);
       },
       "interactions"_a, nb::kw_only(), "interaction_clusters"_a, "mean"_a, "res_mean"_a,
-      "n_inter"_a, "n_inter_clust"_a, "ncls"_a, "itemsize"_a, "stream"_a = 0);
+      "n_inter"_a, "n_inter_clust"_a, "ncls"_a, "stream"_a = 0);
+
+  // res_mean - float64
+  m.def(
+      "res_mean",
+      [](cuda_array<const int> interactions, cuda_array<const int> interaction_clusters,
+         cuda_array<const double> mean, cuda_array<double> res_mean, int n_inter, int n_inter_clust,
+         int ncls, std::uintptr_t stream) {
+        launch_res_mean<double>(interactions.data(), interaction_clusters.data(), mean.data(),
+                                res_mean.data(), n_inter, n_inter_clust, ncls,
+                                (cudaStream_t)stream);
+      },
+      "interactions"_a, nb::kw_only(), "interaction_clusters"_a, "mean"_a, "res_mean"_a,
+      "n_inter"_a, "n_inter_clust"_a, "ncls"_a, "stream"_a = 0);
 }

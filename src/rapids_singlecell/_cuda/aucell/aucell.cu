@@ -1,9 +1,12 @@
 #include <cuda_runtime.h>
 #include <nanobind/nanobind.h>
-#include <cstdint>
+#include <nanobind/ndarray.h>
 
 namespace nb = nanobind;
 using namespace nb::literals;
+
+template <typename T>
+using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 __global__ void auc_kernel(const int* __restrict__ ranks, int R, int C,
                            const int* __restrict__ cnct, const int* __restrict__ starts,
@@ -31,25 +34,23 @@ __global__ void auc_kernel(const int* __restrict__ ranks, int R, int C,
   es[row * n_sets + set] = val;
 }
 
-static inline void launch_auc(std::uintptr_t ranks, int R, int C, std::uintptr_t cnct,
-                              std::uintptr_t starts, std::uintptr_t lens, int n_sets, int n_up,
-                              std::uintptr_t max_aucs, std::uintptr_t es, cudaStream_t stream) {
+static inline void launch_auc(const int* ranks, int R, int C, const int* cnct, const int* starts,
+                              const int* lens, int n_sets, int n_up, const float* max_aucs,
+                              float* es, cudaStream_t stream) {
   dim3 block(32);
   dim3 grid((unsigned)n_sets, (unsigned)((R + block.x - 1) / block.x));
-  auc_kernel<<<grid, block, 0, stream>>>(
-      reinterpret_cast<const int*>(ranks), R, C, reinterpret_cast<const int*>(cnct),
-      reinterpret_cast<const int*>(starts), reinterpret_cast<const int*>(lens), n_sets, n_up,
-      reinterpret_cast<const float*>(max_aucs), reinterpret_cast<float*>(es));
+  auc_kernel<<<grid, block, 0, stream>>>(ranks, R, C, cnct, starts, lens, n_sets, n_up, max_aucs,
+                                         es);
 }
 
 NB_MODULE(_aucell_cuda, m) {
   m.def(
       "auc",
-      [](std::uintptr_t ranks, int R, int C, std::uintptr_t cnct, std::uintptr_t starts,
-         std::uintptr_t lens, int n_sets, int n_up, std::uintptr_t max_aucs, std::uintptr_t es,
-         std::uintptr_t stream) {
-        launch_auc(ranks, R, C, cnct, starts, lens, n_sets, n_up, max_aucs, es,
-                   (cudaStream_t)stream);
+      [](cuda_array<const int> ranks, int R, int C, cuda_array<const int> cnct,
+         cuda_array<const int> starts, cuda_array<const int> lens, int n_sets, int n_up,
+         cuda_array<const float> max_aucs, cuda_array<float> es, std::uintptr_t stream) {
+        launch_auc(ranks.data(), R, C, cnct.data(), starts.data(), lens.data(), n_sets, n_up,
+                   max_aucs.data(), es.data(), (cudaStream_t)stream);
       },
       "ranks"_a, nb::kw_only(), "R"_a, "C"_a, "cnct"_a, "starts"_a, "lens"_a, "n_sets"_a, "n_up"_a,
       "max_aucs"_a, "es"_a, "stream"_a = 0);

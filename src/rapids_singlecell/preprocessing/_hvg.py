@@ -731,33 +731,31 @@ def _highly_variable_pearson_residuals(
         residual_gene_var = cp.zeros(X_batch.shape[1], dtype=X.dtype, order="C")
         if issparse(X_batch):
             _pr.csc_hvg_res(
-                X_batch.indptr.data.ptr,
-                X_batch.indices.data.ptr,
-                X_batch.data.data.ptr,
-                sums_genes=sums_genes.data.ptr,
-                sums_cells=sums_cells.data.ptr,
-                residuals=residual_gene_var.data.ptr,
+                X_batch.indptr,
+                X_batch.indices,
+                X_batch.data,
+                sums_genes=sums_genes,
+                sums_cells=sums_cells,
+                residuals=residual_gene_var,
                 inv_sum_total=float(inv_sum_total),
                 clip=float(clip),
                 inv_theta=float(inv_theta),
                 n_genes=X_batch.shape[1],
                 n_cells=X_batch.shape[0],
-                itemsize=cp.dtype(X_batch.dtype).itemsize,
                 stream=cp.cuda.get_current_stream().ptr,
             )
         else:
             X_batch = cp.asfortranarray(X_batch)
             _pr.dense_hvg_res(
-                X_batch.data.ptr,
-                sums_genes=sums_genes.data.ptr,
-                sums_cells=sums_cells.data.ptr,
-                residuals=residual_gene_var.data.ptr,
+                X_batch,
+                sums_genes=sums_genes,
+                sums_cells=sums_cells,
+                residuals=residual_gene_var,
                 inv_sum_total=float(inv_sum_total),
                 clip=float(clip),
                 inv_theta=float(inv_theta),
                 n_genes=X_batch.shape[1],
                 n_cells=X_batch.shape[0],
-                itemsize=cp.dtype(X.dtype).itemsize,
                 stream=cp.cuda.get_current_stream().ptr,
             )
 

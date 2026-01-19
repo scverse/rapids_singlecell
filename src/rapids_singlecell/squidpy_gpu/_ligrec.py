@@ -465,14 +465,13 @@ def ligrec(
         count_gt0 = cp.zeros((data_cp.shape[1], n_clusters), dtype=cp.int32)
 
         _lc.sum_count_dense(
-            data_cp.data.ptr,
-            clusters=clusters.data.ptr,
-            sum=sum_gt0.data.ptr,
-            count=count_gt0.data.ptr,
+            data_cp,
+            clusters=clusters,
+            sum=sum_gt0,
+            count=count_gt0,
             rows=data_cp.shape[0],
             cols=data_cp.shape[1],
             ncls=n_clusters,
-            itemsize=cp.dtype(data_cp.dtype).itemsize,
             stream=cp.cuda.get_current_stream().ptr,
         )
 
@@ -483,15 +482,14 @@ def ligrec(
         sum_gt0 = cp.zeros((data_cp.shape[1], n_clusters), dtype=cp.float32, order="C")
         count_gt0 = cp.zeros((data_cp.shape[1], n_clusters), dtype=cp.int32, order="C")
         _lc.sum_count_sparse(
-            data_cp.indptr.data.ptr,
-            data_cp.indices.data.ptr,
-            data_cp.data.data.ptr,
-            clusters=clusters.data.ptr,
-            sum=sum_gt0.data.ptr,
-            count=count_gt0.data.ptr,
+            data_cp.indptr,
+            data_cp.indices,
+            data_cp.data,
+            clusters=clusters,
+            sum=sum_gt0,
+            count=count_gt0,
             rows=data_cp.shape[0],
             ncls=n_clusters,
-            itemsize=cp.dtype(data_cp.dtype).itemsize,
             stream=cp.cuda.get_current_stream().ptr,
         )
         mean_cp = sum_gt0 / total_counts
@@ -515,36 +513,33 @@ def ligrec(
             cp.random.shuffle(clustering_use)
             g = cp.zeros((data_cp.shape[1], n_cls), dtype=cp.float32, order="C")
             _lc.mean_sparse(
-                data_cp.indptr.data.ptr,
-                data_cp.indices.data.ptr,
-                data_cp.data.data.ptr,
-                clusters=clustering_use.data.ptr,
-                g=g.data.ptr,
+                data_cp.indptr,
+                data_cp.indices,
+                data_cp.data,
+                clusters=clustering_use,
+                g=g,
                 rows=data_cp.shape[0],
                 ncls=n_clusters,
-                itemsize=cp.dtype(data_cp.dtype).itemsize,
                 stream=cp.cuda.get_current_stream().ptr,
             )
 
             _lc.elementwise_diff(
-                g.data.ptr,
-                total_counts=total_counts.data.ptr,
+                g,
+                total_counts=total_counts,
                 n_genes=data_cp.shape[1],
                 n_clusters=n_cls,
-                itemsize=cp.dtype(g.dtype).itemsize,
                 stream=cp.cuda.get_current_stream().ptr,
             )
             _lc.interaction(
-                interactions_.data.ptr,
-                interaction_clusters=interaction_clusters.data.ptr,
-                mean=mean_cp.data.ptr,
-                res=res.data.ptr,
-                mask=mask_cp.data.ptr,
-                g=g.data.ptr,
+                interactions_,
+                interaction_clusters=interaction_clusters,
+                mean=mean_cp,
+                res=res,
+                mask=mask_cp,
+                g=g,
                 n_iter=len(interactions_),
                 n_inter_clust=len(interaction_clusters),
                 ncls=n_cls,
-                itemsize=cp.dtype(mean_cp.dtype).itemsize,
                 stream=cp.cuda.get_current_stream().ptr,
             )
     else:
@@ -552,34 +547,31 @@ def ligrec(
             cp.random.shuffle(clustering_use)
             g = cp.zeros((data_cp.shape[1], n_cls), dtype=cp.float32, order="C")
             _lc.mean_dense(
-                data_cp.data.ptr,
-                clusters=clustering_use.data.ptr,
-                g=g.data.ptr,
+                data_cp,
+                clusters=clustering_use,
+                g=g,
                 rows=data_cp.shape[0],
                 cols=data_cp.shape[1],
                 ncls=n_cls,
-                itemsize=cp.dtype(data_cp.dtype).itemsize,
                 stream=cp.cuda.get_current_stream().ptr,
             )
             _lc.elementwise_diff(
-                g.data.ptr,
-                total_counts=total_counts.data.ptr,
+                g,
+                total_counts=total_counts,
                 n_genes=data_cp.shape[1],
                 n_clusters=n_cls,
-                itemsize=cp.dtype(g.dtype).itemsize,
                 stream=cp.cuda.get_current_stream().ptr,
             )
             _lc.interaction(
-                interactions_.data.ptr,
-                interaction_clusters=interaction_clusters.data.ptr,
-                mean=mean_cp.data.ptr,
-                res=res.data.ptr,
-                mask=mask_cp.data.ptr,
-                g=g.data.ptr,
+                interactions_,
+                interaction_clusters=interaction_clusters,
+                mean=mean_cp,
+                res=res,
+                mask=mask_cp,
+                g=g,
                 n_iter=len(interactions_),
                 n_inter_clust=len(interaction_clusters),
                 ncls=n_cls,
-                itemsize=cp.dtype(mean_cp.dtype).itemsize,
                 stream=cp.cuda.get_current_stream().ptr,
             )
 
@@ -588,14 +580,13 @@ def ligrec(
     )
 
     _lc.res_mean(
-        interactions_.data.ptr,
-        interaction_clusters=interaction_clusters.data.ptr,
-        mean=mean_cp.data.ptr,
-        res_mean=res_mean.data.ptr,
+        interactions_,
+        interaction_clusters=interaction_clusters,
+        mean=mean_cp,
+        res_mean=res_mean,
         n_inter=len(interactions_),
         n_inter_clust=len(interaction_clusters),
         ncls=n_cls,
-        itemsize=cp.dtype(mean_cp.dtype).itemsize,
         stream=cp.cuda.get_current_stream().ptr,
     )
 

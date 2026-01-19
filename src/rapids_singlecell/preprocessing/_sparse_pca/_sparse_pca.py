@@ -207,13 +207,12 @@ def _create_gram_matrix(x):
     if isinstance(x, csr_matrix):
         gram_matrix = cp.zeros((x.shape[1], x.shape[1]), dtype=x.data.dtype)
         _spca.gram_csr_upper(
-            x.indptr.data.ptr,
-            x.indices.data.ptr,
-            x.data.data.ptr,
+            x.indptr,
+            x.indices,
+            x.data,
             nrows=x.shape[0],
             ncols=x.shape[1],
-            out=gram_matrix.data.ptr,
-            itemsize=cp.dtype(x.dtype).itemsize,
+            out=gram_matrix,
             stream=cp.cuda.get_current_stream().ptr,
         )
     elif isinstance(x, DaskArray):
@@ -224,13 +223,12 @@ def _create_gram_matrix(x):
                 gram_matrix = cp.zeros((n_cols, n_cols), dtype=x.dtype)
 
                 _spca.gram_csr_upper(
-                    x_part.indptr.data.ptr,
-                    x_part.indices.data.ptr,
-                    x_part.data.data.ptr,
+                    x_part.indptr,
+                    x_part.indices,
+                    x_part.data,
                     nrows=x_part.shape[0],
                     ncols=n_cols,
-                    out=gram_matrix.data.ptr,
-                    itemsize=cp.dtype(x_part.dtype).itemsize,
+                    out=gram_matrix,
                     stream=cp.cuda.get_current_stream().ptr,
                 )
                 return gram_matrix[None, ...]  # need new axis for summing

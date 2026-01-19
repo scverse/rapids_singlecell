@@ -172,18 +172,18 @@ def _trimming(cnts: cp_sparse.csr_matrix, trim: int) -> cp_sparse.csr_matrix:
     vals_gpu = cp.zeros(n_rows, dtype=cp.float32)
 
     find_top_k_per_row(
-        cnts.data.data.ptr,
-        cnts.indptr.data.ptr,
+        cnts.data,
+        cnts.indptr,
         n_rows=cnts.shape[0],
         trim=trim,
-        vals=vals_gpu.data.ptr,
+        vals=vals_gpu,
         stream=cp.cuda.get_current_stream().ptr,
     )
     cut_smaller(
-        cnts.indptr.data.ptr,
-        cnts.indices.data.ptr,
-        cnts.data.data.ptr,
-        vals=vals_gpu.data.ptr,
+        cnts.indptr,
+        cnts.indices,
+        cnts.data,
+        vals=vals_gpu,
         n_rows=cnts.shape[0],
         stream=cp.cuda.get_current_stream().ptr,
     )

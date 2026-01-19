@@ -56,13 +56,12 @@ def _nan_mean_minor_dask_sparse(X, major, minor, *, mask=None, n_features=None):
         mean = cp.zeros(minor, dtype=cp.float64)
         nans = cp.zeros(minor, dtype=cp.int32)
         _nm.nan_mean_minor(
-            X_part.indices.data.ptr,
-            X_part.data.data.ptr,
-            means=mean.data.ptr,
-            nans=nans.data.ptr,
-            mask=mask.data.ptr,
+            X_part.indices,
+            X_part.data,
+            means=mean,
+            nans=nans,
+            mask=mask,
             nnz=X_part.nnz,
-            itemsize=cp.dtype(X_part.dtype).itemsize,
             stream=cp.cuda.get_current_stream().ptr,
         )
         return cp.vstack([mean, nans.astype(cp.float64)])[None, ...]
@@ -87,15 +86,14 @@ def _nan_mean_major_dask_sparse(X, major, minor, *, mask=None, n_features=None):
         mean = cp.zeros(major_part, dtype=cp.float64)
         nans = cp.zeros(major_part, dtype=cp.int32)
         _nm.nan_mean_major(
-            X_part.indptr.data.ptr,
-            X_part.indices.data.ptr,
-            X_part.data.data.ptr,
-            means=mean.data.ptr,
-            nans=nans.data.ptr,
-            mask=mask.data.ptr,
+            X_part.indptr,
+            X_part.indices,
+            X_part.data,
+            means=mean,
+            nans=nans,
+            mask=mask,
             major=major_part,
             minor=minor,
-            itemsize=cp.dtype(X_part.dtype).itemsize,
             stream=cp.cuda.get_current_stream().ptr,
         )
         return cp.stack([mean, nans.astype(cp.float64)], axis=1)
@@ -145,13 +143,12 @@ def _nan_mean_minor(X, major, minor, *, mask=None, n_features=None):
     mean = cp.zeros(minor, dtype=cp.float64)
     nans = cp.zeros(minor, dtype=cp.int32)
     _nm.nan_mean_minor(
-        X.indices.data.ptr,
-        X.data.data.ptr,
-        means=mean.data.ptr,
-        nans=nans.data.ptr,
-        mask=mask.data.ptr,
+        X.indices,
+        X.data,
+        means=mean,
+        nans=nans,
+        mask=mask,
         nnz=X.nnz,
-        itemsize=cp.dtype(X.data.dtype).itemsize,
         stream=cp.cuda.get_current_stream().ptr,
     )
     mean /= n_features - nans
@@ -164,15 +161,14 @@ def _nan_mean_major(X, major, minor, *, mask=None, n_features=None):
     mean = cp.zeros(major, dtype=cp.float64)
     nans = cp.zeros(major, dtype=cp.int32)
     _nm.nan_mean_major(
-        X.indptr.data.ptr,
-        X.indices.data.ptr,
-        X.data.data.ptr,
-        means=mean.data.ptr,
-        nans=nans.data.ptr,
-        mask=mask.data.ptr,
+        X.indptr,
+        X.indices,
+        X.data,
+        means=mean,
+        nans=nans,
+        mask=mask,
         major=major,
         minor=minor,
-        itemsize=cp.dtype(X.data.dtype).itemsize,
         stream=cp.cuda.get_current_stream().ptr,
     )
     mean /= n_features - nans

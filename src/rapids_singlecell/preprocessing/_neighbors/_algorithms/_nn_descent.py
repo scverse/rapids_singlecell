@@ -60,9 +60,9 @@ def _nn_descent_knn(
     distances = cp.zeros((X.shape[0], neighbors.shape[1]), dtype=cp.float32)
 
     dist_func(
-        X.data.ptr,
-        out=distances.data.ptr,
-        pairs=neighbors.data.ptr,
+        X,
+        out=distances,
+        pairs=neighbors,
         n_samples=X.shape[0],
         n_features=X.shape[1],
         n_neighbors=neighbors.shape[1],

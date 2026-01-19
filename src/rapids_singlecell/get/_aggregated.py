@@ -88,29 +88,27 @@ class Aggregate:
 
             if is_sparse:
                 _aggr_cuda.sparse_aggr(
-                    X_part.indptr.data.ptr,
-                    X_part.indices.data.ptr,
-                    X_part.data.data.ptr,
-                    out=out.data.ptr,
-                    cats=gb.data.ptr,
-                    mask=mk.data.ptr,
+                    X_part.indptr,
+                    X_part.indices,
+                    X_part.data,
+                    out=out,
+                    cats=gb,
+                    mask=mk,
                     n_cells=X_part.shape[0],
                     n_genes=X_part.shape[1],
                     n_groups=n_groups,
                     is_csc=False,
-                    dtype_itemsize=X_part.data.dtype.itemsize,
                 )
             else:
                 _aggr_cuda.dense_aggr(
-                    X_part.data.ptr,
-                    out=out.data.ptr,
-                    cats=gb.data.ptr,
-                    mask=mk.data.ptr,
+                    X_part,
+                    out=out,
+                    cats=gb,
+                    mask=mk,
                     n_cells=X_part.shape[0],
                     n_genes=X_part.shape[1],
                     n_groups=n_groups,
                     is_fortran=X_part.flags.f_contiguous,
-                    dtype_itemsize=X_part.dtype.itemsize,
                 )
             return out
 
@@ -167,17 +165,16 @@ class Aggregate:
         mask = self._get_mask()
 
         _aggr_cuda.sparse_aggr(
-            self.data.indptr.data.ptr,
-            self.data.indices.data.ptr,
-            self.data.data.data.ptr,
-            out=out.data.ptr,
-            cats=self.groupby.data.ptr,
-            mask=mask.data.ptr,
+            self.data.indptr,
+            self.data.indices,
+            self.data.data,
+            out=out,
+            cats=self.groupby,
+            mask=mask,
             n_cells=self.data.shape[0],
             n_genes=self.data.shape[1],
             n_groups=self.n_cells.shape[0],
             is_csc=self.data.format == "csc",
-            dtype_itemsize=self.data.data.dtype.itemsize,
         )
         sums, counts, sq_sums = out[0, :], out[1, :], out[2, :]
         sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])
@@ -208,16 +205,15 @@ class Aggregate:
         mask = self._get_mask()
 
         _aggr_cuda.csr_to_coo(
-            self.data.indptr.data.ptr,
-            self.data.indices.data.ptr,
-            self.data.data.data.ptr,
-            out_row=src_row.data.ptr,
-            out_col=src_col.data.ptr,
-            out_data=src_data.data.ptr,
-            cats=self.groupby.data.ptr,
-            mask=mask.data.ptr,
+            self.data.indptr,
+            self.data.indices,
+            self.data.data,
+            out_row=src_row,
+            out_col=src_col,
+            out_data=src_data,
+            cats=self.groupby,
+            mask=mask,
             n_cells=self.data.shape[0],
-            dtype_itemsize=self.data.data.dtype.itemsize,
         )
 
         keys = cp.stack([src_col, src_row])
@@ -306,11 +302,11 @@ class Aggregate:
                 )
 
                 _aggr_cuda.sparse_var(
-                    var.indptr.data.ptr,
-                    var.indices.data.ptr,
-                    var.data.data.ptr,
-                    means=means.data.ptr,
-                    n_cells=self.n_cells.data.ptr,
+                    var.indptr,
+                    var.indices,
+                    var.data,
+                    means=means,
+                    n_cells=self.n_cells,
                     dof=int(dof),
                     n_groups=var.shape[0],
                 )
@@ -346,15 +342,14 @@ class Aggregate:
         mask = self._get_mask()
 
         _aggr_cuda.dense_aggr(
-            self.data.data.ptr,
-            out=out.data.ptr,
-            cats=self.groupby.data.ptr,
-            mask=mask.data.ptr,
+            self.data,
+            out=out,
+            cats=self.groupby,
+            mask=mask,
             n_cells=self.data.shape[0],
             n_genes=self.data.shape[1],
             n_groups=self.n_cells.shape[0],
             is_fortran=self.data.flags.f_contiguous,
-            dtype_itemsize=self.data.dtype.itemsize,
         )
         sums, counts, sq_sums = out[0], out[1], out[2]
         sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])

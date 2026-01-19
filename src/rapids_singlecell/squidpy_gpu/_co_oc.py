@@ -142,13 +142,13 @@ def _co_occurrence_helper(
         counts = cp.zeros((k, k, l_val), dtype=cp.int32)
         reader = 1
         use_fast_kernel = _co.count_csr_catpairs_auto(
-            spatial.data.ptr,
-            thresholds=thresholds.data.ptr,
-            cat_offsets=cat_offsets.data.ptr,
-            cell_indices=cell_indices.data.ptr,
-            pair_left=pair_left.data.ptr,
-            pair_right=pair_right.data.ptr,
-            counts_delta=counts.data.ptr,
+            spatial,
+            thresholds=thresholds,
+            cat_offsets=cat_offsets,
+            cell_indices=cell_indices,
+            pair_left=pair_left,
+            pair_right=pair_right,
+            counts_delta=counts,
             num_pairs=pair_left.size,
             k=k,
             l_val=l_val,
@@ -159,10 +159,10 @@ def _co_occurrence_helper(
     if not use_fast_kernel:
         counts = cp.zeros((k, k, l_val * 2), dtype=cp.int32)
         _co.count_pairwise(
-            spatial.data.ptr,
-            thresholds=thresholds.data.ptr,
-            labels=labs.data.ptr,
-            result=counts.data.ptr,
+            spatial,
+            thresholds=thresholds,
+            labels=labs,
+            result=counts,
             n=spatial.shape[0],
             k=k,
             l_val=l_val,
@@ -174,8 +174,8 @@ def _co_occurrence_helper(
     ok = False
     if fast:
         ok = _co.reduce_shared(
-            counts.data.ptr,
-            out=occ_prob.data.ptr,
+            counts,
+            out=occ_prob,
             k=k,
             l_val=l_val,
             format=reader,
@@ -184,9 +184,9 @@ def _co_occurrence_helper(
     if not ok:
         inter_out = cp.zeros((l_val, k, k), dtype=np.float32)
         _co.reduce_global(
-            counts.data.ptr,
-            inter_out=inter_out.data.ptr,
-            out=occ_prob.data.ptr,
+            counts,
+            inter_out=inter_out,
+            out=occ_prob,
             k=k,
             l_val=l_val,
             format=reader,
