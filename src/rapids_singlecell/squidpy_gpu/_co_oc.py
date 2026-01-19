@@ -53,9 +53,9 @@ def co_occurrence(
     Otherwise, modifies the ``adata`` with the following keys:
 
         - :attr:`anndata.AnnData.uns` ``['{cluster_key}_co_occurrence']['occ']`` - the co-occurrence probabilities
-        across interval thresholds.
+          across interval thresholds.
         - :attr:`anndata.AnnData.uns` ``['{cluster_key}_co_occurrence']['interval']`` - the distance thresholds
-        computed at ``interval``.
+          computed at ``interval``.
     """
 
     _assert_categorical_obs(adata, key=cluster_key)

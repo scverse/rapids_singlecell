@@ -58,13 +58,13 @@ extensions = [
     "sphinx.ext.githubpages",
     "sphinx_autodoc_typehints",
     "sphinx.ext.extlinks",
-    "readthedocs_ext.readthedocs",
     "sphinx.ext.imgconverter",
     "sphinx_copybutton",
     "nbsphinx",
     "scanpydoc",
     "sphinx.ext.linkcode",
-    "sphinx_copybutton",
+    "sphinx_tabs.tabs",
+    "sphinxext.opengraph",
 ]
 
 autosummary_generate = True
@@ -130,7 +130,14 @@ intersphinx_mapping = {
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "._*", "*.ipynb_checkpoints"]
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+    "._*",
+    "*.ipynb_checkpoints",
+    "release-notes/blank.md",
+]
 
 
 # -- Options for HTML output -------------------------------------------------
@@ -152,6 +159,11 @@ html_static_path = ["_static"]
 html_css_files = ["_static/css/override.css"]
 html_title = "rapids-singlecell"
 
+# OpenGraph metadata for social media previews
+ogp_site_url = "https://rapids-singlecell.readthedocs.io/"
+ogp_site_name = "rapids-singlecell"
+ogp_image = "_static/logo_RTD.svg"
+
 qualname_overrides = {
     "numpy.bool_": "numpy.bool",  # Since numpy 2, numpy.bool is the canonical dtype
 }
@@ -163,6 +175,7 @@ nitpick_ignore = [
     ("py:class", "anndata._core.views.ArrayView"),
     ("py:class", "anndata._core.raw.Raw"),
     ("py:class", "scanpy._utils.Empty"),
+    ("py:data", "typing.Union"),
     *[
         ("py:class", f"anndata._core.aligned_mapping.{cls}{kind}")
         for cls in "Layers AxisArrays PairwiseArrays".split()
