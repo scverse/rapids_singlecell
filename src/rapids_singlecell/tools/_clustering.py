@@ -466,9 +466,9 @@ def kmeans(
             computed with default parameters or `n_pcs` if present.
         n_init
             Number of initializations to run the KMeans algorithm
-        random_state: float (default: 42)
+        random_state
             if you want results to be the same when you restart Python, select a
-            state.
+            state. Default is 42.
         key_added
             `adata.obs` key under which to add the cluster labels.
         copy

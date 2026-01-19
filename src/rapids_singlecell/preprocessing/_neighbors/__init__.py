@@ -187,12 +187,12 @@ def neighbors(
         * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
 
         * 'n_probes': Number of lists to probe during search. Default is 20. Higher values
-        increase accuracy but reduce speed.
+          increase accuracy but reduce speed.
 
         For `nn_descent` algorithm, the following parameters can be specified:
 
         * 'intermediate_graph_degree': The degree of the intermediate graph. Default is None.
-        It is recommended to set it to `>= 1.5 * n_neighbors`.
+          It is recommended to set it to `>= 1.5 * n_neighbors`.
 
         For `all_neighbors` algorithm, the following parameters can be specified:
 
@@ -213,7 +213,7 @@ def neighbors(
         * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
 
         * 'n_probes': Number of lists to probe during search. Default is 20. Higher values
-        increase accuracy but reduce speed.
+          increase accuracy but reduce speed.
 
     key_added
         If not specified, the neighbors data is stored in .uns['neighbors'],
@@ -400,7 +400,7 @@ def bbknn(
         * 'n_lists': Number of inverted lists for IVF indexing. Default is 2 * next_power_of_2(sqrt(n_samples)).
 
         * 'n_probes': Number of lists to probe during search. Default is 20. Higher values
-        increase accuracy but reduce speed.
+          increase accuracy but reduce speed.
 
     trim
         Trim the neighbours of each cell to these many top connectivities.

@@ -37,9 +37,9 @@ doc = [
     "nbsphinx>=0.8.12",
     "myst-nb",
     "sphinx-design",
+    "sphinx-tabs",
+    "sphinxext-opengraph",
     "scanpydoc[typehints,theme]>=0.9.4",
-    "readthedocs-sphinx-ext",
-    "sphinx_copybutton",
     "dask",
     "pytest",
 ]
