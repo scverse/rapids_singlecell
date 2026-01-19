@@ -63,11 +63,9 @@ extensions = [
     "nbsphinx",
     "scanpydoc",
     "sphinx.ext.linkcode",
+    "sphinx_tabs.tabs",
+    "sphinxext.opengraph",
 ]
-
-# Only load readthedocs extension when building on RTD (incompatible with Sphinx 9.x locally)
-if on_rtd:
-    extensions.append("readthedocs_ext.readthedocs")
 
 autosummary_generate = True
 autodoc_member_order = "bysource"
@@ -160,6 +158,11 @@ html_logo = "_static/logo_RTD.svg"
 html_static_path = ["_static"]
 html_css_files = ["_static/css/override.css"]
 html_title = "rapids-singlecell"
+
+# OpenGraph metadata for social media previews
+ogp_site_url = "https://rapids-singlecell.readthedocs.io/"
+ogp_site_name = "rapids-singlecell"
+ogp_image = "_static/logo_RTD.svg"
 
 qualname_overrides = {
     "numpy.bool_": "numpy.bool",  # Since numpy 2, numpy.bool is the canonical dtype
