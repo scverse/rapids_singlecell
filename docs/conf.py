@@ -58,14 +58,16 @@ extensions = [
     "sphinx.ext.githubpages",
     "sphinx_autodoc_typehints",
     "sphinx.ext.extlinks",
-    "readthedocs_ext.readthedocs",
     "sphinx.ext.imgconverter",
     "sphinx_copybutton",
     "nbsphinx",
     "scanpydoc",
     "sphinx.ext.linkcode",
-    "sphinx_copybutton",
 ]
+
+# Only load readthedocs extension when building on RTD (incompatible with Sphinx 9.x locally)
+if on_rtd:
+    extensions.append("readthedocs_ext.readthedocs")
 
 autosummary_generate = True
 autodoc_member_order = "bysource"
@@ -130,7 +132,14 @@ intersphinx_mapping = {
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "._*", "*.ipynb_checkpoints"]
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+    "._*",
+    "*.ipynb_checkpoints",
+    "release-notes/blank.md",
+]
 
 
 # -- Options for HTML output -------------------------------------------------
@@ -163,6 +172,7 @@ nitpick_ignore = [
     ("py:class", "anndata._core.views.ArrayView"),
     ("py:class", "anndata._core.raw.Raw"),
     ("py:class", "scanpy._utils.Empty"),
+    ("py:data", "typing.Union"),
     *[
         ("py:class", f"anndata._core.aligned_mapping.{cls}{kind}")
         for cls in "Layers AxisArrays PairwiseArrays".split()
