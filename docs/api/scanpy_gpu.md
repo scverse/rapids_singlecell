@@ -107,8 +107,7 @@ Any transformation of the data matrix that is not a tool. Other than `tools`, pr
 .. autosummary::
    :toctree: generated/
 
-    tl.rank_genes_groups_logreg
-    tl.rank_genes_groups_wilcoxon
+    tl.rank_genes_groups
 ```
 
 ## Plotting
