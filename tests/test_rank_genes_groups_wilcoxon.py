@@ -6,25 +6,22 @@ import scanpy as sc
 
 import rapids_singlecell as rsc
 
-cp = pytest.importorskip("cupy")
 
-
-def _require_cuda():
-    try:
-        if cp.cuda.runtime.getDeviceCount() < 1:
-            pytest.skip("No CUDA devices available for Wilcoxon test.")
-    except cp.cuda.runtime.CUDARuntimeError:
-        pytest.skip("CUDA runtime unavailable for Wilcoxon test.")
-
-
-def test_rank_genes_groups_wilcoxon_matches_scanpy_output():
-    _require_cuda()
+@pytest.mark.parametrize("reference", ["rest", "1"])
+def test_rank_genes_groups_wilcoxon_matches_scanpy_output(reference):
+    """Test wilcoxon matches scanpy output for both 'rest' and specific reference."""
     adata_gpu = sc.datasets.blobs(n_variables=6, n_centers=3, n_observations=200)
     adata_gpu.obs["blobs"] = adata_gpu.obs["blobs"].astype("category")
     adata_cpu = adata_gpu.copy()
 
-    rsc.tl.rank_genes_groups_wilcoxon(
-        adata_gpu, "blobs", use_raw=False, n_genes=3, corr_method="benjamini-hochberg"
+    rsc.tl.rank_genes_groups(
+        adata_gpu,
+        "blobs",
+        method="wilcoxon",
+        use_raw=False,
+        n_genes=3,
+        reference=reference,
+        corr_method="benjamini-hochberg",
     )
     sc.tl.rank_genes_groups(
         adata_cpu,
@@ -32,6 +29,7 @@ def test_rank_genes_groups_wilcoxon_matches_scanpy_output():
         method="wilcoxon",
         use_raw=False,
         n_genes=3,
+        reference=reference,
         tie_correct=False,
     )
 
@@ -58,17 +56,21 @@ def test_rank_genes_groups_wilcoxon_matches_scanpy_output():
     assert params["corr_method"] == "benjamini-hochberg"
     assert params["tie_correct"] is False
     assert params["layer"] is None
+    assert params["reference"] == reference
 
 
-def test_rank_genes_groups_wilcoxon_honors_layer_and_use_raw():
-    _require_cuda()
+@pytest.mark.parametrize("reference", ["rest", "1"])
+def test_rank_genes_groups_wilcoxon_honors_layer_and_use_raw(reference):
+    """Test that layer parameter is respected."""
     base = sc.datasets.blobs(n_variables=5, n_centers=3, n_observations=150)
     base.obs["blobs"] = base.obs["blobs"].astype("category")
     base.layers["signal"] = base.X.copy()
 
-    reference = base.copy()
-    rsc.tl.rank_genes_groups_wilcoxon(reference, "blobs", use_raw=False)
-    reference_names = reference.uns["rank_genes_groups"]["names"].copy()
+    ref_adata = base.copy()
+    rsc.tl.rank_genes_groups(
+        ref_adata, "blobs", method="wilcoxon", use_raw=False, reference=reference
+    )
+    reference_names = ref_adata.uns["rank_genes_groups"]["names"].copy()
 
     rng = np.random.default_rng(0)
     perturbed_matrix = base.X.copy()
@@ -76,12 +78,21 @@ def test_rank_genes_groups_wilcoxon_honors_layer_and_use_raw():
 
     layered = base.copy()
     layered.X = perturbed_matrix
-    rsc.tl.rank_genes_groups_wilcoxon(layered, "blobs", layer="signal", use_raw=False)
+    rsc.tl.rank_genes_groups(
+        layered,
+        "blobs",
+        method="wilcoxon",
+        layer="signal",
+        use_raw=False,
+        reference=reference,
+    )
     layered_names = layered.uns["rank_genes_groups"]["names"].copy()
 
     no_layer = base.copy()
     no_layer.X = perturbed_matrix
-    rsc.tl.rank_genes_groups_wilcoxon(no_layer, "blobs", use_raw=False)
+    rsc.tl.rank_genes_groups(
+        no_layer, "blobs", method="wilcoxon", use_raw=False, reference=reference
+    )
     no_layer_names = no_layer.uns["rank_genes_groups"]["names"].copy()
 
     assert layered_names.dtype.names == reference_names.dtype.names
@@ -94,23 +105,29 @@ def test_rank_genes_groups_wilcoxon_honors_layer_and_use_raw():
     assert any(differences)
 
 
-def test_rank_genes_groups_wilcoxon_subset_and_bonferroni():
-    _require_cuda()
+@pytest.mark.parametrize("reference", ["rest", "1"])
+def test_rank_genes_groups_wilcoxon_subset_and_bonferroni(reference):
+    """Test group subsetting and bonferroni correction."""
     adata = sc.datasets.blobs(n_variables=5, n_centers=4, n_observations=150)
     adata.obs["blobs"] = adata.obs["blobs"].astype("category")
 
-    rsc.tl.rank_genes_groups_wilcoxon(
+    groups = ["0", "1", "2"] if reference != "rest" else ["0", "2"]
+
+    rsc.tl.rank_genes_groups(
         adata,
         "blobs",
-        groups=["0", "2"],
+        method="wilcoxon",
+        groups=groups,
+        reference=reference,
         use_raw=False,
         n_genes=2,
         corr_method="bonferroni",
     )
 
     result = adata.uns["rank_genes_groups"]
-    assert result["scores"].dtype.names == ("0", "2")
-    assert result["names"].dtype.names == ("0", "2")
+    expected_groups = tuple(g for g in groups if g != reference)
+    assert result["scores"].dtype.names == expected_groups
+    assert result["names"].dtype.names == expected_groups
     for group in result["names"].dtype.names:
         observed = np.asarray(result["names"][group])
         assert observed.size == 2
@@ -119,46 +136,134 @@ def test_rank_genes_groups_wilcoxon_subset_and_bonferroni():
         assert np.all(adjusted <= 1.0)
 
 
-def test_rank_genes_groups_wilcoxon_with_renamed_categories():
-    _require_cuda()
+@pytest.mark.parametrize(
+    "reference_before,reference_after",
+    [("rest", "rest"), ("1", "One")],
+)
+def test_rank_genes_groups_wilcoxon_with_renamed_categories(
+    reference_before, reference_after
+):
+    """Test with renamed category labels."""
     adata = sc.datasets.blobs(n_variables=4, n_centers=3, n_observations=200)
     adata.obs["blobs"] = adata.obs["blobs"].astype("category")
 
-    rsc.tl.rank_genes_groups_wilcoxon(adata, "blobs")
+    # First run with original category names
+    rsc.tl.rank_genes_groups(
+        adata, "blobs", method="wilcoxon", reference=reference_before
+    )
     names = adata.uns["rank_genes_groups"]["names"]
-    assert names.dtype.names == ("0", "1", "2")
+    expected_groups = ("0", "1", "2") if reference_before == "rest" else ("0", "2")
+    assert names.dtype.names == expected_groups
     first_run = tuple(names[0])
 
     adata.rename_categories("blobs", ["Zero", "One", "Two"])
     assert tuple(adata.uns["rank_genes_groups"]["names"][0]) == first_run
 
-    rsc.tl.rank_genes_groups_wilcoxon(adata, "blobs")
+    # Second run with renamed category names
+    rsc.tl.rank_genes_groups(
+        adata, "blobs", method="wilcoxon", reference=reference_after
+    )
     renamed_names = adata.uns["rank_genes_groups"]["names"]
     assert tuple(renamed_names[0]) == first_run
-    assert renamed_names.dtype.names == ("Zero", "One", "Two")
+    expected_renamed = (
+        ("Zero", "One", "Two") if reference_after == "rest" else ("Zero", "Two")
+    )
+    assert renamed_names.dtype.names == expected_renamed
 
 
-def test_rank_genes_groups_wilcoxon_with_unsorted_groups():
-    _require_cuda()
+@pytest.mark.parametrize("reference", ["rest", "1"])
+def test_rank_genes_groups_wilcoxon_with_unsorted_groups(reference):
+    """Test that group order doesn't affect results."""
     adata = sc.datasets.blobs(n_variables=6, n_centers=4, n_observations=180)
     adata.obs["blobs"] = adata.obs["blobs"].astype("category")
     bdata = adata.copy()
 
-    rsc.tl.rank_genes_groups_wilcoxon(adata, "blobs", groups=["0", "2", "3"])
-    rsc.tl.rank_genes_groups_wilcoxon(bdata, "blobs", groups=["3", "0", "2"])
+    groups = ["0", "1", "2", "3"] if reference != "rest" else ["0", "2", "3"]
+    groups_reversed = list(reversed(groups))
 
-    assert set(adata.uns["rank_genes_groups"]["names"].dtype.names) == {"0", "2", "3"}
-    assert set(bdata.uns["rank_genes_groups"]["names"].dtype.names) == {"0", "2", "3"}
+    rsc.tl.rank_genes_groups(
+        adata, "blobs", method="wilcoxon", groups=groups, reference=reference
+    )
+    rsc.tl.rank_genes_groups(
+        bdata, "blobs", method="wilcoxon", groups=groups_reversed, reference=reference
+    )
 
+    expected_groups = {g for g in groups if g != reference}
+    assert set(adata.uns["rank_genes_groups"]["names"].dtype.names) == expected_groups
+    assert set(bdata.uns["rank_genes_groups"]["names"].dtype.names) == expected_groups
+
+    # Pick a group that's not the reference for comparison
+    test_group = "3" if reference != "3" else "0"
     for field in ("scores", "logfoldchanges", "pvals", "pvals_adj"):
         np.testing.assert_allclose(
-            np.asarray(adata.uns["rank_genes_groups"][field]["3"], dtype=float),
-            np.asarray(bdata.uns["rank_genes_groups"][field]["3"], dtype=float),
+            np.asarray(adata.uns["rank_genes_groups"][field][test_group], dtype=float),
+            np.asarray(bdata.uns["rank_genes_groups"][field][test_group], dtype=float),
             rtol=1e-5,
             atol=1e-6,
             equal_nan=True,
         )
 
-    assert tuple(adata.uns["rank_genes_groups"]["names"]["3"]) == tuple(
-        bdata.uns["rank_genes_groups"]["names"]["3"]
+    assert tuple(adata.uns["rank_genes_groups"]["names"][test_group]) == tuple(
+        bdata.uns["rank_genes_groups"]["names"][test_group]
     )
+
+
+@pytest.mark.parametrize("reference", ["rest", "1"])
+@pytest.mark.parametrize("pre_load", [True, False])
+def test_rank_genes_groups_wilcoxon_pts(reference, pre_load):
+    """Test that pts (fraction of cells expressing) is computed correctly."""
+    adata_gpu = sc.datasets.blobs(n_variables=6, n_centers=3, n_observations=200)
+    adata_gpu.obs["blobs"] = adata_gpu.obs["blobs"].astype("category")
+    adata_cpu = adata_gpu.copy()
+
+    # Run with pts=True
+    rsc.tl.rank_genes_groups(
+        adata_gpu,
+        "blobs",
+        method="wilcoxon",
+        use_raw=False,
+        pts=True,
+        tie_correct=False,
+        reference=reference,
+        pre_load=pre_load,
+    )
+    sc.tl.rank_genes_groups(
+        adata_cpu,
+        "blobs",
+        method="wilcoxon",
+        use_raw=False,
+        pts=True,
+        tie_correct=False,
+        reference=reference,
+    )
+
+    gpu_result = adata_gpu.uns["rank_genes_groups"]
+    cpu_result = adata_cpu.uns["rank_genes_groups"]
+
+    # Check pts DataFrame exists and has correct structure
+    assert "pts" in gpu_result
+    assert "pts" in cpu_result
+
+    # Check pts values match scanpy
+    gpu_pts = gpu_result["pts"]
+    cpu_pts = cpu_result["pts"]
+    assert list(gpu_pts.columns) == list(cpu_pts.columns)
+    assert list(gpu_pts.index) == list(cpu_pts.index)
+
+    for col in gpu_pts.columns:
+        np.testing.assert_allclose(
+            gpu_pts[col].values, cpu_pts[col].values, rtol=1e-5, atol=1e-6
+        )
+
+    # pts_rest only exists when reference='rest'
+    if reference == "rest":
+        assert "pts_rest" in gpu_result
+        assert "pts_rest" in cpu_result
+
+        gpu_pts_rest = gpu_result["pts_rest"]
+        cpu_pts_rest = cpu_result["pts_rest"]
+
+        for col in gpu_pts_rest.columns:
+            np.testing.assert_allclose(
+                gpu_pts_rest[col].values, cpu_pts_rest[col].values, rtol=1e-5, atol=1e-6
+            )
