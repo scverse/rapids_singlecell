@@ -80,19 +80,11 @@ def _select_groups(
     return groups_order_subset, groups_masks
 
 
-def _choose_chunk_size(requested: int | None, n_obs: int, dtype_size: int = 8) -> int:
-    """Choose an appropriate chunk size for GPU memory."""
+def _choose_chunk_size(requested: int | None) -> int:
+    """Choose chunk size for gene processing."""
     if requested is not None:
         return int(requested)
-    try:
-        free_mem, _ = cp.cuda.runtime.memGetInfo()
-    except cp.cuda.runtime.CUDARuntimeError:
-        return 500
-    bytes_per_gene = n_obs * dtype_size * 4
-    if bytes_per_gene == 0:
-        return 500
-    max_genes = int(0.6 * free_mem / bytes_per_gene)
-    return max(min(max_genes, 1000), 100)
+    return 512
 
 
 def _get_column_block(X, start: int, stop: int) -> cp.ndarray:
@@ -151,7 +143,7 @@ def _average_ranks(
     ranks = cp.empty((n_rows, n_cols), dtype=cp.float64, order="F")
 
     # Launch kernel: one block per column
-    threads_per_block = min(256, n_rows)
+    threads_per_block = min(512, n_rows)
     blocks = n_cols
     _rank_kernel(
         (blocks,),
@@ -181,14 +173,11 @@ def _tie_correction(sorted_vals: cp.ndarray) -> cp.ndarray:
     # Ensure F-order
     sorted_vals = cp.asfortranarray(sorted_vals)
 
-    threads_per_block = min(256, n_rows)
-    shared_mem_size = threads_per_block * 8  # sizeof(double)
-
+    threads_per_block = min(512, n_rows)
     _tie_correction_kernel(
         (n_cols,),
         (threads_per_block,),
         (sorted_vals, correction, n_rows, n_cols),
-        shared_mem=shared_mem_size,
     )
 
     return correction
@@ -578,7 +567,7 @@ class _RankGenes:
         group_sizes_dev = cp.asarray(group_sizes, dtype=cp.float64)
         rest_sizes = n_cells - group_sizes_dev
 
-        chunk_width = _choose_chunk_size(chunk_size, n_cells)
+        chunk_width = _choose_chunk_size(chunk_size)
 
         # Accumulate results per group
         all_scores = {i: [] for i in range(len(self.groups_order))}
@@ -686,7 +675,7 @@ class _RankGenes:
             group_indices_in_combined = np.isin(combined_indices, np.where(mask_obs)[0])
             group_mask_gpu = cp.asarray(group_indices_in_combined)
 
-            chunk_width = _choose_chunk_size(chunk_size, n_combined)
+            chunk_width = _choose_chunk_size(chunk_size)
 
             # Pre-allocate output arrays
             scores = np.empty(n_total_genes, dtype=np.float64)

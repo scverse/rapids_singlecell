@@ -17,9 +17,6 @@ void tie_correction_kernel(
 
     const double* sv = sorted_vals + (size_t)col * n_rows;
 
-    // Use shared memory for parallel reduction
-    extern __shared__ double sdata[];
-
     double local_sum = 0.0;
     int tid = threadIdx.x;
 
@@ -51,24 +48,37 @@ void tie_correction_kernel(
         }
     }
 
-    sdata[tid] = local_sum;
-    __syncthreads();
-
-    // Parallel reduction
-    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (tid < s) {
-            sdata[tid] += sdata[tid + s];
-        }
-        __syncthreads();
+    // Warp-level reduction using shuffle
+    #pragma unroll
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        local_sum += __shfl_down_sync(0xffffffff, local_sum, offset);
     }
 
-    if (tid == 0) {
-        double n = (double)n_rows;
-        double denom = n * n * n - n;
-        if (denom > 0) {
-            correction[col] = 1.0 - sdata[0] / denom;
-        } else {
-            correction[col] = 1.0;
+    // Cross-warp reduction using small shared memory
+    __shared__ double warp_sums[32];
+    int lane = tid & 31;
+    int warp_id = tid >> 5;
+
+    if (lane == 0) {
+        warp_sums[warp_id] = local_sum;
+    }
+    __syncthreads();
+
+    // Final reduction in first warp
+    if (tid < 32) {
+        double val = (tid < (blockDim.x >> 5)) ? warp_sums[tid] : 0.0;
+        #pragma unroll
+        for (int offset = 16; offset > 0; offset >>= 1) {
+            val += __shfl_down_sync(0xffffffff, val, offset);
+        }
+        if (tid == 0) {
+            double n = (double)n_rows;
+            double denom = n * n * n - n;
+            if (denom > 0) {
+                correction[col] = 1.0 - val / denom;
+            } else {
+                correction[col] = 1.0;
+            }
         }
     }
 }
