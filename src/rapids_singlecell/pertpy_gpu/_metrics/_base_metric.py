@@ -1,0 +1,150 @@
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from anndata import AnnData
+
+
+class BaseMetric(ABC):
+    """
+    Abstract base class for distance metrics.
+
+    All distance metric implementations should inherit from this class
+    and implement the required methods.
+
+    Parameters
+    ----------
+    obsm_key : str
+        Key in adata.obsm for embeddings (default: 'X_pca')
+    """
+
+    def __init__(self, obsm_key: str = "X_pca"):
+        """Initialize base metric with obsm_key."""
+        self.obsm_key = obsm_key
+
+    @abstractmethod
+    def pairwise(
+        self,
+        adata: AnnData,
+        groupby: str,
+        *,
+        groups: list[str] | None = None,
+        bootstrap: bool = False,
+        n_bootstrap: int = 100,
+        random_state: int = 0,
+        inplace: bool = False,
+    ):
+        """
+        Compute pairwise distances between all cell groups.
+
+        This method must be implemented by all metric subclasses.
+
+        Parameters
+        ----------
+        adata : AnnData
+            Annotated data matrix
+        groupby : str
+            Key in adata.obs for grouping cells
+        groups : list[str] | None
+            Specific groups to compute (if None, use all)
+        bootstrap : bool
+            Whether to compute bootstrap variance estimates
+        n_bootstrap : int
+            Number of bootstrap iterations (if bootstrap=True)
+        random_state : int
+            Random seed for reproducibility
+        inplace : bool
+            Whether to store results in adata.uns
+
+        Returns
+        -------
+        result
+            Result object containing distances and optional variance information.
+            The exact type depends on the specific metric implementation.
+        """
+        pass
+
+    def onesided_distances(
+        self,
+        adata: AnnData,
+        groupby: str,
+        selected_group: str,
+        *,
+        groups: list[str] | None = None,
+        bootstrap: bool = False,
+        n_bootstrap: int = 100,
+        random_state: int = 0,
+    ):
+        """
+        Compute distances from one selected group to all other groups.
+
+        This method is optional and may not be implemented by all metrics.
+
+        Parameters
+        ----------
+        adata : AnnData
+            Annotated data matrix
+        groupby : str
+            Key in adata.obs for grouping cells
+        selected_group : str
+            Reference group to compute distances from
+        groups : list[str] | None
+            Specific groups to compute distances to (if None, use all)
+        bootstrap : bool
+            Whether to compute bootstrap variance estimates
+        n_bootstrap : int
+            Number of bootstrap iterations (if bootstrap=True)
+        random_state : int
+            Random seed for reproducibility
+
+        Returns
+        -------
+        distances
+            Distance values from selected_group to other groups
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement onesided_distances"
+        )
+
+    def bootstrap(
+        self,
+        adata: AnnData,
+        groupby: str,
+        group_a: str,
+        group_b: str,
+        *,
+        n_bootstrap: int = 100,
+        random_state: int = 0,
+    ):
+        """
+        Compute bootstrap mean and variance for distance between two specific groups.
+
+        This method is optional and may not be implemented by all metrics.
+
+        Parameters
+        ----------
+        adata : AnnData
+            Annotated data matrix
+        groupby : str
+            Key in adata.obs for grouping cells
+        group_a : str
+            First group name
+        group_b : str
+            Second group name
+        n_bootstrap : int
+            Number of bootstrap iterations
+        random_state : int
+            Random seed for reproducibility
+
+        Returns
+        -------
+        mean : float
+            Bootstrap mean distance
+        variance : float
+            Bootstrap variance
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement bootstrap"
+        )

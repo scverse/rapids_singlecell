@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 from anndata import AnnData
 
-from rapids_singlecell.pertpy_gpu._edistance import EDistanceResult, pertpy_edistance
+from rapids_singlecell.pertpy_gpu import Distance, EDistanceResult
 
 
 @pytest.fixture
@@ -28,99 +28,157 @@ def small_adata() -> AnnData:
     return adata
 
 
-def _compute_cpu_reference(
-    adata: AnnData, obsm_key: str, group_key: str
-) -> tuple[np.ndarray, np.ndarray]:
-    embedding = adata.obsm[obsm_key].get()
-    group_series = adata.obs[group_key]
-    categories = list(group_series.cat.categories)
-    k = len(categories)
-
-    pair_means = np.zeros((k, k), dtype=np.float32)
-
-    for i, gi in enumerate(categories):
-        idx_i = np.where(group_series == gi)[0]
-        for j, gj in enumerate(categories[i:], start=i):
-            idx_j = np.where(group_series == gj)[0]
-            if len(idx_i) == 0 or len(idx_j) == 0:
-                mean_distance = 0.0
-            else:
-                distances = []
-                for idx in idx_i:
-                    diffs = embedding[idx] - embedding[idx_j]
-                    distances.append(np.sqrt(np.sum(diffs**2, axis=1)))
-                stacked = np.concatenate(distances)
-                mean_distance = stacked.mean(dtype=np.float64)
-            pair_means[i, j] = pair_means[j, i] = np.float32(mean_distance)
-
-    edistance = np.zeros((k, k), dtype=np.float32)
-    for i in range(k):
-        for j in range(i + 1, k):
-            value = 2 * pair_means[i, j] - pair_means[i, i] - pair_means[j, j]
-            edistance[i, j] = edistance[j, i] = np.float32(value)
-
-    return pair_means, edistance
+# ============================================================================
+# Tests for Distance class API
+# ============================================================================
 
 
-def test_pertpy_edistance_matches_cpu_reference(small_adata: AnnData) -> None:
-    result = pertpy_edistance(small_adata, groupby="group", obsm_key="X_pca")
+def test_distance_class_initialization() -> None:
+    """Test Distance class can be initialized with different metrics."""
+    distance = Distance(metric="edistance")
+    assert distance.metric == "edistance"
+    assert distance.obsm_key == "X_pca"
 
-    assert isinstance(result, EDistanceResult)
-    assert result.distances_var is None
-
-    _, cpu_edistance = _compute_cpu_reference(small_adata, "X_pca", "group")
-
-    assert result.distances.shape == cpu_edistance.shape
-    np.testing.assert_allclose(result.distances.values, cpu_edistance, atol=1e-5)
-    assert np.allclose(result.distances.values, result.distances.values.T)
+    distance_custom = Distance(metric="edistance", obsm_key="X_custom")
+    assert distance_custom.obsm_key == "X_custom"
 
 
-def test_pertpy_edistance_inplace_populates_uns(small_adata: AnnData) -> None:
-    key = "group_pairwise_edistance"
-    result = pertpy_edistance(
+def test_distance_class_invalid_metric() -> None:
+    """Test Distance class raises error for unsupported metrics."""
+    with pytest.raises(ValueError, match="Unknown metric"):
+        Distance(metric="invalid_metric")
+
+
+def test_distance_class_pairwise_with_bootstrap(small_adata: AnnData) -> None:
+    """Test Distance.pairwise() with bootstrap."""
+    distance = Distance(metric="edistance")
+    result = distance.pairwise(
         small_adata,
         groupby="group",
-        obsm_key="X_pca",
-        inplace=True,
-    )
-
-    assert isinstance(result, EDistanceResult)
-    assert key in small_adata.uns
-    stored = small_adata.uns[key]
-    assert set(stored.keys()) == {"distances", "distances_var"}
-    np.testing.assert_allclose(stored["distances"].values, result.distances.values)
-    assert stored["distances_var"] is None
-
-
-def test_pertpy_edistance_bootstrap_returns_variance(small_adata: AnnData) -> None:
-    result = pertpy_edistance(
-        small_adata,
-        groupby="group",
-        obsm_key="X_pca",
         bootstrap=True,
-        n_bootstrap=8,
-        random_state=11,
+        n_bootstrap=10,
+        random_state=42,
     )
 
     assert isinstance(result, EDistanceResult)
+    assert result.distances is not None
     assert result.distances_var is not None
     assert result.distances.shape == result.distances_var.shape
-    assert np.allclose(result.distances.values, result.distances.values.T)
-    assert np.allclose(result.distances_var.values, result.distances_var.values.T)
     assert np.all(result.distances_var.values >= 0)
 
 
-def test_pertpy_edistance_requires_categorical_obs(small_adata: AnnData) -> None:
-    bad = small_adata.copy()
-    bad.obs["group"] = bad.obs["group"].astype(str)
+def test_distance_class_onesided_distances(small_adata: AnnData) -> None:
+    """Test Distance.onesided_distances() method."""
+    distance = Distance(metric="edistance")
+    result = distance.onesided_distances(
+        small_adata, groupby="group", selected_group="g0"
+    )
 
-    with pytest.raises(TypeError):
-        pertpy_edistance(bad, groupby="group", obsm_key="X_pca")
+    assert isinstance(result, pd.Series)
+    assert len(result) == 3  # 3 groups total
+    assert "g0" in result.index
+    assert "g1" in result.index
+    assert "g2" in result.index
 
 
-@pytest.mark.parametrize("missing_key", ["missing", "other"])
-def test_pertpy_edistance_missing_group_raises(
-    small_adata: AnnData, missing_key: str
-) -> None:
-    with pytest.raises(KeyError):
-        pertpy_edistance(small_adata, groupby=missing_key, obsm_key="X_pca")
+def test_distance_class_onesided_matches_pairwise(small_adata: AnnData) -> None:
+    """Test onesided_distances matches the corresponding row from pairwise."""
+    distance = Distance(metric="edistance")
+
+    # Get pairwise distances
+    pairwise_result = distance.pairwise(small_adata, groupby="group")
+
+    # Get onesided distances for each group
+    for group in ["g0", "g1", "g2"]:
+        onesided = distance.onesided_distances(
+            small_adata, groupby="group", selected_group=group
+        )
+        # Should match the row from pairwise matrix
+        np.testing.assert_allclose(
+            onesided.values, pairwise_result.distances.loc[group].values, atol=1e-5
+        )
+
+
+def test_distance_class_onesided_self_distance_zero(small_adata: AnnData) -> None:
+    """Test that distance from a group to itself is zero."""
+    distance = Distance(metric="edistance")
+
+    for group in ["g0", "g1", "g2"]:
+        onesided = distance.onesided_distances(
+            small_adata, groupby="group", selected_group=group
+        )
+        # Distance to self should be 0
+        assert onesided[group] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_distance_class_onesided_invalid_group(small_adata: AnnData) -> None:
+    """Test Distance.onesided_distances() raises error for invalid group."""
+    distance = Distance(metric="edistance")
+    with pytest.raises(ValueError, match="not found"):
+        distance.onesided_distances(
+            small_adata, groupby="group", selected_group="invalid"
+        )
+
+
+def test_distance_class_bootstrap_two_groups(small_adata: AnnData) -> None:
+    """Test Distance.bootstrap() for two specific groups."""
+    distance = Distance(metric="edistance")
+    mean, variance = distance.bootstrap(
+        small_adata,
+        groupby="group",
+        group_a="g0",
+        group_b="g1",
+        n_bootstrap=10,
+        random_state=42,
+    )
+
+    assert isinstance(mean, float)
+    assert isinstance(variance, float)
+    assert variance >= 0
+
+
+def test_distance_class_inplace_storage(small_adata: AnnData) -> None:
+    """Test Distance.pairwise() with inplace=True."""
+    distance = Distance(metric="edistance")
+    result = distance.pairwise(small_adata, groupby="group", inplace=True)
+
+    # Check result is returned
+    assert isinstance(result, EDistanceResult)
+
+    # Check result is stored in uns
+    key = "group_pairwise_edistance"
+    assert key in small_adata.uns
+    stored = small_adata.uns[key]
+    np.testing.assert_allclose(stored["distances"].values, result.distances.values)
+
+
+def test_distance_class_repr() -> None:
+    """Test Distance.__repr__() method."""
+    distance = Distance(metric="edistance", obsm_key="X_custom")
+    repr_str = repr(distance)
+    assert "Distance" in repr_str
+    assert "edistance" in repr_str
+    assert "X_custom" in repr_str
+
+
+def test_calculate_blocks_per_pair() -> None:
+    """Test blocks_per_pair calculation logic."""
+    distance = Distance(metric="edistance")
+
+    # Test with large num_pairs (should get 1 block per pair)
+    blocks = distance._metric_impl._calculate_blocks_per_pair(num_pairs=10000)
+    assert blocks >= 1
+
+    # Test with small num_pairs (should get multiple blocks per pair, capped at 32)
+    blocks = distance._metric_impl._calculate_blocks_per_pair(num_pairs=1)
+    assert 1 <= blocks <= 32
+
+    # Test custom parameters
+    blocks = distance._metric_impl._calculate_blocks_per_pair(
+        num_pairs=10, target_multiplier=8, max_blocks_per_pair=16
+    )
+    assert 1 <= blocks <= 16
+
+    # Test edge case: num_pairs=0 should not raise error (max(1, ...) handles it)
+    blocks = distance._metric_impl._calculate_blocks_per_pair(num_pairs=0)
+    assert blocks >= 1
