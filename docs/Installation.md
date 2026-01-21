@@ -1,29 +1,52 @@
 # Installation
 ## Conda
-The easiest way to install *rapids-singlecell* is to use one of the *yaml* file provided in the [conda](https://github.com/scverse/rapids_singlecell/tree/main/conda) folder. These *yaml* files install everything needed to run the example notebooks and get you started.
-```
-conda env create -f conda/rsc_rapids_25.12.yml #default CUDA-13.0 PYTHON-3.13
+The easiest way to install *rapids-singlecell* is to use one of the *yaml* files provided in the [conda](https://github.com/scverse/rapids_singlecell/tree/main/conda) folder. These *yaml* files install everything needed to run the example notebooks and get you started.
+
+`````{tab-set}
+````{tab-item} CUDA 13
+```bash
+conda env create -f conda/rsc_rapids_25.12.yml
 # or
-mamba env create -f conda/rsc_rapids_25.10.yml #default CUDA-12.9 PYTHON-3.13
+mamba env create -f conda/rsc_rapids_25.12.yml
 ```
+*Python 3.13, CUDA 13.0*
+````
+````{tab-item} CUDA 12
+```bash
+conda env create -f conda/rsc_rapids_25.10.yml
+# or
+mamba env create -f conda/rsc_rapids_25.10.yml
+```
+*Python 3.13, CUDA 12.9*
+````
+`````
+
 ```{note}
 RAPIDS currently doesn't support `channel_priority: strict`; use `channel_priority: flexible` instead
 ```
 
 ## PyPI
 *rapids-singlecell* is also on PyPI.
-```
+```bash
 pip install rapids-singlecell
 ```
 The default installer doesn't cover RAPIDS nor CuPy. Information on how to install RAPIDS & CuPy can be found [here](https://rapids.ai/start.html).
 
-If you want to use RAPIDS new PyPI packages, the whole library with all dependencies can be install with:
-```
-uv pip install 'rapids-singlecell[rapids12]' --extra-index-url=https://pypi.nvidia.com #CUDA12
-uv pip install 'rapids-singlecell[rapids13]' --extra-index-url=https://pypi.nvidia.com #CUDA13
+If you want to use RAPIDS new PyPI packages, the whole library with all dependencies can be installed with:
 
-
+`````{tab-set}
+````{tab-item} CUDA 13
+```bash
+uv pip install 'rapids-singlecell[rapids13]' --extra-index-url=https://pypi.nvidia.com
 ```
+````
+````{tab-item} CUDA 12
+```bash
+uv pip install 'rapids-singlecell[rapids12]' --extra-index-url=https://pypi.nvidia.com
+```
+````
+`````
+
 It is important to ensure that the CUDA environment is set up correctly so that RAPIDS and CuPy can locate the necessary libraries.
 
 ```{note}
