@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING
 
 import cupy as cp
 import numpy as np
@@ -12,19 +12,19 @@ from rapids_singlecell.preprocessing._harmony._helper import (
 from rapids_singlecell.squidpy_gpu._utils import _assert_categorical_obs
 
 from ._base_metric import BaseMetric
-from ._kernels._edistance import (
-    get_compute_group_distances_kernel,
+from ._kernels._edistance_fallback import (
+    get_compute_group_distances_kernel_fallback,
 )
+from ._kernels._edistance_multiblock import (
+    get_compute_group_distances_kernel_multiblock,
+)
+
+# Max shared memory to use (conservative, works on all modern GPUs)
+_MAX_SHARED_MEM_BYTES = 48_000
+_DEFAULT_TILE_SIZE = 32
 
 if TYPE_CHECKING:
     from anndata import AnnData
-
-
-class EDistanceResult(NamedTuple):
-    """Result object for energy distance computation."""
-
-    distances: pd.DataFrame
-    distances_var: pd.DataFrame | None
 
 
 class EDistanceMetric(BaseMetric):
@@ -37,8 +37,17 @@ class EDistanceMetric(BaseMetric):
 
     Parameters
     ----------
-    obsm_key : str
+    layer_key : str | None
+        Key in adata.layers for cell data. Mutually exclusive with obsm_key.
+    obsm_key : str | None
         Key in adata.obsm for embeddings (default: 'X_pca')
+    kernel : str
+        Kernel strategy: 'auto' or 'manual'.
+        - 'auto': Dynamically choose optimal blocks_per_pair (default)
+        - 'manual': Use the specified blocks_per_pair directly
+    blocks_per_pair : int
+        Number of blocks per pair (default: 32). For 'auto', this is the maximum.
+        Higher values increase parallelism but add atomic overhead.
 
     References
     ----------
@@ -47,9 +56,18 @@ class EDistanceMetric(BaseMetric):
     Journal of Statistical Planning and Inference, 143(8), 1249-1272.
     """
 
-    def __init__(self, obsm_key: str = "X_pca"):
+    def __init__(
+        self,
+        layer_key: str | None = None,
+        obsm_key: str | None = "X_pca",
+        kernel: str = "auto",
+        blocks_per_pair: int = 32,
+    ):
         """Initialize energy distance metric."""
         super().__init__(obsm_key=obsm_key)
+        self.layer_key = layer_key
+        self.kernel = kernel
+        self.blocks_per_pair = blocks_per_pair
 
     def pairwise(
         self,
@@ -61,14 +79,17 @@ class EDistanceMetric(BaseMetric):
         n_bootstrap: int = 100,
         random_state: int = 0,
         inplace: bool = False,
-    ) -> EDistanceResult:
+    ) -> pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]:
         """
         Compute pairwise energy distances between all cell groups.
 
-        Returns EDistanceResult containing the distances and distances_var.
-        The distances DataFrame is where:
+        Returns a DataFrame containing pairwise distances. When bootstrap=True,
+        returns a tuple of (distances, distances_var) DataFrames.
+
+        The distances DataFrame contains:
         distances[a,b] = 2*d[a,b] - d[a] - d[b]
-        The distances_var DataFrame is where:
+
+        When bootstrap=True, distances_var contains:
         distances_var[a,b] = 4*d_var[a,b] + d_var[a] + d_var[b]
 
         Parameters
@@ -90,12 +111,13 @@ class EDistanceMetric(BaseMetric):
 
         Returns
         -------
-        result : EDistanceResult
-            EDistanceResult containing the distances and if bootstrap is True, the distances_var.
+        result : pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]
+            DataFrame with pairwise distances. If bootstrap=True, returns
+            tuple of (distances, distances_var) DataFrames.
         """
         _assert_categorical_obs(adata, key=groupby)
 
-        embedding = cp.array(adata.obsm[self.obsm_key]).astype(np.float32)
+        embedding = self._get_embedding(adata)
         original_groups = adata.obs[groupby]
         group_map = {v: i for i, v in enumerate(original_groups.cat.categories.values)}
         group_labels = cp.array([group_map[c] for c in original_groups], dtype=cp.int32)
@@ -107,7 +129,6 @@ class EDistanceMetric(BaseMetric):
         all_groups = list(original_groups.cat.categories.values)
         groups_list = all_groups if groups is None else groups
 
-        result = None
         if not bootstrap:
             df = self._prepare_edistance_df(
                 embedding=embedding,
@@ -118,7 +139,11 @@ class EDistanceMetric(BaseMetric):
                 groups_list=groups_list,
                 groupby=groupby,
             )
-            result = EDistanceResult(distances=df, distances_var=None)
+
+            if inplace:
+                adata.uns[f"{groupby}_pairwise_edistance"] = {"distances": df}
+
+            return df
 
         else:
             df, df_var = self._prepare_edistance_df_bootstrap(
@@ -132,12 +157,14 @@ class EDistanceMetric(BaseMetric):
                 n_bootstrap=n_bootstrap,
                 random_state=random_state,
             )
-            result = EDistanceResult(distances=df, distances_var=df_var)
 
-        if inplace:
-            adata.uns[f"{groupby}_pairwise_edistance"] = result._asdict()
+            if inplace:
+                adata.uns[f"{groupby}_pairwise_edistance"] = {
+                    "distances": df,
+                    "distances_var": df_var,
+                }
 
-        return result
+            return df, df_var
 
     def onesided_distances(
         self,
@@ -175,24 +202,62 @@ class EDistanceMetric(BaseMetric):
         distances : pd.Series
             Series containing distances from selected_group to all other groups
         """
-        # Compute pairwise distances
-        result = self.pairwise(
-            adata=adata,
-            groupby=groupby,
-            groups=groups,
-            bootstrap=bootstrap,
-            n_bootstrap=n_bootstrap,
-            random_state=random_state,
-            inplace=False,
-        )
+        # For bootstrap, fall back to pairwise (computes all pairs)
+        if bootstrap:
+            df, df_var = self.pairwise(
+                adata=adata,
+                groupby=groupby,
+                groups=groups,
+                bootstrap=True,
+                n_bootstrap=n_bootstrap,
+                random_state=random_state,
+                inplace=False,
+            )
+            if selected_group not in df.index:
+                raise ValueError(
+                    f"Selected group '{selected_group}' not found in groupby '{groupby}'"
+                )
+            return df.loc[selected_group]
 
-        # Extract distances for the selected group
-        if selected_group not in result.distances.index:
+        # Optimized path: only compute k pairs instead of k*(k+1)/2
+        _assert_categorical_obs(adata, key=groupby)
+
+        embedding = self._get_embedding(adata)
+        original_groups = adata.obs[groupby]
+        group_map = {v: i for i, v in enumerate(original_groups.cat.categories.values)}
+
+        if selected_group not in group_map:
             raise ValueError(
                 f"Selected group '{selected_group}' not found in groupby '{groupby}'"
             )
 
-        return result.distances.loc[selected_group]
+        group_labels = cp.array([group_map[c] for c in original_groups], dtype=cp.int32)
+        k = len(group_map)
+        cat_offsets, cell_indices = _create_category_index_mapping(group_labels, k)
+
+        all_groups = list(original_groups.cat.categories.values)
+        groups_list = all_groups if groups is None else groups
+
+        # Compute onesided means (only pairs involving selected_group)
+        selected_idx = group_map[selected_group]
+        onesided_means = self._onesided_means(
+            embedding, cat_offsets, cell_indices, k, selected_idx
+        )
+
+        # Compute energy distances: e[s,b] = 2*d[s,b] - d[s,s] - d[b,b]
+        diag = cp.diag(onesided_means)
+        edistances = 2 * onesided_means[selected_idx, :] - diag[selected_idx] - diag
+        edistances[selected_idx] = 0.0  # Self-distance is 0
+
+        # Create Series
+        series = pd.Series(edistances.get(), index=all_groups, name=selected_group)
+        series.index.name = groupby
+
+        # Filter to requested groups if needed
+        if groups_list != all_groups:
+            series = series.loc[groups_list]
+
+        return series
 
     def bootstrap(
         self,
@@ -230,7 +295,7 @@ class EDistanceMetric(BaseMetric):
             Bootstrap variance
         """
         # Compute pairwise with bootstrap
-        result = self.pairwise(
+        df, df_var = self.pairwise(
             adata=adata,
             groupby=groupby,
             groups=[group_a, group_b],
@@ -240,53 +305,162 @@ class EDistanceMetric(BaseMetric):
             inplace=False,
         )
 
-        mean = result.distances.loc[group_a, group_b]
-        variance = result.distances_var.loc[group_a, group_b]
+        mean = df.loc[group_a, group_b]
+        variance = df_var.loc[group_a, group_b]
 
         return float(mean), float(variance)
 
-    # Internal methods from original _edistance.py
+    # Helper methods
 
-    def _calculate_blocks_per_pair(
+    def _get_embedding(self, adata: AnnData) -> cp.ndarray:
+        """Get embedding from adata using layer_key or obsm_key."""
+        if self.layer_key:
+            data = adata.layers[self.layer_key]
+        else:
+            data = adata.obsm[self.obsm_key]
+
+        # Convert to cupy array if needed
+        if isinstance(data, cp.ndarray):
+            return data.astype(np.float32)
+        return cp.array(data).astype(np.float32)
+
+    def compute_distance(
         self,
-        num_pairs: int,
-        target_multiplier: int = 4,
-        max_blocks_per_pair: int = 32,
-    ) -> int:
+        X: np.ndarray | cp.ndarray,
+        Y: np.ndarray | cp.ndarray,
+    ) -> float:
         """
-        Calculate optimal blocks_per_pair for GPU utilization.
+        Compute energy distance between two arrays directly.
 
         Parameters
         ----------
-        num_pairs : int
-            Number of group pairs to process
-        target_multiplier : int, default=4
-            Multiplier for SM count to determine target total blocks.
-            Higher values increase GPU utilization but may increase overhead.
-        max_blocks_per_pair : int, default=32
-            Maximum blocks per pair to avoid excessive atomic contention
+        X : np.ndarray | cp.ndarray
+            First array of shape (n_samples_x, n_features)
+        Y : np.ndarray | cp.ndarray
+            Second array of shape (n_samples_y, n_features)
 
         Returns
         -------
-        int
-            Optimal number of blocks to assign per pair
-
-        Notes
-        -----
-        Strategy:
-        - Target total blocks = target_multiplier * SM_count (e.g., 4x for ~100-200 SMs)
-        - Distribute blocks evenly across pairs: target_blocks // num_pairs
-        - Ensure at least 1 block per pair
-        - Cap at max_blocks_per_pair to limit atomic contention overhead
+        distance : float
+            Energy distance between X and Y
         """
-        device = cp.cuda.Device()
-        sm_count = device.attributes["MultiProcessorCount"]
-        target_blocks = target_multiplier * sm_count
-        # Handle edge case where num_pairs is 0 or negative
-        if num_pairs <= 0:
-            return 1
-        blocks_per_pair = max(1, target_blocks // num_pairs)
-        return min(blocks_per_pair, max_blocks_per_pair)
+        # Convert to cupy arrays
+        X_gpu = cp.asarray(X, dtype=cp.float32)
+        Y_gpu = cp.asarray(Y, dtype=cp.float32)
+
+        if len(X_gpu) == 0 or len(Y_gpu) == 0:
+            raise ValueError("Neither X nor Y can be empty.")
+
+        # Compute mean pairwise distances
+        d_xy = self._mean_pairwise_distance(X_gpu, Y_gpu)
+        d_xx = self._mean_pairwise_distance_within(X_gpu)
+        d_yy = self._mean_pairwise_distance_within(Y_gpu)
+
+        # Energy distance formula
+        return float(2 * d_xy - d_xx - d_yy)
+
+    def bootstrap_arrays(
+        self,
+        X: np.ndarray | cp.ndarray,
+        Y: np.ndarray | cp.ndarray,
+        *,
+        n_bootstrap: int = 100,
+        random_state: int = 0,
+    ) -> tuple[float, float]:
+        """
+        Compute bootstrap mean and variance for energy distance between arrays.
+
+        Parameters
+        ----------
+        X : np.ndarray | cp.ndarray
+            First array of shape (n_samples_x, n_features)
+        Y : np.ndarray | cp.ndarray
+            Second array of shape (n_samples_y, n_features)
+        n_bootstrap : int
+            Number of bootstrap iterations
+        random_state : int
+            Random seed for reproducibility
+
+        Returns
+        -------
+        mean : float
+            Bootstrap mean distance
+        variance : float
+            Bootstrap variance
+        """
+        # Convert to cupy arrays
+        X_gpu = cp.asarray(X, dtype=cp.float32)
+        Y_gpu = cp.asarray(Y, dtype=cp.float32)
+
+        if len(X_gpu) == 0 or len(Y_gpu) == 0:
+            raise ValueError("Neither X nor Y can be empty.")
+
+        rng = np.random.default_rng(random_state)
+
+        distances = []
+        for _ in range(n_bootstrap):
+            # Bootstrap sample indices
+            X_idx = rng.choice(len(X_gpu), size=len(X_gpu), replace=True)
+            Y_idx = rng.choice(len(Y_gpu), size=len(Y_gpu), replace=True)
+
+            X_boot = X_gpu[X_idx]
+            Y_boot = Y_gpu[Y_idx]
+
+            # Compute distance for this bootstrap sample
+            d_xy = self._mean_pairwise_distance(X_boot, Y_boot)
+            d_xx = self._mean_pairwise_distance_within(X_boot)
+            d_yy = self._mean_pairwise_distance_within(Y_boot)
+
+            distance = 2 * d_xy - d_xx - d_yy
+            distances.append(float(distance))
+
+        return float(np.mean(distances)), float(np.var(distances))
+
+    def _mean_pairwise_distance(
+        self,
+        X: cp.ndarray,
+        Y: cp.ndarray,
+    ) -> float:
+        """Compute mean pairwise Euclidean distance between X and Y."""
+        # Use cdist-like computation on GPU
+        # For moderate sizes, direct computation is fast
+        # X: (n, d), Y: (m, d)
+        # dist[i,j] = ||X[i] - Y[j]||
+
+        n, d = X.shape
+        _ = Y.shape[0]  # m, unused but documents Y shape
+
+        # Compute squared distances using broadcasting
+        # ||x - y||^2 = ||x||^2 + ||y||^2 - 2*x.y
+        X_sq = cp.sum(X * X, axis=1, keepdims=True)  # (n, 1)
+        Y_sq = cp.sum(Y * Y, axis=1, keepdims=True)  # (m, 1)
+        XY = X @ Y.T  # (n, m)
+
+        dist_sq = X_sq + Y_sq.T - 2 * XY
+        dist_sq = cp.maximum(dist_sq, 0)  # Numerical stability
+        distances = cp.sqrt(dist_sq)
+
+        return float(cp.mean(distances))
+
+    def _mean_pairwise_distance_within(self, X: cp.ndarray) -> float:
+        """Compute mean pairwise Euclidean distance within X (upper triangle only)."""
+        n = len(X)
+        if n < 2:
+            return 0.0
+
+        # Compute all pairwise distances
+        X_sq = cp.sum(X * X, axis=1, keepdims=True)
+        dist_sq = X_sq + X_sq.T - 2 * (X @ X.T)
+        dist_sq = cp.maximum(dist_sq, 0)
+        distances = cp.sqrt(dist_sq)
+
+        # Get upper triangle (excluding diagonal)
+        triu_indices = cp.triu_indices(n, k=1)
+        upper_distances = distances[triu_indices]
+
+        return float(cp.mean(upper_distances))
+
+    # Internal methods from original _edistance.py
 
     def _pairwise_means(
         self,
@@ -296,53 +470,191 @@ class EDistanceMetric(BaseMetric):
         k: int,
     ) -> cp.ndarray:
         """Compute between-group mean distances for all group pairs."""
-        _, n_features = embedding.shape
+        n_cells, n_features = embedding.shape
 
         # Vectorized upper triangular indices (including diagonal)
         triu_indices = cp.triu_indices(k)
         pair_left = triu_indices[0].astype(cp.int32)
         pair_right = triu_indices[1].astype(cp.int32)
-
         num_pairs = len(pair_left)
 
-        # Allocate output - will accumulate sums, then normalize
-        pairwise_sums = cp.zeros((k, k), dtype=embedding.dtype)
-
-        # Determine blocks_per_pair for good GPU utilization
+        # Calculate optimal blocks_per_pair
         blocks_per_pair = self._calculate_blocks_per_pair(num_pairs)
 
-        compute_group_distances_kernel = get_compute_group_distances_kernel(
-            embedding.dtype
-        )
+        # Check if n_features is too large for tiled kernel
+        dtype_size = cp.dtype(embedding.dtype).itemsize
+        required_shared_mem = _DEFAULT_TILE_SIZE * n_features * dtype_size
+        use_tiled = required_shared_mem <= _MAX_SHARED_MEM_BYTES
 
-        # 2D grid: (num_pairs, blocks_per_pair)
+        pairwise_sums = cp.zeros((k, k), dtype=embedding.dtype)
         grid = (num_pairs, blocks_per_pair)
         block = (1024,)
 
-        compute_group_distances_kernel(
-            grid,
-            block,
-            (
-                embedding,
-                cat_offsets,
-                cell_indices,
-                pair_left,
-                pair_right,
-                pairwise_sums,
-                k,
-                n_features,
-                blocks_per_pair,
-            ),
+        if use_tiled:
+            kernel, shared_mem = get_compute_group_distances_kernel_multiblock(
+                embedding.dtype, n_features, tile_size=_DEFAULT_TILE_SIZE
+            )
+            kernel(
+                grid,
+                block,
+                (
+                    embedding,
+                    cat_offsets,
+                    cell_indices,
+                    pair_left,
+                    pair_right,
+                    pairwise_sums,
+                    k,
+                    n_features,
+                    blocks_per_pair,
+                ),
+                shared_mem=shared_mem,
+            )
+        else:
+            kernel = get_compute_group_distances_kernel_fallback(embedding.dtype)
+            kernel(
+                grid,
+                block,
+                (
+                    embedding,
+                    cat_offsets,
+                    cell_indices,
+                    pair_left,
+                    pair_right,
+                    pairwise_sums,
+                    k,
+                    n_features,
+                    blocks_per_pair,
+                ),
+            )
+
+        # Normalize sums to means
+        group_sizes = cp.diff(cat_offsets)
+        diag_counts = group_sizes * (group_sizes - 1) // 2
+        cross_counts = cp.outer(group_sizes, group_sizes)
+        norm_matrix = cross_counts.astype(embedding.dtype)
+        cp.fill_diagonal(norm_matrix, diag_counts.astype(embedding.dtype))
+
+        return pairwise_sums / norm_matrix
+
+    def _calculate_blocks_per_pair(self, num_pairs: int) -> int:
+        """Calculate optimal blocks_per_pair based on workload.
+
+        Based on profiling insights:
+        - Need ~300K+ total blocks for good GPU throughput on modern GPUs
+        - blocks_per_pair=1 is efficient when num_pairs is already large
+
+        Returns
+        -------
+        blocks_per_pair : int
+            Optimal number of blocks per pair
+        """
+        if self.kernel == "manual":
+            return self.blocks_per_pair
+
+        # auto - calculate optimal blocks_per_pair
+        # Target ~300K total blocks for good GPU utilization
+        # From profiling: 320K blocks gave 66% throughput vs 22% with 20K blocks
+        target_blocks = 300_000
+
+        blocks_per_pair = max(1, (target_blocks + num_pairs - 1) // num_pairs)
+        blocks_per_pair = min(blocks_per_pair, self.blocks_per_pair)
+
+        return blocks_per_pair
+
+    def _onesided_means(
+        self,
+        embedding: cp.ndarray,
+        cat_offsets: cp.ndarray,
+        cell_indices: cp.ndarray,
+        k: int,
+        selected_idx: int,
+    ) -> cp.ndarray:
+        """Compute mean distances from selected group to all groups.
+
+        Computes:
+        - d[selected_idx, i] for all i (cross-distances)
+        - d[i, i] for all i (self-distances needed for energy distance formula)
+        """
+        n_cells, n_features = embedding.shape
+
+        # Need pairs for:
+        # 1. (selected_idx, i) for all i - cross distances from selected group
+        # 2. (i, i) for all i where i != selected_idx - self-distances for other groups
+        # Note: (selected_idx, selected_idx) is already in set 1
+
+        # Cross-distance pairs: (selected_idx, 0), ..., (selected_idx, k-1)
+        cross_left = cp.full(k, selected_idx, dtype=cp.int32)
+        cross_right = cp.arange(k, dtype=cp.int32)
+
+        # Diagonal pairs for other groups (excluding selected_idx which is already computed)
+        other_diag = cp.array(
+            [i for i in range(k) if i != selected_idx], dtype=cp.int32
         )
 
-        # Normalize sums to means on GPU
-        group_sizes = cp.diff(cat_offsets)  # [k]
-        norm_matrix = cp.outer(group_sizes, group_sizes).astype(
-            embedding.dtype
-        )  # [k, k]
-        pairwise_means = pairwise_sums / norm_matrix
+        # Combine all pairs
+        pair_left = cp.concatenate([cross_left, other_diag])
+        pair_right = cp.concatenate([cross_right, other_diag])
+        num_pairs = len(pair_left)
 
-        return pairwise_means
+        # Calculate optimal blocks_per_pair
+        blocks_per_pair = self._calculate_blocks_per_pair(num_pairs)
+
+        # Check if n_features is too large for tiled kernel
+        dtype_size = cp.dtype(embedding.dtype).itemsize
+        required_shared_mem = _DEFAULT_TILE_SIZE * n_features * dtype_size
+        use_tiled = required_shared_mem <= _MAX_SHARED_MEM_BYTES
+
+        onesided_sums = cp.zeros((k, k), dtype=embedding.dtype)
+        grid = (num_pairs, blocks_per_pair)
+        block = (1024,)
+
+        if use_tiled:
+            kernel, shared_mem = get_compute_group_distances_kernel_multiblock(
+                embedding.dtype, n_features, tile_size=_DEFAULT_TILE_SIZE
+            )
+            kernel(
+                grid,
+                block,
+                (
+                    embedding,
+                    cat_offsets,
+                    cell_indices,
+                    pair_left,
+                    pair_right,
+                    onesided_sums,
+                    k,
+                    n_features,
+                    blocks_per_pair,
+                ),
+                shared_mem=shared_mem,
+            )
+        else:
+            kernel = get_compute_group_distances_kernel_fallback(embedding.dtype)
+            kernel(
+                grid,
+                block,
+                (
+                    embedding,
+                    cat_offsets,
+                    cell_indices,
+                    pair_left,
+                    pair_right,
+                    onesided_sums,
+                    k,
+                    n_features,
+                    blocks_per_pair,
+                ),
+            )
+
+        # Normalize sums to means
+        group_sizes = cp.diff(cat_offsets)
+        diag_counts = group_sizes * (group_sizes - 1) // 2
+        cross_counts = cp.outer(group_sizes, group_sizes)
+        norm_matrix = cross_counts.astype(embedding.dtype)
+        cp.fill_diagonal(norm_matrix, diag_counts.astype(embedding.dtype))
+
+        return onesided_sums / norm_matrix
 
     def _generate_bootstrap_indices(
         self,
