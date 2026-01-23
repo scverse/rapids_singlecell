@@ -15,17 +15,23 @@ from cuml.common.kernel_utils import cuda_kernel_factory
 # Larger tiles = fewer iterations but more shared memory
 TILE_SIZES = [32, 50, 64]
 
-# Cache for device shared memory limit (lazy initialization)
-_MAX_SHARED_MEM: int | None = None
+# Cache for device attributes (lazy initialization)
+_DEVICE_ATTRS: dict | None = None
 
 
-def _get_max_shared_mem() -> int:
-    """Get maximum shared memory per block for the current device (cached)."""
-    global _MAX_SHARED_MEM
-    if _MAX_SHARED_MEM is None:
+def _get_device_attrs() -> dict:
+    """Get device attributes for the current device (cached)."""
+    global _DEVICE_ATTRS
+    if _DEVICE_ATTRS is None:
         device = cp.cuda.Device()
-        _MAX_SHARED_MEM = device.attributes["MaxSharedMemoryPerBlock"]
-    return _MAX_SHARED_MEM
+        # compute_capability is a string like "120" for CC 12.0, or "86" for CC 8.6
+        cc_str = str(device.compute_capability)
+        cc_major = int(cc_str[:-1]) if len(cc_str) > 1 else int(cc_str)
+        _DEVICE_ATTRS = {
+            "max_shared_mem": device.attributes["MaxSharedMemoryPerBlock"],
+            "cc_major": cc_major,
+        }
+    return _DEVICE_ATTRS
 
 
 def _choose_feat_tile(
@@ -93,7 +99,7 @@ def _choose_feat_tile(
 
 def get_compute_group_distances_kernel(
     dtype: np.dtype, n_features: int
-) -> tuple[object, int]:
+) -> tuple[object, int, int]:
     """
     Compile GPU kernel for computing pairwise group distances.
 
@@ -110,19 +116,30 @@ def get_compute_group_distances_kernel(
         Compiled CUDA kernel
     shared_mem_bytes
         Required shared memory in bytes
+    block_size
+        Recommended block size (threads per block)
     """
     dtype = np.dtype(dtype)
     is_double = dtype == np.float64
     sqrt_fn = "sqrt" if is_double else "sqrtf"
     dtype_size = dtype.itemsize
 
+    device_attrs = _get_device_attrs()
+    max_shared = device_attrs["max_shared_mem"]
+
     # Cell tile based on dtype to avoid register pressure
     cell_tile = 16 if is_double else 32
 
     # Auto-select feat_tile based on n_features and available shared memory
-    feat_tile = _choose_feat_tile(
-        n_features, _get_max_shared_mem(), cell_tile, dtype_size
-    )
+    feat_tile = _choose_feat_tile(n_features, max_shared, cell_tile, dtype_size)
+
+    # Default block size for Ampere+ (3090, A100, H100, etc.)
+    block_size = 1024
+
+    # For pre-Ampere GPUs (CC < 8.0, e.g., T4) with float64, reduce block size
+    # to avoid CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES due to register pressure
+    if is_double and device_attrs["cc_major"] < 8:
+        block_size = 256
 
     kernel_code = """
 (const {0}* __restrict__ embedding,
@@ -270,4 +287,4 @@ def get_compute_group_distances_kernel(
 
     shared_mem_bytes = cell_tile * feat_tile * dtype_size
 
-    return kernel, shared_mem_bytes
+    return kernel, shared_mem_bytes, block_size

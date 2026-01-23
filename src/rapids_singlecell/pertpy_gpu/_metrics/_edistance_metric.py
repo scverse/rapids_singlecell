@@ -485,13 +485,13 @@ class EDistanceMetric(BaseMetric):
         pairwise_sums = cp.zeros((k, k), dtype=embedding.dtype)
 
         if num_pairs > 0:
-            blocks_per_pair = self._calculate_blocks_per_pair(num_pairs)
-            grid = (num_pairs, blocks_per_pair)
-            block = (1024,)
-
-            kernel, shared_mem = get_compute_group_distances_kernel(
+            kernel, shared_mem, block_size = get_compute_group_distances_kernel(
                 embedding.dtype, n_features
             )
+            blocks_per_pair = self._calculate_blocks_per_pair(num_pairs)
+            grid = (num_pairs, blocks_per_pair)
+            block = (block_size,)
+
             kernel(
                 grid,
                 block,
@@ -574,13 +574,13 @@ class EDistanceMetric(BaseMetric):
         onesided_sums = cp.zeros((k, k), dtype=embedding.dtype)
 
         if num_pairs > 0:
-            blocks_per_pair = self._calculate_blocks_per_pair(num_pairs)
-            grid = (num_pairs, blocks_per_pair)
-            block = (1024,)
-
-            kernel, shared_mem = get_compute_group_distances_kernel(
+            kernel, shared_mem, block_size = get_compute_group_distances_kernel(
                 embedding.dtype, n_features
             )
+            blocks_per_pair = self._calculate_blocks_per_pair(num_pairs)
+            grid = (num_pairs, blocks_per_pair)
+            block = (block_size,)
+
             kernel(
                 grid,
                 block,
