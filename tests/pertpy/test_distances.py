@@ -173,23 +173,6 @@ def test_distance_class_onesided_bootstrap_matches_pairwise(
     )
 
 
-def test_distance_class_bootstrap_two_groups(small_adata: AnnData) -> None:
-    """Test Distance.bootstrap_adata() for two specific groups."""
-    distance = Distance(metric="edistance")
-    result = distance.bootstrap_adata(
-        small_adata,
-        groupby="group",
-        group_a="g0",
-        group_b="g1",
-        n_bootstrap=10,
-        random_state=42,
-    )
-
-    assert isinstance(result.mean, float)
-    assert isinstance(result.variance, float)
-    assert result.variance >= 0
-
-
 def test_distance_class_repr() -> None:
     """Test Distance.__repr__() method."""
     distance = Distance(metric="edistance", obsm_key="X_custom")
@@ -436,44 +419,6 @@ def test_bootstrap_reproducibility(small_adata: AnnData) -> None:
         var2.values,
         atol=1e-10,
         err_msg="Same seed should produce same bootstrap variance",
-    )
-
-
-def test_bootstrap_two_groups_matches_pairwise(small_adata: AnnData) -> None:
-    """Test that Distance.bootstrap_adata() for two groups matches pairwise bootstrap."""
-    distance = Distance(metric="edistance")
-
-    # Use pairwise bootstrap
-    pairwise_df, pairwise_var_df = distance.pairwise(
-        small_adata,
-        groupby="group",
-        bootstrap=True,
-        n_bootstrap=50,
-        random_state=42,
-    )
-
-    # Use two-group bootstrap (adata-based)
-    result = distance.bootstrap_adata(
-        small_adata,
-        groupby="group",
-        group_a="g0",
-        group_b="g1",
-        n_bootstrap=50,
-        random_state=42,
-    )
-
-    # Should match the corresponding cell in pairwise result
-    np.testing.assert_allclose(
-        result.mean,
-        pairwise_df.loc["g0", "g1"],
-        atol=1e-6,
-        err_msg="Two-group bootstrap mean should match pairwise",
-    )
-    np.testing.assert_allclose(
-        result.variance,
-        pairwise_var_df.loc["g0", "g1"],
-        atol=1e-6,
-        err_msg="Two-group bootstrap variance should match pairwise",
     )
 
 

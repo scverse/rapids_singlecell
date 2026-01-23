@@ -24,15 +24,22 @@ class Distance:
 
     API compatible with pertpy's Distance class.
 
+    Currently supported metrics:
+
+    - ``"edistance"``: Energy distance (default).
+        Twice the mean pairwise distance between cells of two groups minus
+        the mean pairwise distance between cells within each group. See
+        `Peidli et al. (2023) <https://doi.org/10.1101/2022.08.20.504663>`__.
+
     Parameters
     ----------
     metric
-        Distance metric. Currently supported: 'edistance' (energy distance).
+        Distance metric to use. Currently only ``"edistance"`` is supported.
     layer_key
-        Key in adata.layers for cell data. Mutually exclusive with 'obsm_key'.
+        Key in adata.layers for cell data. Mutually exclusive with ``obsm_key``.
     obsm_key
-        Key in adata.obsm for embeddings. Mutually exclusive with 'layer_key'.
-        Defaults to 'X_pca' if neither is specified.
+        Key in adata.obsm for embeddings. Mutually exclusive with ``layer_key``.
+        Defaults to ``"X_pca"`` if neither is specified.
 
     Examples
     --------
@@ -68,7 +75,7 @@ class Distance:
     def _initialize_metric(self):
         """Initialize the metric implementation based on the metric type."""
         if self.metric == "edistance":
-            from rapids_singlecell.pertpy_gpu._metrics._edistance_metric import (
+            from rapids_singlecell.pertpy_gpu._metrics._edistance import (
                 EDistanceMetric,
             )
 
@@ -267,61 +274,6 @@ class Distance:
         mean, variance = self._metric_impl.bootstrap_arrays(
             X=X,
             Y=Y,
-            n_bootstrap=n_bootstrap,
-            random_state=random_state,
-        )
-        return MeanVar(mean=mean, variance=variance)
-
-    def bootstrap_adata(
-        self,
-        adata: AnnData,
-        groupby: str,
-        group_a: str,
-        group_b: str,
-        *,
-        n_bootstrap: int = 100,
-        random_state: int = 0,
-    ) -> MeanVar:
-        """
-        Compute bootstrap mean and variance for distance between two groups in AnnData.
-
-        Parameters
-        ----------
-        adata
-            Annotated data matrix
-        groupby
-            Key in adata.obs for grouping cells
-        group_a
-            First group name
-        group_b
-            Second group name
-        n_bootstrap
-            Number of bootstrap iterations
-        random_state
-            Random seed for reproducibility
-
-        Returns
-        -------
-        result
-            Named tuple containing mean and variance of bootstrapped distances
-
-        Examples
-        --------
-        >>> distance = Distance(metric='edistance')
-        >>> result = distance.bootstrap_adata(
-        ...     adata, groupby='condition', group_a='treated', group_b='control'
-        ... )
-        >>> print(f"Distance: {result.mean:.3f} ± {result.variance**0.5:.3f}")
-        """
-        if not hasattr(self._metric_impl, "bootstrap"):
-            raise NotImplementedError(
-                f"Metric '{self.metric}' does not support bootstrap"
-            )
-        mean, variance = self._metric_impl.bootstrap(
-            adata=adata,
-            groupby=groupby,
-            group_a=group_a,
-            group_b=group_b,
             n_bootstrap=n_bootstrap,
             random_state=random_state,
         )
