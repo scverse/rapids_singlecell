@@ -8,6 +8,7 @@ from importlib.metadata import metadata
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 import anndata  # noqa
+import fast_array_utils  # noqa
 
 if TYPE_CHECKING:
     from sphinx.application import Sphinx
