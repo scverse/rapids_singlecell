@@ -48,7 +48,6 @@ def test_clustering_subset(adata_neighbors, key):
     clustering(adata_neighbors, key_added=key)
 
     for c in adata_neighbors.obs[key].unique():
-        print("Analyzing cluster ", c)
         cells_in_c = adata_neighbors.obs[key] == c
         ncells_in_c = adata_neighbors.obs[key].value_counts().loc[c]
         key_sub = str(key) + "_sub"
@@ -69,6 +68,18 @@ def test_clustering_subset(adata_neighbors, key):
         nonzero_cat = cat_counts[cat_counts > 0].index
         common_cat = nonzero_cat.intersection(adata_neighbors.obs[key].cat.categories)
         assert len(common_cat) == 0
+
+
+@pytest.mark.parametrize("clustering_function", [rsc.tl.leiden, rsc.tl.louvain])
+@pytest.mark.parametrize("resolution", [0.1, [0.5, 1.0]])
+def test_clustering_resolution(adata_neighbors, clustering_function, resolution):
+    adata = adata_neighbors.copy()
+    clustering_function(adata, key_added="test_clustering", resolution=resolution)
+    if isinstance(resolution, list):
+        for r in resolution:
+            assert f"test_clustering_{r}" in adata.obs.columns
+    else:
+        assert "test_clustering" in adata.obs.columns
 
 
 def test_kmeans_basic(adata_neighbors):
