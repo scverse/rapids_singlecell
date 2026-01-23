@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from anndata import AnnData
 
 
@@ -30,16 +32,13 @@ class BaseMetric(ABC):
         adata: AnnData,
         groupby: str,
         *,
-        groups: list[str] | None = None,
+        groups: Sequence[str] | None = None,
         bootstrap: bool = False,
         n_bootstrap: int = 100,
         random_state: int = 0,
-        inplace: bool = False,
     ):
         """
         Compute pairwise distances between all cell groups.
-
-        This method must be implemented by all metric subclasses.
 
         Parameters
         ----------
@@ -47,7 +46,7 @@ class BaseMetric(ABC):
             Annotated data matrix
         groupby : str
             Key in adata.obs for grouping cells
-        groups : list[str] | None
+        groups : Sequence[str] | None
             Specific groups to compute (if None, use all)
         bootstrap : bool
             Whether to compute bootstrap variance estimates
@@ -55,16 +54,13 @@ class BaseMetric(ABC):
             Number of bootstrap iterations (if bootstrap=True)
         random_state : int
             Random seed for reproducibility
-        inplace : bool
-            Whether to store results in adata.uns
 
         Returns
         -------
         result
             Result object containing distances and optional variance information.
-            The exact type depends on the specific metric implementation.
         """
-        pass
+        ...
 
     def onesided_distances(
         self,
@@ -72,15 +68,13 @@ class BaseMetric(ABC):
         groupby: str,
         selected_group: str,
         *,
-        groups: list[str] | None = None,
+        groups: Sequence[str] | None = None,
         bootstrap: bool = False,
         n_bootstrap: int = 100,
         random_state: int = 0,
     ):
         """
         Compute distances from one selected group to all other groups.
-
-        This method is optional and may not be implemented by all metrics.
 
         Parameters
         ----------
@@ -90,7 +84,7 @@ class BaseMetric(ABC):
             Key in adata.obs for grouping cells
         selected_group : str
             Reference group to compute distances from
-        groups : list[str] | None
+        groups : Sequence[str] | None
             Specific groups to compute distances to (if None, use all)
         bootstrap : bool
             Whether to compute bootstrap variance estimates
@@ -120,8 +114,6 @@ class BaseMetric(ABC):
     ):
         """
         Compute bootstrap mean and variance for distance between two specific groups.
-
-        This method is optional and may not be implemented by all metrics.
 
         Parameters
         ----------

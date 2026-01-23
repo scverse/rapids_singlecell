@@ -23,7 +23,7 @@ def small_adata() -> AnnData:
         {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])}
     )
 
-    adata = AnnData(cpu_embedding.copy(), obs=obs)
+    adata = AnnData(cpu_embedding, obs=obs)
     adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
     return adata
 
@@ -87,7 +87,7 @@ def test_distance_class_onesided_matches_pairwise(small_adata: AnnData) -> None:
     # Get pairwise distances
     pairwise_df = distance.pairwise(small_adata, groupby="group")
 
-    # Get onesided distances for each group
+    # Get onesided distances for each group and verify it matches pairwise row
     for group in ["g0", "g1", "g2"]:
         onesided = distance.onesided_distances(
             small_adata, groupby="group", selected_group=group
@@ -96,17 +96,7 @@ def test_distance_class_onesided_matches_pairwise(small_adata: AnnData) -> None:
         np.testing.assert_allclose(
             onesided.values, pairwise_df.loc[group].values, atol=1e-5
         )
-
-
-def test_distance_class_onesided_self_distance_zero(small_adata: AnnData) -> None:
-    """Test that distance from a group to itself is zero."""
-    distance = Distance(metric="edistance")
-
-    for group in ["g0", "g1", "g2"]:
-        onesided = distance.onesided_distances(
-            small_adata, groupby="group", selected_group=group
-        )
-        # Distance to self should be 0
+        # Self-distance should be 0
         assert onesided[group] == pytest.approx(0.0, abs=1e-6)
 
 
@@ -117,6 +107,69 @@ def test_distance_class_onesided_invalid_group(small_adata: AnnData) -> None:
         distance.onesided_distances(
             small_adata, groupby="group", selected_group="invalid"
         )
+
+
+def test_distance_class_onesided_bootstrap(small_adata: AnnData) -> None:
+    """Test Distance.onesided_distances() with bootstrap returns tuple."""
+    distance = Distance(metric="edistance")
+    result = distance.onesided_distances(
+        small_adata,
+        groupby="group",
+        selected_group="g0",
+        bootstrap=True,
+        n_bootstrap=10,
+        random_state=42,
+    )
+
+    # Should return tuple of (distances, distances_var)
+    assert isinstance(result, tuple)
+    assert len(result) == 2
+    distances, distances_var = result
+
+    assert isinstance(distances, pd.Series)
+    assert isinstance(distances_var, pd.Series)
+    assert len(distances) == 3
+    assert len(distances_var) == 3
+
+    # Self-distance variance should be 0
+    assert distances["g0"] == pytest.approx(0.0, abs=1e-6)
+    assert distances_var["g0"] == pytest.approx(0.0, abs=1e-6)
+
+    # Non-self variances should be positive
+    assert distances_var["g1"] > 0
+    assert distances_var["g2"] > 0
+
+
+def test_distance_class_onesided_bootstrap_matches_pairwise(
+    small_adata: AnnData,
+) -> None:
+    """Test onesided_distances with bootstrap matches pairwise bootstrap."""
+    distance = Distance(metric="edistance")
+
+    # Get pairwise with bootstrap
+    pairwise_df, pairwise_var_df = distance.pairwise(
+        small_adata,
+        groupby="group",
+        bootstrap=True,
+        n_bootstrap=20,
+        random_state=42,
+    )
+
+    # Get onesided with bootstrap
+    onesided, onesided_var = distance.onesided_distances(
+        small_adata,
+        groupby="group",
+        selected_group="g0",
+        bootstrap=True,
+        n_bootstrap=20,
+        random_state=42,
+    )
+
+    # Should match the corresponding row from pairwise
+    np.testing.assert_allclose(onesided.values, pairwise_df.loc["g0"].values, atol=1e-6)
+    np.testing.assert_allclose(
+        onesided_var.values, pairwise_var_df.loc["g0"].values, atol=1e-6
+    )
 
 
 def test_distance_class_bootstrap_two_groups(small_adata: AnnData) -> None:
@@ -134,21 +187,6 @@ def test_distance_class_bootstrap_two_groups(small_adata: AnnData) -> None:
     assert isinstance(result.mean, float)
     assert isinstance(result.variance, float)
     assert result.variance >= 0
-
-
-def test_distance_class_inplace_storage(small_adata: AnnData) -> None:
-    """Test Distance.pairwise() with inplace=True."""
-    distance = Distance(metric="edistance")
-    result_df = distance.pairwise(small_adata, groupby="group", inplace=True)
-
-    # Check result is returned
-    assert isinstance(result_df, pd.DataFrame)
-
-    # Check result is stored in uns
-    key = "group_pairwise_edistance"
-    assert key in small_adata.uns
-    stored = small_adata.uns[key]
-    np.testing.assert_allclose(stored["distances"].values, result_df.values)
 
 
 def test_distance_class_repr() -> None:
@@ -295,29 +333,6 @@ def test_onesided_distances_correctness_vs_cpu(small_adata: AnnData) -> None:
             )
 
 
-def test_onesided_matches_pairwise_all_groups(small_adata: AnnData) -> None:
-    """Test that onesided_distances matches the pairwise matrix for all groups."""
-    distance = Distance(metric="edistance")
-    pairwise_df = distance.pairwise(small_adata, groupby="group")
-
-    # For each group, onesided should match the corresponding row
-    for group in ["g0", "g1", "g2"]:
-        onesided = distance.onesided_distances(
-            small_adata, groupby="group", selected_group=group
-        )
-
-        # Extract the row from pairwise
-        pairwise_row = pairwise_df.loc[group]
-
-        # Should match exactly (same computation path after optimization)
-        np.testing.assert_allclose(
-            onesided.values,
-            pairwise_row.values,
-            atol=1e-5,
-            err_msg=f"Onesided vs pairwise mismatch for group {group}",
-        )
-
-
 # ============================================================================
 # Bootstrap correctness tests
 # ============================================================================
@@ -326,7 +341,7 @@ def test_onesided_matches_pairwise_all_groups(small_adata: AnnData) -> None:
 def test_bootstrap_variance_is_positive(small_adata: AnnData) -> None:
     """Test that bootstrap variance is always non-negative."""
     distance = Distance(metric="edistance")
-    distances_df, distances_var_df = distance.pairwise(
+    _, distances_var_df = distance.pairwise(
         small_adata,
         groupby="group",
         bootstrap=True,
@@ -372,7 +387,7 @@ def test_bootstrap_mean_close_to_point_estimate() -> None:
     point_df = distance.pairwise(adata, groupby="group")
 
     # Bootstrap estimate
-    boot_df, boot_var_df = distance.pairwise(
+    boot_df, _ = distance.pairwise(
         adata,
         groupby="group",
         bootstrap=True,
@@ -381,7 +396,6 @@ def test_bootstrap_mean_close_to_point_estimate() -> None:
     )
 
     # Bootstrap mean should be reasonably close to point estimate
-    # With 50 cells per group, the bootstrap should be more stable
     np.testing.assert_allclose(
         boot_df.values,
         point_df.values,
@@ -484,7 +498,7 @@ def test_distance_call_api_basic(small_adata: AnnData) -> None:
     d = distance(X, Y)
 
     assert isinstance(d, float)
-    assert d >= 0 or d < 0  # Energy distance can be negative with small samples
+    assert np.isfinite(d), "Distance should be finite"
 
 
 def test_distance_call_api_vs_cpu_reference(small_adata: AnnData) -> None:
@@ -690,3 +704,732 @@ def test_distance_default_obsm_key() -> None:
     distance = Distance(metric="edistance")
     assert distance.obsm_key == "X_pca"
     assert distance.layer_key is None
+
+
+# ============================================================================
+# Dtype and kernel coverage tests (parametrized)
+# ============================================================================
+
+
+def test_float64_matches_float32_results(small_adata: AnnData) -> None:
+    """Test that float64 and float32 produce similar results (within float32 precision)."""
+    adata_f64 = small_adata.copy()
+    adata_f64.obsm["X_pca"] = small_adata.obsm["X_pca"].astype(cp.float64)
+
+    distance = Distance(metric="edistance")
+
+    result_f32 = distance.pairwise(small_adata, groupby="group")
+    result_f64 = distance.pairwise(adata_f64, groupby="group")
+
+    np.testing.assert_allclose(
+        result_f32.values,
+        result_f64.values,
+        rtol=1e-5,
+        atol=1e-6,
+        err_msg="Float64 and float32 results should be similar",
+    )
+
+
+@pytest.mark.parametrize("n_features", [50, 400])
+def test_bootstrap_different_feature_counts(n_features: int) -> None:
+    """Test bootstrap works with different feature counts (50 and 400)."""
+    rng = np.random.default_rng(42)
+    n_groups = 3
+    cells_per_group = 10
+    total_cells = n_groups * cells_per_group
+
+    cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(np.float32)
+    groups = [f"g{idx}" for idx in range(n_groups) for _ in range(cells_per_group)]
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])}
+    )
+
+    adata = AnnData(cpu_embedding.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
+
+    distance = Distance(metric="edistance")
+    distances, variances = distance.pairwise(
+        adata, groupby="group", bootstrap=True, n_bootstrap=10, random_state=42
+    )
+
+    assert isinstance(distances, pd.DataFrame)
+    assert isinstance(variances, pd.DataFrame)
+    assert np.all(variances.values >= 0)
+
+    # Non-self distances should have positive variance
+    for g1 in ["g0", "g1", "g2"]:
+        for g2 in ["g0", "g1", "g2"]:
+            if g1 != g2:
+                assert variances.loc[g1, g2] > 0
+
+
+# ============================================================================
+# Combined dtype and kernel tests
+# ============================================================================
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_pairwise_correctness_parametrized(dtype) -> None:
+    """Parametrized test for pairwise correctness across dtypes."""
+    rng = np.random.default_rng(42)
+    n_groups = 4
+    cells_per_group = 15
+    n_features = 20
+    total_cells = n_groups * cells_per_group
+
+    cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(dtype)
+    groups = [f"g{idx}" for idx in range(n_groups) for _ in range(cells_per_group)]
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])}
+    )
+
+    adata = AnnData(cpu_embedding.copy().astype(np.float32), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=dtype)
+
+    distance = Distance(metric="edistance")
+    result_df = distance.pairwise(adata, groupby="group")
+
+    # Check a few pairs
+    rtol = 1e-10 if dtype == np.float64 else 1e-5
+    atol = 1e-12 if dtype == np.float64 else 1e-6
+
+    for g1, g2 in [("g0", "g1"), ("g1", "g3"), ("g2", "g3")]:
+        X = cpu_embedding[np.array(groups) == g1]
+        Y = cpu_embedding[np.array(groups) == g2]
+        expected = _compute_energy_distance_cpu(X, Y)
+        actual = result_df.loc[g1, g2]
+        np.testing.assert_allclose(
+            actual,
+            expected,
+            rtol=rtol,
+            atol=atol,
+            err_msg=f"dtype={dtype.__name__} mismatch for ({g1}, {g2})",
+        )
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("n_features", [50, 400])
+def test_correctness_dtype_and_features(dtype, n_features) -> None:
+    """Test correctness across dtypes and feature counts."""
+    rng = np.random.default_rng(42)
+    n_groups = 3
+    cells_per_group = 10
+    total_cells = n_groups * cells_per_group
+
+    cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(dtype)
+    groups = [f"g{idx}" for idx in range(n_groups) for _ in range(cells_per_group)]
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])}
+    )
+
+    adata = AnnData(cpu_embedding.copy().astype(np.float32), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=dtype)
+
+    distance = Distance(metric="edistance")
+    result_df = distance.pairwise(adata, groupby="group")
+
+    # Check correctness
+    rtol = 1e-10 if dtype == np.float64 else 1e-4
+    atol = 1e-12 if dtype == np.float64 else 1e-5
+
+    X = cpu_embedding[np.array(groups) == "g0"]
+    Y = cpu_embedding[np.array(groups) == "g1"]
+    expected = _compute_energy_distance_cpu(X, Y)
+    actual = result_df.loc["g0", "g1"]
+
+    np.testing.assert_allclose(
+        actual,
+        expected,
+        rtol=rtol,
+        atol=atol,
+        err_msg=f"dtype={dtype.__name__}, n_features={n_features} mismatch",
+    )
+
+
+# ============================================================================
+# Distance axioms tests (semimetric properties)
+# ============================================================================
+
+
+@pytest.mark.parametrize(
+    "n_groups,cells_per_group,n_features,use_distinct_distributions",
+    [
+        (3, 4, 5, False),  # Small dataset (uses small_adata-like setup)
+        (5, 50, 20, True),  # Larger dataset with distinct distributions
+    ],
+)
+def test_distance_axioms(
+    n_groups: int,
+    cells_per_group: int,
+    n_features: int,
+    use_distinct_distributions: bool,
+) -> None:
+    """Test distance axioms: definiteness, symmetry, and positivity.
+
+    Note: Energy distance can be negative with very small samples from same
+    distribution. With distinct distributions or larger samples, positivity holds.
+    """
+    rng = np.random.default_rng(42)
+    total_cells = n_groups * cells_per_group
+
+    if use_distinct_distributions:
+        # Create groups with distinctly different distributions
+        cpu_embeddings = []
+        for i in range(n_groups):
+            group_data = rng.normal(loc=i * 2.0, size=(cells_per_group, n_features))
+            cpu_embeddings.append(group_data)
+        cpu_embedding = np.vstack(cpu_embeddings).astype(np.float32)
+    else:
+        cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(np.float32)
+
+    groups = [f"g{idx}" for idx in range(n_groups) for _ in range(cells_per_group)]
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])}
+    )
+
+    adata = AnnData(cpu_embedding.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
+
+    distance = Distance(metric="edistance")
+    result_df = distance.pairwise(adata, groupby="group")
+
+    # Definiteness: d(x, x) = 0
+    for group in result_df.index:
+        assert result_df.loc[group, group] == pytest.approx(0.0, abs=1e-10), (
+            f"Self-distance for {group} should be 0"
+        )
+
+    # Symmetry: d(x, y) = d(y, x)
+    np.testing.assert_allclose(
+        result_df.values,
+        result_df.values.T,
+        atol=1e-5,
+        err_msg="Matrix should be symmetric",
+    )
+
+    # Positivity: d(x, y) >= 0 for distinct distributions
+    if use_distinct_distributions:
+        for g1 in result_df.index:
+            for g2 in result_df.columns:
+                if g1 != g2:
+                    assert result_df.loc[g1, g2] >= 0, (
+                        f"Distance ({g1}, {g2}) should be non-negative"
+                    )
+
+
+# ============================================================================
+# Triangle inequality test
+# ============================================================================
+
+
+@pytest.fixture
+def pertpy_adata() -> AnnData:
+    """Load pertpy's example dataset for testing.
+
+    This uses the same data pertpy uses in their tests.
+    """
+    import pertpy as pt
+    import scanpy as sc
+
+    adata = pt.dt.distance_example()
+
+    # Subsample like pertpy tests do (0.1% for most distances)
+    sc.pp.subsample(adata, fraction=0.01, random_state=42)
+
+    # Compute PCA if not present
+    if "X_pca" not in adata.obsm:
+        sc.pp.pca(adata, n_comps=5)
+
+    # Convert to GPU
+    adata.obsm["X_pca"] = cp.asarray(adata.obsm["X_pca"], dtype=cp.float32)
+
+    return adata
+
+
+def test_triangle_inequality_pertpy_data(pertpy_adata: AnnData) -> None:
+    """Test triangle inequality using pertpy's example dataset.
+
+    NOTE: The raw energy statistic does not mathematically guarantee the
+    triangle inequality (only sqrt(energy_statistic) is a true metric).
+    However, with real biological data, violations are rare. This test
+    follows pertpy's approach of testing random triplets.
+
+    We test 10 random triplets and allow up to 2 violations (20%), which
+    accounts for the statistical nature of the raw energy statistic.
+    """
+    rng = np.random.default_rng(42)
+
+    distance = Distance(metric="edistance")
+    pairwise_df = distance.pairwise(pertpy_adata, groupby="perturbation")
+
+    groups = list(pairwise_df.index)
+    n_tests = 10
+    max_violations = 2  # Allow some violations since it's not guaranteed
+
+    violations = []
+    for _ in range(n_tests):
+        triplet = rng.choice(groups, size=3, replace=False)
+        a, b, c = triplet
+
+        d_ab = pairwise_df.loc[a, b]
+        d_bc = pairwise_df.loc[b, c]
+        d_ac = pairwise_df.loc[a, c]
+
+        # Triangle inequality: d(a,c) <= d(a,b) + d(b,c)
+        if d_ac > d_ab + d_bc + 1e-6:
+            violations.append(
+                f"d({a},{c})={d_ac:.2f} > d({a},{b})={d_ab:.2f} + d({b},{c})={d_bc:.2f}"
+            )
+
+    assert len(violations) <= max_violations, (
+        f"Too many triangle inequality violations ({len(violations)}/{n_tests}): "
+        f"{violations[:3]}..."  # Show first 3
+    )
+
+
+# ============================================================================
+# Output format validation tests
+# ============================================================================
+
+
+def test_pairwise_output_format(small_adata: AnnData) -> None:
+    """Test pairwise output format: DataFrame, symmetric, proper names."""
+    distance = Distance(metric="edistance")
+    result = distance.pairwise(small_adata, groupby="group")
+
+    # Is DataFrame
+    assert isinstance(result, pd.DataFrame), "pairwise should return DataFrame"
+
+    # Index and columns match
+    assert list(result.index) == list(result.columns), "Index and columns should match"
+
+    # Symmetric
+    np.testing.assert_allclose(
+        result.values, result.values.T, atol=1e-10, err_msg="Matrix should be symmetric"
+    )
+
+    # Proper names
+    assert result.index.name == "group", "Index name should match groupby key"
+    assert result.columns.name == "group", "Columns name should match groupby key"
+
+    # Contains all groups
+    expected_groups = list(small_adata.obs["group"].cat.categories)
+    assert list(result.index) == expected_groups
+    assert list(result.columns) == expected_groups
+
+
+def test_onesided_output_format(small_adata: AnnData) -> None:
+    """Test onesided_distances output format: Series with proper name."""
+    distance = Distance(metric="edistance")
+    result = distance.onesided_distances(
+        small_adata, groupby="group", selected_group="g0"
+    )
+
+    assert isinstance(result, pd.Series), "onesided_distances should return Series"
+    assert "edistance" in result.name, "Series name should contain 'edistance'"
+    assert "g0" in result.name, "Series name should contain selected group"
+
+
+# ============================================================================
+# Groups parameter filtering tests
+# ============================================================================
+
+
+def test_pairwise_groups_parameter_filters_output(small_adata: AnnData) -> None:
+    """Test that groups parameter filters the pairwise output correctly."""
+    distance = Distance(metric="edistance")
+
+    # Request only subset of groups
+    result = distance.pairwise(small_adata, groupby="group", groups=["g0", "g1"])
+
+    assert list(result.index) == ["g0", "g1"]
+    assert list(result.columns) == ["g0", "g1"]
+    assert "g2" not in result.index
+    assert "g2" not in result.columns
+
+
+def test_pairwise_groups_parameter_values_correct(small_adata: AnnData) -> None:
+    """Test that filtered pairwise values match full pairwise computation."""
+    distance = Distance(metric="edistance")
+
+    # Full pairwise
+    full_result = distance.pairwise(small_adata, groupby="group")
+
+    # Filtered pairwise
+    filtered_result = distance.pairwise(
+        small_adata, groupby="group", groups=["g0", "g2"]
+    )
+
+    # Values should match
+    np.testing.assert_allclose(
+        filtered_result.loc["g0", "g2"], full_result.loc["g0", "g2"], atol=1e-10
+    )
+    np.testing.assert_allclose(
+        filtered_result.loc["g0", "g0"], full_result.loc["g0", "g0"], atol=1e-10
+    )
+
+
+def test_onesided_groups_parameter_filters_output(small_adata: AnnData) -> None:
+    """Test that groups parameter filters onesided_distances output."""
+    distance = Distance(metric="edistance")
+
+    result = distance.onesided_distances(
+        small_adata, groupby="group", selected_group="g0", groups=["g0", "g1"]
+    )
+
+    assert len(result) == 2
+    assert "g0" in result.index
+    assert "g1" in result.index
+    assert "g2" not in result.index
+
+
+def test_pairwise_groups_parameter_with_bootstrap(small_adata: AnnData) -> None:
+    """Test groups parameter works with bootstrap."""
+    distance = Distance(metric="edistance")
+
+    distances, variances = distance.pairwise(
+        small_adata,
+        groupby="group",
+        groups=["g0", "g1"],
+        bootstrap=True,
+        n_bootstrap=10,
+        random_state=42,
+    )
+
+    assert list(distances.index) == ["g0", "g1"]
+    assert list(variances.index) == ["g0", "g1"]
+
+
+# ============================================================================
+# Edge case tests
+# ============================================================================
+
+
+def test_two_groups_only() -> None:
+    """Test with exactly two groups (minimum for pairwise comparison)."""
+    rng = np.random.default_rng(42)
+    n_groups = 2
+    cells_per_group = 10
+    n_features = 5
+    total_cells = n_groups * cells_per_group
+
+    cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(np.float32)
+    groups = [f"g{idx}" for idx in range(n_groups) for _ in range(cells_per_group)]
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])}
+    )
+
+    adata = AnnData(cpu_embedding.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
+
+    distance = Distance(metric="edistance")
+    result_df = distance.pairwise(adata, groupby="group")
+
+    assert result_df.shape == (2, 2)
+    assert result_df.loc["g0", "g0"] == pytest.approx(0.0, abs=1e-10)
+    assert result_df.loc["g1", "g1"] == pytest.approx(0.0, abs=1e-10)
+    assert result_df.loc["g0", "g1"] >= 0
+
+
+def test_many_groups() -> None:
+    """Test with many groups (stress test)."""
+    rng = np.random.default_rng(42)
+    n_groups = 20
+    cells_per_group = 5
+    n_features = 10
+    total_cells = n_groups * cells_per_group
+
+    cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(np.float32)
+    groups = [f"g{idx}" for idx in range(n_groups) for _ in range(cells_per_group)]
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])}
+    )
+
+    adata = AnnData(cpu_embedding.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
+
+    distance = Distance(metric="edistance")
+    result_df = distance.pairwise(adata, groupby="group")
+
+    assert result_df.shape == (20, 20)
+    # Check diagonal is all zeros
+    for i in range(n_groups):
+        assert result_df.iloc[i, i] == pytest.approx(0.0, abs=1e-10)
+
+
+def test_unequal_group_sizes() -> None:
+    """Test with unequal group sizes."""
+    rng = np.random.default_rng(42)
+    n_features = 5
+
+    # Groups with sizes 5, 20, 50
+    group_sizes = [5, 20, 50]
+    total_cells = sum(group_sizes)
+
+    cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(np.float32)
+    groups = []
+    for i, size in enumerate(group_sizes):
+        groups.extend([f"g{i}"] * size)
+
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(3)])}
+    )
+
+    adata = AnnData(cpu_embedding.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
+
+    distance = Distance(metric="edistance")
+    result_df = distance.pairwise(adata, groupby="group")
+
+    # Should still produce valid symmetric matrix
+    assert result_df.shape == (3, 3)
+    np.testing.assert_allclose(result_df.values, result_df.values.T, atol=1e-10)
+
+    # Verify against CPU reference
+    for g1, g2 in [("g0", "g1"), ("g0", "g2"), ("g1", "g2")]:
+        X = cpu_embedding[np.array(groups) == g1]
+        Y = cpu_embedding[np.array(groups) == g2]
+        expected = _compute_energy_distance_cpu(X, Y)
+        actual = result_df.loc[g1, g2]
+        np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-6)
+
+
+def test_distance_call_empty_array_error() -> None:
+    """Test that __call__ raises error for empty arrays."""
+    distance = Distance(metric="edistance")
+    X = np.array([], dtype=np.float32).reshape(0, 5)
+    Y = np.random.default_rng(42).normal(size=(10, 5)).astype(np.float32)
+
+    with pytest.raises(ValueError, match="empty"):
+        distance(X, Y)
+
+
+def test_distance_call_empty_second_array_error() -> None:
+    """Test that __call__ raises error when second array is empty."""
+    distance = Distance(metric="edistance")
+    X = np.random.default_rng(42).normal(size=(10, 5)).astype(np.float32)
+    Y = np.array([], dtype=np.float32).reshape(0, 5)
+
+    with pytest.raises(ValueError, match="empty"):
+        distance(X, Y)
+
+
+def test_bootstrap_empty_array_error() -> None:
+    """Test that bootstrap raises error for empty arrays."""
+    distance = Distance(metric="edistance")
+    X = np.array([], dtype=np.float32).reshape(0, 5)
+    Y = np.random.default_rng(42).normal(size=(10, 5)).astype(np.float32)
+
+    with pytest.raises(ValueError, match="empty"):
+        distance.bootstrap(X, Y, n_bootstrap=10)
+
+
+def test_missing_obsm_key_error(small_adata: AnnData) -> None:
+    """Test error when obsm_key doesn't exist in adata."""
+    distance = Distance(metric="edistance", obsm_key="X_nonexistent")
+
+    with pytest.raises(KeyError):
+        distance.pairwise(small_adata, groupby="group")
+
+
+def test_missing_layer_key_error(small_adata: AnnData) -> None:
+    """Test error when layer_key doesn't exist in adata."""
+    distance = Distance(metric="edistance", layer_key="nonexistent_layer")
+
+    with pytest.raises(KeyError):
+        distance.pairwise(small_adata, groupby="group")
+
+
+def test_non_categorical_groupby_error(small_adata: AnnData) -> None:
+    """Test error when groupby column is not categorical."""
+    # Convert to non-categorical
+    small_adata.obs["group_str"] = small_adata.obs["group"].astype(str)
+
+    distance = Distance(metric="edistance")
+
+    with pytest.raises((ValueError, TypeError)):
+        distance.pairwise(small_adata, groupby="group_str")
+
+
+def test_missing_groupby_column_error(small_adata: AnnData) -> None:
+    """Test error when groupby column doesn't exist."""
+    distance = Distance(metric="edistance")
+
+    with pytest.raises(KeyError):
+        distance.pairwise(small_adata, groupby="nonexistent_column")
+
+
+def test_single_cell_per_group() -> None:
+    """Test with single cell per group (edge case for within-group distance)."""
+    rng = np.random.default_rng(42)
+    n_groups = 3
+    cells_per_group = 1  # Single cell per group
+    n_features = 5
+    total_cells = n_groups * cells_per_group
+
+    cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(np.float32)
+    groups = [f"g{idx}" for idx in range(n_groups)]
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])}
+    )
+
+    adata = AnnData(cpu_embedding.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
+
+    distance = Distance(metric="edistance")
+    result_df = distance.pairwise(adata, groupby="group")
+
+    # All results should be finite (no NaN or inf)
+    assert np.all(np.isfinite(result_df.values)), "All distances should be finite"
+
+    # Diagonal (within-group) distances should be 0 for single-cell groups
+    for g in result_df.index:
+        assert result_df.loc[g, g] == 0.0, f"Within-group distance for {g} should be 0"
+
+    # Between-group distances should be positive (different cells)
+    for g1 in result_df.index:
+        for g2 in result_df.columns:
+            if g1 != g2:
+                assert result_df.loc[g1, g2] > 0, f"Distance ({g1}, {g2}) should be > 0"
+
+
+def test_single_cell_mixed_groups() -> None:
+    """Test with mix of single-cell and multi-cell groups."""
+    rng = np.random.default_rng(42)
+    n_features = 5
+
+    # g0: 1 cell, g1: 1 cell, g2: 5 cells
+    group_sizes = [1, 1, 5]
+    total_cells = sum(group_sizes)
+
+    cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(np.float32)
+    group_labels = []
+    for i, size in enumerate(group_sizes):
+        group_labels.extend([f"g{i}"] * size)
+
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(group_labels, categories=["g0", "g1", "g2"])}
+    )
+    adata = AnnData(cpu_embedding.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
+
+    distance = Distance(metric="edistance")
+    result_df = distance.pairwise(adata, groupby="group")
+
+    # All results should be finite
+    assert np.all(np.isfinite(result_df.values)), "All distances should be finite"
+
+    # Single-cell groups (g0, g1) should have 0 diagonal
+    assert result_df.loc["g0", "g0"] == 0.0, "g0 within-group should be 0"
+    assert result_df.loc["g1", "g1"] == 0.0, "g1 within-group should be 0"
+
+    # Multi-cell group (g2) can have non-zero diagonal (within-group variance)
+    # Just check it's finite
+    assert np.isfinite(result_df.loc["g2", "g2"]), "g2 within-group should be finite"
+
+    # Test onesided_distances with single-cell selected group
+    onesided = distance.onesided_distances(adata, groupby="group", selected_group="g0")
+    assert np.all(np.isfinite(onesided.values)), "Onesided distances should be finite"
+    assert onesided["g0"] == 0.0, "Self-distance should be 0"
+
+
+def test_high_dimensional_features() -> None:
+    """Test with very high dimensional features (beyond typical PCA)."""
+    rng = np.random.default_rng(42)
+    n_groups = 3
+    cells_per_group = 10
+    n_features = 1000  # Very high dimensional
+    total_cells = n_groups * cells_per_group
+
+    cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(np.float32)
+    groups = [f"g{idx}" for idx in range(n_groups) for _ in range(cells_per_group)]
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])}
+    )
+
+    adata = AnnData(cpu_embedding.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
+
+    distance = Distance(metric="edistance")
+    result_df = distance.pairwise(adata, groupby="group")
+
+    # Verify correctness against CPU reference
+    X = cpu_embedding[np.array(groups) == "g0"]
+    Y = cpu_embedding[np.array(groups) == "g1"]
+    expected = _compute_energy_distance_cpu(X, Y)
+    actual = result_df.loc["g0", "g1"]
+
+    np.testing.assert_allclose(
+        actual, expected, rtol=1e-4, atol=1e-5, err_msg="High-dimensional mismatch"
+    )
+
+
+def test_similar_distributions_small_distance() -> None:
+    """Test that similar distributions have small distance.
+
+    Note: Energy distance measures distributional difference. Two groups
+    sampled from the same underlying distribution will have distance
+    close to 0 (but not exactly 0 due to sampling variation).
+
+    Two groups with identical data points do NOT have 0 distance because
+    the formula uses different pair counts for between-group vs within-group.
+    """
+    rng = np.random.default_rng(42)
+    n_features = 10
+
+    # Create two groups sampled from the same distribution
+    # With enough samples, their distance should be small
+    cells_per_group = 100
+    g0_data = rng.normal(size=(cells_per_group, n_features)).astype(np.float32)
+    g1_data = rng.normal(size=(cells_per_group, n_features)).astype(np.float32)
+    cpu_embedding = np.vstack([g0_data, g1_data])
+
+    groups = ["g0"] * cells_per_group + ["g1"] * cells_per_group
+    obs = pd.DataFrame({"group": pd.Categorical(groups, categories=["g0", "g1"])})
+
+    adata = AnnData(cpu_embedding.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
+
+    distance = Distance(metric="edistance")
+    result_df = distance.pairwise(adata, groupby="group")
+
+    # Distance between samples from same distribution should be small
+    # (close to 0, but not exactly due to sampling)
+    assert abs(result_df.loc["g0", "g1"]) < 0.5, (
+        f"Distance between similar distributions should be small, "
+        f"got {result_df.loc['g0', 'g1']}"
+    )
+
+
+def test_different_distributions_larger_distance() -> None:
+    """Test that different distributions have larger distance than similar ones."""
+    rng = np.random.default_rng(42)
+    n_features = 10
+    cells_per_group = 50
+
+    # g0 and g1: same distribution (N(0, 1))
+    # g2: different distribution (N(5, 1))
+    g0_data = rng.normal(loc=0, size=(cells_per_group, n_features))
+    g1_data = rng.normal(loc=0, size=(cells_per_group, n_features))
+    g2_data = rng.normal(loc=5, size=(cells_per_group, n_features))
+    cpu_embedding = np.vstack([g0_data, g1_data, g2_data]).astype(np.float32)
+
+    groups = (
+        ["g0"] * cells_per_group + ["g1"] * cells_per_group + ["g2"] * cells_per_group
+    )
+    obs = pd.DataFrame({"group": pd.Categorical(groups, categories=["g0", "g1", "g2"])})
+
+    adata = AnnData(cpu_embedding.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
+
+    distance = Distance(metric="edistance")
+    result_df = distance.pairwise(adata, groupby="group")
+
+    # Distance between same distributions should be smaller than different
+    d_same = abs(result_df.loc["g0", "g1"])
+    d_diff = result_df.loc["g0", "g2"]
+
+    assert d_diff > d_same, (
+        f"Distance to different distribution ({d_diff:.4f}) should be larger "
+        f"than distance between same distributions ({d_same:.4f})"
+    )
