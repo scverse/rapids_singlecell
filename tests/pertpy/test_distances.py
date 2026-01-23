@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from anndata import AnnData
+from scipy.spatial.distance import cdist
 
 from rapids_singlecell.pertpy_gpu import Distance, MeanVar
 
@@ -205,8 +206,6 @@ def test_distance_class_repr() -> None:
 
 def _compute_mean_euclidean_distance_cpu(X: np.ndarray, Y: np.ndarray) -> float:
     """Compute mean Euclidean distance between all pairs in X and Y (CPU reference)."""
-    from scipy.spatial.distance import cdist
-
     if X is Y or np.array_equal(X, Y):
         # Within-group: compute upper triangle only
         dists = cdist(X, X, metric="euclidean")

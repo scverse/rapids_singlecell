@@ -11,40 +11,73 @@ import cupy as cp
 import numpy as np
 from cuml.common.kernel_utils import cuda_kernel_factory
 
+# Common tile sizes for feature dimension
+# Larger tiles = fewer iterations but more shared memory
+TILE_SIZES = [32, 50, 64]
 
-def _choose_feat_tile(n_features: int) -> int:
+# Cache for device shared memory limit (lazy initialization)
+_MAX_SHARED_MEM: int | None = None
+
+
+def _get_max_shared_mem() -> int:
+    """Get maximum shared memory per block for the current device (cached)."""
+    global _MAX_SHARED_MEM
+    if _MAX_SHARED_MEM is None:
+        device = cp.cuda.Device()
+        _MAX_SHARED_MEM = device.attributes["MaxSharedMemoryPerBlock"]
+    return _MAX_SHARED_MEM
+
+
+def _choose_feat_tile(
+    n_features: int, max_shared_bytes: int, cell_tile: int, dtype_size: int
+) -> int:
     """
-    Choose optimal feat_tile based on n_features to minimize wasted work.
+    Choose optimal feat_tile based on n_features and shared memory limits.
 
     Prioritizes exact divisibility to avoid partially-filled final tiles,
     which incur full synchronization overhead for little work.
 
     Parameters
     ----------
-    n_features : int
+    n_features
         Number of features in the embedding
+    max_shared_bytes
+        Maximum shared memory available per block
+    cell_tile
+        Cell tile size (affects shared memory usage)
+    dtype_size
+        Size of data type in bytes (4 for float32, 8 for float64)
 
     Returns
     -------
     int
-        Optimal feat_tile (32, 50, or 64)
+        Optimal feat_tile that fits in shared memory
     """
+    # Filter tile sizes that fit in shared memory
+    # Shared memory usage: cell_tile * feat_tile * dtype_size + overhead for warp_sums
+    warp_sums_overhead = 32 * dtype_size  # warp_sums[32] in kernel
+    available_shared = max_shared_bytes - warp_sums_overhead
+
+    valid_tiles = [
+        t for t in TILE_SIZES if cell_tile * t * dtype_size <= available_shared
+    ]
+
+    if not valid_tiles:
+        # Fallback: compute max possible tile size
+        max_feat_tile = available_shared // (cell_tile * dtype_size)
+        return max(16, max_feat_tile)  # Minimum tile of 16
+
     # Check exact divisibility - prefer larger tiles (fewer iterations)
-    # 64 first since it gives fewest tiles when it divides evenly
-    if n_features % 64 == 0:
-        return 64
-    if n_features % 50 == 0:
-        return 50
-    if n_features % 32 == 0:
-        return 32
+    for tile in reversed(valid_tiles):
+        if n_features % tile == 0:
+            return tile
 
     # No exact match - minimize (n_tiles, waste)
-    # Start with 50 as baseline (common PCA default)
-    best_tile = 50
-    best_n_tiles = (n_features + 49) // 50
-    best_waste = 50 - (n_features % 50 or 50)
+    best_tile = valid_tiles[0]
+    best_n_tiles = (n_features + best_tile - 1) // best_tile
+    best_waste = best_tile - (n_features % best_tile or best_tile)
 
-    for tile in [32, 64]:
+    for tile in valid_tiles[1:]:
         n_tiles = (n_features + tile - 1) // tile
         remainder = n_features % tile
         waste = 0 if remainder == 0 else tile - remainder
@@ -66,27 +99,30 @@ def get_compute_group_distances_kernel(
 
     Parameters
     ----------
-    dtype : dtype
+    dtype
         Data type for embeddings (float32 or float64)
-    n_features : int
+    n_features
         Number of features per cell
 
     Returns
     -------
-    kernel : callable
+    kernel
         Compiled CUDA kernel
-    shared_mem_bytes : int
+    shared_mem_bytes
         Required shared memory in bytes
     """
     dtype = np.dtype(dtype)
     is_double = dtype == np.float64
     sqrt_fn = "sqrt" if is_double else "sqrtf"
+    dtype_size = dtype.itemsize
 
     # Cell tile based on dtype to avoid register pressure
     cell_tile = 16 if is_double else 32
 
-    # Auto-select feat_tile based on n_features
-    feat_tile = _choose_feat_tile(n_features)
+    # Auto-select feat_tile based on n_features and available shared memory
+    feat_tile = _choose_feat_tile(
+        n_features, _get_max_shared_mem(), cell_tile, dtype_size
+    )
 
     kernel_code = """
 (const {0}* __restrict__ embedding,
@@ -232,7 +268,6 @@ def get_compute_group_distances_kernel(
         f"edistance_kernel_{cell_tile}x{feat_tile}_{precision_suffix}",
     )
 
-    dtype_size = cp.dtype(dtype).itemsize
     shared_mem_bytes = cell_tile * feat_tile * dtype_size
 
     return kernel, shared_mem_bytes

@@ -26,11 +26,11 @@ class Distance:
 
     Parameters
     ----------
-    metric : str
+    metric
         Distance metric. Currently supported: 'edistance' (energy distance).
-    layer_key : str | None
+    layer_key
         Key in adata.layers for cell data. Mutually exclusive with 'obsm_key'.
-    obsm_key : str | None
+    obsm_key
         Key in adata.obsm for embeddings. Mutually exclusive with 'layer_key'.
         Defaults to 'X_pca' if neither is specified.
 
@@ -51,12 +51,12 @@ class Distance:
         obsm_key: str | None = None,
     ):
         """Initialize Distance calculator with specified metric."""
-        if layer_key and obsm_key:
+        if layer_key is not None and obsm_key is not None:
             raise ValueError(
                 "Cannot use 'layer_key' and 'obsm_key' at the same time.\n"
                 "Please provide only one of the two keys."
             )
-        if not layer_key and not obsm_key:
+        if layer_key is None and obsm_key is None:
             obsm_key = "X_pca"
 
         self.metric = metric
@@ -93,14 +93,14 @@ class Distance:
 
         Parameters
         ----------
-        X : np.ndarray | cp.ndarray
+        X
             First array of shape (n_samples_x, n_features)
-        Y : np.ndarray | cp.ndarray
+        Y
             Second array of shape (n_samples_y, n_features)
 
         Returns
         -------
-        distance : float
+        float
             Distance between X and Y
 
         Examples
@@ -131,17 +131,17 @@ class Distance:
 
         Parameters
         ----------
-        adata : AnnData
+        adata
             Annotated data matrix
-        groupby : str
+        groupby
             Key in adata.obs for grouping cells
-        groups : Sequence[str] | None
+        groups
             Specific groups to compute (if None, use all)
-        bootstrap : bool
+        bootstrap
             Whether to compute bootstrap variance estimates
-        n_bootstrap : int
+        n_bootstrap
             Number of bootstrap iterations (if bootstrap=True)
-        random_state : int
+        random_state
             Random seed for reproducibility
 
         Returns
@@ -180,24 +180,24 @@ class Distance:
 
         Parameters
         ----------
-        adata : AnnData
+        adata
             Annotated data matrix
-        groupby : str
+        groupby
             Key in adata.obs for grouping cells
-        selected_group : str
+        selected_group
             Reference group to compute distances from
-        groups : Sequence[str] | None
+        groups
             Specific groups to compute distances to (if None, use all)
-        bootstrap : bool
+        bootstrap
             Whether to compute bootstrap variance estimates
-        n_bootstrap : int
+        n_bootstrap
             Number of bootstrap iterations (if bootstrap=True)
-        random_state : int
+        random_state
             Random seed for reproducibility
 
         Returns
         -------
-        distances : pd.Series | tuple[pd.Series, pd.Series]
+        distances
             Series containing distances from selected_group to all other groups.
             If bootstrap=True, returns tuple of (distances, distances_var).
 
@@ -238,18 +238,18 @@ class Distance:
 
         Parameters
         ----------
-        X : np.ndarray | cp.ndarray
+        X
             First array of shape (n_samples_x, n_features)
-        Y : np.ndarray | cp.ndarray
+        Y
             Second array of shape (n_samples_y, n_features)
-        n_bootstrap : int
+        n_bootstrap
             Number of bootstrap iterations
-        random_state : int
+        random_state
             Random seed for reproducibility
 
         Returns
         -------
-        result : MeanVar
+        result
             Named tuple containing mean and variance of bootstrapped distances
 
         Examples
@@ -287,22 +287,22 @@ class Distance:
 
         Parameters
         ----------
-        adata : AnnData
+        adata
             Annotated data matrix
-        groupby : str
+        groupby
             Key in adata.obs for grouping cells
-        group_a : str
+        group_a
             First group name
-        group_b : str
+        group_b
             Second group name
-        n_bootstrap : int
+        n_bootstrap
             Number of bootstrap iterations
-        random_state : int
+        random_state
             Random seed for reproducibility
 
         Returns
         -------
-        result : MeanVar
+        result
             Named tuple containing mean and variance of bootstrapped distances
 
         Examples

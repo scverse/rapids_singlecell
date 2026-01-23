@@ -18,7 +18,7 @@ class BaseMetric(ABC):
 
     Parameters
     ----------
-    obsm_key : str
+    obsm_key
         Key in adata.obsm for embeddings (default: 'X_pca')
     """
 
@@ -42,17 +42,17 @@ class BaseMetric(ABC):
 
         Parameters
         ----------
-        adata : AnnData
+        adata
             Annotated data matrix
-        groupby : str
+        groupby
             Key in adata.obs for grouping cells
-        groups : Sequence[str] | None
+        groups
             Specific groups to compute (if None, use all)
-        bootstrap : bool
+        bootstrap
             Whether to compute bootstrap variance estimates
-        n_bootstrap : int
+        n_bootstrap
             Number of bootstrap iterations (if bootstrap=True)
-        random_state : int
+        random_state
             Random seed for reproducibility
 
         Returns
@@ -78,19 +78,19 @@ class BaseMetric(ABC):
 
         Parameters
         ----------
-        adata : AnnData
+        adata
             Annotated data matrix
-        groupby : str
+        groupby
             Key in adata.obs for grouping cells
-        selected_group : str
+        selected_group
             Reference group to compute distances from
-        groups : Sequence[str] | None
+        groups
             Specific groups to compute distances to (if None, use all)
-        bootstrap : bool
+        bootstrap
             Whether to compute bootstrap variance estimates
-        n_bootstrap : int
+        n_bootstrap
             Number of bootstrap iterations (if bootstrap=True)
-        random_state : int
+        random_state
             Random seed for reproducibility
 
         Returns
@@ -117,24 +117,24 @@ class BaseMetric(ABC):
 
         Parameters
         ----------
-        adata : AnnData
+        adata
             Annotated data matrix
-        groupby : str
+        groupby
             Key in adata.obs for grouping cells
-        group_a : str
+        group_a
             First group name
-        group_b : str
+        group_b
             Second group name
-        n_bootstrap : int
+        n_bootstrap
             Number of bootstrap iterations
-        random_state : int
+        random_state
             Random seed for reproducibility
 
         Returns
         -------
-        mean : float
+        mean
             Bootstrap mean distance
-        variance : float
+        variance
             Bootstrap variance
         """
         raise NotImplementedError(
