@@ -892,6 +892,63 @@ def test_correctness_float64_small() -> None:
 
 
 # ============================================================================
+# Block size consistency test
+# ============================================================================
+
+
+def test_block_size_consistency() -> None:
+    """Test that both block sizes (1024 and 256) produce identical results.
+
+    This test runs on GPUs that support both block sizes (Ampere+, CC >= 8.0)
+    and verifies both code paths produce the same results.
+    """
+    from rapids_singlecell.pertpy_gpu._metrics._kernels import _edistance_kernel
+
+    # Check if GPU supports both block sizes (Ampere+)
+    device_attrs = _edistance_kernel._get_device_attrs()
+    if device_attrs["cc_major"] < 8:
+        pytest.skip("GPU does not support both block sizes (requires CC >= 8.0)")
+
+    rng = np.random.default_rng(42)
+    n_groups = 3
+    cells_per_group = 10
+    n_features = 20
+    total_cells = n_groups * cells_per_group
+
+    # Use float64 since block size difference only matters for float64 on pre-Ampere
+    cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(np.float64)
+    groups = [f"g{idx}" for idx in range(n_groups) for _ in range(cells_per_group)]
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])}
+    )
+
+    adata = AnnData(cpu_embedding.copy().astype(np.float32), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float64)
+
+    # Get result with default block size (1024 for Ampere+)
+    distance = Distance(metric="edistance")
+    result_1024 = distance.pairwise(adata, groupby="group")
+
+    # Temporarily override cc_major to force 256 block size
+    original_cc = device_attrs["cc_major"]
+    try:
+        _edistance_kernel._DEVICE_ATTRS["cc_major"] = 7  # Force pre-Ampere path
+        distance_256 = Distance(metric="edistance")
+        result_256 = distance_256.pairwise(adata, groupby="group")
+    finally:
+        _edistance_kernel._DEVICE_ATTRS["cc_major"] = original_cc  # Restore
+
+    # Results should be identical (within floating point tolerance)
+    np.testing.assert_allclose(
+        result_1024.values,
+        result_256.values,
+        rtol=1e-5,
+        atol=1e-6,
+        err_msg="Block size 1024 vs 256 produced different results",
+    )
+
+
+# ============================================================================
 # Distance axioms tests (semimetric properties)
 # ============================================================================
 
