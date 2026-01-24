@@ -44,7 +44,7 @@ jobs:
           remove-haskell: true
           remove-codeql: true
           remove-docker-images: true
-          root-reserve-mb: 45000
+          root-reserve-mb: 35000
           swap-size-mb: 1048
 
       - name: Check out the repo
