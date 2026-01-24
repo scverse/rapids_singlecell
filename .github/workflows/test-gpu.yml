@@ -87,7 +87,19 @@ jobs:
         run: uvx hatch -v env create ${{ matrix.env.name }}
 
       - name: Run tests
-        run: uvx hatch run ${{ matrix.env.name }}:run
+        run: |
+          if [[ "${{ matrix.env.name }}" == *"stable"* ]]; then
+            uvx hatch run ${{ matrix.env.name }}:run-cov
+          else
+            uvx hatch run ${{ matrix.env.name }}:run
+          fi
+
+      - name: Upload coverage to Codecov
+        if: contains(matrix.env.name, 'stable')
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
 
   test-prerelease:
     name: Test (${{ matrix.env.name }})

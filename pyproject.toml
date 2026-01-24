@@ -45,6 +45,7 @@ doc = [
 ]
 test-minimal = [
     "pytest",
+    "pytest-cov",
     "anyio",
     "pooch",
     "profimp",
