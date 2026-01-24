@@ -88,17 +88,31 @@ jobs:
 
       - name: Run tests
         run: |
+          mkdir -p test-data
           if [[ "${{ matrix.env.name }}" == *"stable"* ]]; then
-            uvx hatch run ${{ matrix.env.name }}:run-cov
+            uvx hatch run ${{ matrix.env.name }}:run-cov -v --color=yes --junitxml=test-data/test-results.xml
+            uvx hatch run ${{ matrix.env.name }}:cov-combine
+            uvx hatch run ${{ matrix.env.name }}:coverage xml
+            uvx hatch run ${{ matrix.env.name }}:cov-report
           else
-            uvx hatch run ${{ matrix.env.name }}:run
+            uvx hatch run ${{ matrix.env.name }}:run -v --color=yes
           fi
 
-      - name: Upload coverage to Codecov
+      - name: Upload test results
+        if: ${{ !cancelled() && contains(matrix.env.name, 'stable') }}
+        uses: codecov/codecov-action@v5
+        with:
+          report_type: test_results
+          files: test-data/test-results.xml
+          use_oidc: true
+          fail_ci_if_error: false
+
+      - name: Upload coverage data
         if: contains(matrix.env.name, 'stable')
         uses: codecov/codecov-action@v5
         with:
-          files: coverage.xml
+          files: test-data/coverage.xml
+          use_oidc: true
           fail_ci_if_error: false
 
   test-prerelease:

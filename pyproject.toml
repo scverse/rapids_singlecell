@@ -136,3 +136,19 @@ packages = [ 'src/rapids_singlecell', 'src/testing' ]
 [tool.codespell]
 skip = '*.ipynb,*.csv'
 ignore-words-list = "nd"
+
+[tool.coverage.run]
+data_file = "test-data/coverage"
+source_pkgs = [ "rapids_singlecell" ]
+omit = [ "tests/*", "src/testing/*" ]
+
+[tool.coverage.xml]
+output = "test-data/coverage.xml"
+
+[tool.coverage.paths]
+source = [ "./src", "**/site-packages" ]
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+]
