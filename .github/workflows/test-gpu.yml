@@ -90,10 +90,11 @@ jobs:
         run: |
           mkdir -p test-data
           if [[ "${{ matrix.env.name }}" == *"stable"* ]]; then
-            uvx hatch run ${{ matrix.env.name }}:run-cov -v --color=yes --junitxml=test-data/test-results.xml
-            uvx hatch run ${{ matrix.env.name }}:cov-combine
-            uvx hatch run ${{ matrix.env.name }}:coverage xml
-            uvx hatch run ${{ matrix.env.name }}:cov-report
+            hatch run ${{ matrix.env.name }}:run-cov -v --color=yes
+            hatch run ${{ matrix.env.name }}:cov-combine
+            hatch run ${{ matrix.env.name }}:coverage xml
+            hatch run ${{ matrix.env.name }}:cov-report
+
           else
             uvx hatch run ${{ matrix.env.name }}:run -v --color=yes
           fi
