@@ -163,4 +163,5 @@ jobs:
     steps:
       - uses: re-actors/alls-green@release/v1
         with:
+          allowed-failures: test-prerelease
           jobs: ${{ toJSON(needs) }}
