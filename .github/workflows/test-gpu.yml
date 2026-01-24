@@ -91,7 +91,6 @@ jobs:
           mkdir -p test-data
           if [[ "${{ matrix.env.name }}" == *"stable"* ]]; then
             uvx hatch run ${{ matrix.env.name }}:run-cov -v --color=yes
-            uvx hatch run ${{ matrix.env.name }}:cov-combine
             uvx hatch run ${{ matrix.env.name }}:coverage xml
             uvx hatch run ${{ matrix.env.name }}:cov-report
 
