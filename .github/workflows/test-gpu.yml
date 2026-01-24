@@ -120,10 +120,9 @@ jobs:
   remove-label:
     name: Remove 'run-gpu-ci' Label
     runs-on: ubuntu-latest
-    if: ${{ always() && github.event_name == 'pull_request' }}
+    if: ${{ always() && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-gpu-ci') }}
     steps:
       - uses: actions-ecosystem/action-remove-labels@v1
-        if: contains(github.event.pull_request.labels.*.name, 'run-gpu-ci')
         with:
           labels: 'run-gpu-ci'
           github_token: ${{ secrets.GITHUB_TOKEN }}
