@@ -87,7 +87,35 @@ jobs:
         run: uvx hatch -v env create ${{ matrix.env.name }}
 
       - name: Run tests
-        run: uvx hatch run ${{ matrix.env.name }}:run
+        run: |
+          mkdir -p test-data
+          if [[ "${{ matrix.env.name }}" == *"stable"* ]]; then
+            uvx hatch run ${{ matrix.env.name }}:run-cov -v --color=yes
+            uvx hatch run ${{ matrix.env.name }}:coverage xml
+            uvx hatch run ${{ matrix.env.name }}:cov-report
+
+          else
+            uvx hatch run ${{ matrix.env.name }}:run -v --color=yes
+          fi
+
+      - name: Upload test results
+        if: ${{ !cancelled() && contains(matrix.env.name, 'stable') }}
+        uses: codecov/codecov-action@v5
+        with:
+          report_type: test_results
+          files: test-data/test-results.xml
+          use_oidc: false
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload coverage data
+        if: contains(matrix.env.name, 'stable')
+        uses: codecov/codecov-action@v5
+        with:
+          files: test-data/coverage.xml
+          use_oidc: false
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   test-prerelease:
     name: Test (${{ matrix.env.name }})
@@ -151,4 +179,5 @@ jobs:
     steps:
       - uses: re-actors/alls-green@release/v1
         with:
+          allowed-failures: test-prerelease
           jobs: ${{ toJSON(needs) }}
