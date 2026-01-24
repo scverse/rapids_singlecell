@@ -8,6 +8,7 @@ from importlib.metadata import metadata
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 import anndata  # noqa
+import fast_array_utils  # noqa
 
 if TYPE_CHECKING:
     from sphinx.application import Sphinx
@@ -119,6 +120,7 @@ intersphinx_mapping = {
     "pymde": ("https://pymde.org", None),
     "scanpy": ("https://scanpy.readthedocs.io/en/stable/", None),
     "squidpy": ("https://squidpy.readthedocs.io/en/stable/", None),
+    "pertpy": ("https://pertpy.readthedocs.io/en/stable/", None),
     "seaborn": ("https://seaborn.pydata.org/", None),
     "decoupler": ("https://decoupler.readthedocs.io/en/latest/", None),
     "rmm": ("https://docs.rapids.ai/api/rmm/stable/", None),
@@ -172,6 +174,7 @@ nitpick_ignore = [
     ("py:class", "scipy.sparse.base.spmatrix"),
     ("py:meth", "pandas.DataFrame.iloc"),
     ("py:meth", "pandas.DataFrame.loc"),
+    ("py:class", "pandas.core.series.Series"),
     ("py:class", "anndata._core.views.ArrayView"),
     ("py:class", "anndata._core.raw.Raw"),
     ("py:class", "scanpy._utils.Empty"),
