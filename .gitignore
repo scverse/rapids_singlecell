@@ -37,3 +37,12 @@ __pycache__/
 # Test/coverage caches
 /.pytest_cache/
 /.coverage
+
+# Ai Agents and Files
+.vscode/
+.cursor/
+.claude/
+Claude.md
+
+# tmp_scripts
+tmp_scripts/
