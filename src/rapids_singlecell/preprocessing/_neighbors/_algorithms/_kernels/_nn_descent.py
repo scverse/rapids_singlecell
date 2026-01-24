@@ -18,7 +18,8 @@ void computeDistances_Cosine(const float* data,
 
     float sum_i1 = 0.0f;
     for (long long int d = 0; d < n_features; d++) {
-        sum_i1 += powf(data[i1 * n_features + d], 2);
+        float val = data[i1 * n_features + d];
+        sum_i1 = fmaf(val, val, sum_i1);
     }
     for (long long int j = 0; j < n_neighbors; j++){
         long long int i2 = static_cast<long long>(pairs[i1 * n_neighbors + j]);
@@ -26,8 +27,10 @@ void computeDistances_Cosine(const float* data,
 
         float sum_i2 = 0.0f;
         for (long long int d = 0; d < n_features; d++) {
-            dist += data[i1 * n_features + d] * data[i2 * n_features + d];
-            sum_i2 += powf(data[i2 * n_features + d], 2);
+            float val1 = data[i1 * n_features + d];
+            float val2 = data[i2 * n_features + d];
+            dist = fmaf(val1, val2, dist);
+            sum_i2 = fmaf(val2, val2, sum_i2);
         }
         out[i1 * n_neighbors + j] = 1-dist/ (sqrtf(sum_i1) * sqrtf(sum_i2));
     }
@@ -58,7 +61,7 @@ void computeDistances(const float* data,
         float dist = 0.0f;
         for (long long int d = 0; d < n_features; d++) {
             float diff = data[i1 * n_features + d] - data[i2 * n_features + d];
-            dist += powf(diff, 2);
+            dist = fmaf(diff, diff, dist);
         }
         out[i1 * n_neighbors + j] = dist;
     }
@@ -90,8 +93,7 @@ void computeDistances_inner(const float* data,
         float dist = 0.0f;
 
         for (long long int d = 0; d < n_features; d++) {
-            dist += data[i1 * n_features + d] * data[i2 * n_features + d];
-
+            dist = fmaf(data[i1 * n_features + d], data[i2 * n_features + d], dist);
         }
         out[i1 * n_neighbors + j] =  dist;
     }
