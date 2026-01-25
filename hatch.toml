@@ -5,7 +5,6 @@ features = [ "dev" ]
 [envs.hatch-test]
 default-args = [  ]
 features = [ "test" ]
-scripts.run = "pytest"
 
 # Select CUDA feature per matrix
 overrides.matrix.cuda.features = [
