@@ -1019,6 +1019,20 @@ def rank_genes_groups(
             )
 
 
+if TYPE_CHECKING:
+    from warnings import deprecated
+else:
+    if sys.version_info >= (3, 13):
+        from warnings import deprecated as _deprecated
+    else:
+        from typing_extensions import deprecated as _deprecated
+    deprecated = partial(_deprecated, category=FutureWarning)
+
+
+@deprecated(
+    "rank_genes_groups_logreg is deprecated. "
+    "Use rank_genes_groups(method='logreg') instead."
+)
 def rank_genes_groups_logreg(
     adata: AnnData,
     groupby: str,
@@ -1031,59 +1045,6 @@ def rank_genes_groups_logreg(
     layer: str | None = None,
     **kwds,
 ) -> None:
-    """
-    Rank genes for characterizing groups using logistic regression.
-
-    .. deprecated::
-        Use :func:`rank_genes_groups` with ``method='logreg'`` instead.
-
-    This is a convenience wrapper around :func:`rank_genes_groups` with
-    ``method='logreg'``.
-
-    Parameters
-    ----------
-    adata
-        Annotated data matrix.
-    groupby
-        The key of the observations grouping to consider.
-    groups
-        Subset of groups, e.g. [`'g1'`, `'g2'`, `'g3'`], to which comparison
-        shall be restricted, or `'all'` (default), for all groups.
-    use_raw
-        Use `raw` attribute of `adata` if present.
-    reference
-        If `'rest'`, compare each group to the union of the rest of the group.
-        If a group identifier, compare with respect to this group.
-    n_genes
-        The number of genes that appear in the returned tables.
-        Defaults to all genes.
-    key_added
-        The key in `adata.uns` information is saved to.
-    layer
-        Key from `adata.layers` whose value will be used to perform tests on.
-    **kwds
-        Additional arguments passed to :class:`cuml.linear_model.LogisticRegression`.
-
-    Returns
-    -------
-    Updates `adata` with the following fields in `.uns['rank_genes_groups']`:
-
-    **names** : structured `np.ndarray`
-        Structured array to be indexed by group id storing the gene
-        names. Ordered according to scores.
-    **scores** : structured `np.ndarray`
-        Structured array to be indexed by group id storing the z-score
-        underlying the computation of a p-value for each gene for each
-        group. Ordered according to scores.
-    """
-    import warnings
-
-    warnings.warn(
-        "rank_genes_groups_logreg is deprecated. "
-        "Use rank_genes_groups(method='logreg') instead.",
-        FutureWarning,
-        stacklevel=2,
-    )
     rank_genes_groups(
         adata,
         groupby,
