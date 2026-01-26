@@ -8,13 +8,15 @@ import numpy as np
 import pandas as pd
 from scanpy.get import _get_obs_rep
 
-from rapids_singlecell.preprocessing._hvg._kernels._poisson import (
-    _expected_zeros_kernel,
-)
+from rapids_singlecell._compat import DaskArray
 from rapids_singlecell.preprocessing._qc import _basic_qc
 from rapids_singlecell.preprocessing._utils import (
     _check_gpu_X,
     _check_nonnegative_integers,
+)
+
+from ._kernels._poisson import (
+    _expected_zeros_kernel,
 )
 
 if TYPE_CHECKING:
@@ -63,8 +65,8 @@ def _poisson_gene_selection(
         )
 
     X = _get_obs_rep(adata, layer=layer)
-    _check_gpu_X(X)
-
+    _check_gpu_X(X, allow_dask=True)
+    check_values = False if isinstance(X, DaskArray) else check_values
     if check_values and not _check_nonnegative_integers(X):
         warnings.warn(
             "`flavor='poisson_gene_selection'` expects raw count data, "
