@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import cupy as cp
 import numpy as np
 import pytest
 import scanpy as sc
 import scipy.sparse as sp
+from scipy.stats import rankdata, tiecorrect
 
 import rapids_singlecell as rsc
 
@@ -370,3 +372,186 @@ def test_rank_genes_groups_wilcoxon_pts(reference, pre_load):
             np.testing.assert_allclose(
                 gpu_pts_rest[col].values, cpu_pts_rest[col].values, rtol=1e-5, atol=1e-6
             )
+
+
+# ============================================================================
+# Tests for ranking and tie correction kernels (edge cases from scipy)
+# ============================================================================
+
+
+class TestRankingKernel:
+    """Tests for _average_ranks based on scipy.stats.rankdata edge cases."""
+
+    @pytest.fixture
+    def average_ranks(self):
+        """Import the ranking function."""
+        from rapids_singlecell.tools._rank_gene_groups import _average_ranks
+
+        return _average_ranks
+
+    @staticmethod
+    def _to_gpu(values):
+        """Convert 1D values to GPU column matrix with F-order."""
+        arr = np.asarray(values, dtype=np.float64).reshape(-1, 1)
+        return cp.asarray(arr, order="F")
+
+    def test_basic_ranking(self, average_ranks):
+        """Test basic average ranking on simple data."""
+        values = [3.0, 1.0, 2.0]
+        result = average_ranks(self._to_gpu(values))
+        expected = rankdata(values, method="average")
+        np.testing.assert_allclose(result.get().flatten(), expected)
+
+    def test_all_ties(self, average_ranks):
+        """All identical values should get the average rank."""
+        values = [5.0, 5.0, 5.0, 5.0]
+        result = average_ranks(self._to_gpu(values))
+        expected = rankdata(values, method="average")
+        np.testing.assert_allclose(result.get().flatten(), expected)
+
+    def test_no_ties(self, average_ranks):
+        """All unique values should get sequential ranks."""
+        values = [1.0, 2.0, 3.0, 4.0, 5.0]
+        result = average_ranks(self._to_gpu(values))
+        expected = rankdata(values, method="average")
+        np.testing.assert_allclose(result.get().flatten(), expected)
+
+    def test_mixed_ties(self, average_ranks):
+        """Mix of ties and unique values."""
+        values = [1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0]
+        result = average_ranks(self._to_gpu(values))
+        expected = rankdata(values, method="average")
+        np.testing.assert_allclose(result.get().flatten(), expected)
+
+    def test_negative_values(self, average_ranks):
+        """Test with negative values."""
+        values = [-3.0, -1.0, -2.0, 0.0, 1.0]
+        result = average_ranks(self._to_gpu(values))
+        expected = rankdata(values, method="average")
+        np.testing.assert_allclose(result.get().flatten(), expected)
+
+    def test_single_element(self, average_ranks):
+        """Single element should have rank 1."""
+        values = [42.0]
+        result = average_ranks(self._to_gpu(values))
+        np.testing.assert_allclose(result.get().flatten(), [1.0])
+
+    def test_two_elements_tied(self, average_ranks):
+        """Two tied elements should both have rank 1.5."""
+        values = [7.0, 7.0]
+        result = average_ranks(self._to_gpu(values))
+        np.testing.assert_allclose(result.get().flatten(), [1.5, 1.5])
+
+    def test_multiple_columns(self, average_ranks):
+        """Test ranking across multiple columns independently."""
+        col0 = [3.0, 1.0, 2.0]
+        col1 = [1.0, 1.0, 2.0]
+        data = np.column_stack([col0, col1]).astype(np.float64)
+        result = average_ranks(cp.asarray(data, order="F"))
+
+        np.testing.assert_allclose(result.get()[:, 0], rankdata(col0, method="average"))
+        np.testing.assert_allclose(result.get()[:, 1], rankdata(col1, method="average"))
+
+
+class TestTieCorrectionKernel:
+    """Tests for _tie_correction based on scipy.stats.tiecorrect edge cases."""
+
+    @pytest.fixture
+    def tie_correction(self):
+        """Import the tie correction function and ranking function."""
+        from rapids_singlecell.tools._rank_gene_groups import (
+            _average_ranks,
+            _tie_correction,
+        )
+
+        return _tie_correction, _average_ranks
+
+    @staticmethod
+    def _to_gpu(values):
+        """Convert 1D values to GPU column matrix with F-order."""
+        arr = np.asarray(values, dtype=np.float64).reshape(-1, 1)
+        return cp.asarray(arr, order="F")
+
+    def test_no_ties(self, tie_correction):
+        """No ties should give correction factor 1.0."""
+        _tie_correction, _average_ranks = tie_correction
+
+        values = [1.0, 2.0, 3.0, 4.0, 5.0]
+        _, sorted_vals = _average_ranks(self._to_gpu(values), return_sorted=True)
+        result = _tie_correction(sorted_vals)
+
+        expected = tiecorrect(rankdata(values))
+        np.testing.assert_allclose(result.get()[0], expected, rtol=1e-10)
+
+    def test_all_ties(self, tie_correction):
+        """All tied values should give correction factor 0.0."""
+        _tie_correction, _average_ranks = tie_correction
+
+        values = [5.0, 5.0, 5.0, 5.0]
+        _, sorted_vals = _average_ranks(self._to_gpu(values), return_sorted=True)
+        result = _tie_correction(sorted_vals)
+
+        expected = tiecorrect(rankdata(values))
+        np.testing.assert_allclose(result.get()[0], expected, rtol=1e-10)
+
+    def test_mixed_ties(self, tie_correction):
+        """Mix of ties should give intermediate correction factor."""
+        _tie_correction, _average_ranks = tie_correction
+
+        values = [1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0]
+        _, sorted_vals = _average_ranks(self._to_gpu(values), return_sorted=True)
+        result = _tie_correction(sorted_vals)
+
+        expected = tiecorrect(rankdata(values))
+        np.testing.assert_allclose(result.get()[0], expected, rtol=1e-10)
+
+    def test_two_elements_tied(self, tie_correction):
+        """Two tied elements."""
+        _tie_correction, _average_ranks = tie_correction
+
+        values = [7.0, 7.0]
+        _, sorted_vals = _average_ranks(self._to_gpu(values), return_sorted=True)
+        result = _tie_correction(sorted_vals)
+
+        expected = tiecorrect(rankdata(values))
+        np.testing.assert_allclose(result.get()[0], expected, rtol=1e-10)
+
+    def test_single_element(self, tie_correction):
+        """Single element should give correction factor 1.0."""
+        _tie_correction, _average_ranks = tie_correction
+
+        values = [42.0]
+        _, sorted_vals = _average_ranks(self._to_gpu(values), return_sorted=True)
+        result = _tie_correction(sorted_vals)
+
+        # Single element: n^3 - n = 0, so formula gives 1.0
+        np.testing.assert_allclose(result.get()[0], 1.0, rtol=1e-10)
+
+    def test_multiple_columns(self, tie_correction):
+        """Test tie correction across multiple columns independently."""
+        _tie_correction, _average_ranks = tie_correction
+
+        col0 = [1.0, 2.0, 3.0]  # No ties
+        col1 = [5.0, 5.0, 5.0]  # All ties
+        data = np.column_stack([col0, col1]).astype(np.float64)
+        _, sorted_vals = _average_ranks(cp.asarray(data, order="F"), return_sorted=True)
+        result = _tie_correction(sorted_vals)
+
+        np.testing.assert_allclose(
+            result.get()[0], tiecorrect(rankdata(col0)), rtol=1e-10
+        )
+        np.testing.assert_allclose(
+            result.get()[1], tiecorrect(rankdata(col1)), rtol=1e-10
+        )
+
+    def test_large_tie_groups(self, tie_correction):
+        """Test with large tie groups."""
+        _tie_correction, _average_ranks = tie_correction
+
+        # 50 values of 1, 50 values of 2 (non-multiple of 32 to test warp handling)
+        values = [1.0] * 50 + [2.0] * 50
+        _, sorted_vals = _average_ranks(self._to_gpu(values), return_sorted=True)
+        result = _tie_correction(sorted_vals)
+
+        expected = tiecorrect(rankdata(values))
+        np.testing.assert_allclose(result.get()[0], expected, rtol=1e-10)

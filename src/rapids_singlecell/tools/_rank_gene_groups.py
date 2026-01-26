@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import sys
 import warnings
+from functools import partial
 from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
@@ -32,10 +34,21 @@ type _CorrMethod = Literal["benjamini-hochberg", "bonferroni"]
 type _Method = Literal["logreg", "wilcoxon"]
 
 EPS = 1e-9
+WARP_SIZE = 32
+MAX_THREADS_PER_BLOCK = 512
+
+
+def _round_up_to_warp(n: int) -> int:
+    """Round up to nearest multiple of WARP_SIZE, capped at MAX_THREADS_PER_BLOCK."""
+    return min(MAX_THREADS_PER_BLOCK, ((n + WARP_SIZE - 1) // WARP_SIZE) * WARP_SIZE)
 
 
 def _select_top_n(scores: NDArray, n_top: int) -> NDArray:
-    """Select indices of top n scores."""
+    """Select indices of top n scores.
+
+    Uses argpartition + argsort for O(n + k log k) complexity where k = n_top.
+    This is faster than full sorting when k << n.
+    """
     n_from = scores.shape[0]
     reference_indices = np.arange(n_from, dtype=int)
     partition = np.argpartition(scores, -n_top)[-n_top:]
@@ -96,19 +109,18 @@ def _get_column_block(X, start: int, stop: int) -> cp.ndarray:
     """
     X_chunk = X[:, start:stop]
 
-    if sp.issparse(X_chunk):
-        # SciPy sparse -> CuPy sparse CSC -> dense
-        X_chunk = cpsp.csc_matrix(X_chunk.tocsc())
-        return _sparse_to_dense(X_chunk, order="F").astype(cp.float64)
-    elif cpsp.issparse(X_chunk):
-        # CuPy sparse -> dense
-        return _sparse_to_dense(X_chunk, order="F").astype(cp.float64)
-    elif isinstance(X_chunk, np.ndarray):
-        return cp.asarray(X_chunk, dtype=cp.float64, order="F")
-    elif isinstance(X_chunk, cp.ndarray):
-        return cp.asarray(X_chunk, dtype=cp.float64, order="F")
-    else:
-        raise ValueError(f"Unsupported matrix type: {type(X_chunk)}")
+    match X_chunk:
+        case sp.spmatrix() | sp.sparray():
+            # SciPy sparse -> CuPy sparse CSC -> dense
+            X_chunk = cpsp.csc_matrix(X_chunk.tocsc())
+            return _sparse_to_dense(X_chunk, order="F").astype(cp.float64)
+        case cpsp.spmatrix():
+            # CuPy sparse -> dense
+            return _sparse_to_dense(X_chunk, order="F").astype(cp.float64)
+        case np.ndarray() | cp.ndarray():
+            return cp.asarray(X_chunk, dtype=cp.float64, order="F")
+        case _:
+            raise ValueError(f"Unsupported matrix type: {type(X_chunk)}")
 
 
 def _average_ranks(
@@ -142,8 +154,8 @@ def _average_ranks(
     sorter = cp.asfortranarray(sorter.astype(cp.int64))
     ranks = cp.empty((n_rows, n_cols), dtype=cp.float64, order="F")
 
-    # Launch kernel: one block per column
-    threads_per_block = min(512, n_rows)
+    # Launch kernel: one block per column, threads must be multiple of WARP_SIZE
+    threads_per_block = _round_up_to_warp(n_rows)
     blocks = n_cols
     _rank_kernel(
         (blocks,),
@@ -173,7 +185,8 @@ def _tie_correction(sorted_vals: cp.ndarray) -> cp.ndarray:
     # Ensure F-order
     sorted_vals = cp.asfortranarray(sorted_vals)
 
-    threads_per_block = min(512, n_rows)
+    # Threads must be multiple of WARP_SIZE for correct warp reduction
+    threads_per_block = _round_up_to_warp(n_rows)
     _tie_correction_kernel(
         (n_cols,),
         (threads_per_block,),

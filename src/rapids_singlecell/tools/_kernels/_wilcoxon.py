@@ -65,6 +65,7 @@ void tie_correction_kernel(
     __syncthreads();
 
     // Final reduction in first warp
+    // Note: blockDim.x must be a multiple of 32 for correct warp reduction
     if (tid < 32) {
         double val = (tid < (blockDim.x >> 5)) ? warp_sums[tid] : 0.0;
         #pragma unroll
