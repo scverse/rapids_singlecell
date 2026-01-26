@@ -16,6 +16,7 @@ import rapids_singlecell as rsc
 FILE = Path(__file__).parent / Path("_scripts/seurat_hvg.csv")
 FILE_V3 = Path(__file__).parent / Path("_scripts/seurat_hvg_v3.csv.gz")
 FILE_V3_BATCH = Path(__file__).parent / Path("_scripts/seurat_hvg_v3_batch.csv")
+FILE_POISSON = Path(__file__).parent / Path("_data/scvi-poisson-ref.parquet")
 
 
 @pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
@@ -388,3 +389,83 @@ def test_highly_variable_genes_pearson_residuals_batch(n_top_genes, dtype):
     assert np.max(cudata.var["highly_variable_nbatches"].values) <= nbatches
 
     assert len(cudata.var) == n_genes
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+@pytest.mark.parametrize("sparse", [True, False])
+def test_poisson_gene_selection_compare_to_scvi(dtype, sparse):
+    """Test poisson_gene_selection against scvi-tools reference output.
+
+    Note: scvi uses Monte Carlo sampling while we use the exact analytical formula
+    P(Bern(p_obs) > Bern(p_exp)) = p_obs * (1 - p_exp). This leads to slightly
+    different prob_zero_enrichment values and rankings, but the underlying
+    observed/expected fractions should match closely.
+    """
+    ref = pd.read_parquet(FILE_POISSON)
+
+    pbmc = sc.datasets.pbmc3k()
+    sc.pp.filter_genes(pbmc, min_counts=5)
+    if sparse:
+        pbmc.X = cpx.scipy.sparse.csr_matrix(pbmc.X, dtype=dtype)
+    else:
+        pbmc.X = cp.array(pbmc.X.toarray(), dtype=dtype)
+
+    n_top_genes = 2000
+    rsc.pp.highly_variable_genes(
+        pbmc,
+        flavor="poisson_gene_selection",
+        n_top_genes=n_top_genes,
+        check_values=False,
+    )
+
+    # Check all expected columns are present
+    for key in [
+        "highly_variable",
+        "observed_fraction_zeros",
+        "expected_fraction_zeros",
+        "prob_zero_enriched_nbatches",
+        "prob_zero_enrichment",
+        "prob_zero_enrichment_rank",
+    ]:
+        assert key in pbmc.var.columns, f"Missing column: {key}"
+
+    # Compare observed_fraction_zeros - these should match exactly
+    # (deterministic calculation from count data)
+    np.testing.assert_allclose(
+        ref["observed_fraction_zeros"].values,
+        pbmc.var["observed_fraction_zeros"].values,
+        rtol=1e-5,
+        atol=1e-6,
+        err_msg="observed_fraction_zeros mismatch",
+    )
+
+    # Compare expected_fraction_zeros - should match closely
+    # (deterministic Poisson model calculation)
+    np.testing.assert_allclose(
+        ref["expected_fraction_zeros"].values,
+        pbmc.var["expected_fraction_zeros"].values,
+        rtol=1e-4,
+        atol=1e-6,
+        err_msg="expected_fraction_zeros mismatch",
+    )
+
+    # Compare HVG overlap - scvi uses Monte Carlo sampling so rankings may differ
+    # at boundaries, but the overlap should be high (>95%)
+    ref_hvg = set(ref[ref["highly_variable"]].index)
+    our_hvg = set(pbmc.var[pbmc.var["highly_variable"]].index)
+    overlap = len(ref_hvg & our_hvg)
+    overlap_pct = overlap / n_top_genes
+    assert overlap_pct >= 0.95, (
+        f"HVG overlap {overlap_pct:.1%} is too low (expected >= 95%)"
+    )
+
+    # Check prob_zero_enriched_nbatches (should be 1 for HVGs, 0 for non-HVGs in single batch)
+    hvg_mask = pbmc.var["highly_variable"]
+    assert (pbmc.var.loc[hvg_mask, "prob_zero_enriched_nbatches"] == 1).all()
+    assert (pbmc.var.loc[~hvg_mask, "prob_zero_enriched_nbatches"] == 0).all()
+
+    # Check that exactly n_top_genes are selected
+    assert pbmc.var["highly_variable"].sum() == n_top_genes
+
+    # Check uns is set correctly
+    assert pbmc.uns["hvg"]["flavor"] == "poisson_zeros"
