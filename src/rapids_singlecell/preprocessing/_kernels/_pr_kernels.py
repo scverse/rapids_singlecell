@@ -167,7 +167,7 @@ def _norm_res_dense(dtype):
     )
 
 
-# PR HVG
+# PR HVG - Single-pass Welford's algorithm with precomputed constants and rsqrt
 
 _csc_hvg_res_kernel = r"""
     (const int *indptr,const int *index,const {0} *data,
@@ -180,38 +180,35 @@ _csc_hvg_res_kernel = r"""
         int start_idx = indptr[gene];
         int stop_idx = indptr[gene + 1];
 
-        int sparse_idx = start_idx;
-        {0} var_sum = 0.0;
-        {0} sum_clipped_res = 0.0;
-        for(int cell = 0; cell < n_cells; cell++){
-            {0} mu = sums_genes[gene]*sums_cells[cell]/sum_total[0];
-            {0} value = 0.0;
-            if (sparse_idx < stop_idx && index[sparse_idx] == cell){
-                value = data[sparse_idx];
-                sparse_idx++;
-            }
-            {0} mu_sum = value - mu;
-            {0} pre_res =  mu_sum / sqrt(mu + mu * mu / theta[0]);
-            {0} clipped_res = fminf(fmaxf(pre_res, -clip[0]), clip[0]);
-            sum_clipped_res += clipped_res;
-        }
+        // Precompute gene-level constants
+        {0} gene_sum = sums_genes[gene];
+        {0} inv_total = ({0})1.0 / sum_total[0];
+        {0} inv_theta = ({0})1.0 / theta[0];
+        {0} clip_val = clip[0];
 
-        {0} mean_clipped_res = sum_clipped_res / n_cells;
-        sparse_idx = start_idx;
+        // Welford's online algorithm: single pass for mean and variance
+        {0} mean = ({0})0.0;
+        {0} M2 = ({0})0.0;
+        int sparse_idx = start_idx;
+
         for(int cell = 0; cell < n_cells; cell++){
-            {0} mu = sums_genes[gene]*sums_cells[cell]/sum_total[0];
-            {0} value = 0.0;
+            {0} mu = gene_sum * sums_cells[cell] * inv_total;
+            {0} value = ({0})0.0;
             if (sparse_idx < stop_idx && index[sparse_idx] == cell){
                 value = data[sparse_idx];
                 sparse_idx++;
             }
-            {0} mu_sum = value - mu;
-            {0} pre_res =  mu_sum / sqrt(mu + mu * mu / theta[0]);
-            {0} clipped_res = fminf(fmaxf(pre_res, -clip[0]), clip[0]);
-            {0} diff = clipped_res - mean_clipped_res;
-            var_sum += diff * diff;
+            {0} diff = value - mu;
+            {0} x = fmin(fmax(diff * rsqrt(mu + mu * mu * inv_theta), -clip_val), clip_val);
+
+            // Welford update: mean and M2 (sum of squared deviations)
+            {0} delta = x - mean;
+            mean += delta / ({0})(cell + 1);
+            {0} delta2 = x - mean;
+            M2 = fma(delta, delta2, M2);
         }
-        residuals[gene] = var_sum / n_cells;
+        // Population variance = M2 / n
+        residuals[gene] = M2 / ({0})n_cells;
     }
 
     """
@@ -230,30 +227,31 @@ _dense_hvg_res_kernel = r"""
             return;
         }
 
-        {0} var_sum = 0.0;
-        {0} sum_clipped_res = 0.0;
-        for(int cell = 0; cell < n_cells; cell++){
-            long long int res_index = static_cast<long long int>(gene) * n_cells + cell;
-            {0} mu = sums_genes[gene]*sums_cells[cell]/sum_total[0];
-            {0} value = data[res_index];
-            {0} mu_sum = value - mu;
-            {0} pre_res =  mu_sum / sqrt(mu + mu * mu / theta[0]);
-            {0} clipped_res = fminf(fmaxf(pre_res, -clip[0]), clip[0]);
-            sum_clipped_res += clipped_res;
-        }
+        // Precompute gene-level constants
+        {0} gene_sum = sums_genes[gene];
+        {0} inv_total = ({0})1.0 / sum_total[0];
+        {0} inv_theta = ({0})1.0 / theta[0];
+        {0} clip_val = clip[0];
 
-        {0} mean_clipped_res = sum_clipped_res / n_cells;
+        // Welford's online algorithm: single pass for mean and variance
+        {0} mean = ({0})0.0;
+        {0} M2 = ({0})0.0;
+
         for(int cell = 0; cell < n_cells; cell++){
             long long int res_index = static_cast<long long int>(gene) * n_cells + cell;
-            {0} mu = sums_genes[gene]*sums_cells[cell]/sum_total[0];
+            {0} mu = gene_sum * sums_cells[cell] * inv_total;
             {0} value = data[res_index];
-            {0} mu_sum = value - mu;
-            {0} pre_res =  mu_sum / sqrt(mu + mu * mu / theta[0]);
-            {0} clipped_res = fminf(fmaxf(pre_res, -clip[0]), clip[0]);
-            {0} diff = clipped_res - mean_clipped_res;
-            var_sum += diff * diff;
+            {0} diff = value - mu;
+            {0} x = fmin(fmax(diff * rsqrt(mu + mu * mu * inv_theta), -clip_val), clip_val);
+
+            // Welford update: mean and M2 (sum of squared deviations)
+            {0} delta = x - mean;
+            mean += delta / ({0})(cell + 1);
+            {0} delta2 = x - mean;
+            M2 = fma(delta, delta2, M2);
         }
-        residuals[gene] = var_sum / n_cells;
+        // Population variance = M2 / n
+        residuals[gene] = M2 / ({0})n_cells;
     }
     """
 
