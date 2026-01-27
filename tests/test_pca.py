@@ -351,11 +351,15 @@ def test_mask_length_error():
 )
 def test_mask_var_argument_equivalence(float_dtype, array_type):
     """Test mask as bool array vs string produces same results."""
+    rng = np.random.RandomState(42)
     X = cp.random.random((100, 10), dtype=float_dtype)
     if array_type != "array":
         X = array_type(X)
     adata_base = AnnData(X)
-    mask_var = np.random.choice([True, False], adata_base.shape[1])
+    # Ensure at least 2 columns selected (cuML requires n_cols >= 2)
+    mask_var = rng.choice([True, False], adata_base.shape[1])
+    while mask_var.sum() < 2:
+        mask_var = rng.choice([True, False], adata_base.shape[1])
 
     adata = adata_base.copy()
     rsc.pp.pca(adata, mask_var=mask_var, dtype=float_dtype)
