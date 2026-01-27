@@ -37,14 +37,16 @@ doc = [
     "nbsphinx>=0.8.12",
     "myst-nb",
     "sphinx-design",
+    "sphinx-tabs",
+    "sphinxext-opengraph",
     "scanpydoc[typehints,theme]>=0.9.4",
-    "readthedocs-sphinx-ext",
-    "sphinx_copybutton",
     "dask",
     "pytest",
 ]
 test-minimal = [
     "pytest",
+    "pytest-cov",
+    "pytest-timeout",
     "anyio",
     "pooch",
     "profimp",
@@ -111,6 +113,7 @@ required-imports = [ "from __future__ import annotations" ]
 addopts = [
     "--import-mode=importlib",
     "--strict-markers",
+    "--timeout=60",
 ]
 markers = [
     "gpu: tests that use a GPU (currently unused, but needs to be specified here as we import anndata.tests.helpers, which uses it)",
@@ -135,3 +138,19 @@ packages = [ 'src/rapids_singlecell', 'src/testing' ]
 [tool.codespell]
 skip = '*.ipynb,*.csv'
 ignore-words-list = "nd"
+
+[tool.coverage.run]
+data_file = "test-data/coverage"
+source_pkgs = [ "rapids_singlecell" ]
+omit = [ "tests/*", "src/testing/*" ]
+
+[tool.coverage.xml]
+output = "test-data/coverage.xml"
+
+[tool.coverage.paths]
+source = [ "./src", "**/site-packages" ]
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+]
