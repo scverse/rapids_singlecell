@@ -8,72 +8,47 @@ the centering on-the-fly during matrix-vector products.
 from __future__ import annotations
 
 import cupy as cp
+from cupyx.scipy.sparse.linalg import LinearOperator
 
 
-class MeanCenteredOperator:
+def mean_centered_operator(X, mean: cp.ndarray) -> LinearOperator:
     """
-    Linear operator for mean-centered sparse matrix.
+    Create a linear operator for mean-centered sparse matrix.
 
-    For matrix X with column means, computes products with (X - 1*mean.T)
-    without explicitly forming the dense centered matrix.
+    Computes products with (X - 1*mean.T) without forming the dense matrix.
 
     Parameters
     ----------
-    X : sparse matrix
-        The sparse matrix to center.
-    mean : cupy.ndarray
+    X
+        Sparse matrix in CSR format.
+    mean
         Column means of shape (n_features,).
+
+    Returns
+    -------
+    LinearOperator
+        Operator that computes mean-centered matrix-vector products.
     """
+    n_samples, n_features = X.shape
+    XT = X.T  # CSC view - no copy
 
-    def __init__(self, X, mean: cp.ndarray) -> None:
-        self.X = X
-        self.mean = mean
-        self.shape = X.shape
-        self.dtype = X.dtype
+    def matvec(v):
+        return X.dot(v) - cp.dot(mean, v)
 
-    def dot(self, v: cp.ndarray) -> cp.ndarray:
-        """
-        Compute (X - 1*mean.T) @ v.
+    def rmatvec(v):
+        return XT.dot(v) - mean * cp.sum(v)
 
-        For vector v: X @ v - (mean @ v) (broadcasted)
-        For matrix v: X @ v - outer(ones, mean @ v)
-        """
-        Xv = self.X.dot(v)
-        mean_v = cp.dot(self.mean, v)
-        if v.ndim == 1:
-            return Xv - mean_v
-        else:
-            return Xv - mean_v[cp.newaxis, :]
+    def matmat(V):
+        return X.dot(V) - cp.dot(mean, V)[cp.newaxis, :]
 
-    def __matmul__(self, other):
-        return self.dot(other)
+    def rmatmat(V):
+        return XT.dot(V) - cp.outer(mean, cp.sum(V, axis=0))
 
-    @property
-    def T(self):
-        """Return transposed operator."""
-        return MeanCenteredOperatorT(self.X, self.mean)
-
-
-class MeanCenteredOperatorT:
-    """Transposed mean-centered operator."""
-
-    def __init__(self, X, mean: cp.ndarray) -> None:
-        self.X = X
-        self.mean = mean
-        self.shape = (X.shape[1], X.shape[0])
-        self.dtype = X.dtype
-
-    def dot(self, v: cp.ndarray) -> cp.ndarray:
-        """
-        Compute (X - 1*mean.T).T @ v = X.T @ v - mean * sum(v).
-        """
-        XTv = self.X.T.dot(v)
-        if v.ndim == 1:
-            sum_v = cp.sum(v)
-            return XTv - self.mean * sum_v
-        else:
-            sum_v = cp.sum(v, axis=0)
-            return XTv - cp.outer(self.mean, sum_v)
-
-    def __matmul__(self, other):
-        return self.dot(other)
+    return LinearOperator(
+        shape=(n_samples, n_features),
+        matvec=matvec,
+        rmatvec=rmatvec,
+        matmat=matmat,
+        rmatmat=rmatmat,
+        dtype=X.dtype,
+    )

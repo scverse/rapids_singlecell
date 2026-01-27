@@ -38,6 +38,7 @@ def pca(
     chunk_size: int = None,
     key_added: str | None = None,
     copy: bool = False,
+    **kwargs,
 ) -> None | AnnData:
     """
     Performs PCA using the cuml decomposition function.
@@ -60,26 +61,33 @@ def pca(
 
         svd_solver
             Solver to use for the PCA computation. \
-            Must be one of {'full', 'jacobi', 'auto', 'covariance_eigh', 'lanczos', 'randomized', 'block_krylov'}. \
+            Must be one of {'full', 'jacobi', 'auto', 'covariance_eigh', 'lanczos', 'randomized'}. \
             Defaults to 'auto'. Sparse matrices will use `'covariance_eigh'` or `'lanczos'`.
 
+            .. note::
+                For sparse matrices, `'covariance_eigh'` is recommended for fewer than ~10,000
+                features (best around 2-5k). For larger feature counts (>10,000), use `'lanczos'`
+                or `'randomized'` which scale better with the number of features.
+
             `'covariance_eigh'`
-                Classic eigendecomposition of the covariance matrix. Fast for matrices with
-                fewer than ~10,000 features due to optimized GPU kernels.
-                Works with dask, array must be CSR or dense and chunked as `(N, adata.shape[1])`.
+                Classic eigendecomposition of the covariance matrix. Fast for sparse matrices
+                with fewer than ~10,000 features due to optimized GPU kernels. Good balance of
+                speed and accuracy. Works with Dask arrays (must be CSR or dense, chunked
+                as `(N, adata.shape[1])`).
             `'lanczos'`
-                Lanczos bidiagonalization SVD. Memory efficient for large sparse matrices
-                with many features (>10,000). Faster than covariance_eigh when n_vars is large
-                and n_comps is small relative to n_vars. Does not support Dask arrays.
-                Best accuracy (exact for converged components).
+                Lanczos bidiagonalization SVD with implicit restarts. Memory efficient for
+                large sparse matrices with many features (>10,000). Faster than covariance_eigh
+                when n_vars is large and n_comps is small relative to n_vars. Does not support
+                Dask arrays. Best singular value accuracy (exact for converged components),
+                but orthogonality of components may degrade for high n_comps due to accumulated
+                rounding errors in the iterative process.
             `'randomized'`
-                Randomized SVD based on Halko et al. (2009). Faster than Lanczos for very
-                large matrices when approximate results are acceptable. Accuracy depends
-                on the number of power iterations (default 4). Does not support Dask arrays.
-            `'block_krylov'`
-                Block Krylov method with CholeskyQR2 orthogonalization based on
-                Tomás et al. (2024). Uses efficient GPU GEMM operations. Faster than
-                Lanczos but approximate. Does not support Dask arrays.
+                Randomized SVD based on Halko et al. (2009) with GPU-optimized CholeskyQR2
+                orthogonalization from Tomás et al. (2024). Uses efficient GPU GEMM operations.
+                Faster than Lanczos but approximate. Excellent orthogonality of components
+                (uses explicit reorthogonalization), but singular values are approximate.
+                Accuracy depends on the number of power iterations (default 2). Does not
+                support Dask arrays.
             `'full'`
                 From `cuml` for dense arrays uses a eigendecomposition of the covariance matrix then discards components.
             `'jacobi'`
@@ -127,6 +135,15 @@ def pca(
 
         copy
             Whether to return a copy or update `adata`.
+
+        **kwargs
+            Additional arguments for specific SVD solvers.
+            For ``svd_solver='randomized'``:
+
+            - ``n_oversamples`` : Extra random vectors for better approximation.
+              Higher values improve accuracy. Default is 10.
+            - ``n_iter`` : Number of power iterations. Higher values improve
+              accuracy for matrices with slowly decaying singular values. Default is 2.
 
     Returns
     -------
@@ -185,7 +202,7 @@ def pca(
                 "Dask arrays are not supported for chunked PCA computation."
             )
         _check_gpu_X(X, allow_dask=True)
-        if svd_solver in ("lanczos", "randomized", "block_krylov"):
+        if svd_solver in ("lanczos", "randomized"):
             raise NotImplementedError(
                 f"'{svd_solver}' SVD solver does not support Dask arrays. "
                 "Use svd_solver='covariance_eigh' instead."
@@ -205,17 +222,15 @@ def pca(
         if chunked:
             pca_func, X_pca = _run_chunked_pca(X, n_comps, chunk_size)
         elif cpissparse(X) or issparse(X):
-            if svd_solver == "lanczos":
-                pca_func, X_pca = _run_lanczos_pca(
-                    X, n_comps, zero_center, random_state=random_state
-                )
-            elif svd_solver == "randomized":
-                pca_func, X_pca = _run_randomized_pca(
-                    X, n_comps, random_state=random_state
-                )
-            elif svd_solver == "block_krylov":
-                pca_func, X_pca = _run_block_krylov_pca(
-                    X, n_comps, random_state=random_state
+            if svd_solver in ("lanczos", "randomized"):
+                pca_func, X_pca = _run_sparse_svd_pca(
+                    X,
+                    n_comps,
+                    svd_solver,
+                    zero_center,
+                    random_state=random_state,
+                    n_oversamples=kwargs.get("n_oversamples"),
+                    n_iter=kwargs.get("n_iter"),
                 )
             else:
                 pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
@@ -224,17 +239,15 @@ def pca(
 
     else:  # not zero_center
         if cpissparse(X) or issparse(X):
-            if svd_solver == "lanczos":
-                pca_func, X_pca = _run_lanczos_pca(
-                    X, n_comps, zero_center, random_state=random_state
-                )
-            elif svd_solver == "randomized":
-                pca_func, X_pca = _run_randomized_pca(
-                    X, n_comps, random_state=random_state
-                )
-            elif svd_solver == "block_krylov":
-                pca_func, X_pca = _run_block_krylov_pca(
-                    X, n_comps, random_state=random_state
+            if svd_solver in ("lanczos", "randomized"):
+                pca_func, X_pca = _run_sparse_svd_pca(
+                    X,
+                    n_comps,
+                    svd_solver,
+                    zero_center,
+                    random_state=random_state,
+                    n_oversamples=kwargs.get("n_oversamples"),
+                    n_iter=kwargs.get("n_iter"),
                 )
             else:
                 pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
@@ -291,60 +304,39 @@ def _run_covariance_pca(X, n_comps, zero_center):
     return pca_func, X_pca
 
 
-def _run_lanczos_pca(X, n_comps, zero_center, *, random_state: int = 0):
-    """Run PCA using Lanczos bidiagonalization SVD."""
+def _run_sparse_svd_pca(
+    X,
+    n_comps,
+    svd_solver,
+    *,
+    zero_center: bool = True,
+    random_state: int = 0,
+    n_oversamples: int | None = None,
+    n_iter: int | None = None,
+):
+    """Run PCA using SVD solvers (lanczos, randomized)."""
     if issparse(X):
         X = sparse_scipy_to_cp(X, dtype=X.dtype)
-    from ._sparse_pca._pca_lanczos import PCA_sparse_lanczos
+    from ._sparse_pca._sparse_svd_pca import PCA_sparse_svd
 
     if not isspmatrix_csr(X):
         X = X.tocsr()
     if issparse_cupy(X):
         X.sort_indices()
 
-    pca_func = PCA_sparse_lanczos(
-        n_components=n_comps,
-        zero_center=zero_center,
-        random_state=random_state,
-    )
-    X_pca = pca_func.fit_transform(X)
-    return pca_func, X_pca
+    # Build kwargs for PCA_sparse_svd
+    kwargs = {
+        "n_components": n_comps,
+        "svd_solver": svd_solver,
+        "zero_center": zero_center,
+        "random_state": random_state,
+    }
+    if n_oversamples is not None:
+        kwargs["n_oversamples"] = n_oversamples
+    if n_iter is not None:
+        kwargs["n_iter"] = n_iter
 
-
-def _run_randomized_pca(X, n_comps, *, random_state: int = 0):
-    """Run PCA using randomized SVD."""
-    if issparse(X):
-        X = sparse_scipy_to_cp(X, dtype=X.dtype)
-    from ._sparse_pca._rsvd import PCA_rsvd
-
-    if not isspmatrix_csr(X):
-        X = X.tocsr()
-    if issparse_cupy(X):
-        X.sort_indices()
-
-    pca_func = PCA_rsvd(
-        n_components=n_comps,
-        random_state=random_state,
-    )
-    X_pca = pca_func.fit_transform(X)
-    return pca_func, X_pca
-
-
-def _run_block_krylov_pca(X, n_comps, *, random_state: int = 0):
-    """Run PCA using block Krylov method with CholeskyQR2."""
-    if issparse(X):
-        X = sparse_scipy_to_cp(X, dtype=X.dtype)
-    from ._sparse_pca._block_lanczos import PCA_block_lanczos
-
-    if not isspmatrix_csr(X):
-        X = X.tocsr()
-    if issparse_cupy(X):
-        X.sort_indices()
-
-    pca_func = PCA_block_lanczos(
-        n_components=n_comps,
-        random_state=random_state,
-    )
+    pca_func = PCA_sparse_svd(**kwargs)
     X_pca = pca_func.fit_transform(X)
     return pca_func, X_pca
 

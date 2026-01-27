@@ -163,7 +163,7 @@ def _lanczos_bidiag(
     return alphas, betas
 
 
-def gpu_sparse_svds(
+def lanczos_svd(
     A,
     k: int = 6,
     *,
