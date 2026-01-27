@@ -94,8 +94,8 @@ def pca(
                 From `cuml` for dense arrays. Jacobi is much faster as it iteratively corrects, but is less accurate.
             `'auto'`
                 Automatically chooses the best solver based on the shape of the data matrix.
-                For sparse matrices: uses `'lanczos'` when n_vars > 10,000 and n_comps < n_vars/10,
-                otherwise uses `'covariance_eigh'`. For dense dask arrays uses `'covariance_eigh'`.
+                For sparse matrices: uses `'lanczos'` when n_vars > 8,000, otherwise uses
+                `'covariance_eigh'`. For dense dask arrays uses `'covariance_eigh'`.
 
         random_state
             Change to use different initial states for the optimization.
@@ -187,11 +187,11 @@ def pca(
             n_comps = 50
 
     # Auto-select sparse solver based on matrix dimensions
-    # Lanczos is faster when n_vars is large (>10000) and k is small
+    # Lanczos is faster for large feature counts (>8000)
     # Covariance is faster for smaller matrices due to optimized kernels
     if svd_solver == "auto" and (cpissparse(X) or issparse(X)):
         n_vars = X.shape[1]
-        if n_vars > 10000 and n_comps < n_vars // 10:
+        if n_vars > 8000:
             svd_solver = "lanczos"
         else:
             svd_solver = "covariance_eigh"
