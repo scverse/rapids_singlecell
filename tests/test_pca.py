@@ -282,6 +282,26 @@ def test_pca_chunked():
     )
 
 
+def test_pca_chunked_sparse():
+    """Test chunked PCA works with sparse input (densifies per chunk)."""
+    adata = sc.datasets.blobs(n_variables=50, n_centers=3, n_observations=200)
+    adata.X = sparse.csr_matrix(adata.X.astype(np.float64))
+
+    # Run chunked PCA on sparse - should work without errors
+    rsc.pp.pca(adata, chunked=True, chunk_size=50)
+
+    # Verify outputs are valid
+    assert adata.obsm["X_pca"].shape == (200, 49)  # 50 vars, so max 49 comps
+    assert adata.varm["PCs"].shape == (50, 49)
+    assert len(adata.uns["pca"]["variance_ratio"]) == 49
+
+    # Variance ratios should sum to <= 1 and be positive descending
+    var_ratio = adata.uns["pca"]["variance_ratio"]
+    assert np.all(var_ratio >= 0)
+    assert np.all(var_ratio[:-1] >= var_ratio[1:])
+    assert np.sum(var_ratio) <= 1.0 + 1e-6
+
+
 def test_pca_reproducible():
     """Test PCA is reproducible across runs."""
     pbmc = pbmc3k_processed()

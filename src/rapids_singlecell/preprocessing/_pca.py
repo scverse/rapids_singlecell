@@ -40,65 +40,71 @@ def pca(
     copy: bool = False,
     **kwargs,
 ) -> None | AnnData:
-    """
-    Performs PCA using the cuml decomposition function.
+    """\
+    Principal component analysis using GPU acceleration.
+
+    Uses the following implementations based on data type (defaults for `svd_solver` in parentheses):
+
+    .. list-table::
+       :header-rows: 1
+
+       * -
+         - Dense
+         - Sparse
+         - Dask
+       * - `zero_center=True`
+         - cuML PCA (`'full'`)
+         - Custom (`'lanczos'` if n_vars > 8k, else `'covariance_eigh'`)
+         - Custom (`'covariance_eigh'`)
+       * - `zero_center=False`
+         - cuML TruncatedSVD (`'full'`)
+         - Custom (`'lanczos'` if n_vars > 8k, else `'covariance_eigh'`)
+         - Custom (`'covariance_eigh'`)
+       * - `chunked=True`
+         - cuML IncrementalPCA
+         - cuML IncrementalPCA
+         - Not supported
 
     Parameters
     ----------
-        adata
-            AnnData object
+    adata
+        AnnData object
 
-        n_comps
-            Number of principal components to compute. Defaults to 50, or 1 - minimum \
-            dimension size of selected representation
+    n_comps
+        Number of principal components to compute. Defaults to 50, or 1 - minimum
+        dimension size of selected representation.
 
-        layer
-            If provided, use `adata.layers[layer]` for expression values instead of `adata.X`.
+    layer
+        If provided, use `adata.layers[layer]` for expression values instead of `adata.X`.
 
-        zero_center
-            If `True`, compute standard PCA from covariance matrix. \
-            If `False`, omit zero-centering variables
+    zero_center
+        If `True`, compute standard PCA from covariance matrix.
+        If `False`, omit zero-centering variables (truncated SVD).
 
-        svd_solver
-            Solver to use for the PCA computation. \
-            Must be one of {'full', 'jacobi', 'auto', 'covariance_eigh', 'lanczos', 'randomized'}. \
-            Defaults to 'auto'. Sparse matrices will use `'covariance_eigh'` or `'lanczos'`.
+    svd_solver
+        SVD solver to use. See table above for which implementation is used based on
+        data type, as well as the default solver when `svd_solver=None`.
 
-            .. note::
-                For sparse matrices, `'covariance_eigh'` is recommended for fewer than ~10,000
-                features (best around 2-5k). For larger feature counts (>10,000), use `'lanczos'`
-                or `'randomized'` which scale better with the number of features.
+        `None`
+            Choose automatically based on data type (see table above).
+        `'covariance_eigh'`
+            Eigendecomposition of the covariance matrix. Fast for sparse matrices
+            with fewer than ~8,000 features. Works with Dask arrays.
+        `'lanczos'`
+            Lanczos bidiagonalization with implicit restarts. Memory efficient for
+            large sparse matrices (>8,000 features). Best singular value accuracy.
+            Does not support Dask arrays.
+        `'randomized'`
+            Randomized SVD (Halko et al. 2009) with CholeskyQR2 orthogonalization
+            (Tomás et al. 2024). Faster than Lanczos but approximate.
+            Does not support Dask arrays.
+        `'full'`
+            cuML: Full eigendecomposition of covariance matrix. For dense arrays only.
+        `'jacobi'`
+            cuML: Jacobi iterative solver. Faster but less accurate. For dense arrays only.
 
-            `'covariance_eigh'`
-                Classic eigendecomposition of the covariance matrix. Fast for sparse matrices
-                with fewer than ~10,000 features due to optimized GPU kernels. Good balance of
-                speed and accuracy. Works with Dask arrays (must be CSR or dense, chunked
-                as `(N, adata.shape[1])`).
-            `'lanczos'`
-                Lanczos bidiagonalization SVD with implicit restarts. Memory efficient for
-                large sparse matrices with many features (>10,000). Faster than covariance_eigh
-                when n_vars is large and n_comps is small relative to n_vars. Does not support
-                Dask arrays. Best singular value accuracy (exact for converged components),
-                but orthogonality of components may degrade for high n_comps due to accumulated
-                rounding errors in the iterative process.
-            `'randomized'`
-                Randomized SVD based on Halko et al. (2009) with GPU-optimized CholeskyQR2
-                orthogonalization from Tomás et al. (2024). Uses efficient GPU GEMM operations.
-                Faster than Lanczos but approximate. Excellent orthogonality of components
-                (uses explicit reorthogonalization), but singular values are approximate.
-                Accuracy depends on the number of power iterations (default 2). Does not
-                support Dask arrays.
-            `'full'`
-                From `cuml` for dense arrays uses a eigendecomposition of the covariance matrix then discards components.
-            `'jacobi'`
-                From `cuml` for dense arrays. Jacobi is much faster as it iteratively corrects, but is less accurate.
-            `'auto'`
-                Automatically chooses the best solver based on the shape of the data matrix.
-                For sparse matrices: uses `'lanczos'` when n_vars > 8,000, otherwise uses
-                `'covariance_eigh'`. For dense dask arrays uses `'covariance_eigh'`.
-
-        random_state
-            Change to use different initial states for the optimization.
+    random_state
+        Random state for initialization.
 
         mask_var
             Mask to use for the PCA computation. \
@@ -176,9 +182,6 @@ def pca(
     del use_highly_variable
     X = X[:, mask_var] if mask_var is not None else X
 
-    if svd_solver is None:
-        svd_solver = "auto"
-
     if n_comps is None:
         min_dim = min(X.shape[0], X.shape[1])
         if 50 >= min_dim:
@@ -189,7 +192,7 @@ def pca(
     # Auto-select sparse solver based on matrix dimensions
     # Lanczos is faster for large feature counts (>8000)
     # Covariance is faster for smaller matrices due to optimized kernels
-    if svd_solver == "auto" and (cpissparse(X) or issparse(X)):
+    if svd_solver is None and (cpissparse(X) or issparse(X)):
         n_vars = X.shape[1]
         if n_vars > 8000:
             svd_solver = "lanczos"
@@ -207,7 +210,7 @@ def pca(
                 f"'{svd_solver}' SVD solver does not support Dask arrays. "
                 "Use svd_solver='covariance_eigh' instead."
             )
-        if svd_solver == "auto":
+        if svd_solver is None:
             svd_solver = "covariance_eigh"
         if (
             isinstance(X._meta, cp.ndarray)
@@ -356,17 +359,15 @@ def _run_chunked_pca(X, n_comps, chunk_size):
         start_idx = batch * chunk_size
         stop_idx = min(batch * chunk_size + chunk_size, X.shape[0])
         chunk = X[start_idx:stop_idx, :]
-        if issparse(chunk) or cpissparse(chunk):
-            chunk = chunk.toarray()
         X_pca[start_idx:stop_idx] = pca_func.transform(chunk)
 
     return pca_func, X_pca
 
 
-def _run_cuml_pca(X, n_comps, *, svd_solver: str):
+def _run_cuml_pca(X, n_comps, *, svd_solver: str | None):
     from cuml.decomposition import PCA
 
-    if svd_solver == "covariance_eigh":
+    if svd_solver is None or svd_solver == "covariance_eigh":
         svd_solver = "auto"
     pca_func = PCA(
         n_components=n_comps,
@@ -377,9 +378,11 @@ def _run_cuml_pca(X, n_comps, *, svd_solver: str):
     return pca_func, X_pca
 
 
-def _run_cuml_tsvd(X, n_comps, *, svd_solver: str = "auto"):
+def _run_cuml_tsvd(X, n_comps, *, svd_solver: str | None = None):
     from cuml.decomposition import TruncatedSVD
 
+    if svd_solver is None:
+        svd_solver = "auto"
     pca_func = TruncatedSVD(
         n_components=n_comps,
         algorithm=svd_solver,
