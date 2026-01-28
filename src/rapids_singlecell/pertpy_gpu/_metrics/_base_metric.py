@@ -53,7 +53,7 @@ def parse_device_ids(*, multi_gpu: bool | list[int] | str | None) -> list[int]:
     if invalid_ids:
         raise ValueError(
             f"Invalid GPU device ID(s): {invalid_ids}. "
-            f"Available devices: 0-{n_available - 1}"
+            f"Available devices: {list(range(n_available))}"
         )
 
     if len(device_ids) == 0:
