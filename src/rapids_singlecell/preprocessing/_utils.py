@@ -34,10 +34,11 @@ def _sparse_to_dense(X: spmatrix, order: Literal["C", "F"] | None = None) -> cp.
     sparse2dense = _sparse2densekernel(X.dtype)
 
     dense = cp.zeros(X.shape, order=order, dtype=X.dtype)
-    max_nnz = cp.diff(X.indptr).max()
+    max_nnz = int(cp.diff(X.indptr).max())
     tpb = (32, 32)
+    max_grid_dim_y = cp.cuda.Device().attributes["MaxGridDimY"]
     bpg_x = math.ceil(major / tpb[0])
-    bpg_y = math.ceil(max_nnz / tpb[1])
+    bpg_y = min(math.ceil(max_nnz / tpb[1]), max_grid_dim_y)
     bpg = (bpg_x, bpg_y)
 
     sparse2dense(

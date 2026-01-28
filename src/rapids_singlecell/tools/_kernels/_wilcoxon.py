@@ -93,7 +93,7 @@ _rank_kernel = cp.RawKernel(
 extern "C" __global__
 void average_rank_kernel(
     const double* __restrict__ sorted_vals,
-    const long long* __restrict__ sorter,
+    const int* __restrict__ sorter,
     double* __restrict__ ranks,
     const int n_rows,
     const int n_cols)
@@ -104,7 +104,7 @@ void average_rank_kernel(
 
     // Pointers to this column's data
     const double* sv = sorted_vals + (size_t)col * n_rows;
-    const long long* si = sorter + (size_t)col * n_rows;
+    const int* si = sorter + (size_t)col * n_rows;
     double* rk = ranks + (size_t)col * n_rows;
 
     // Each thread processes multiple rows

@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 import warnings
 from functools import partial
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, assert_never
 
 import cupy as cp
 import cupyx.scipy.sparse as cpsp
@@ -97,7 +97,9 @@ def _choose_chunk_size(requested: int | None) -> int:
     """Choose chunk size for gene processing."""
     if requested is not None:
         return int(requested)
-    return 512
+    given = 512
+    print(f"Using chunk size: {given}")
+    return given
 
 
 def _get_column_block(X, start: int, stop: int) -> cp.ndarray:
@@ -151,8 +153,7 @@ def _average_ranks(
 
     # Ensure F-order for kernel (columns contiguous in memory)
     sorted_vals = cp.asfortranarray(sorted_vals)
-    sorter = cp.asfortranarray(sorter.astype(cp.int64))
-    ranks = cp.empty((n_rows, n_cols), dtype=cp.float64, order="F")
+    sorter = cp.asfortranarray(sorter.astype(cp.int32))
 
     # Launch kernel: one block per column, threads must be multiple of WARP_SIZE
     threads_per_block = _round_up_to_warp(n_rows)
@@ -160,12 +161,12 @@ def _average_ranks(
     _rank_kernel(
         (blocks,),
         (threads_per_block,),
-        (sorted_vals, sorter, ranks, n_rows, n_cols),
+        (sorted_vals, sorter, matrix, n_rows, n_cols),
     )
 
     if return_sorted:
-        return ranks, sorted_vals
-    return ranks
+        return matrix, sorted_vals
+    return matrix
 
 
 def _tie_correction(sorted_vals: cp.ndarray) -> cp.ndarray:
@@ -279,11 +280,9 @@ class _RankGenes:
         # Set up expm1 function based on log base
         base = adata.uns.get("log1p", {}).get("base")
         if base is not None:
-            self.expm1_func_gpu = lambda x: cp.expm1(x * cp.log(base))
-            self.expm1_func_cpu = lambda x: np.expm1(x * np.log(base))
+            self.expm1_func = lambda x: np.expm1(x * np.log(base))
         else:
-            self.expm1_func_gpu = cp.expm1
-            self.expm1_func_cpu = np.expm1
+            self.expm1_func = np.expm1
 
         # For logreg
         self.grouping_mask = self.labels.isin(pd.Series(self.groups_order))
@@ -585,7 +584,8 @@ class _RankGenes:
         # Accumulate results per group
         all_scores = {i: [] for i in range(len(self.groups_order))}
         all_pvals = {i: [] for i in range(len(self.groups_order))}
-        all_logfc = {i: [] for i in range(len(self.groups_order))}
+        if isinstance(X, sp.spmatrix or sp.sparray):
+            X = X.tocsc()
 
         for start in range(0, n_total_genes, chunk_width):
             stop = min(start + chunk_width, n_total_genes)
@@ -621,28 +621,18 @@ class _RankGenes:
             cp.nan_to_num(z, copy=False)
             p_values = 2.0 * (1.0 - cupyx_special.ndtr(cp.abs(z)))
 
-            # Log fold changes from accumulated means
-            group_means = cp.asarray(self.means[:, start:stop])
-            mean_rest = cp.asarray(self.means_rest[:, start:stop])
-            numerator = self.expm1_func_gpu(group_means) + EPS
-            denominator = self.expm1_func_gpu(mean_rest) + EPS
-            log_fold = cp.log2(numerator / denominator)
-
             z_host = z.get()
             p_host = p_values.get()
-            logfc_host = log_fold.get()
 
             for idx in range(len(self.groups_order)):
                 all_scores[idx].append(z_host[idx])
                 all_pvals[idx].append(p_host[idx])
-                all_logfc[idx].append(logfc_host[idx])
 
         # Yield results per group
         for group_index in range(len(self.groups_order)):
             scores = np.concatenate(all_scores[group_index])
             pvals = np.concatenate(all_pvals[group_index])
-            logfc = np.concatenate(all_logfc[group_index])
-            yield group_index, scores, pvals, logfc
+            yield group_index, scores, pvals
 
     def _wilcoxon_with_reference(
         self,
@@ -652,7 +642,7 @@ class _RankGenes:
         *,
         tie_correct: bool,
         chunk_size: int | None,
-    ) -> Generator[tuple[int, NDArray, NDArray, NDArray], None, None]:
+    ) -> Generator[tuple[int, NDArray, NDArray], None, None]:
         """Wilcoxon test: each group vs a specific reference group."""
         mask_ref = self.groups_masks_obs[self.ireference]
         n_ref = int(group_sizes[self.ireference])
@@ -693,7 +683,6 @@ class _RankGenes:
             # Pre-allocate output arrays
             scores = np.empty(n_total_genes, dtype=np.float64)
             pvals = np.empty(n_total_genes, dtype=np.float64)
-            logfc = np.empty(n_total_genes, dtype=np.float32)
 
             for start in range(0, n_total_genes, chunk_width):
                 stop = min(start + chunk_width, n_total_genes)
@@ -731,21 +720,13 @@ class _RankGenes:
                 cp.nan_to_num(z, copy=False)
                 p_values = 2.0 * (1.0 - cupyx_special.ndtr(cp.abs(z)))
 
-                # Log fold changes from accumulated means
-                group_mean = cp.asarray(self.means[group_index, start:stop])
-                ref_mean = cp.asarray(self.means[self.ireference, start:stop])
-                numerator = self.expm1_func_gpu(group_mean) + EPS
-                denominator = self.expm1_func_gpu(ref_mean) + EPS
-                log_fold = cp.log2(numerator / denominator)
-
                 # Fill pre-allocated arrays
                 scores[start:stop] = z.get()
                 pvals[start:stop] = p_values.get()
-                logfc[start:stop] = log_fold.get()
 
-            yield group_index, scores, pvals, logfc
+            yield group_index, scores, pvals
 
-    def logreg(self, **kwds) -> Generator[tuple[int, NDArray, None, None], None, None]:
+    def logreg(self, **kwds) -> Generator[tuple[int, NDArray, None], None, None]:
         """Compute logistic regression scores."""
         if len(self.groups_order) == 1:
             msg = "Cannot perform logistic regression on a single cluster."
@@ -782,7 +763,7 @@ class _RankGenes:
             else:
                 scores = scores_all[igroup].get()
 
-            yield igroup, scores, None, None
+            yield igroup, scores, None
 
             if len(self.groups_order) <= 2:
                 break
@@ -806,36 +787,31 @@ class _RankGenes:
         elif method == "logreg":
             generate_test_results = self.logreg(**kwds)
         else:
-            msg = f"Method must be one of 'logreg', 'wilcoxon'. Got {method!r}."
-            raise ValueError(msg)
+            assert_never(method)
 
-        self.stats = None
         n_genes = self.X.shape[1]
 
-        for group_index, scores, pvals, logfc in generate_test_results:
+        # Collect all stats data first to avoid DataFrame fragmentation
+        stats_data: dict[tuple[str, str], np.ndarray] = {}
+
+        for group_index, scores, pvals in generate_test_results:
             group_name = str(self.groups_order[group_index])
 
             if n_genes_user is not None:
                 scores_sort = np.abs(scores) if rankby_abs else scores
                 global_indices = _select_top_n(scores_sort, n_genes_user)
-                first_col = "names"
             else:
                 global_indices = slice(None)
-                first_col = "scores"
-
-            if self.stats is None:
-                idx = pd.MultiIndex.from_tuples([(group_name, first_col)])
-                self.stats = pd.DataFrame(columns=idx)
 
             if n_genes_user is not None:
-                self.stats[group_name, "names"] = np.asarray(self.var_names)[
+                stats_data[group_name, "names"] = np.asarray(self.var_names)[
                     global_indices
                 ]
 
-            self.stats[group_name, "scores"] = scores[global_indices]
+            stats_data[group_name, "scores"] = scores[global_indices]
 
             if pvals is not None:
-                self.stats[group_name, "pvals"] = pvals[global_indices]
+                stats_data[group_name, "pvals"] = pvals[global_indices]
                 if corr_method == "benjamini-hochberg":
                     pvals_clean = np.array(pvals, copy=True)
                     pvals_clean[np.isnan(pvals_clean)] = 1.0
@@ -844,24 +820,30 @@ class _RankGenes:
                     )
                 elif corr_method == "bonferroni":
                     pvals_adj = np.minimum(pvals * n_genes, 1.0)
-                self.stats[group_name, "pvals_adj"] = pvals_adj[global_indices]
+                stats_data[group_name, "pvals_adj"] = pvals_adj[global_indices]
 
+            # Compute logfoldchanges from accumulated means (like scanpy)
             if self.means is not None:
                 mean_group = self.means[group_index]
                 if self.ireference is None:
                     mean_rest = self.means_rest[group_index]
                 else:
                     mean_rest = self.means[self.ireference]
-                # Use numpy expm1 since means are on CPU
-                foldchanges = (self.expm1_func_cpu(mean_group) + EPS) / (
-                    self.expm1_func_cpu(mean_rest) + EPS
-                )  # add small value to remove 0's
-                self.stats[group_name, "logfoldchanges"] = np.log2(
+                foldchanges = (self.expm1_func(mean_group) + EPS) / (
+                    self.expm1_func(mean_rest) + EPS
+                )
+                stats_data[group_name, "logfoldchanges"] = np.log2(
                     foldchanges[global_indices]
                 )
 
-        if n_genes_user is None and self.stats is not None:
-            self.stats.index = self.var_names
+        # Create DataFrame all at once to avoid fragmentation
+        if stats_data:
+            self.stats = pd.DataFrame(stats_data)
+            self.stats.columns = pd.MultiIndex.from_tuples(self.stats.columns)
+            if n_genes_user is None:
+                self.stats.index = self.var_names
+        else:
+            self.stats = None
 
 
 def rank_genes_groups(

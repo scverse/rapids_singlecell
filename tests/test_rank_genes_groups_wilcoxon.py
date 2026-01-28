@@ -13,6 +13,7 @@ import rapids_singlecell as rsc
 @pytest.mark.parametrize("reference", ["rest", "1"])
 def test_rank_genes_groups_wilcoxon_matches_scanpy_output(reference):
     """Test wilcoxon matches scanpy output for both 'rest' and specific reference."""
+    np.random.seed(42)
     adata_gpu = sc.datasets.blobs(n_variables=6, n_centers=3, n_observations=200)
     adata_gpu.obs["blobs"] = adata_gpu.obs["blobs"].astype("category")
     adata_cpu = adata_gpu.copy()
@@ -65,6 +66,7 @@ def test_rank_genes_groups_wilcoxon_matches_scanpy_output(reference):
 @pytest.mark.parametrize("reference", ["rest", "1"])
 def test_rank_genes_groups_wilcoxon_honors_layer_and_use_raw(reference):
     """Test that layer parameter is respected."""
+    np.random.seed(42)
     base = sc.datasets.blobs(n_variables=5, n_centers=3, n_observations=150)
     base.obs["blobs"] = base.obs["blobs"].astype("category")
     base.layers["signal"] = base.X.copy()
@@ -111,6 +113,7 @@ def test_rank_genes_groups_wilcoxon_honors_layer_and_use_raw(reference):
 @pytest.mark.parametrize("reference", ["rest", "1"])
 def test_rank_genes_groups_wilcoxon_subset_and_bonferroni(reference):
     """Test group subsetting and bonferroni correction."""
+    np.random.seed(42)
     adata = sc.datasets.blobs(n_variables=5, n_centers=4, n_observations=150)
     adata.obs["blobs"] = adata.obs["blobs"].astype("category")
 
@@ -147,6 +150,7 @@ def test_rank_genes_groups_wilcoxon_with_renamed_categories(
     reference_before, reference_after
 ):
     """Test with renamed category labels."""
+    np.random.seed(42)
     adata = sc.datasets.blobs(n_variables=4, n_centers=3, n_observations=200)
     adata.obs["blobs"] = adata.obs["blobs"].astype("category")
 
@@ -177,6 +181,7 @@ def test_rank_genes_groups_wilcoxon_with_renamed_categories(
 @pytest.mark.parametrize("reference", ["rest", "1"])
 def test_rank_genes_groups_wilcoxon_with_unsorted_groups(reference):
     """Test that group order doesn't affect results."""
+    np.random.seed(42)
     adata = sc.datasets.blobs(n_variables=6, n_centers=4, n_observations=180)
     adata.obs["blobs"] = adata.obs["blobs"].astype("category")
     bdata = adata.copy()
@@ -215,6 +220,7 @@ def test_rank_genes_groups_wilcoxon_with_unsorted_groups(reference):
 @pytest.mark.parametrize("tie_correct", [True, False])
 def test_rank_genes_groups_wilcoxon_tie_correct(reference, tie_correct):
     """Test tie_correct matches scanpy output for both True and False."""
+    np.random.seed(42)
     adata_gpu = sc.datasets.blobs(n_variables=6, n_centers=3, n_observations=200)
     adata_gpu.obs["blobs"] = adata_gpu.obs["blobs"].astype("category")
     adata_cpu = adata_gpu.copy()
@@ -265,6 +271,7 @@ def test_rank_genes_groups_wilcoxon_tie_correct(reference, tie_correct):
 @pytest.mark.parametrize("tie_correct", [True, False])
 def test_rank_genes_groups_wilcoxon_tie_correct_sparse(reference, tie_correct):
     """Test tie_correct matches scanpy with sparse matrices."""
+    np.random.seed(42)
     adata_gpu = sc.datasets.blobs(n_variables=6, n_centers=3, n_observations=200)
     adata_gpu.obs["blobs"] = adata_gpu.obs["blobs"].astype("category")
     # Convert to sparse matrix
@@ -317,6 +324,7 @@ def test_rank_genes_groups_wilcoxon_tie_correct_sparse(reference, tie_correct):
 @pytest.mark.parametrize("pre_load", [True, False])
 def test_rank_genes_groups_wilcoxon_pts(reference, pre_load):
     """Test that pts (fraction of cells expressing) is computed correctly."""
+    np.random.seed(42)
     adata_gpu = sc.datasets.blobs(n_variables=6, n_centers=3, n_observations=200)
     adata_gpu.obs["blobs"] = adata_gpu.obs["blobs"].astype("category")
     adata_cpu = adata_gpu.copy()
