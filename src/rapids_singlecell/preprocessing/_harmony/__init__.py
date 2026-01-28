@@ -7,6 +7,8 @@ import cupy as cp
 import numpy as np
 from cuml import KMeans as CumlKMeans
 
+from rapids_singlecell._utils import _create_category_index_mapping
+
 from ._fuses import (
     _calc_R,
     _entropy_kernel,
@@ -17,7 +19,6 @@ from ._fuses import (
 from ._helper import (
     _choose_colsum_algo_benchmark,
     _choose_colsum_algo_heuristic,
-    _create_category_index_mapping,
     _get_aggregated_matrix,
     _get_batch_codes,
     _get_theta_array,
