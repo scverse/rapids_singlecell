@@ -97,9 +97,7 @@ def _choose_chunk_size(requested: int | None) -> int:
     """Choose chunk size for gene processing."""
     if requested is not None:
         return int(requested)
-    given = 512
-    print(f"Using chunk size: {given}")
-    return given
+    return 128
 
 
 def _get_column_block(X, start: int, stop: int) -> cp.ndarray:
