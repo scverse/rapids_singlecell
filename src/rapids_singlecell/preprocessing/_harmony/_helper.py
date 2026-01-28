@@ -166,24 +166,6 @@ def _one_hot_tensor_cp(X: pd.Series) -> cp.array:
     return Phi
 
 
-def _create_category_index_mapping(
-    cats: cp.ndarray, n_batches: int
-) -> tuple[cp.ndarray, cp.ndarray]:
-    """
-    Create a CSR-like data structure mapping categories to cell indices using lexicographical sort.
-    """
-    cat_counts = cp.zeros(n_batches, dtype=cp.int32)
-    cp.add.at(cat_counts, cats, 1)
-    cat_offsets = cp.zeros(n_batches + 1, dtype=cp.int32)
-    cp.cumsum(cat_counts, out=cat_offsets[1:])
-
-    n_cells = cats.shape[0]
-    indices = cp.arange(n_cells, dtype=cp.int32)
-
-    cell_indices = cp.lexsort(cp.stack((indices, cats))).astype(cp.int32)
-    return cat_offsets, cell_indices
-
-
 def _scatter_add_cp_bias_csr(
     X: cp.ndarray,
     out: cp.ndarray,
