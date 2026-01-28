@@ -7,45 +7,14 @@ Shared memory is constant: CELL_TILE * FEAT_TILE * dtype_size.
 
 from __future__ import annotations
 
-import cupy as cp
 import numpy as np
 from cuml.common.kernel_utils import cuda_kernel_factory
+
+from rapids_singlecell._utils import _get_device_attrs
 
 # Common tile sizes for feature dimension
 # Larger tiles = fewer iterations but more shared memory
 TILE_SIZES = [32, 50, 64]
-
-# Cache for device attributes per device (lazy initialization)
-_DEVICE_ATTRS_CACHE: dict[int, dict] = {}
-
-
-def _get_device_attrs(device_id: int | None = None) -> dict:
-    """Get device attributes for a specific device (cached per device).
-
-    Parameters
-    ----------
-    device_id
-        CUDA device ID. If None, uses current device.
-
-    Returns
-    -------
-    dict
-        Dictionary containing 'max_shared_mem' and 'cc_major' for the device.
-    """
-    if device_id is None:
-        device_id = cp.cuda.Device().id
-
-    if device_id not in _DEVICE_ATTRS_CACHE:
-        with cp.cuda.Device(device_id):
-            device = cp.cuda.Device()
-            # compute_capability is a string like "120" for CC 12.0, or "86" for CC 8.6
-            cc_str = str(device.compute_capability)
-            cc_major = int(cc_str[:-1]) if len(cc_str) > 1 else int(cc_str)
-            _DEVICE_ATTRS_CACHE[device_id] = {
-                "max_shared_mem": device.attributes["MaxSharedMemoryPerBlock"],
-                "cc_major": cc_major,
-            }
-    return _DEVICE_ATTRS_CACHE[device_id]
 
 
 def _choose_feat_tile(

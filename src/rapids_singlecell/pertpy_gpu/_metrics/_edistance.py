@@ -9,8 +9,10 @@ import cupy as cp
 import numpy as np
 import pandas as pd
 
-from rapids_singlecell.preprocessing._harmony._helper import (
+from rapids_singlecell._utils import (
+    _calculate_blocks_per_pair,
     _create_category_index_mapping,
+    _split_pairs,
 )
 from rapids_singlecell.squidpy_gpu._utils import _assert_categorical_obs
 
@@ -21,45 +23,6 @@ from ._kernels._edistance_kernel import (
 
 if TYPE_CHECKING:
     from anndata import AnnData
-
-
-def _split_pairs(
-    pair_left: cp.ndarray, pair_right: cp.ndarray, n_devices: int
-) -> list[tuple[cp.ndarray, cp.ndarray]]:
-    """Split pairs evenly across devices.
-
-    Parameters
-    ----------
-    pair_left
-        Left indices of pairs
-    pair_right
-        Right indices of pairs
-    n_devices
-        Number of devices to split across
-
-    Returns
-    -------
-    list
-        List of (pair_left, pair_right) tuples for each device
-    """
-    n_pairs = len(pair_left)
-    pairs_per_device = (n_pairs + n_devices - 1) // n_devices
-
-    chunks = []
-    for i in range(n_devices):
-        start = i * pairs_per_device
-        end = min(start + pairs_per_device, n_pairs)
-        if start < n_pairs:
-            chunks.append((pair_left[start:end], pair_right[start:end]))
-        else:
-            # No pairs for this device
-            chunks.append(
-                (
-                    cp.array([], dtype=cp.int32),
-                    cp.array([], dtype=cp.int32),
-                )
-            )
-    return chunks
 
 
 class EDistanceMetric(BaseMetric):
@@ -529,19 +492,6 @@ class EDistanceMetric(BaseMetric):
 
     # Internal methods from original _edistance.py
 
-    def _calculate_blocks_per_pair(self, num_pairs: int) -> int:
-        """Calculate optimal blocks_per_pair based on workload.
-
-        Targets ~300K total blocks for good GPU utilization.
-        """
-        target_blocks = 300_000
-        max_blocks_per_pair = 32
-
-        blocks_per_pair = max(1, (target_blocks + num_pairs - 1) // num_pairs)
-        blocks_per_pair = min(blocks_per_pair, max_blocks_per_pair)
-
-        return blocks_per_pair
-
     def _pairwise_means(
         self,
         embedding: cp.ndarray,
@@ -659,7 +609,7 @@ class EDistanceMetric(BaseMetric):
                 kernel, shared_mem, block_size = get_compute_group_distances_kernel(
                     embedding.dtype, n_features
                 )
-                blocks_per_pair = self._calculate_blocks_per_pair(data["n_pairs"])
+                blocks_per_pair = _calculate_blocks_per_pair(data["n_pairs"])
                 grid = (data["n_pairs"], blocks_per_pair)
                 block = (block_size,)
 
@@ -845,7 +795,7 @@ class EDistanceMetric(BaseMetric):
                 kernel, shared_mem, block_size = get_compute_group_distances_kernel(
                     embedding.dtype, n_features
                 )
-                blocks_per_pair = self._calculate_blocks_per_pair(data["n_pairs"])
+                blocks_per_pair = _calculate_blocks_per_pair(data["n_pairs"])
                 grid = (data["n_pairs"], blocks_per_pair)
                 block = (block_size,)
 
