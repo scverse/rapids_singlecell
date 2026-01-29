@@ -845,7 +845,8 @@ class EDistanceMetric(BaseMetric):
     ) -> tuple[cp.ndarray, cp.ndarray]:
         """Compute bootstrap statistics for pairwise distances.
 
-        Interleaves bootstrap iterations across specified GPUs for parallel processing.
+        Distributes bootstrap iterations across GPUs - each GPU gets a contiguous
+        batch of iterations to run independently.
 
         Parameters
         ----------
@@ -876,70 +877,97 @@ class EDistanceMetric(BaseMetric):
             cat_offsets, k, n_bootstrap, random_state
         )
 
-        # Phase 1: Start async data transfer to all devices
-        streams = {}
-        device_embeddings = {}
+        # Split iterations across devices - each GPU gets a batch
+        iters_per_device = (n_bootstrap + n_devices - 1) // n_devices
 
-        for device_id in device_ids:
+        # Phase 1: Transfer data to all devices
+        streams: dict[int, cp.cuda.Stream] = {}
+        device_data: list[dict | None] = []
+
+        for i, device_id in enumerate(device_ids):
+            start_iter = i * iters_per_device
+            end_iter = min(start_iter + iters_per_device, n_bootstrap)
+            n_iters = end_iter - start_iter
+
+            if n_iters == 0:
+                device_data.append(None)
+                continue
+
             with cp.cuda.Device(device_id):
                 streams[device_id] = cp.cuda.Stream(non_blocking=True)
 
                 with streams[device_id]:
                     if device_id == device_ids[0]:
-                        device_embeddings[device_id] = embedding
+                        dev_emb = embedding
+                        dev_off = cat_offsets
+                        dev_idx = cell_indices
                     else:
-                        device_embeddings[device_id] = cp.asarray(embedding)
+                        dev_emb = cp.asarray(embedding)
+                        dev_off = cp.asarray(cat_offsets)
+                        dev_idx = cp.asarray(cell_indices)
 
-        # Wait for all data transfers to complete
-        for device_id in device_ids:
+                    device_data.append(
+                        {
+                            "embedding": dev_emb,
+                            "cat_offsets": dev_off,
+                            "cell_indices": dev_idx,
+                            "start_iter": start_iter,
+                            "n_iters": n_iters,
+                            "device_id": device_id,
+                        }
+                    )
+
+        # Phase 2: Run iterations on each device (batched per GPU)
+        for data in device_data:
+            if data is None:
+                continue
+
+            device_id = data["device_id"]
+            start_iter = data["start_iter"]
+            n_iters = data["n_iters"]
+
+            with cp.cuda.Device(device_id):
+                with streams[device_id]:
+                    results = []
+                    for j in range(n_iters):
+                        iter_idx = start_iter + j
+
+                        # Create bootstrap sample
+                        boot_cat_offsets, boot_cell_indices = (
+                            self._bootstrap_sample_cells_from_indices(
+                                cat_offsets=data["cat_offsets"],
+                                cell_indices=data["cell_indices"],
+                                k=k,
+                                bootstrap_group_indices=bootstrap_indices[iter_idx],
+                            )
+                        )
+
+                        # Compute pairwise means
+                        pairwise_means = self._pairwise_means(
+                            embedding=data["embedding"],
+                            cat_offsets=boot_cat_offsets,
+                            cell_indices=boot_cell_indices,
+                            k=k,
+                            device_ids=[device_id],
+                        )
+                        results.append(pairwise_means)
+
+                    data["results"] = results
+
+        # Phase 3: Synchronize all devices
+        for device_id in streams:
             with cp.cuda.Device(device_id):
                 streams[device_id].synchronize()
 
-        # Phase 2: Launch all iterations in interleaved order (async)
-        # Store GPU arrays, don't call .get() yet
-        iteration_results = [None] * n_bootstrap
-
-        for i in range(n_bootstrap):
-            device_id = device_ids[i % n_devices]
-
-            with cp.cuda.Device(device_id):
-                # Create bootstrap sample
-                boot_cat_offsets, boot_cell_indices = (
-                    self._bootstrap_sample_cells_from_indices(
-                        cat_offsets=cat_offsets,
-                        cell_indices=cell_indices,
-                        k=k,
-                        bootstrap_group_indices=bootstrap_indices[i],
-                    )
-                )
-
-                # Copy bootstrap indices to this device if needed
-                if device_id != device_ids[0]:
-                    boot_cat_offsets = cp.asarray(boot_cat_offsets)
-                    boot_cell_indices = cp.asarray(boot_cell_indices)
-
-                # Compute pairwise means (kernel launch is async)
-                # Use single device for inner call since we're already distributing iterations
-                pairwise_means = self._pairwise_means(
-                    embedding=device_embeddings[device_id],
-                    cat_offsets=boot_cat_offsets,
-                    cell_indices=boot_cell_indices,
-                    k=k,
-                    device_ids=[device_id],
-                )
-                iteration_results[i] = (device_id, pairwise_means)
-
-        # Phase 3: Synchronize all devices
-        for device_id in device_ids:
-            with cp.cuda.Device(device_id):
-                cp.cuda.Stream.null.synchronize()
-
-        # Phase 4: Collect results (now safe to call .get())
+        # Phase 4: Gather results from all devices
         all_results = []
-        for i in range(n_bootstrap):
-            device_id, result = iteration_results[i]
+        for data in device_data:
+            if data is None:
+                continue
+            device_id = data["device_id"]
             with cp.cuda.Device(device_id):
-                all_results.append(result.get())
+                for result in data["results"]:
+                    all_results.append(result.get())
 
         # Compute statistics on first GPU
         with cp.cuda.Device(device_ids[0]):
@@ -963,7 +991,8 @@ class EDistanceMetric(BaseMetric):
     ) -> tuple[cp.ndarray, cp.ndarray]:
         """Compute bootstrap statistics for onesided distances.
 
-        Interleaves bootstrap iterations across specified GPUs for parallel processing.
+        Distributes bootstrap iterations across GPUs - each GPU gets a contiguous
+        batch of iterations to run independently.
 
         Parameters
         ----------
@@ -996,68 +1025,100 @@ class EDistanceMetric(BaseMetric):
             cat_offsets, k, n_bootstrap, random_state
         )
 
-        # Phase 1: Start async data transfer to all devices
-        streams = {}
-        device_embeddings = {}
+        # Split iterations across devices - each GPU gets a batch
+        iters_per_device = (n_bootstrap + n_devices - 1) // n_devices
 
-        for device_id in device_ids:
+        # Phase 1: Transfer data to all devices
+        streams: dict[int, cp.cuda.Stream] = {}
+        device_data: list[dict | None] = []
+
+        for i, device_id in enumerate(device_ids):
+            start_iter = i * iters_per_device
+            end_iter = min(start_iter + iters_per_device, n_bootstrap)
+            n_iters = end_iter - start_iter
+
+            if n_iters == 0:
+                device_data.append(None)
+                continue
+
             with cp.cuda.Device(device_id):
                 streams[device_id] = cp.cuda.Stream(non_blocking=True)
 
                 with streams[device_id]:
                     if device_id == device_ids[0]:
-                        device_embeddings[device_id] = embedding
+                        dev_emb = embedding
+                        dev_off = cat_offsets
+                        dev_idx = cell_indices
                     else:
-                        device_embeddings[device_id] = cp.asarray(embedding)
+                        dev_emb = cp.asarray(embedding)
+                        dev_off = cp.asarray(cat_offsets)
+                        dev_idx = cp.asarray(cell_indices)
 
-        # Wait for all data transfers to complete
-        for device_id in device_ids:
+                    device_data.append(
+                        {
+                            "embedding": dev_emb,
+                            "cat_offsets": dev_off,
+                            "cell_indices": dev_idx,
+                            "start_iter": start_iter,
+                            "n_iters": n_iters,
+                            "device_id": device_id,
+                        }
+                    )
+
+        # Phase 2: Run iterations on each device (batched per GPU)
+        for data in device_data:
+            if data is None:
+                continue
+
+            device_id = data["device_id"]
+            start_iter = data["start_iter"]
+            n_iters = data["n_iters"]
+
+            with cp.cuda.Device(device_id):
+                with streams[device_id]:
+                    results = []
+                    for j in range(n_iters):
+                        iter_idx = start_iter + j
+
+                        # Create bootstrap sample
+                        boot_cat_offsets, boot_cell_indices = (
+                            self._bootstrap_sample_cells_from_indices(
+                                cat_offsets=data["cat_offsets"],
+                                cell_indices=data["cell_indices"],
+                                k=k,
+                                bootstrap_group_indices=bootstrap_indices[iter_idx],
+                            )
+                        )
+
+                        # Compute onesided means
+                        onesided_means = self._onesided_means(
+                            embedding=data["embedding"],
+                            cat_offsets=boot_cat_offsets,
+                            cell_indices=boot_cell_indices,
+                            k=k,
+                            selected_idx=selected_idx,
+                            device_ids=[device_id],
+                        )
+                        results.append(onesided_means)
+
+                    data["results"] = results
+
+        # Phase 3: Synchronize all devices
+        for device_id in streams:
             with cp.cuda.Device(device_id):
                 streams[device_id].synchronize()
 
-        # Phase 2: Launch all iterations in interleaved order (async)
-        iteration_results = [None] * n_bootstrap
-
-        for i in range(n_bootstrap):
-            device_id = device_ids[i % n_devices]
-
-            with cp.cuda.Device(device_id):
-                boot_cat_offsets, boot_cell_indices = (
-                    self._bootstrap_sample_cells_from_indices(
-                        cat_offsets=cat_offsets,
-                        cell_indices=cell_indices,
-                        k=k,
-                        bootstrap_group_indices=bootstrap_indices[i],
-                    )
-                )
-
-                if device_id != device_ids[0]:
-                    boot_cat_offsets = cp.asarray(boot_cat_offsets)
-                    boot_cell_indices = cp.asarray(boot_cell_indices)
-
-                # Use single device for inner call since we're already distributing iterations
-                onesided_means = self._onesided_means(
-                    embedding=device_embeddings[device_id],
-                    cat_offsets=boot_cat_offsets,
-                    cell_indices=boot_cell_indices,
-                    k=k,
-                    selected_idx=selected_idx,
-                    device_ids=[device_id],
-                )
-                iteration_results[i] = (device_id, onesided_means)
-
-        # Phase 3: Synchronize all devices
-        for device_id in device_ids:
-            with cp.cuda.Device(device_id):
-                cp.cuda.Stream.null.synchronize()
-
-        # Phase 4: Collect results
+        # Phase 4: Gather results from all devices
         all_results = []
-        for i in range(n_bootstrap):
-            device_id, result = iteration_results[i]
+        for data in device_data:
+            if data is None:
+                continue
+            device_id = data["device_id"]
             with cp.cuda.Device(device_id):
-                all_results.append(result.get())
+                for result in data["results"]:
+                    all_results.append(result.get())
 
+        # Compute statistics on first GPU
         with cp.cuda.Device(device_ids[0]):
             bootstrap_stack = cp.array(all_results)
             means = cp.mean(bootstrap_stack, axis=0)
