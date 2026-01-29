@@ -547,8 +547,8 @@ class EDistanceMetric(BaseMetric):
             norm_matrix = self._compute_norm_matrix(group_sizes, embedding.dtype)
             return cp.zeros((k, k), dtype=embedding.dtype) / norm_matrix
 
-        # Split pairs across devices
-        pair_chunks = _split_pairs(pair_left, pair_right, n_devices)
+        # Split pairs across devices with load balancing
+        pair_chunks = _split_pairs(pair_left, pair_right, n_devices, group_sizes)
 
         # Phase 1: Create streams and start async data transfer to all devices
         streams = {}
@@ -735,8 +735,8 @@ class EDistanceMetric(BaseMetric):
             norm_matrix = self._compute_norm_matrix(group_sizes, embedding.dtype)
             return cp.zeros((k, k), dtype=embedding.dtype) / norm_matrix
 
-        # Split pairs across devices
-        pair_chunks = _split_pairs(pair_left, pair_right, n_devices)
+        # Split pairs across devices with load balancing
+        pair_chunks = _split_pairs(pair_left, pair_right, n_devices, group_sizes)
 
         # Phase 1: Create streams and start async data transfer to all devices
         streams = {}

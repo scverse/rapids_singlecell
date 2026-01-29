@@ -847,10 +847,10 @@ def test_block_size_consistency() -> None:
     This test runs on GPUs that support both block sizes (Ampere+, CC >= 8.0)
     and verifies both code paths produce the same results.
     """
-    from rapids_singlecell.pertpy_gpu._metrics._kernels import _edistance_kernel
+    from rapids_singlecell._utils import _multi_gpu
 
     # Check if GPU supports both block sizes (Ampere+)
-    device_attrs = _edistance_kernel._get_device_attrs()
+    device_attrs = _multi_gpu._get_device_attrs()
     if device_attrs["cc_major"] < 8:
         pytest.skip("GPU does not support both block sizes (requires CC >= 8.0)")
 
@@ -878,15 +878,13 @@ def test_block_size_consistency() -> None:
     device_id = cp.cuda.Device().id
     original_cc = device_attrs["cc_major"]
     try:
-        _edistance_kernel._DEVICE_ATTRS_CACHE[device_id]["cc_major"] = (
+        _multi_gpu._DEVICE_ATTRS_CACHE[device_id]["cc_major"] = (
             7  # Force pre-Ampere path
         )
         distance_256 = Distance(metric="edistance")
         result_256 = distance_256.pairwise(adata, groupby="group")
     finally:
-        _edistance_kernel._DEVICE_ATTRS_CACHE[device_id]["cc_major"] = (
-            original_cc  # Restore
-        )
+        _multi_gpu._DEVICE_ATTRS_CACHE[device_id]["cc_major"] = original_cc  # Restore
 
     # Results should be identical (within floating point tolerance)
     np.testing.assert_allclose(
@@ -1784,18 +1782,18 @@ def test_multi_gpu_with_more_gpus_than_pairs() -> None:
 @pytest.mark.skipif(not _has_multiple_gpus(), reason="Requires 2+ GPUs")
 def test_multi_gpu_device_attrs_cache_per_device() -> None:
     """Test that device attributes are cached per device."""
-    from rapids_singlecell.pertpy_gpu._metrics._kernels import _edistance_kernel
+    from rapids_singlecell._utils import _multi_gpu
 
     # Clear cache to ensure fresh test
-    _edistance_kernel._DEVICE_ATTRS_CACHE.clear()
+    _multi_gpu._DEVICE_ATTRS_CACHE.clear()
 
     # Get attrs for device 0
-    attrs_0 = _edistance_kernel._get_device_attrs(device_id=0)
-    assert 0 in _edistance_kernel._DEVICE_ATTRS_CACHE
+    attrs_0 = _multi_gpu._get_device_attrs(device_id=0)
+    assert 0 in _multi_gpu._DEVICE_ATTRS_CACHE
 
     # Get attrs for device 1
-    attrs_1 = _edistance_kernel._get_device_attrs(device_id=1)
-    assert 1 in _edistance_kernel._DEVICE_ATTRS_CACHE
+    attrs_1 = _multi_gpu._get_device_attrs(device_id=1)
+    assert 1 in _multi_gpu._DEVICE_ATTRS_CACHE
 
     # Both should have required keys
     assert "max_shared_mem" in attrs_0
@@ -1804,7 +1802,7 @@ def test_multi_gpu_device_attrs_cache_per_device() -> None:
     assert "cc_major" in attrs_1
 
     # Getting attrs again should return cached values
-    attrs_0_again = _edistance_kernel._get_device_attrs(device_id=0)
+    attrs_0_again = _multi_gpu._get_device_attrs(device_id=0)
     assert attrs_0_again is attrs_0  # Same object (cached)
 
 
