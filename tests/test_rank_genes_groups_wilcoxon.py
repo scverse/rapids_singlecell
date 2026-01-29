@@ -11,11 +11,17 @@ import rapids_singlecell as rsc
 
 
 @pytest.mark.parametrize("reference", ["rest", "1"])
-def test_rank_genes_groups_wilcoxon_matches_scanpy_output(reference):
-    """Test wilcoxon matches scanpy output for both 'rest' and specific reference."""
+@pytest.mark.parametrize("tie_correct", [True, False])
+@pytest.mark.parametrize("sparse", [True, False])
+def test_rank_genes_groups_wilcoxon_matches_scanpy(reference, tie_correct, sparse):
+    """Test wilcoxon matches scanpy output across configurations."""
     np.random.seed(42)
     adata_gpu = sc.datasets.blobs(n_variables=6, n_centers=3, n_observations=200)
     adata_gpu.obs["blobs"] = adata_gpu.obs["blobs"].astype("category")
+
+    if sparse:
+        adata_gpu.X = sp.csr_matrix(adata_gpu.X)
+
     adata_cpu = adata_gpu.copy()
 
     rsc.tl.rank_genes_groups(
@@ -26,6 +32,7 @@ def test_rank_genes_groups_wilcoxon_matches_scanpy_output(reference):
         n_genes=3,
         reference=reference,
         corr_method="benjamini-hochberg",
+        tie_correct=tie_correct,
     )
     sc.tl.rank_genes_groups(
         adata_cpu,
@@ -34,7 +41,7 @@ def test_rank_genes_groups_wilcoxon_matches_scanpy_output(reference):
         use_raw=False,
         n_genes=3,
         reference=reference,
-        tie_correct=False,
+        tie_correct=tie_correct,
     )
 
     gpu_result = adata_gpu.uns["rank_genes_groups"]
@@ -58,7 +65,7 @@ def test_rank_genes_groups_wilcoxon_matches_scanpy_output(reference):
     params = gpu_result["params"]
     assert params["use_raw"] is False
     assert params["corr_method"] == "benjamini-hochberg"
-    assert params["tie_correct"] is False
+    assert params["tie_correct"] is tie_correct
     assert params["layer"] is None
     assert params["reference"] == reference
 
@@ -214,110 +221,6 @@ def test_rank_genes_groups_wilcoxon_with_unsorted_groups(reference):
     assert tuple(adata.uns["rank_genes_groups"]["names"][test_group]) == tuple(
         bdata.uns["rank_genes_groups"]["names"][test_group]
     )
-
-
-@pytest.mark.parametrize("reference", ["rest", "1"])
-@pytest.mark.parametrize("tie_correct", [True, False])
-def test_rank_genes_groups_wilcoxon_tie_correct(reference, tie_correct):
-    """Test tie_correct matches scanpy output for both True and False."""
-    np.random.seed(42)
-    adata_gpu = sc.datasets.blobs(n_variables=6, n_centers=3, n_observations=200)
-    adata_gpu.obs["blobs"] = adata_gpu.obs["blobs"].astype("category")
-    adata_cpu = adata_gpu.copy()
-
-    rsc.tl.rank_genes_groups(
-        adata_gpu,
-        "blobs",
-        method="wilcoxon",
-        use_raw=False,
-        n_genes=3,
-        reference=reference,
-        corr_method="benjamini-hochberg",
-        tie_correct=tie_correct,
-    )
-    sc.tl.rank_genes_groups(
-        adata_cpu,
-        "blobs",
-        method="wilcoxon",
-        use_raw=False,
-        n_genes=3,
-        reference=reference,
-        tie_correct=tie_correct,
-    )
-
-    gpu_result = adata_gpu.uns["rank_genes_groups"]
-    cpu_result = adata_cpu.uns["rank_genes_groups"]
-
-    assert gpu_result["names"].dtype.names == cpu_result["names"].dtype.names
-    for group in gpu_result["names"].dtype.names:
-        assert list(gpu_result["names"][group]) == list(cpu_result["names"][group])
-
-    for field in ("scores", "logfoldchanges", "pvals", "pvals_adj"):
-        gpu_field = gpu_result[field]
-        cpu_field = cpu_result[field]
-        assert gpu_field.dtype.names == cpu_field.dtype.names
-        for group in gpu_field.dtype.names:
-            gpu_values = np.asarray(gpu_field[group], dtype=float)
-            cpu_values = np.asarray(cpu_field[group], dtype=float)
-            np.testing.assert_allclose(
-                gpu_values, cpu_values, rtol=1e-5, atol=1e-6, equal_nan=True
-            )
-
-    params = gpu_result["params"]
-    assert params["tie_correct"] is tie_correct
-
-
-@pytest.mark.parametrize("reference", ["rest", "1"])
-@pytest.mark.parametrize("tie_correct", [True, False])
-def test_rank_genes_groups_wilcoxon_tie_correct_sparse(reference, tie_correct):
-    """Test tie_correct matches scanpy with sparse matrices."""
-    np.random.seed(42)
-    adata_gpu = sc.datasets.blobs(n_variables=6, n_centers=3, n_observations=200)
-    adata_gpu.obs["blobs"] = adata_gpu.obs["blobs"].astype("category")
-    # Convert to sparse matrix
-    adata_gpu.X = sp.csr_matrix(adata_gpu.X)
-    adata_cpu = adata_gpu.copy()
-
-    rsc.tl.rank_genes_groups(
-        adata_gpu,
-        "blobs",
-        method="wilcoxon",
-        use_raw=False,
-        n_genes=3,
-        reference=reference,
-        corr_method="benjamini-hochberg",
-        tie_correct=tie_correct,
-    )
-    sc.tl.rank_genes_groups(
-        adata_cpu,
-        "blobs",
-        method="wilcoxon",
-        use_raw=False,
-        n_genes=3,
-        reference=reference,
-        tie_correct=tie_correct,
-    )
-
-    gpu_result = adata_gpu.uns["rank_genes_groups"]
-    cpu_result = adata_cpu.uns["rank_genes_groups"]
-
-    assert gpu_result["names"].dtype.names == cpu_result["names"].dtype.names
-    for group in gpu_result["names"].dtype.names:
-        assert list(gpu_result["names"][group]) == list(cpu_result["names"][group])
-
-    for field in ("scores", "logfoldchanges", "pvals", "pvals_adj"):
-        gpu_field = gpu_result[field]
-        cpu_field = cpu_result[field]
-        assert gpu_field.dtype.names == cpu_field.dtype.names
-        for group in gpu_field.dtype.names:
-            gpu_values = np.asarray(gpu_field[group], dtype=float)
-            cpu_values = np.asarray(cpu_field[group], dtype=float)
-            np.testing.assert_allclose(
-                gpu_values, cpu_values, rtol=1e-5, atol=1e-6, equal_nan=True
-            )
-
-    params = gpu_result["params"]
-    assert params["tie_correct"] is tie_correct
 
 
 @pytest.mark.parametrize("reference", ["rest", "1"])
