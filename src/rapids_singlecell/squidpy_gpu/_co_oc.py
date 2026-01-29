@@ -11,9 +11,12 @@ try:
 except ImportError:
     _co = None
 
-from rapids_singlecell.preprocessing._harmony._helper import (
+from rapids_singlecell._utils import (
+    _calculate_blocks_per_pair,
     _create_category_index_mapping,
+    _split_pairs,
 )
+from rapids_singlecell.pertpy_gpu._metrics._base_metric import parse_device_ids
 
 from ._utils import _assert_categorical_obs, _assert_spatial_basis
 
@@ -27,6 +30,7 @@ def co_occurrence(
     *,
     spatial_key: str = "spatial",
     interval: int | np.ndarray | cp.ndarray = 50,
+    multi_gpu: bool | list[int] | str | None = None,
     copy: bool = False,
 ) -> tuple[np.ndarray, np.ndarray] | None:
     """
@@ -43,6 +47,13 @@ def co_occurrence(
     interval
         Distances interval at which co-occurrence is computed. If :class:`int`, uniformly spaced interval
         of the given size will be used.
+    multi_gpu
+        GPU selection:
+        - None: Use all GPUs if available (default)
+        - True: Use all available GPUs
+        - False: Use only GPU 0
+        - list[int]: Use specific GPU IDs (e.g., [0, 2])
+        - str: Comma-separated GPU IDs (e.g., "0,2")
     copy
         If ``True``, return the co-occurrence probability and the distance thresholds intervals.
 
@@ -74,7 +85,11 @@ def co_occurrence(
         raise ValueError(
             f"Expected interval to be of length `>= 2`, found `{len(interval)}`."
         )
-    out = _co_occurrence_helper(spatial, interval, labs, fast=True)
+
+    device_ids = parse_device_ids(multi_gpu=multi_gpu)
+    out = _co_occurrence_helper(
+        spatial, interval, labs, fast=True, device_ids=device_ids
+    )
     out, interval = out.get(), interval.get()
     if copy:
         return out, interval
@@ -99,7 +114,12 @@ def _find_min_max(spatial: cp.ndarray) -> tuple[float, float]:
 
 
 def _co_occurrence_helper(
-    spatial: cp.ndarray, v_radium: cp.ndarray, labs: cp.ndarray, *, fast: bool = True
+    spatial: cp.ndarray,
+    v_radium: cp.ndarray,
+    labs: cp.ndarray,
+    *,
+    fast: bool = True,
+    device_ids: list[int] | None = None,
 ) -> cp.ndarray:
     """
     Fast co-occurrence probability computation using cuda kernels.
@@ -112,6 +132,10 @@ def _co_occurrence_helper(
         Distance thresholds (in ascending order).
     labs
         Cluster labels (as integers).
+    fast
+        Whether to use the fast CSR-based kernel.
+    device_ids
+        List of GPU device IDs to use. If None, uses GPU 0.
 
     Returns
     -------
@@ -119,16 +143,27 @@ def _co_occurrence_helper(
         A 3D array of shape (k, k, len(v_radium)-1) containing the co-occurrence probabilities.
 
     """
+    if device_ids is None:
+        device_ids = [0]
+
+    n = spatial.shape[0]
     # labels are dense [0, k)
     k = int(cp.asnumpy(labs.max())) + 1
     l_val = len(v_radium) - 1
     thresholds = (v_radium[1:]) ** 2
     use_fast_kernel = False  # Flag to track which kernel path was taken
+
     if fast:
-        # New CSR-based per-category-pair kernel using per-warp shared histograms (size l_val)
-        # 1 block per (cat_a, cat_b) with a<=b
+        # Early check: can we use the fast kernel with available shared memory?
+        kernel_config = _co.get_kernel_config(l_val, n, k)
+        if kernel_config is None:
+            # Shared memory insufficient, skip CSR prep and use pairwise kernel
+            fast = False
+
+    if fast:
         # Prepare category CSR structures
         cat_offsets, cell_indices = _create_category_index_mapping(labs, k)
+
         # Build pair list (upper triangle including diagonal)
         pair_left = []
         pair_right = []
@@ -138,22 +173,27 @@ def _co_occurrence_helper(
                 pair_right.append(b)
         pair_left = cp.asarray(pair_left, dtype=cp.int32)
         pair_right = cp.asarray(pair_right, dtype=cp.int32)
-        # Let C++ pick tpb; fall back to slow if insufficient shared memory
-        counts = cp.zeros((k, k, l_val), dtype=cp.int32)
-        reader = 1
-        use_fast_kernel = _co.count_csr_catpairs_auto(
-            spatial,
+
+        # Use single GPU for small workloads (< 100k cells)
+        min_cells_for_multi_gpu = 100_000
+        n_devices = len(device_ids)
+        if n_devices > 1 and n < min_cells_for_multi_gpu:
+            device_ids = [device_ids[0]]
+
+        counts, use_fast_kernel = _co_occurrence_gpu(
+            spatial=spatial,
             thresholds=thresholds,
             cat_offsets=cat_offsets,
             cell_indices=cell_indices,
             pair_left=pair_left,
             pair_right=pair_right,
-            counts_delta=counts,
-            num_pairs=pair_left.size,
+            n_cells=n,
             k=k,
             l_val=l_val,
-            stream=cp.cuda.get_current_stream().ptr,
+            device_ids=device_ids,
         )
+        if use_fast_kernel:
+            reader = 1
 
     # Fallback to the standard kernel if fast=False or shared memory was insufficient
     if not use_fast_kernel:
@@ -163,7 +203,7 @@ def _co_occurrence_helper(
             thresholds=thresholds,
             labels=labs,
             result=counts,
-            n=spatial.shape[0],
+            n=n,
             k=k,
             l_val=l_val,
             stream=cp.cuda.get_current_stream().ptr,
@@ -172,7 +212,7 @@ def _co_occurrence_helper(
 
     occ_prob = cp.empty((k, k, l_val), dtype=np.float32)
     ok = False
-    if fast:
+    if use_fast_kernel:
         ok = _co.reduce_shared(
             counts,
             out=occ_prob,
@@ -194,3 +234,159 @@ def _co_occurrence_helper(
         )
 
     return occ_prob
+
+
+def _co_occurrence_gpu(
+    spatial: cp.ndarray,
+    thresholds: cp.ndarray,
+    cat_offsets: cp.ndarray,
+    cell_indices: cp.ndarray,
+    *,
+    pair_left: cp.ndarray,
+    pair_right: cp.ndarray,
+    n_cells: int,
+    k: int,
+    l_val: int,
+    device_ids: list[int],
+) -> tuple[cp.ndarray, bool]:
+    """GPU co-occurrence computation using 4-phase pattern.
+
+    Handles both single-GPU and multi-GPU cases. For single GPU, pairs are not
+    split and all computation happens on one device.
+
+    Parameters
+    ----------
+    spatial
+        Spatial coordinates on GPU 0
+    thresholds
+        Squared distance thresholds on GPU 0
+    cat_offsets
+        Category offsets for CSR structure on GPU 0
+    cell_indices
+        Cell indices for CSR structure on GPU 0
+    pair_left
+        Left category indices for all pairs on GPU 0
+    pair_right
+        Right category indices for all pairs on GPU 0
+    n_cells
+        Total number of cells (for block size heuristic)
+    k
+        Number of categories
+    l_val
+        Number of threshold bins
+    device_ids
+        List of GPU device IDs to use
+
+    Returns
+    -------
+    tuple
+        (counts, use_fast_kernel) where counts is the aggregated count array
+        of shape (k, k, l_val), and use_fast_kernel indicates if the optimized
+        kernel was used (False means shared memory was insufficient).
+    """
+    n_devices = len(device_ids)
+
+    # Split pairs across devices
+    pair_chunks = _split_pairs(pair_left, pair_right, n_devices)
+
+    # Phase 1: Create streams and start async data transfer to all devices
+    streams: dict[int, cp.cuda.Stream] = {}
+    device_data: list[dict | None] = []
+
+    for i, device_id in enumerate(device_ids):
+        chunk_left, chunk_right = pair_chunks[i]
+        if len(chunk_left) == 0:
+            device_data.append(None)
+            continue
+
+        with cp.cuda.Device(device_id):
+            # Create non-blocking stream for this device
+            streams[device_id] = cp.cuda.Stream(non_blocking=True)
+
+            with streams[device_id]:
+                # Replicate data to this device (async on stream)
+                if device_id == device_ids[0]:
+                    dev_spatial = spatial
+                    dev_thresholds = thresholds
+                    dev_cat_offsets = cat_offsets
+                    dev_cell_indices = cell_indices
+                else:
+                    dev_spatial = cp.asarray(spatial)
+                    dev_thresholds = cp.asarray(thresholds)
+                    dev_cat_offsets = cp.asarray(cat_offsets)
+                    dev_cell_indices = cp.asarray(cell_indices)
+
+                # Copy pair indices to this device
+                dev_pair_left = cp.asarray(chunk_left)
+                dev_pair_right = cp.asarray(chunk_right)
+
+                # Initialize local counts array
+                dev_counts = cp.zeros((k, k, l_val), dtype=cp.int32)
+
+                device_data.append(
+                    {
+                        "spatial": dev_spatial,
+                        "thresholds": dev_thresholds,
+                        "cat_offsets": dev_cat_offsets,
+                        "cell_indices": dev_cell_indices,
+                        "pair_left": dev_pair_left,
+                        "pair_right": dev_pair_right,
+                        "counts": dev_counts,
+                        "n_pairs": len(dev_pair_left),
+                        "device_id": device_id,
+                    }
+                )
+
+    # Phase 2: Synchronize data transfers, then launch kernels
+    for data in device_data:
+        if data is None:
+            continue
+
+        device_id = data["device_id"]
+        with cp.cuda.Device(device_id):
+            # Wait for data transfer to complete on this device
+            streams[device_id].synchronize()
+
+            # Get kernel configuration for this device
+            kernel_config = _co.get_kernel_config(l_val, n_cells, k)
+            if kernel_config is None:
+                # Shared memory insufficient, fall back to pairwise kernel
+                return cp.zeros((k, k, l_val), dtype=cp.int32), False
+
+            cell_tile, _l_pad, block_size, shared_mem = kernel_config
+            blocks_per_pair = _calculate_blocks_per_pair(data["n_pairs"])
+
+            # Launch kernel with computed configuration
+            _co.count_csr_catpairs(
+                data["spatial"],
+                thresholds=data["thresholds"],
+                cat_offsets=data["cat_offsets"],
+                cell_indices=data["cell_indices"],
+                pair_left=data["pair_left"],
+                pair_right=data["pair_right"],
+                counts=data["counts"],
+                num_pairs=data["n_pairs"],
+                k=k,
+                l_val=l_val,
+                blocks_per_pair=blocks_per_pair,
+                cell_tile=cell_tile,
+                block_size=block_size,
+                shared_mem=shared_mem,
+                stream=cp.cuda.get_current_stream().ptr,
+            )
+
+    # Phase 3: Synchronize all devices (wait for kernels to complete)
+    for data in device_data:
+        if data is not None:
+            with cp.cuda.Device(data["device_id"]):
+                cp.cuda.Stream.null.synchronize()
+
+    # Phase 4: Aggregate counts on first device
+    with cp.cuda.Device(device_ids[0]):
+        counts = cp.zeros((k, k, l_val), dtype=cp.int32)
+        for data in device_data:
+            if data is not None:
+                # cp.asarray handles cross-device copy
+                counts += cp.asarray(data["counts"])
+
+    return counts, True

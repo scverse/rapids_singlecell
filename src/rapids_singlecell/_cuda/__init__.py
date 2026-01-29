@@ -19,6 +19,8 @@ __all__ = [
     "_bbknn_cuda",
     # Co-occurrence analysis
     "_cooc_cuda",
+    # HVG / Poisson gene selection
+    "_hvg_cuda",
     # Harmony integration
     "_harmony_colsum_cuda",
     "_harmony_kmeans_cuda",
@@ -40,6 +42,8 @@ __all__ = [
     "_pr_cuda",
     # Permutation testing (decoupler)
     "_pv_cuda",
+    # Energy distance (pertpy)
+    "_edistance_cuda",
     # QC metrics
     "_qc_cuda",
     "_qc_dask_cuda",

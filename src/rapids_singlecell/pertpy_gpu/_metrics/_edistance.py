@@ -9,15 +9,19 @@ import cupy as cp
 import numpy as np
 import pandas as pd
 
-from rapids_singlecell.preprocessing._harmony._helper import (
+try:
+    from rapids_singlecell._cuda import _edistance_cuda as _ed
+except ImportError:
+    _ed = None
+
+from rapids_singlecell._utils import (
+    _calculate_blocks_per_pair,
     _create_category_index_mapping,
+    _split_pairs,
 )
 from rapids_singlecell.squidpy_gpu._utils import _assert_categorical_obs
 
-from ._base_metric import BaseMetric
-from ._kernels._edistance_kernel import (
-    get_compute_group_distances_kernel,
-)
+from ._base_metric import BaseMetric, parse_device_ids
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -45,6 +49,8 @@ class EDistanceMetric(BaseMetric):
     Journal of Statistical Planning and Inference, 143(8), 1249-1272.
     """
 
+    supports_multi_gpu: bool = True
+
     def __init__(
         self,
         layer_key: str | None = None,
@@ -68,6 +74,7 @@ class EDistanceMetric(BaseMetric):
         bootstrap: bool = False,
         n_bootstrap: int = 100,
         random_state: int = 0,
+        multi_gpu: bool | list[int] | str | None = None,
     ) -> pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]:
         """
         Compute pairwise energy distances between all cell groups.
@@ -95,6 +102,13 @@ class EDistanceMetric(BaseMetric):
             Number of bootstrap iterations (if bootstrap=True)
         random_state
             Random seed for reproducibility
+        multi_gpu
+            GPU selection:
+            - None: Use all GPUs if metric supports it, else GPU 0 (default)
+            - True: Use all available GPUs
+            - False: Use only GPU 0
+            - list[int]: Use specific GPU IDs (e.g., [0, 2])
+            - str: Comma-separated GPU IDs (e.g., "0,2")
 
         Returns
         -------
@@ -125,6 +139,7 @@ class EDistanceMetric(BaseMetric):
                 all_groups=all_groups,
                 groups_list=groups_list,
                 groupby=groupby,
+                multi_gpu=multi_gpu,
             )
 
         return self._prepare_edistance_df_bootstrap(
@@ -137,6 +152,7 @@ class EDistanceMetric(BaseMetric):
             groupby=groupby,
             n_bootstrap=n_bootstrap,
             random_state=random_state,
+            multi_gpu=multi_gpu,
         )
 
     def onesided_distances(
@@ -149,6 +165,7 @@ class EDistanceMetric(BaseMetric):
         bootstrap: bool = False,
         n_bootstrap: int = 100,
         random_state: int = 0,
+        multi_gpu: bool | list[int] | str | None = None,
     ) -> pd.Series | tuple[pd.Series, pd.Series]:
         """
         Compute energy distances from one selected group to all other groups.
@@ -169,6 +186,13 @@ class EDistanceMetric(BaseMetric):
             Number of bootstrap iterations (if bootstrap=True)
         random_state
             Random seed for reproducibility
+        multi_gpu
+            GPU selection:
+            - None: Use all GPUs if metric supports it, else GPU 0 (default)
+            - True: Use all available GPUs
+            - False: Use only GPU 0
+            - list[int]: Use specific GPU IDs (e.g., [0, 2])
+            - str: Comma-separated GPU IDs (e.g., "0,2")
 
         Returns
         -------
@@ -195,8 +219,9 @@ class EDistanceMetric(BaseMetric):
         groups_list = all_groups if groups is None else list(groups)
         selected_idx = group_map[selected_group]
 
+        device_ids = parse_device_ids(multi_gpu=multi_gpu)
+
         if bootstrap:
-            # Optimized bootstrap: only compute 2k-1 pairs per iteration
             onesided_means, onesided_vars = self._onesided_means_bootstrap(
                 embedding=embedding,
                 cat_offsets=cat_offsets,
@@ -205,6 +230,7 @@ class EDistanceMetric(BaseMetric):
                 selected_idx=selected_idx,
                 n_bootstrap=n_bootstrap,
                 random_state=random_state,
+                device_ids=device_ids,
             )
 
             # Compute energy distances: e[s,b] = 2*d[s,b] - d[s,s] - d[b,b]
@@ -234,7 +260,12 @@ class EDistanceMetric(BaseMetric):
 
         # Non-bootstrap path: compute onesided means directly
         onesided_means = self._onesided_means(
-            embedding, cat_offsets, cell_indices, k, selected_idx
+            embedding,
+            cat_offsets,
+            cell_indices,
+            k,
+            selected_idx=selected_idx,
+            device_ids=device_ids,
         )
 
         # Compute energy distances: e[s,b] = 2*d[s,b] - d[s,s] - d[b,b]
@@ -263,6 +294,7 @@ class EDistanceMetric(BaseMetric):
         *,
         n_bootstrap: int = 100,
         random_state: int = 0,
+        multi_gpu: bool | list[int] | str | None = None,
     ) -> tuple[float, float]:
         """
         Compute bootstrap mean and variance for energy distance between two groups.
@@ -281,6 +313,13 @@ class EDistanceMetric(BaseMetric):
             Number of bootstrap iterations
         random_state
             Random seed for reproducibility
+        multi_gpu
+            GPU selection:
+            - None: Use all GPUs if metric supports it, else GPU 0 (default)
+            - True: Use all available GPUs
+            - False: Use only GPU 0
+            - list[int]: Use specific GPU IDs (e.g., [0, 2])
+            - str: Comma-separated GPU IDs (e.g., "0,2")
 
         Returns
         -------
@@ -297,6 +336,7 @@ class EDistanceMetric(BaseMetric):
             bootstrap=True,
             n_bootstrap=n_bootstrap,
             random_state=random_state,
+            multi_gpu=multi_gpu,
         )
 
         mean = df.loc[group_a, group_b]
@@ -460,15 +500,37 @@ class EDistanceMetric(BaseMetric):
         cat_offsets: cp.ndarray,
         cell_indices: cp.ndarray,
         k: int,
+        device_ids: list[int],
     ) -> cp.ndarray:
-        """Compute between-group mean distances for all group pairs."""
+        """Compute between-group mean distances for all group pairs.
+
+        Splits pairs across specified GPUs and aggregates results on GPU 0.
+
+        Parameters
+        ----------
+        embedding
+            Cell embeddings on GPU 0
+        cat_offsets
+            Category offsets on GPU 0
+        cell_indices
+            Cell indices on GPU 0
+        k
+            Number of groups
+        device_ids
+            List of GPU device IDs to use
+
+        Returns
+        -------
+        cp.ndarray
+            Matrix of mean pairwise distances (k x k)
+        """
+        n_devices = len(device_ids)
         _, n_features = embedding.shape
 
         # Get group sizes to filter out single-cell diagonal pairs
         group_sizes = cp.diff(cat_offsets).astype(cp.int64)
 
         # Build upper triangular indices, excluding diagonal for single-cell groups
-        # Diagonal (i,i): only if group_size >= 2; Off-diagonal (i,j): always
         triu_indices = cp.triu_indices(k)
         pair_left = triu_indices[0].astype(cp.int32)
         pair_right = triu_indices[1].astype(cp.int32)
@@ -482,56 +544,143 @@ class EDistanceMetric(BaseMetric):
         pair_right = pair_right[keep_mask]
         num_pairs = len(pair_left)
 
-        pairwise_sums = cp.zeros((k, k), dtype=embedding.dtype)
+        if num_pairs == 0:
+            # No pairs to compute
+            norm_matrix = self._compute_norm_matrix(group_sizes, embedding.dtype)
+            return cp.zeros((k, k), dtype=embedding.dtype) / norm_matrix
 
-        if num_pairs > 0:
-            kernel, shared_mem, block_size = get_compute_group_distances_kernel(
-                embedding.dtype, n_features
-            )
-            blocks_per_pair = self._calculate_blocks_per_pair(num_pairs)
-            grid = (num_pairs, blocks_per_pair)
-            block = (block_size,)
+        # Split pairs across devices
+        pair_chunks = _split_pairs(pair_left, pair_right, n_devices)
 
-            kernel(
-                grid,
-                block,
-                (
-                    embedding,
-                    cat_offsets,
-                    cell_indices,
-                    pair_left,
-                    pair_right,
-                    pairwise_sums,
+        # Phase 1: Create streams and start async data transfer to all devices
+        streams = {}
+        device_data = []
+
+        for i, device_id in enumerate(device_ids):
+            chunk_left, chunk_right = pair_chunks[i]
+            if len(chunk_left) == 0:
+                device_data.append(None)
+                continue
+
+            with cp.cuda.Device(device_id):
+                # Create non-blocking stream for this device
+                streams[device_id] = cp.cuda.Stream(non_blocking=True)
+
+                with streams[device_id]:
+                    # Replicate data to this device (async on stream)
+                    if device_id == 0:
+                        dev_emb = embedding
+                        dev_off = cat_offsets
+                        dev_idx = cell_indices
+                    else:
+                        dev_emb = cp.asarray(embedding)
+                        dev_off = cp.asarray(cat_offsets)
+                        dev_idx = cp.asarray(cell_indices)
+
+                    # Copy pair indices to this device
+                    dev_pair_left = cp.asarray(chunk_left)
+                    dev_pair_right = cp.asarray(chunk_right)
+
+                    # Initialize local accumulator
+                    dev_sums = cp.zeros((k, k), dtype=embedding.dtype)
+
+                    device_data.append(
+                        {
+                            "emb": dev_emb,
+                            "off": dev_off,
+                            "idx": dev_idx,
+                            "pair_left": dev_pair_left,
+                            "pair_right": dev_pair_right,
+                            "sums": dev_sums,
+                            "n_pairs": len(dev_pair_left),
+                            "device_id": device_id,
+                        }
+                    )
+
+        # Phase 2: Synchronize data transfers, then launch kernels
+        for data in device_data:
+            if data is None:
+                continue
+
+            device_id = data["device_id"]
+            with cp.cuda.Device(device_id):
+                # Wait for data transfer to complete on this device
+                streams[device_id].synchronize()
+
+                # Launch kernel (on default stream, async)
+                is_double = embedding.dtype == np.float64
+                config = _ed.get_kernel_config(n_features, is_double)
+                if config is None:
+                    raise RuntimeError(
+                        "Insufficient shared memory for edistance kernel"
+                    )
+                _, feat_tile, block_size, shared_mem = config
+                blocks_per_pair = _calculate_blocks_per_pair(data["n_pairs"])
+
+                kernel_fn = (
+                    _ed.compute_distances_f64
+                    if is_double
+                    else _ed.compute_distances_f32
+                )
+                kernel_fn(
+                    data["emb"],
+                    data["off"],
+                    data["idx"],
+                    data["pair_left"],
+                    data["pair_right"],
+                    data["sums"],
+                    data["n_pairs"],
                     k,
                     n_features,
                     blocks_per_pair,
-                ),
-                shared_mem=shared_mem,
-            )
+                    feat_tile,
+                    block_size,
+                    shared_mem,
+                    cp.cuda.get_current_stream().ptr,
+                )
 
-        # Normalize sums to means
+        # Phase 3: Synchronize all devices (wait for kernels to complete)
+        for data in device_data:
+            if data is not None:
+                with cp.cuda.Device(data["device_id"]):
+                    cp.cuda.Stream.null.synchronize()
+
+        # Phase 4: Aggregate on GPU 0
+        with cp.cuda.Device(0):
+            pairwise_sums = cp.zeros((k, k), dtype=embedding.dtype)
+            for data in device_data:
+                if data is not None:
+                    # cp.asarray handles cross-device copy
+                    pairwise_sums += cp.asarray(data["sums"])
+
+            # Normalize sums to means
+            norm_matrix = self._compute_norm_matrix(group_sizes, embedding.dtype)
+            return pairwise_sums / norm_matrix
+
+    def _compute_norm_matrix(
+        self, group_sizes: cp.ndarray, dtype: np.dtype
+    ) -> cp.ndarray:
+        """Compute normalization matrix for pairwise means.
+
+        Parameters
+        ----------
+        group_sizes
+            Array of group sizes
+        dtype
+            Data type for output matrix
+
+        Returns
+        -------
+        cp.ndarray
+            Normalization matrix (k x k)
+        """
         diag_counts = group_sizes * (group_sizes - 1) // 2
         # Handle single-cell groups: replace 0 with 1 to avoid division by zero
-        # (the sum is 0 for these, so 0/1 = 0 is correct)
         diag_counts = cp.maximum(diag_counts, 1)
         cross_counts = cp.outer(group_sizes, group_sizes)
-        norm_matrix = cross_counts.astype(embedding.dtype)
-        cp.fill_diagonal(norm_matrix, diag_counts.astype(embedding.dtype))
-
-        return pairwise_sums / norm_matrix
-
-    def _calculate_blocks_per_pair(self, num_pairs: int) -> int:
-        """Calculate optimal blocks_per_pair based on workload.
-
-        Targets ~300K total blocks for good GPU utilization.
-        """
-        target_blocks = 300_000
-        max_blocks_per_pair = 32
-
-        blocks_per_pair = max(1, (target_blocks + num_pairs - 1) // num_pairs)
-        blocks_per_pair = min(blocks_per_pair, max_blocks_per_pair)
-
-        return blocks_per_pair
+        norm_matrix = cross_counts.astype(dtype)
+        cp.fill_diagonal(norm_matrix, diag_counts.astype(dtype))
+        return norm_matrix
 
     def _onesided_means(
         self,
@@ -539,30 +688,50 @@ class EDistanceMetric(BaseMetric):
         cat_offsets: cp.ndarray,
         cell_indices: cp.ndarray,
         k: int,
+        *,
         selected_idx: int,
+        device_ids: list[int],
     ) -> cp.ndarray:
         """Compute mean distances from selected group to all groups.
+
+        Splits pairs across specified GPUs and aggregates results on GPU 0.
 
         Computes:
         - d[selected_idx, i] for all i (cross-distances)
         - d[i, i] for all i (self-distances needed for energy distance formula)
+
+        Parameters
+        ----------
+        embedding
+            Cell embeddings on GPU 0
+        cat_offsets
+            Category offsets on GPU 0
+        cell_indices
+            Cell indices on GPU 0
+        k
+            Number of groups
+        selected_idx
+            Index of the selected group
+        device_ids
+            List of GPU device IDs to use
+
+        Returns
+        -------
+        cp.ndarray
+            Matrix of mean onesided distances (k x k)
         """
+        n_devices = len(device_ids)
         _, n_features = embedding.shape
 
-        # Get group sizes to filter out single-cell diagonal pairs
+        # Get group sizes
         group_sizes = cp.diff(cat_offsets).astype(cp.int64)
 
-        # Need pairs for:
-        # 1. (selected_idx, i) for all i - cross distances from selected group
-        # 2. (i, i) for all i where i != selected_idx AND group_sizes[i] >= 2
-        # Note: (selected_idx, selected_idx) is already in set 1
-
-        # Cross-distance pairs: (selected_idx, 0), ..., (selected_idx, k-1)
+        # Build pairs for onesided computation
         all_indices = cp.arange(k, dtype=cp.int32)
         cross_left = cp.full(k, selected_idx, dtype=cp.int32)
         cross_right = all_indices
 
-        # Diagonal pairs for other groups with >= 2 cells (vectorized)
+        # Diagonal pairs for other groups with >= 2 cells
         mask = (all_indices != selected_idx) & (group_sizes >= 2)
         other_diag = all_indices[mask]
 
@@ -571,43 +740,346 @@ class EDistanceMetric(BaseMetric):
         pair_right = cp.concatenate([cross_right, other_diag])
         num_pairs = len(pair_left)
 
-        onesided_sums = cp.zeros((k, k), dtype=embedding.dtype)
+        if num_pairs == 0:
+            norm_matrix = self._compute_norm_matrix(group_sizes, embedding.dtype)
+            return cp.zeros((k, k), dtype=embedding.dtype) / norm_matrix
 
-        if num_pairs > 0:
-            kernel, shared_mem, block_size = get_compute_group_distances_kernel(
-                embedding.dtype, n_features
-            )
-            blocks_per_pair = self._calculate_blocks_per_pair(num_pairs)
-            grid = (num_pairs, blocks_per_pair)
-            block = (block_size,)
+        # Split pairs across devices
+        pair_chunks = _split_pairs(pair_left, pair_right, n_devices)
 
-            kernel(
-                grid,
-                block,
-                (
-                    embedding,
-                    cat_offsets,
-                    cell_indices,
-                    pair_left,
-                    pair_right,
-                    onesided_sums,
+        # Phase 1: Create streams and start async data transfer to all devices
+        streams = {}
+        device_data = []
+
+        for i, device_id in enumerate(device_ids):
+            chunk_left, chunk_right = pair_chunks[i]
+            if len(chunk_left) == 0:
+                device_data.append(None)
+                continue
+
+            with cp.cuda.Device(device_id):
+                # Create non-blocking stream for this device
+                streams[device_id] = cp.cuda.Stream(non_blocking=True)
+
+                with streams[device_id]:
+                    # Replicate data to this device (async on stream)
+                    if device_id == device_ids[0]:
+                        dev_emb = embedding
+                        dev_off = cat_offsets
+                        dev_idx = cell_indices
+                    else:
+                        dev_emb = cp.asarray(embedding)
+                        dev_off = cp.asarray(cat_offsets)
+                        dev_idx = cp.asarray(cell_indices)
+
+                    dev_pair_left = cp.asarray(chunk_left)
+                    dev_pair_right = cp.asarray(chunk_right)
+
+                    dev_sums = cp.zeros((k, k), dtype=embedding.dtype)
+
+                    device_data.append(
+                        {
+                            "emb": dev_emb,
+                            "off": dev_off,
+                            "idx": dev_idx,
+                            "pair_left": dev_pair_left,
+                            "pair_right": dev_pair_right,
+                            "sums": dev_sums,
+                            "n_pairs": len(dev_pair_left),
+                            "device_id": device_id,
+                        }
+                    )
+
+        # Phase 2: Synchronize data transfers, then launch kernels
+        for data in device_data:
+            if data is None:
+                continue
+
+            device_id = data["device_id"]
+            with cp.cuda.Device(device_id):
+                # Wait for data transfer to complete on this device
+                streams[device_id].synchronize()
+
+                # Launch kernel (on default stream, async)
+                is_double = embedding.dtype == np.float64
+                config = _ed.get_kernel_config(n_features, is_double)
+                if config is None:
+                    raise RuntimeError(
+                        "Insufficient shared memory for edistance kernel"
+                    )
+                _, feat_tile, block_size, shared_mem = config
+                blocks_per_pair = _calculate_blocks_per_pair(data["n_pairs"])
+
+                kernel_fn = (
+                    _ed.compute_distances_f64
+                    if is_double
+                    else _ed.compute_distances_f32
+                )
+                kernel_fn(
+                    data["emb"],
+                    data["off"],
+                    data["idx"],
+                    data["pair_left"],
+                    data["pair_right"],
+                    data["sums"],
+                    data["n_pairs"],
                     k,
                     n_features,
                     blocks_per_pair,
-                ),
-                shared_mem=shared_mem,
-            )
+                    feat_tile,
+                    block_size,
+                    shared_mem,
+                    cp.cuda.get_current_stream().ptr,
+                )
 
-        # Normalize sums to means
-        diag_counts = group_sizes * (group_sizes - 1) // 2
-        # Handle single-cell groups: replace 0 with 1 to avoid division by zero
-        # (the sum is 0 for these, so 0/1 = 0 is correct)
-        diag_counts = cp.maximum(diag_counts, 1)
-        cross_counts = cp.outer(group_sizes, group_sizes)
-        norm_matrix = cross_counts.astype(embedding.dtype)
-        cp.fill_diagonal(norm_matrix, diag_counts.astype(embedding.dtype))
+        # Phase 3: Synchronize all devices (wait for kernels to complete)
+        for data in device_data:
+            if data is not None:
+                with cp.cuda.Device(data["device_id"]):
+                    cp.cuda.Stream.null.synchronize()
 
-        return onesided_sums / norm_matrix
+        # Phase 4: Aggregate on GPU 0
+        with cp.cuda.Device(device_ids[0]):
+            onesided_sums = cp.zeros((k, k), dtype=embedding.dtype)
+            for data in device_data:
+                if data is not None:
+                    onesided_sums += cp.asarray(data["sums"])
+
+            norm_matrix = self._compute_norm_matrix(group_sizes, embedding.dtype)
+            return onesided_sums / norm_matrix
+
+    def _pairwise_means_bootstrap(
+        self,
+        embedding: cp.ndarray,
+        *,
+        cat_offsets: cp.ndarray,
+        cell_indices: cp.ndarray,
+        k: int,
+        n_bootstrap: int,
+        random_state: int,
+        device_ids: list[int],
+    ) -> tuple[cp.ndarray, cp.ndarray]:
+        """Compute bootstrap statistics for pairwise distances.
+
+        Interleaves bootstrap iterations across specified GPUs for parallel processing.
+
+        Parameters
+        ----------
+        embedding
+            Cell embeddings on GPU 0
+        cat_offsets
+            Category offsets on GPU 0
+        cell_indices
+            Cell indices on GPU 0
+        k
+            Number of groups
+        n_bootstrap
+            Number of bootstrap iterations
+        random_state
+            Random seed for reproducibility
+        device_ids
+            List of GPU device IDs to use
+
+        Returns
+        -------
+        tuple
+            (means, variances) matrices (k x k each)
+        """
+        n_devices = len(device_ids)
+
+        # Generate all bootstrap indices on CPU for reproducibility
+        bootstrap_indices = self._generate_bootstrap_indices(
+            cat_offsets, k, n_bootstrap, random_state
+        )
+
+        # Phase 1: Start async data transfer to all devices
+        streams = {}
+        device_embeddings = {}
+
+        for device_id in device_ids:
+            with cp.cuda.Device(device_id):
+                streams[device_id] = cp.cuda.Stream(non_blocking=True)
+
+                with streams[device_id]:
+                    if device_id == device_ids[0]:
+                        device_embeddings[device_id] = embedding
+                    else:
+                        device_embeddings[device_id] = cp.asarray(embedding)
+
+        # Wait for all data transfers to complete
+        for device_id in device_ids:
+            with cp.cuda.Device(device_id):
+                streams[device_id].synchronize()
+
+        # Phase 2: Launch all iterations in interleaved order (async)
+        # Store GPU arrays, don't call .get() yet
+        iteration_results = [None] * n_bootstrap
+
+        for i in range(n_bootstrap):
+            device_id = device_ids[i % n_devices]
+
+            with cp.cuda.Device(device_id):
+                # Create bootstrap sample
+                boot_cat_offsets, boot_cell_indices = (
+                    self._bootstrap_sample_cells_from_indices(
+                        cat_offsets=cat_offsets,
+                        cell_indices=cell_indices,
+                        k=k,
+                        bootstrap_group_indices=bootstrap_indices[i],
+                    )
+                )
+
+                # Copy bootstrap indices to this device if needed
+                if device_id != device_ids[0]:
+                    boot_cat_offsets = cp.asarray(boot_cat_offsets)
+                    boot_cell_indices = cp.asarray(boot_cell_indices)
+
+                # Compute pairwise means (kernel launch is async)
+                # Use single device for inner call since we're already distributing iterations
+                pairwise_means = self._pairwise_means(
+                    embedding=device_embeddings[device_id],
+                    cat_offsets=boot_cat_offsets,
+                    cell_indices=boot_cell_indices,
+                    k=k,
+                    device_ids=[device_id],
+                )
+                iteration_results[i] = (device_id, pairwise_means)
+
+        # Phase 3: Synchronize all devices
+        for device_id in device_ids:
+            with cp.cuda.Device(device_id):
+                cp.cuda.Stream.null.synchronize()
+
+        # Phase 4: Collect results (now safe to call .get())
+        all_results = []
+        for i in range(n_bootstrap):
+            device_id, result = iteration_results[i]
+            with cp.cuda.Device(device_id):
+                all_results.append(result.get())
+
+        # Compute statistics on first GPU
+        with cp.cuda.Device(device_ids[0]):
+            bootstrap_stack = cp.array(all_results)  # [n_bootstrap, k, k]
+            means = cp.mean(bootstrap_stack, axis=0)
+            variances = cp.var(bootstrap_stack, axis=0)
+
+        return means, variances
+
+    def _onesided_means_bootstrap(
+        self,
+        embedding: cp.ndarray,
+        *,
+        cat_offsets: cp.ndarray,
+        cell_indices: cp.ndarray,
+        k: int,
+        selected_idx: int,
+        n_bootstrap: int,
+        random_state: int,
+        device_ids: list[int],
+    ) -> tuple[cp.ndarray, cp.ndarray]:
+        """Compute bootstrap statistics for onesided distances.
+
+        Interleaves bootstrap iterations across specified GPUs for parallel processing.
+
+        Parameters
+        ----------
+        embedding
+            Cell embeddings on GPU 0
+        cat_offsets
+            Category offsets on GPU 0
+        cell_indices
+            Cell indices on GPU 0
+        k
+            Number of groups
+        selected_idx
+            Index of the selected group
+        n_bootstrap
+            Number of bootstrap iterations
+        random_state
+            Random seed for reproducibility
+        device_ids
+            List of GPU device IDs to use
+
+        Returns
+        -------
+        tuple
+            (means, variances) matrices (k x k each)
+        """
+        n_devices = len(device_ids)
+
+        # Generate all bootstrap indices on CPU for reproducibility
+        bootstrap_indices = self._generate_bootstrap_indices(
+            cat_offsets, k, n_bootstrap, random_state
+        )
+
+        # Phase 1: Start async data transfer to all devices
+        streams = {}
+        device_embeddings = {}
+
+        for device_id in device_ids:
+            with cp.cuda.Device(device_id):
+                streams[device_id] = cp.cuda.Stream(non_blocking=True)
+
+                with streams[device_id]:
+                    if device_id == device_ids[0]:
+                        device_embeddings[device_id] = embedding
+                    else:
+                        device_embeddings[device_id] = cp.asarray(embedding)
+
+        # Wait for all data transfers to complete
+        for device_id in device_ids:
+            with cp.cuda.Device(device_id):
+                streams[device_id].synchronize()
+
+        # Phase 2: Launch all iterations in interleaved order (async)
+        iteration_results = [None] * n_bootstrap
+
+        for i in range(n_bootstrap):
+            device_id = device_ids[i % n_devices]
+
+            with cp.cuda.Device(device_id):
+                boot_cat_offsets, boot_cell_indices = (
+                    self._bootstrap_sample_cells_from_indices(
+                        cat_offsets=cat_offsets,
+                        cell_indices=cell_indices,
+                        k=k,
+                        bootstrap_group_indices=bootstrap_indices[i],
+                    )
+                )
+
+                if device_id != device_ids[0]:
+                    boot_cat_offsets = cp.asarray(boot_cat_offsets)
+                    boot_cell_indices = cp.asarray(boot_cell_indices)
+
+                # Use single device for inner call since we're already distributing iterations
+                onesided_means = self._onesided_means(
+                    embedding=device_embeddings[device_id],
+                    cat_offsets=boot_cat_offsets,
+                    cell_indices=boot_cell_indices,
+                    k=k,
+                    selected_idx=selected_idx,
+                    device_ids=[device_id],
+                )
+                iteration_results[i] = (device_id, onesided_means)
+
+        # Phase 3: Synchronize all devices
+        for device_id in device_ids:
+            with cp.cuda.Device(device_id):
+                cp.cuda.Stream.null.synchronize()
+
+        # Phase 4: Collect results
+        all_results = []
+        for i in range(n_bootstrap):
+            device_id, result = iteration_results[i]
+            with cp.cuda.Device(device_id):
+                all_results.append(result.get())
+
+        with cp.cuda.Device(device_ids[0]):
+            bootstrap_stack = cp.array(all_results)
+            means = cp.mean(bootstrap_stack, axis=0)
+            variances = cp.var(bootstrap_stack, axis=0)
+
+        return means, variances
 
     def _generate_bootstrap_indices(
         self,
@@ -678,97 +1150,6 @@ class EDistanceMetric(BaseMetric):
 
         return new_cat_offsets, cp.array(new_cell_indices, dtype=cp.int32)
 
-    def _pairwise_means_bootstrap(
-        self,
-        embedding: cp.ndarray,
-        *,
-        cat_offsets: cp.ndarray,
-        cell_indices: cp.ndarray,
-        k: int,
-        n_bootstrap: int = 100,
-        random_state: int = 0,
-    ) -> tuple[cp.ndarray, cp.ndarray]:
-        """Compute bootstrap statistics for between-group distances."""
-        # Generate all bootstrap indices upfront
-        bootstrap_indices = self._generate_bootstrap_indices(
-            cat_offsets, k, n_bootstrap, random_state
-        )
-
-        bootstrap_results = []
-
-        for i in range(n_bootstrap):
-            boot_cat_offsets, boot_cell_indices = (
-                self._bootstrap_sample_cells_from_indices(
-                    cat_offsets=cat_offsets,
-                    cell_indices=cell_indices,
-                    k=k,
-                    bootstrap_group_indices=bootstrap_indices[i],
-                )
-            )
-
-            pairwise_means = self._pairwise_means(
-                embedding=embedding,
-                cat_offsets=boot_cat_offsets,
-                cell_indices=boot_cell_indices,
-                k=k,
-            )
-            bootstrap_results.append(pairwise_means.get())
-
-        # Compute statistics across bootstrap samples
-        bootstrap_stack = cp.array(bootstrap_results)  # [n_bootstrap, k, k]
-        means = cp.mean(bootstrap_stack, axis=0)
-        variances = cp.var(bootstrap_stack, axis=0)
-
-        return means, variances
-
-    def _onesided_means_bootstrap(
-        self,
-        embedding: cp.ndarray,
-        *,
-        cat_offsets: cp.ndarray,
-        cell_indices: cp.ndarray,
-        k: int,
-        selected_idx: int,
-        n_bootstrap: int = 100,
-        random_state: int = 0,
-    ) -> tuple[cp.ndarray, cp.ndarray]:
-        """Compute bootstrap statistics for onesided distances.
-
-        Only computes 2k-1 pairs per iteration instead of k*(k+1)/2 for pairwise.
-        """
-        # Generate all bootstrap indices upfront
-        bootstrap_indices = self._generate_bootstrap_indices(
-            cat_offsets, k, n_bootstrap, random_state
-        )
-
-        bootstrap_results = []
-
-        for i in range(n_bootstrap):
-            boot_cat_offsets, boot_cell_indices = (
-                self._bootstrap_sample_cells_from_indices(
-                    cat_offsets=cat_offsets,
-                    cell_indices=cell_indices,
-                    k=k,
-                    bootstrap_group_indices=bootstrap_indices[i],
-                )
-            )
-
-            onesided_means = self._onesided_means(
-                embedding=embedding,
-                cat_offsets=boot_cat_offsets,
-                cell_indices=boot_cell_indices,
-                k=k,
-                selected_idx=selected_idx,
-            )
-            bootstrap_results.append(onesided_means.get())
-
-        # Compute statistics across bootstrap samples
-        bootstrap_stack = cp.array(bootstrap_results)  # [n_bootstrap, k, k]
-        means = cp.mean(bootstrap_stack, axis=0)
-        variances = cp.var(bootstrap_stack, axis=0)
-
-        return means, variances
-
     def _prepare_edistance_df_bootstrap(
         self,
         embedding: cp.ndarray,
@@ -781,9 +1162,10 @@ class EDistanceMetric(BaseMetric):
         groupby: str,
         n_bootstrap: int = 100,
         random_state: int = 0,
+        multi_gpu: bool | list[int] | str | None = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Prepare bootstrap edistance DataFrames."""
-        # Bootstrap computation
+        device_ids = parse_device_ids(multi_gpu=multi_gpu)
         pairwise_means_boot, pairwise_vars_boot = self._pairwise_means_bootstrap(
             embedding=embedding,
             cat_offsets=cat_offsets,
@@ -791,6 +1173,7 @@ class EDistanceMetric(BaseMetric):
             k=k,
             n_bootstrap=n_bootstrap,
             random_state=random_state,
+            device_ids=device_ids,
         )
 
         # Vectorized edistance: e[a,b] = 2*d[a,b] - d[a,a] - d[b,b]
@@ -840,10 +1223,13 @@ class EDistanceMetric(BaseMetric):
         all_groups: list[str],
         groups_list: list[str],
         groupby: str,
+        multi_gpu: bool | list[int] | str | None = None,
     ) -> pd.DataFrame:
         """Prepare edistance DataFrame."""
-        # Compute means
-        pairwise_means = self._pairwise_means(embedding, cat_offsets, cell_indices, k)
+        device_ids = parse_device_ids(multi_gpu=multi_gpu)
+        pairwise_means = self._pairwise_means(
+            embedding, cat_offsets, cell_indices, k, device_ids
+        )
 
         # Vectorized edistance: e[a,b] = 2*d[a,b] - d[a,a] - d[b,b]
         diag = cp.diag(pairwise_means)

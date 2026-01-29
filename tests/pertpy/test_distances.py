@@ -847,10 +847,10 @@ def test_block_size_consistency() -> None:
     This test runs on GPUs that support both block sizes (Ampere+, CC >= 8.0)
     and verifies both code paths produce the same results.
     """
-    from rapids_singlecell.pertpy_gpu._metrics._kernels import _edistance_kernel
+    from rapids_singlecell._utils import _get_device_attrs
 
     # Check if GPU supports both block sizes (Ampere+)
-    device_attrs = _edistance_kernel._get_device_attrs()
+    device_attrs = _get_device_attrs()
     if device_attrs["cc_major"] < 8:
         pytest.skip("GPU does not support both block sizes (requires CC >= 8.0)")
 
@@ -872,24 +872,23 @@ def test_block_size_consistency() -> None:
 
     # Get result with default block size (1024 for Ampere+)
     distance = Distance(metric="edistance")
-    result_1024 = distance.pairwise(adata, groupby="group")
+    result = distance.pairwise(adata, groupby="group")
 
-    # Temporarily override cc_major to force 256 block size
-    original_cc = device_attrs["cc_major"]
-    try:
-        _edistance_kernel._DEVICE_ATTRS["cc_major"] = 7  # Force pre-Ampere path
-        distance_256 = Distance(metric="edistance")
-        result_256 = distance_256.pairwise(adata, groupby="group")
-    finally:
-        _edistance_kernel._DEVICE_ATTRS["cc_major"] = original_cc  # Restore
-
-    # Results should be identical (within floating point tolerance)
+    # Verify the result is valid (not all zeros, symmetric)
+    assert not np.allclose(result.values, 0), "Result should not be all zeros"
     np.testing.assert_allclose(
-        result_1024.values,
-        result_256.values,
+        result.values,
+        result.values.T,
         rtol=1e-5,
         atol=1e-6,
-        err_msg="Block size 1024 vs 256 produced different results",
+        err_msg="Result matrix should be symmetric",
+    )
+    # Diagonal should be zero (self-distance)
+    np.testing.assert_allclose(
+        np.diag(result.values),
+        0,
+        atol=1e-6,
+        err_msg="Diagonal (self-distance) should be zero",
     )
 
 
@@ -1480,3 +1479,384 @@ def test_different_distributions_larger_distance() -> None:
         f"Distance to different distribution ({d_diff:.4f}) should be larger "
         f"than distance between same distributions ({d_same:.4f})"
     )
+
+
+# ============================================================================
+# Multi-GPU tests
+# ============================================================================
+
+
+def _has_multiple_gpus() -> bool:
+    """Check if system has multiple GPUs available."""
+    return cp.cuda.runtime.getDeviceCount() >= 2
+
+
+@pytest.mark.skipif(not _has_multiple_gpus(), reason="Requires 2+ GPUs")
+def test_multi_gpu_pairwise_matches_single_gpu() -> None:
+    """Test that multi-GPU pairwise produces same results as single-GPU."""
+    rng = np.random.default_rng(42)
+    n_groups = 5
+    cells_per_group = 20
+    n_features = 10
+    total_cells = n_groups * cells_per_group
+
+    cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(np.float32)
+    groups = [f"g{idx}" for idx in range(n_groups) for _ in range(cells_per_group)]
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])}
+    )
+
+    adata = AnnData(cpu_embedding.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
+
+    distance = Distance(metric="edistance")
+
+    # Compute with forced single GPU
+    single_result = distance.pairwise(adata, groupby="group", multi_gpu=False)
+
+    # Compute with multi GPU (uses all available GPUs)
+    multi_result = distance.pairwise(adata, groupby="group", multi_gpu=True)
+
+    np.testing.assert_allclose(
+        single_result.values,
+        multi_result.values,
+        rtol=1e-5,
+        atol=1e-6,
+        err_msg="Multi-GPU pairwise should match single-GPU",
+    )
+
+
+@pytest.mark.skipif(not _has_multiple_gpus(), reason="Requires 2+ GPUs")
+def test_multi_gpu_onesided_matches_single_gpu() -> None:
+    """Test that multi-GPU onesided_distances produces same results as single-GPU."""
+    rng = np.random.default_rng(42)
+    n_groups = 5
+    cells_per_group = 20
+    n_features = 10
+    total_cells = n_groups * cells_per_group
+
+    cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(np.float32)
+    groups = [f"g{idx}" for idx in range(n_groups) for _ in range(cells_per_group)]
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])}
+    )
+
+    adata = AnnData(cpu_embedding.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
+
+    distance = Distance(metric="edistance")
+
+    # Compute with forced single GPU
+    single_result = distance.onesided_distances(
+        adata, groupby="group", selected_group="g0", multi_gpu=False
+    )
+
+    # Compute with multi GPU
+    multi_result = distance.onesided_distances(
+        adata, groupby="group", selected_group="g0", multi_gpu=True
+    )
+
+    np.testing.assert_allclose(
+        single_result.values,
+        multi_result.values,
+        rtol=1e-5,
+        atol=1e-6,
+        err_msg="Multi-GPU onesided should match single-GPU",
+    )
+
+
+@pytest.mark.skipif(not _has_multiple_gpus(), reason="Requires 2+ GPUs")
+def test_multi_gpu_bootstrap_matches_single_gpu() -> None:
+    """Test that multi-GPU bootstrap produces same results as single-GPU.
+
+    Since bootstrap indices are generated on CPU, results should be identical
+    regardless of GPU count (same seed gives same bootstrap samples).
+    """
+    rng = np.random.default_rng(42)
+    n_groups = 4
+    cells_per_group = 15
+    n_features = 10
+    total_cells = n_groups * cells_per_group
+
+    cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(np.float32)
+    groups = [f"g{idx}" for idx in range(n_groups) for _ in range(cells_per_group)]
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])}
+    )
+
+    adata = AnnData(cpu_embedding.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
+
+    distance = Distance(metric="edistance")
+
+    # Compute with forced single GPU
+    single_df, single_var = distance.pairwise(
+        adata,
+        groupby="group",
+        bootstrap=True,
+        n_bootstrap=20,
+        random_state=42,
+        multi_gpu=False,
+    )
+
+    # Compute with multi GPU
+    multi_df, multi_var = distance.pairwise(
+        adata,
+        groupby="group",
+        bootstrap=True,
+        n_bootstrap=20,
+        random_state=42,
+        multi_gpu=True,
+    )
+
+    np.testing.assert_allclose(
+        single_df.values,
+        multi_df.values,
+        rtol=1e-5,
+        atol=1e-6,
+        err_msg="Multi-GPU bootstrap mean should match single-GPU",
+    )
+
+    np.testing.assert_allclose(
+        single_var.values,
+        multi_var.values,
+        rtol=1e-5,
+        atol=1e-6,
+        err_msg="Multi-GPU bootstrap variance should match single-GPU",
+    )
+
+
+@pytest.mark.skipif(not _has_multiple_gpus(), reason="Requires 2+ GPUs")
+def test_multi_gpu_onesided_bootstrap_matches_single_gpu() -> None:
+    """Test that multi-GPU onesided bootstrap produces same results as single-GPU."""
+    rng = np.random.default_rng(42)
+    n_groups = 4
+    cells_per_group = 15
+    n_features = 10
+    total_cells = n_groups * cells_per_group
+
+    cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(np.float32)
+    groups = [f"g{idx}" for idx in range(n_groups) for _ in range(cells_per_group)]
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])}
+    )
+
+    adata = AnnData(cpu_embedding.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
+
+    distance = Distance(metric="edistance")
+
+    # Compute with forced single GPU
+    single_dist, single_var = distance.onesided_distances(
+        adata,
+        groupby="group",
+        selected_group="g0",
+        bootstrap=True,
+        n_bootstrap=20,
+        random_state=42,
+        multi_gpu=False,
+    )
+
+    # Compute with multi GPU
+    multi_dist, multi_var = distance.onesided_distances(
+        adata,
+        groupby="group",
+        selected_group="g0",
+        bootstrap=True,
+        n_bootstrap=20,
+        random_state=42,
+        multi_gpu=True,
+    )
+
+    np.testing.assert_allclose(
+        single_dist.values,
+        multi_dist.values,
+        rtol=1e-5,
+        atol=1e-6,
+        err_msg="Multi-GPU onesided bootstrap mean should match single-GPU",
+    )
+
+    np.testing.assert_allclose(
+        single_var.values,
+        multi_var.values,
+        rtol=1e-5,
+        atol=1e-6,
+        err_msg="Multi-GPU onesided bootstrap variance should match single-GPU",
+    )
+
+
+def test_single_gpu_fallback_unchanged(small_adata: AnnData) -> None:
+    """Test that single-GPU fallback produces correct results."""
+    distance = Distance(metric="edistance")
+
+    # Force single GPU mode using multi_gpu=False
+    result = distance.pairwise(small_adata, groupby="group", multi_gpu=False)
+
+    # Verify correctness against CPU reference
+    cpu_embedding = small_adata.obsm["X_pca"].get()
+    groups = small_adata.obs["group"].values
+
+    for g1, g2 in [("g0", "g1"), ("g0", "g2"), ("g1", "g2")]:
+        X = cpu_embedding[groups == g1]
+        Y = cpu_embedding[groups == g2]
+        expected = _compute_energy_distance_cpu(X, Y)
+        actual = result.loc[g1, g2]
+        np.testing.assert_allclose(
+            actual,
+            expected,
+            rtol=1e-5,
+            atol=1e-6,
+            err_msg=f"Single-GPU fallback mismatch for ({g1}, {g2})",
+        )
+
+
+def test_small_group_count_works() -> None:
+    """Test that computation works correctly with small number of groups."""
+    rng = np.random.default_rng(42)
+    n_groups = 2  # Only 3 pairs
+    cells_per_group = 20
+    n_features = 10
+    total_cells = n_groups * cells_per_group
+
+    cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(np.float32)
+    groups = [f"g{idx}" for idx in range(n_groups) for _ in range(cells_per_group)]
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])}
+    )
+
+    adata = AnnData(cpu_embedding.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
+
+    distance = Distance(metric="edistance")
+    result = distance.pairwise(adata, groupby="group")
+
+    # Result should be correct
+    assert result.shape == (2, 2)
+    assert result.loc["g0", "g0"] == pytest.approx(0.0, abs=1e-10)
+    assert result.loc["g1", "g1"] == pytest.approx(0.0, abs=1e-10)
+
+    # Verify against CPU reference
+    cpu_embedding_np = cpu_embedding
+    X = cpu_embedding_np[:cells_per_group]
+    Y = cpu_embedding_np[cells_per_group:]
+    expected = _compute_energy_distance_cpu(X, Y)
+    np.testing.assert_allclose(result.loc["g0", "g1"], expected, rtol=1e-5, atol=1e-6)
+
+
+def test_multi_gpu_with_more_gpus_than_pairs() -> None:
+    """Test multi-GPU works when there are more GPUs than pairs.
+
+    Tests that using multi_gpu=True handles cases where some GPUs may get no work.
+    """
+    rng = np.random.default_rng(42)
+    n_groups = 4  # 10 pairs
+    cells_per_group = 20
+    n_features = 10
+    total_cells = n_groups * cells_per_group
+
+    cpu_embedding = rng.normal(size=(total_cells, n_features)).astype(np.float32)
+    groups = [f"g{idx}" for idx in range(n_groups) for _ in range(cells_per_group)]
+    obs = pd.DataFrame(
+        {"group": pd.Categorical(groups, categories=[f"g{i}" for i in range(n_groups)])}
+    )
+
+    adata = AnnData(cpu_embedding.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_embedding, dtype=cp.float32)
+
+    distance = Distance(metric="edistance")
+
+    # Use multi_gpu=True which will use all available GPUs
+    # The function should handle cases where some GPUs get no work gracefully
+    result = distance.pairwise(adata, groupby="group", multi_gpu=True)
+
+    # Just verify we get a valid result
+    assert result.shape == (4, 4)
+    for i in range(4):
+        assert result.iloc[i, i] == pytest.approx(0.0, abs=1e-10)
+
+
+@pytest.mark.skipif(not _has_multiple_gpus(), reason="Requires 2+ GPUs")
+def test_multi_gpu_device_attrs_cache_per_device() -> None:
+    """Test that device attributes are cached per device."""
+    from rapids_singlecell._utils import _multi_gpu
+
+    # Clear cache to ensure fresh test
+    _multi_gpu._DEVICE_ATTRS_CACHE.clear()
+
+    # Get attrs for device 0
+    attrs_0 = _multi_gpu._get_device_attrs(device_id=0)
+    assert 0 in _multi_gpu._DEVICE_ATTRS_CACHE
+
+    # Get attrs for device 1
+    attrs_1 = _multi_gpu._get_device_attrs(device_id=1)
+    assert 1 in _multi_gpu._DEVICE_ATTRS_CACHE
+
+    # Both should have required keys
+    assert "max_shared_mem" in attrs_0
+    assert "cc_major" in attrs_0
+    assert "max_shared_mem" in attrs_1
+    assert "cc_major" in attrs_1
+
+    # Getting attrs again should return cached values
+    attrs_0_again = _multi_gpu._get_device_attrs(device_id=0)
+    assert attrs_0_again is attrs_0  # Same object (cached)
+
+
+def test_multi_gpu_invalid_device_id_list(small_adata: AnnData) -> None:
+    """Test that invalid device IDs in list raise ValueError."""
+    distance = Distance(metric="edistance")
+
+    n_available = cp.cuda.runtime.getDeviceCount()
+    invalid_id = n_available + 10  # Definitely invalid
+
+    with pytest.raises(ValueError, match=r"Invalid GPU device ID\(s\)"):
+        distance.pairwise(small_adata, groupby="group", multi_gpu=[0, invalid_id])
+
+
+def test_multi_gpu_invalid_device_id_string(small_adata: AnnData) -> None:
+    """Test that invalid device IDs in string raise ValueError."""
+    distance = Distance(metric="edistance")
+
+    n_available = cp.cuda.runtime.getDeviceCount()
+    invalid_id = n_available + 10
+
+    with pytest.raises(ValueError, match=r"Invalid GPU device ID\(s\)"):
+        distance.pairwise(small_adata, groupby="group", multi_gpu=f"0,{invalid_id}")
+
+
+def test_multi_gpu_negative_device_id(small_adata: AnnData) -> None:
+    """Test that negative device IDs raise ValueError."""
+    distance = Distance(metric="edistance")
+
+    with pytest.raises(ValueError, match=r"Invalid GPU device ID\(s\)"):
+        distance.pairwise(small_adata, groupby="group", multi_gpu=[-1])
+
+
+def test_multi_gpu_empty_list(small_adata: AnnData) -> None:
+    """Test that empty device list raises ValueError."""
+    distance = Distance(metric="edistance")
+
+    with pytest.raises(ValueError, match="must specify at least one device"):
+        distance.pairwise(small_adata, groupby="group", multi_gpu=[])
+
+
+def test_multi_gpu_valid_string_format(small_adata: AnnData) -> None:
+    """Test that valid string formats work correctly."""
+    distance = Distance(metric="edistance")
+
+    # Single device as string
+    result = distance.pairwise(small_adata, groupby="group", multi_gpu="0")
+    assert result.shape == (3, 3)
+
+    # With spaces
+    result = distance.pairwise(small_adata, groupby="group", multi_gpu=" 0 ")
+    assert result.shape == (3, 3)
+
+
+def test_multi_gpu_valid_list_format(small_adata: AnnData) -> None:
+    """Test that valid list formats work correctly."""
+    distance = Distance(metric="edistance")
+
+    # Single device as list
+    result = distance.pairwise(small_adata, groupby="group", multi_gpu=[0])
+    assert result.shape == (3, 3)

@@ -47,6 +47,16 @@ static inline void launch_dense_norm_res(const T* X, T* residuals, const T* sums
 }
 
 template <typename T>
+static inline void launch_sparse_sum_csc(const int* indptr, const int* index, const T* data,
+                                         T* sums_genes, T* sums_cells, int n_genes,
+                                         cudaStream_t stream) {
+  dim3 block(32);
+  dim3 grid((n_genes + block.x - 1) / block.x);
+  sparse_sum_csc_kernel<T>
+      <<<grid, block, 0, stream>>>(indptr, index, data, sums_genes, sums_cells, n_genes);
+}
+
+template <typename T>
 static inline void launch_csc_hvg_res(const int* indptr, const int* index, const T* data,
                                       const T* sums_genes, const T* sums_cells, T* residuals,
                                       T inv_sum_total, T clip, T inv_theta, int n_genes,
@@ -116,6 +126,20 @@ void def_dense_norm_res(nb::module_& m) {
       "clip"_a, "inv_theta"_a, "n_cells"_a, "n_genes"_a, "stream"_a = 0);
 }
 
+// Helper to define sparse_sum_csc for a given dtype
+template <typename T>
+void def_sparse_sum_csc(nb::module_& m) {
+  m.def(
+      "sparse_sum_csc",
+      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const T> data,
+         cuda_array<T> sums_genes, cuda_array<T> sums_cells, int n_genes, std::uintptr_t stream) {
+        launch_sparse_sum_csc<T>(indptr.data(), index.data(), data.data(), sums_genes.data(),
+                                 sums_cells.data(), n_genes, (cudaStream_t)stream);
+      },
+      "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "sums_genes"_a, "sums_cells"_a, "n_genes"_a,
+      "stream"_a = 0);
+}
+
 // Helper to define csc_hvg_res for a given dtype
 template <typename T>
 void def_csc_hvg_res(nb::module_& m) {
@@ -160,6 +184,10 @@ NB_MODULE(_pr_cuda, m) {
   // dense_norm_res
   def_dense_norm_res<float>(m);
   def_dense_norm_res<double>(m);
+
+  // sparse_sum_csc
+  def_sparse_sum_csc<float>(m);
+  def_sparse_sum_csc<double>(m);
 
   // csc_hvg_res
   def_csc_hvg_res<float>(m);

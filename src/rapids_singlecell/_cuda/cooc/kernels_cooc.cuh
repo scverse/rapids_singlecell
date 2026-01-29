@@ -2,6 +2,7 @@
 
 #include <cuda_runtime.h>
 
+// Fallback pairwise kernel (for when shared memory is insufficient for CSR kernel)
 __global__ void occur_count_kernel_pairwise(const float* __restrict__ spatial,
                                             const float* __restrict__ thresholds,
                                             const int* __restrict__ label_idx,
@@ -40,6 +41,7 @@ __global__ void occur_count_kernel_pairwise(const float* __restrict__ spatial,
   }
 }
 
+// Reduction kernel using shared memory (for small k)
 __global__ void occur_reduction_kernel_shared(const int* __restrict__ result,
                                               float* __restrict__ out, int k, int l_val,
                                               int format) {
@@ -148,6 +150,7 @@ __global__ void occur_reduction_kernel_shared(const int* __restrict__ result,
   __syncthreads();
 }
 
+// Reduction kernel using global memory (for large k)
 __global__ void occur_reduction_kernel_global(const int* __restrict__ result,
                                               float* __restrict__ inter_out,
                                               float* __restrict__ out, int k, int l_val,
@@ -251,105 +254,111 @@ __global__ void occur_reduction_kernel_global(const int* __restrict__ result,
   __syncthreads();
 }
 
-__global__ void occur_count_kernel_csr_catpairs(const float* __restrict__ spatial,
-                                                const float* __restrict__ thresholds,
-                                                const int* __restrict__ cat_offsets,
-                                                const int* __restrict__ cell_indices,
-                                                const int* __restrict__ pair_left,
-                                                const int* __restrict__ pair_right,
-                                                int* __restrict__ counts_delta, int k, int l_val) {
-  // Shared memory layout: per-warp histograms of length l_pad
-  const int l_pad = ((l_val + 31) / 32) * 32;
-  extern __shared__ int shared_hist[];  // size: warps_per_block * l_pad
+// Templated CSR catpairs kernel with cell tile caching
+// CELL_TILE: number of B cells to cache in shared memory
+template <int CELL_TILE>
+__global__ __launch_bounds__(1024, 1) void occur_count_kernel_csr_catpairs_tiled(
+    const float* __restrict__ spatial, const float* __restrict__ thresholds,
+    const int* __restrict__ cat_offsets, const int* __restrict__ cell_indices,
+    const int* __restrict__ pair_left, const int* __restrict__ pair_right, int* __restrict__ counts,
+    int k, int l_val, int blocks_per_pair, int l_pad) {
+  // Shared memory layout:
+  // - B-tile coords: CELL_TILE * 2 floats
+  // - Warp histograms: warps_per_block * l_pad ints
+  extern __shared__ char smem[];
+  float* smem_b = reinterpret_cast<float*>(smem);
+  int* shared_hist = reinterpret_cast<int*>(smem + CELL_TILE * 2 * sizeof(float));
+
   const int lane = threadIdx.x & 31;
-  const int warp_id = threadIdx.x >> 5;  // /32
+  const int warp_id = threadIdx.x >> 5;
   const int warps_per_block = blockDim.x >> 5;
   int* warp_hist = shared_hist + warp_id * l_pad;
 
-  // Zero per-warp histograms (only the first l_val bins)
+  // Zero per-warp histograms
   for (int r = lane; r < l_pad; r += 32) {
     warp_hist[r] = 0;
   }
   __syncthreads();
 
-  const int a = pair_left[blockIdx.x];
-  const int b = pair_right[blockIdx.x];
+  const int pair_id = blockIdx.x;
+  const int block_in_pair = blockIdx.y;
+
+  const int a = pair_left[pair_id];
+  const int b = pair_right[pair_id];
 
   const int start_a = cat_offsets[a];
   const int end_a = cat_offsets[a + 1];
   const int start_b = cat_offsets[b];
   const int end_b = cat_offsets[b + 1];
 
-  if (a == b) {
-    // Same-category: enumerate i<j within [start_a, end_a)
-    for (int ia = start_a + threadIdx.x; ia < end_a; ia += blockDim.x) {
-      const int idx_i = cell_indices[ia];
-      const float xi = spatial[idx_i * 2];
-      const float yi = spatial[idx_i * 2 + 1];
-      for (int jb = ia + 1; jb < end_a; ++jb) {
-        const int idx_j = cell_indices[jb];
-        const float dx = xi - spatial[idx_j * 2];
-        const float dy = yi - spatial[idx_j * 2 + 1];
-        const float dist_sq = dx * dx + dy * dy;
-        // lower_bound on thresholds
-        int lo = 0;
-        int hi = l_val;
-        while (lo < hi) {
-          int mid = (lo + hi) >> 1;
-          if (dist_sq <= thresholds[mid]) {
-            hi = mid;
-          } else {
-            lo = mid + 1;
-          }
-        }
-        if (lo < l_val) {
-          atomicAdd(&warp_hist[lo], 1);
-        }
-      }
-    }
-  } else {
-    // Cross-category: enumerate full cartesian product
-    for (int ia = start_a + threadIdx.x; ia < end_a; ia += blockDim.x) {
-      const int idx_i = cell_indices[ia];
-      const float xi = spatial[idx_i * 2];
-      const float yi = spatial[idx_i * 2 + 1];
-      for (int jb = start_b; jb < end_b; ++jb) {
-        const int idx_j = cell_indices[jb];
-        const float dx = xi - spatial[idx_j * 2];
-        const float dy = yi - spatial[idx_j * 2 + 1];
-        const float dist_sq = dx * dx + dy * dy;
-        // lower_bound on thresholds
-        int lo = 0;
-        int hi = l_val;
-        while (lo < hi) {
-          int mid = (lo + hi) >> 1;
-          if (dist_sq <= thresholds[mid]) {
-            hi = mid;
-          } else {
-            lo = mid + 1;
-          }
-        }
-        if (lo < l_val) {
-          atomicAdd(&warp_hist[lo], 1);
-        }
-      }
-    }
-  }
-  __syncthreads();
+  const int n_a = end_a - start_a;
+  const int n_b = end_b - start_b;
 
-  // Reduce warp histograms into block result and write cumulative to global counts
+  // Distribute A cells across blocks_per_pair
+  const int total_threads_for_pair = blocks_per_pair * blockDim.x;
+  const int global_thread_in_pair = block_in_pair * blockDim.x + threadIdx.x;
+
+  const int is_diagonal = (a == b);
+
+  // Tile over B cells with shared memory caching
+  for (int jb_base = 0; jb_base < n_b; jb_base += CELL_TILE) {
+    const int cells_in_tile = min(CELL_TILE, n_b - jb_base);
+
+    // Cooperatively load B tile coords into shared memory
+    for (int i = threadIdx.x; i < CELL_TILE * 2; i += blockDim.x) {
+      int cell = i / 2;
+      int coord = i % 2;
+      if (cell < cells_in_tile) {
+        int idx = cell_indices[start_b + jb_base + cell];
+        smem_b[cell * 2 + coord] = spatial[idx * 2 + coord];
+      }
+    }
+    __syncthreads();
+
+    // Each thread processes a subset of A cells
+    for (int ia = global_thread_in_pair; ia < n_a; ia += total_threads_for_pair) {
+      const int idx_i = cell_indices[start_a + ia];
+      const float xi = spatial[idx_i * 2];
+      const float yi = spatial[idx_i * 2 + 1];
+
+      for (int c = 0; c < cells_in_tile; ++c) {
+        // For diagonal blocks (a == b), skip lower triangle + diagonal
+        if (is_diagonal && ia >= jb_base + c) continue;
+
+        const float dx = xi - smem_b[c * 2];
+        const float dy = yi - smem_b[c * 2 + 1];
+        const float dist_sq = dx * dx + dy * dy;
+
+        // Binary search for threshold bin
+        int lo = 0, hi = l_val;
+        while (lo < hi) {
+          int mid = (lo + hi) >> 1;
+          if (dist_sq <= thresholds[mid])
+            hi = mid;
+          else
+            lo = mid + 1;
+        }
+        if (lo < l_val) {
+          atomicAdd(&warp_hist[lo], 1);
+        }
+      }
+    }
+    __syncthreads();
+  }
+
+  // Reduce warp histograms into block result
   if (warp_id == 0) {
-    // First, sum each bin across warps into warp0's histogram
+    // Sum each bin across warps into warp0's histogram
     for (int r = lane; r < l_pad; r += 32) {
       int sum = 0;
       for (int w = 0; w < warps_per_block; ++w) {
         sum += shared_hist[w * l_pad + r];
       }
-      shared_hist[r] = sum;  // warp0 region reused as accumulator
+      shared_hist[r] = sum;
     }
     __syncwarp();
-    // Inclusive scan (cumulative) along thresholds in warp0 region
-    // Do a simple sequential scan by a single thread to avoid warp divergence
+
+    // Inclusive scan (cumulative) along thresholds
     if (threadIdx.x == 0) {
       int acc = 0;
       for (int r = 0; r < l_val; ++r) {
@@ -357,10 +366,11 @@ __global__ void occur_count_kernel_csr_catpairs(const float* __restrict__ spatia
         shared_hist[r] = acc;
       }
     }
-    __syncthreads();
-    // Write cumulative counts to global (k, k, l_val) layout
+    __syncwarp();
+
+    // Atomic add to global counts (partial results from each block)
     for (int r = lane; r < l_val; r += 32) {
-      counts_delta[a * (k * l_val) + b * l_val + r] = shared_hist[r];
+      atomicAdd(&counts[a * (k * l_val) + b * l_val + r], shared_hist[r]);
     }
   }
 }
