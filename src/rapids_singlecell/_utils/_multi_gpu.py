@@ -1,0 +1,143 @@
+"""Shared multi-GPU utilities for parallel computation across devices.
+
+This module provides common utilities for distributing work across multiple GPUs,
+following a 4-phase pattern:
+1. Split - divide work (pairs) across devices
+2. Transfer - async copy shared data to each device
+3. Launch - run kernel on each device
+4. Gather - aggregate results back
+
+Used by: co_occurrence, edistance, and future multi-GPU functions.
+"""
+
+from __future__ import annotations
+
+import cupy as cp
+
+# Cache for device attributes per device (lazy initialization)
+_DEVICE_ATTRS_CACHE: dict[int, dict] = {}
+
+
+def _get_device_attrs(device_id: int | None = None) -> dict:
+    """Get device attributes for a specific device (cached per device).
+
+    Parameters
+    ----------
+    device_id
+        CUDA device ID. If None, uses current device.
+
+    Returns
+    -------
+    dict
+        Dictionary containing 'max_shared_mem' and 'cc_major' for the device.
+    """
+    if device_id is None:
+        device_id = cp.cuda.Device().id
+
+    if device_id not in _DEVICE_ATTRS_CACHE:
+        with cp.cuda.Device(device_id):
+            device = cp.cuda.Device()
+            # compute_capability is a string like "120" for CC 12.0, or "86" for CC 8.6
+            cc_str = str(device.compute_capability)
+            cc_major = int(cc_str[:-1]) if len(cc_str) > 1 else int(cc_str)
+            _DEVICE_ATTRS_CACHE[device_id] = {
+                "max_shared_mem": device.attributes["MaxSharedMemoryPerBlock"],
+                "cc_major": cc_major,
+            }
+    return _DEVICE_ATTRS_CACHE[device_id]
+
+
+def _split_pairs(
+    pair_left: cp.ndarray, pair_right: cp.ndarray, n_devices: int
+) -> list[tuple[cp.ndarray, cp.ndarray]]:
+    """Split pairs evenly across devices.
+
+    Parameters
+    ----------
+    pair_left
+        Left indices of pairs
+    pair_right
+        Right indices of pairs
+    n_devices
+        Number of devices to split across
+
+    Returns
+    -------
+    list
+        List of (pair_left, pair_right) tuples for each device
+    """
+    n_pairs = len(pair_left)
+    pairs_per_device = (n_pairs + n_devices - 1) // n_devices
+
+    chunks = []
+    for i in range(n_devices):
+        start = i * pairs_per_device
+        end = min(start + pairs_per_device, n_pairs)
+        if start < n_pairs:
+            chunks.append((pair_left[start:end], pair_right[start:end]))
+        else:
+            # No pairs for this device
+            chunks.append(
+                (
+                    cp.array([], dtype=cp.int32),
+                    cp.array([], dtype=cp.int32),
+                )
+            )
+    return chunks
+
+
+def _calculate_blocks_per_pair(num_pairs: int) -> int:
+    """Calculate optimal blocks_per_pair based on workload.
+
+    Targets ~300K total blocks for good GPU utilization.
+
+    Parameters
+    ----------
+    num_pairs
+        Number of pairs to process
+
+    Returns
+    -------
+    int
+        Optimal number of blocks per pair
+    """
+    target_blocks = 300_000
+    max_blocks_per_pair = 32
+
+    blocks_per_pair = max(1, (target_blocks + num_pairs - 1) // num_pairs)
+    blocks_per_pair = min(blocks_per_pair, max_blocks_per_pair)
+
+    return blocks_per_pair
+
+
+def _create_category_index_mapping(
+    cats: cp.ndarray, n_batches: int
+) -> tuple[cp.ndarray, cp.ndarray]:
+    """Create a CSR-like data structure mapping categories to cell indices.
+
+    Uses lexicographical sort to group cells by category.
+
+    Parameters
+    ----------
+    cats
+        Category labels for each cell (integers 0 to n_batches-1)
+    n_batches
+        Number of categories
+
+    Returns
+    -------
+    cat_offsets
+        Array of length n_batches+1 with start/end indices for each category
+    cell_indices
+        Array of cell indices sorted by category
+    """
+    cat_counts = cp.zeros(n_batches, dtype=cp.int32)
+    cp.add.at(cat_counts, cats, 1)
+    cat_offsets = cp.zeros(n_batches + 1, dtype=cp.int32)
+    cp.cumsum(cat_counts, out=cat_offsets[1:])
+
+    n_cells = cats.shape[0]
+    indices = cp.arange(n_cells, dtype=cp.int32)
+
+    cell_indices = cp.lexsort(cp.stack((indices, cats))).astype(cp.int32)
+    return cat_offsets, cell_indices
