@@ -99,8 +99,16 @@ def _split_pairs(
         return chunks
 
     # Load-balanced split based on work per pair
-    # Work ~ group_sizes[left] * group_sizes[right]
-    work = group_sizes[pair_left] * group_sizes[pair_right]
+    # Off-diagonal (i != j): work = n_i * n_j
+    # Diagonal (i == i): work = n_i * (n_i - 1) / 2  (within-group, no self-pairs)
+    sizes_left = group_sizes[pair_left]
+    sizes_right = group_sizes[pair_right]
+    is_diagonal = pair_left == pair_right
+    work = cp.where(
+        is_diagonal,
+        sizes_left * (sizes_left - 1) // 2,
+        sizes_left * sizes_right,
+    )
     cumulative_work = cp.cumsum(work)
     total_work = cumulative_work[-1]
 
