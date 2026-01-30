@@ -31,13 +31,6 @@ type _CorrMethod = Literal["benjamini-hochberg", "bonferroni"]
 type _Method = Literal["logreg", "t-test", "t-test_overestim_var", "wilcoxon"]
 
 EPS = 1e-9
-WARP_SIZE = 32
-MAX_THREADS_PER_BLOCK = 512
-
-
-def _round_up_to_warp(n: int) -> int:
-    """Round up to nearest multiple of WARP_SIZE, capped at MAX_THREADS_PER_BLOCK."""
-    return min(MAX_THREADS_PER_BLOCK, ((n + WARP_SIZE - 1) // WARP_SIZE) * WARP_SIZE)
 
 
 def _select_top_n(scores: NDArray, n_top: int) -> NDArray:
@@ -563,8 +556,7 @@ class _RankGenes:
                 # Hack for overestimating the variance for small groups
                 ns_rest = ns_group
             else:
-                msg = "Method does not exist."
-                raise ValueError(msg)
+                assert_never(method)
 
             # Welch's t-test using pre-computed stats
             with np.errstate(invalid="ignore"):

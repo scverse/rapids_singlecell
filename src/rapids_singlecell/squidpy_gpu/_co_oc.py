@@ -15,8 +15,8 @@ from rapids_singlecell._utils import (
     _calculate_blocks_per_pair,
     _create_category_index_mapping,
     _split_pairs,
+    parse_device_ids,
 )
-from rapids_singlecell.pertpy_gpu._metrics._base_metric import parse_device_ids
 
 from ._utils import _assert_categorical_obs, _assert_spatial_basis
 
@@ -286,8 +286,9 @@ def _co_occurrence_gpu(
     """
     n_devices = len(device_ids)
 
-    # Split pairs across devices
-    pair_chunks = _split_pairs(pair_left, pair_right, n_devices)
+    # Split pairs across devices with load balancing
+    group_sizes = cp.diff(cat_offsets)
+    pair_chunks = _split_pairs(pair_left, pair_right, n_devices, group_sizes)
 
     # Phase 1: Create streams and start async data transfer to all devices
     streams: dict[int, cp.cuda.Stream] = {}

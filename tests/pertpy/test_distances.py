@@ -847,10 +847,10 @@ def test_block_size_consistency() -> None:
     This test runs on GPUs that support both block sizes (Ampere+, CC >= 8.0)
     and verifies both code paths produce the same results.
     """
-    from rapids_singlecell._utils import _get_device_attrs
+    from rapids_singlecell._utils import _multi_gpu
 
     # Check if GPU supports both block sizes (Ampere+)
-    device_attrs = _get_device_attrs()
+    device_attrs = _multi_gpu._get_device_attrs()
     if device_attrs["cc_major"] < 8:
         pytest.skip("GPU does not support both block sizes (requires CC >= 8.0)")
 
@@ -874,14 +874,25 @@ def test_block_size_consistency() -> None:
     distance = Distance(metric="edistance")
     result = distance.pairwise(adata, groupby="group")
 
-    # Verify the result is valid (not all zeros, symmetric)
-    assert not np.allclose(result.values, 0), "Result should not be all zeros"
+    # Temporarily override cc_major to force 256 block size
+    device_id = cp.cuda.Device().id
+    original_cc = device_attrs["cc_major"]
+    try:
+        _multi_gpu._DEVICE_ATTRS_CACHE[device_id]["cc_major"] = (
+            7  # Force pre-Ampere path
+        )
+        distance_256 = Distance(metric="edistance")
+        result_256 = distance_256.pairwise(adata, groupby="group")
+    finally:
+        _multi_gpu._DEVICE_ATTRS_CACHE[device_id]["cc_major"] = original_cc  # Restore
+
+    # Results should be identical between 256 and 1024 block paths
     np.testing.assert_allclose(
         result.values,
-        result.values.T,
+        result_256.values,
         rtol=1e-5,
         atol=1e-6,
-        err_msg="Result matrix should be symmetric",
+        err_msg="256-block and 1024-block paths should produce identical results",
     )
     # Diagonal should be zero (self-distance)
     np.testing.assert_allclose(

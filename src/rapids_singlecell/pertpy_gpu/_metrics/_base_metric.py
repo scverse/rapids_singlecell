@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
     from anndata import AnnData
 
-# Re-export for backward compatibility
+# Re-export for backwards compatibility
 __all__ = ["BaseMetric", "parse_device_ids"]
 
 
