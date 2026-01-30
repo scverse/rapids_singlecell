@@ -25,14 +25,14 @@ If you like scverse® and want to support our mission, please consider making a 
 :gutter: 2
 
 :::{grid-item-card} Installation {octicon}`plug;1em;`
-:link: Installation
- :link-type: doc
+:link: installation
+:link-type: doc
 
 New to *rapids-singlecell*? Check out the installation guide.
 :::
 
 :::{grid-item-card} Tutorials {octicon}`play;1em;`
-:link: notebooks
+:link: tutorials
 :link-type: doc
 
 The tutorials walk you through real-world applications of rapids-singlecell.
