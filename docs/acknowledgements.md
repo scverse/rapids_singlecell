@@ -1,6 +1,7 @@
 # Acknowledgements
 
-This library has been made possible by the support and work of a lot of people and organizations. I feel a lot of gratitude towards them and would like to thank them this way:
+This library has been made possible by the support and work of a lot of people and organizations.
+I feel a lot of gratitude towards them and would like to thank them this way:
 * Taurean Dyer
 * Corey Nolet
 * The [RAPIDS](https://rapids.ai/) team

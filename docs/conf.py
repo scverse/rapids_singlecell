@@ -144,9 +144,8 @@ exclude_patterns = [
 
 # -- Options for HTML output -------------------------------------------------
 
-# The theme to use for HTML and HTML Help pages.  See the documentation for
-# a list of builtin themes.
-#
+# The theme to use for HTML and HTML Help pages.
+#  See the documentation for a list of builtin themes.
 
 html_theme = "scanpydoc"
 html_theme_options = {

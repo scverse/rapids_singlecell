@@ -20,11 +20,11 @@
 :hidden: true
 :maxdepth: 1
 
-Installation.md
-Usage_Principles.md
+installation.md
+usage_principles.md
 api/index.md
 MM.md
-Out_of_core.md
+out_of_core.md
 release-notes/index.md
 references.md
 notebooks.rst
