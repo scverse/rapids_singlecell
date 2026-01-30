@@ -284,8 +284,9 @@ def _co_occurrence_gpu(
     """
     n_devices = len(device_ids)
 
-    # Split pairs across devices
-    pair_chunks = _split_pairs(pair_left, pair_right, n_devices)
+    # Split pairs across devices with load balancing
+    group_sizes = cp.diff(cat_offsets)
+    pair_chunks = _split_pairs(pair_left, pair_right, n_devices, group_sizes)
 
     # Phase 1: Create streams and start async data transfer to all devices
     streams: dict[int, cp.cuda.Stream] = {}

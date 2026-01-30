@@ -48,9 +48,16 @@ def _get_device_attrs(device_id: int | None = None) -> dict:
 
 
 def _split_pairs(
-    pair_left: cp.ndarray, pair_right: cp.ndarray, n_devices: int
+    pair_left: cp.ndarray,
+    pair_right: cp.ndarray,
+    n_devices: int,
+    group_sizes: cp.ndarray | None = None,
 ) -> list[tuple[cp.ndarray, cp.ndarray]]:
-    """Split pairs evenly across devices.
+    """Split pairs across devices with load balancing.
+
+    When group_sizes is provided, pairs are assigned to balance computational
+    work (proportional to group_sizes[left] * group_sizes[right]) across devices.
+    Without group_sizes, falls back to simple even splitting by count.
 
     Parameters
     ----------
@@ -60,6 +67,8 @@ def _split_pairs(
         Right indices of pairs
     n_devices
         Number of devices to split across
+    group_sizes
+        Size of each group. If provided, enables work-based load balancing.
 
     Returns
     -------
@@ -67,23 +76,51 @@ def _split_pairs(
         List of (pair_left, pair_right) tuples for each device
     """
     n_pairs = len(pair_left)
-    pairs_per_device = (n_pairs + n_devices - 1) // n_devices
 
-    chunks = []
-    for i in range(n_devices):
-        start = i * pairs_per_device
-        end = min(start + pairs_per_device, n_pairs)
-        if start < n_pairs:
-            chunks.append((pair_left[start:end], pair_right[start:end]))
-        else:
-            # No pairs for this device
-            chunks.append(
-                (
-                    cp.array([], dtype=cp.int32),
-                    cp.array([], dtype=cp.int32),
+    if n_pairs == 0:
+        return [
+            (cp.array([], dtype=cp.int32), cp.array([], dtype=cp.int32))
+            for _ in range(n_devices)
+        ]
+
+    # Simple even split if no group sizes provided or single device
+    if group_sizes is None or n_devices == 1:
+        pairs_per_device = (n_pairs + n_devices - 1) // n_devices
+        chunks = []
+        for i in range(n_devices):
+            start = i * pairs_per_device
+            end = min(start + pairs_per_device, n_pairs)
+            if start < n_pairs:
+                chunks.append((pair_left[start:end], pair_right[start:end]))
+            else:
+                chunks.append(
+                    (cp.array([], dtype=cp.int32), cp.array([], dtype=cp.int32))
                 )
-            )
-    return chunks
+        return chunks
+
+    # Load-balanced split based on work per pair
+    # Off-diagonal (i != j): work = n_i * n_j
+    # Diagonal (i == i): work = n_i * (n_i - 1) / 2  (within-group, no self-pairs)
+    sizes_left = group_sizes[pair_left]
+    sizes_right = group_sizes[pair_right]
+    is_diagonal = pair_left == pair_right
+    work = cp.where(
+        is_diagonal,
+        sizes_left * (sizes_left - 1) // 2,
+        sizes_left * sizes_right,
+    )
+    cumulative_work = cp.cumsum(work)
+    total_work = cumulative_work[-1]
+
+    # Find split points at 1/n_devices, 2/n_devices, ... of total work
+    targets = total_work * cp.arange(1, n_devices) / n_devices
+    split_indices = cp.searchsorted(cumulative_work, targets).get()
+
+    # Split arrays at those indices
+    left_splits = cp.split(pair_left, split_indices)
+    right_splits = cp.split(pair_right, split_indices)
+
+    return list(zip(left_splits, right_splits, strict=False))
 
 
 def _calculate_blocks_per_pair(num_pairs: int) -> int:
