@@ -18,6 +18,57 @@ import cupy as cp
 _DEVICE_ATTRS_CACHE: dict[int, dict] = {}
 
 
+def parse_device_ids(*, multi_gpu: bool | list[int] | str | None) -> list[int]:
+    """Parse multi_gpu parameter into a list of device IDs.
+
+    Parameters
+    ----------
+    multi_gpu
+        GPU selection:
+        - None or True: Use all available GPUs
+        - False: Use only GPU 0
+        - list[int]: Use specific GPU IDs (e.g., [0, 2])
+        - str: Comma-separated GPU IDs (e.g., "0,2")
+
+    Returns
+    -------
+    list[int]
+        List of device IDs to use
+
+    Raises
+    ------
+    ValueError
+        If any specified device ID is invalid or out of range
+    """
+    n_available = cp.cuda.runtime.getDeviceCount()
+
+    if multi_gpu is None or multi_gpu is True:
+        return list(range(n_available))
+    elif multi_gpu is False:
+        return [0]
+    elif isinstance(multi_gpu, str):
+        device_ids = [int(x.strip()) for x in multi_gpu.split(",")]
+    elif isinstance(multi_gpu, list):
+        device_ids = multi_gpu
+    else:
+        raise ValueError(
+            f"multi_gpu must be bool, list[int], or str, got {type(multi_gpu)}"
+        )
+
+    # Validate device IDs
+    invalid_ids = [d for d in device_ids if d < 0 or d >= n_available]
+    if invalid_ids:
+        raise ValueError(
+            f"Invalid GPU device ID(s): {invalid_ids}. "
+            f"Available devices: {list(range(n_available))}"
+        )
+
+    if len(device_ids) == 0:
+        raise ValueError("multi_gpu must specify at least one device")
+
+    return device_ids
+
+
 def _get_device_attrs(device_id: int | None = None) -> dict:
     """Get device attributes for a specific device (cached per device).
 
@@ -48,9 +99,16 @@ def _get_device_attrs(device_id: int | None = None) -> dict:
 
 
 def _split_pairs(
-    pair_left: cp.ndarray, pair_right: cp.ndarray, n_devices: int
+    pair_left: cp.ndarray,
+    pair_right: cp.ndarray,
+    n_devices: int,
+    group_sizes: cp.ndarray | None = None,
 ) -> list[tuple[cp.ndarray, cp.ndarray]]:
-    """Split pairs evenly across devices.
+    """Split pairs across devices with load balancing.
+
+    When group_sizes is provided, pairs are assigned to balance computational
+    work (proportional to group_sizes[left] * group_sizes[right]) across devices.
+    Without group_sizes, falls back to simple even splitting by count.
 
     Parameters
     ----------
@@ -60,6 +118,8 @@ def _split_pairs(
         Right indices of pairs
     n_devices
         Number of devices to split across
+    group_sizes
+        Size of each group. If provided, enables work-based load balancing.
 
     Returns
     -------
@@ -67,23 +127,51 @@ def _split_pairs(
         List of (pair_left, pair_right) tuples for each device
     """
     n_pairs = len(pair_left)
-    pairs_per_device = (n_pairs + n_devices - 1) // n_devices
 
-    chunks = []
-    for i in range(n_devices):
-        start = i * pairs_per_device
-        end = min(start + pairs_per_device, n_pairs)
-        if start < n_pairs:
-            chunks.append((pair_left[start:end], pair_right[start:end]))
-        else:
-            # No pairs for this device
-            chunks.append(
-                (
-                    cp.array([], dtype=cp.int32),
-                    cp.array([], dtype=cp.int32),
+    if n_pairs == 0:
+        return [
+            (cp.array([], dtype=cp.int32), cp.array([], dtype=cp.int32))
+            for _ in range(n_devices)
+        ]
+
+    # Simple even split if no group sizes provided or single device
+    if group_sizes is None or n_devices == 1:
+        pairs_per_device = (n_pairs + n_devices - 1) // n_devices
+        chunks = []
+        for i in range(n_devices):
+            start = i * pairs_per_device
+            end = min(start + pairs_per_device, n_pairs)
+            if start < n_pairs:
+                chunks.append((pair_left[start:end], pair_right[start:end]))
+            else:
+                chunks.append(
+                    (cp.array([], dtype=cp.int32), cp.array([], dtype=cp.int32))
                 )
-            )
-    return chunks
+        return chunks
+
+    # Load-balanced split based on work per pair
+    # Off-diagonal (i != j): work = n_i * n_j
+    # Diagonal (i == i): work = n_i * (n_i - 1) / 2  (within-group, no self-pairs)
+    sizes_left = group_sizes[pair_left]
+    sizes_right = group_sizes[pair_right]
+    is_diagonal = pair_left == pair_right
+    work = cp.where(
+        is_diagonal,
+        sizes_left * (sizes_left - 1) // 2,
+        sizes_left * sizes_right,
+    )
+    cumulative_work = cp.cumsum(work)
+    total_work = cumulative_work[-1]
+
+    # Find split points at 1/n_devices, 2/n_devices, ... of total work
+    targets = total_work * cp.arange(1, n_devices) / n_devices
+    split_indices = cp.searchsorted(cumulative_work, targets).get()
+
+    # Split arrays at those indices
+    left_splits = cp.split(pair_left, split_indices)
+    right_splits = cp.split(pair_right, split_indices)
+
+    return list(zip(left_splits, right_splits, strict=False))
 
 
 def _calculate_blocks_per_pair(num_pairs: int) -> int:

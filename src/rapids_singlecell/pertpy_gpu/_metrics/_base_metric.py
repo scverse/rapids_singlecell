@@ -3,63 +3,15 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
-import cupy as cp
+from rapids_singlecell._utils import parse_device_ids
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from anndata import AnnData
 
-
-def parse_device_ids(*, multi_gpu: bool | list[int] | str | None) -> list[int]:
-    """Parse multi_gpu parameter into a list of device IDs.
-
-    Parameters
-    ----------
-    multi_gpu
-        GPU selection:
-        - None or True: Use all available GPUs
-        - False: Use only GPU 0
-        - list[int]: Use specific GPU IDs (e.g., [0, 2])
-        - str: Comma-separated GPU IDs (e.g., "0,2")
-
-    Returns
-    -------
-    list[int]
-        List of device IDs to use
-
-    Raises
-    ------
-    ValueError
-        If any specified device ID is invalid or out of range
-    """
-    n_available = cp.cuda.runtime.getDeviceCount()
-
-    if multi_gpu is None or multi_gpu is True:
-        return list(range(n_available))
-    elif multi_gpu is False:
-        return [0]
-    elif isinstance(multi_gpu, str):
-        device_ids = [int(x.strip()) for x in multi_gpu.split(",")]
-    elif isinstance(multi_gpu, list):
-        device_ids = multi_gpu
-    else:
-        raise ValueError(
-            f"multi_gpu must be bool, list[int], or str, got {type(multi_gpu)}"
-        )
-
-    # Validate device IDs
-    invalid_ids = [d for d in device_ids if d < 0 or d >= n_available]
-    if invalid_ids:
-        raise ValueError(
-            f"Invalid GPU device ID(s): {invalid_ids}. "
-            f"Available devices: {list(range(n_available))}"
-        )
-
-    if len(device_ids) == 0:
-        raise ValueError("multi_gpu must specify at least one device")
-
-    return device_ids
+# Re-export for backward compatibility
+__all__ = ["BaseMetric", "parse_device_ids"]
 
 
 class BaseMetric(ABC):

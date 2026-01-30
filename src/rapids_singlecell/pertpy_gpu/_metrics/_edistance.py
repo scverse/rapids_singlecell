@@ -614,15 +614,10 @@ class EDistanceMetric(BaseMetric):
                     raise RuntimeError(
                         "Insufficient shared memory for edistance kernel"
                     )
-                _, feat_tile, block_size, shared_mem = config
+                cell_tile, feat_tile, block_size, shared_mem = config
                 blocks_per_pair = _calculate_blocks_per_pair(data["n_pairs"])
 
-                kernel_fn = (
-                    _ed.compute_distances_f64
-                    if is_double
-                    else _ed.compute_distances_f32
-                )
-                kernel_fn(
+                _ed.compute_distances(
                     data["emb"],
                     data["off"],
                     data["idx"],
@@ -633,6 +628,7 @@ class EDistanceMetric(BaseMetric):
                     k,
                     n_features,
                     blocks_per_pair,
+                    cell_tile,
                     feat_tile,
                     block_size,
                     shared_mem,
@@ -807,15 +803,10 @@ class EDistanceMetric(BaseMetric):
                     raise RuntimeError(
                         "Insufficient shared memory for edistance kernel"
                     )
-                _, feat_tile, block_size, shared_mem = config
+                cell_tile, feat_tile, block_size, shared_mem = config
                 blocks_per_pair = _calculate_blocks_per_pair(data["n_pairs"])
 
-                kernel_fn = (
-                    _ed.compute_distances_f64
-                    if is_double
-                    else _ed.compute_distances_f32
-                )
-                kernel_fn(
+                _ed.compute_distances(
                     data["emb"],
                     data["off"],
                     data["idx"],
@@ -826,6 +817,7 @@ class EDistanceMetric(BaseMetric):
                     k,
                     n_features,
                     blocks_per_pair,
+                    cell_tile,
                     feat_tile,
                     block_size,
                     shared_mem,

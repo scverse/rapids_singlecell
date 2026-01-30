@@ -16,9 +16,21 @@ template <typename T, bool C_ORDER>
 static inline void launch_sparse2dense(const int* indptr, const int* index, const T* data, T* out,
                                        long long major, long long minor, int max_nnz,
                                        cudaStream_t stream) {
+  // Get device max grid Y dimension
+  int device = 0;
+  cudaGetDevice(&device);
+  cudaDeviceProp prop;
+  cudaGetDeviceProperties(&prop, device);
+  int max_grid_y = prop.maxGridSize[1];
+
   dim3 block(32, 32);
-  dim3 grid((unsigned)((major + block.x - 1) / block.x),
-            (unsigned)((max_nnz + block.y - 1) / block.y));
+  unsigned grid_x = (unsigned)((major + block.x - 1) / block.x);
+  unsigned grid_y = (unsigned)((max_nnz + block.y - 1) / block.y);
+  // Limit grid Y to device max - strided loop in kernel handles overflow
+  if (grid_y > (unsigned)max_grid_y) {
+    grid_y = (unsigned)max_grid_y;
+  }
+  dim3 grid(grid_x, grid_y);
   sparse2dense_kernel<T, C_ORDER>
       <<<grid, block, 0, stream>>>(indptr, index, data, out, major, minor);
 }

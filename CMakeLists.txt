@@ -60,6 +60,7 @@ if (RSC_BUILD_EXTENSIONS)
   add_nb_cuda_module(_pv_cuda           src/rapids_singlecell/_cuda/pv/pv.cu)
   add_nb_cuda_module(_edistance_cuda    src/rapids_singlecell/_cuda/edistance/edistance.cu)
   add_nb_cuda_module(_hvg_cuda          src/rapids_singlecell/_cuda/hvg/hvg.cu)
+  add_nb_cuda_module(_wilcoxon_cuda     src/rapids_singlecell/_cuda/wilcoxon/wilcoxon.cu)
   # Harmony CUDA modules
   add_nb_cuda_module(_harmony_scatter_cuda   src/rapids_singlecell/_cuda/harmony/scatter/scatter.cu)
   add_nb_cuda_module(_harmony_outer_cuda     src/rapids_singlecell/_cuda/harmony/outer/outer.cu)

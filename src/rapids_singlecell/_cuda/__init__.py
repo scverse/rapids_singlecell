@@ -53,4 +53,6 @@ __all__ = [
     "_sparse2dense_cuda",
     # Sparse PCA
     "_spca_cuda",
+    # Wilcoxon rank-sum test
+    "_wilcoxon_cuda",
 ]
