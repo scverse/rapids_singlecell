@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from anndata import read_h5ad
+from scipy import sparse
 
 from rapids_singlecell.gr import spatial_autocorr
 
@@ -42,3 +43,100 @@ def test_autocorr_consistency(mode):
     assert dummy_adata.uns[UNS_KEY].shape != df1.shape
     # assert idx are sorted and contain same elements
     assert not np.array_equal(idx_df, idx_adata)
+
+
+@pytest.mark.parametrize("mode", ["moran", "geary"])
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_autocorr_sparse(mode, dtype):
+    """Test spatial_autocorr with sparse data and different dtypes."""
+    file = Path(__file__).parent / Path("_data/dummy.h5ad")
+    dummy_adata = read_h5ad(file)
+
+    # Convert to sparse with specified dtype
+    dummy_adata.X = sparse.csr_matrix(dummy_adata.X, dtype=dtype)
+
+    df = spatial_autocorr(dummy_adata, mode=mode, copy=True, n_perms=None)
+
+    stat_col = "I" if mode == "moran" else "C"
+    assert stat_col in df.columns
+    assert "pval_norm" in df.columns
+    # Check no inf or nan values in the statistic
+    assert not np.any(np.isinf(df[stat_col].values))
+    # Some nan is expected for zero-variance genes, but not all
+    assert not np.all(np.isnan(df[stat_col].values))
+
+
+@pytest.mark.parametrize("mode", ["moran", "geary"])
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_autocorr_dense(mode, dtype):
+    """Test spatial_autocorr with dense data and different dtypes."""
+    file = Path(__file__).parent / Path("_data/dummy.h5ad")
+    dummy_adata = read_h5ad(file)
+
+    # Convert to dense with specified dtype
+    if sparse.issparse(dummy_adata.X):
+        dummy_adata.X = dummy_adata.X.toarray().astype(dtype)
+    else:
+        dummy_adata.X = dummy_adata.X.astype(dtype)
+
+    df = spatial_autocorr(dummy_adata, mode=mode, copy=True, n_perms=None)
+
+    stat_col = "I" if mode == "moran" else "C"
+    assert stat_col in df.columns
+    assert "pval_norm" in df.columns
+    # Check no inf or nan values in the statistic
+    assert not np.any(np.isinf(df[stat_col].values))
+    assert not np.all(np.isnan(df[stat_col].values))
+
+
+@pytest.mark.parametrize("mode", ["moran", "geary"])
+def test_autocorr_sparse_dense_consistency(mode):
+    """Test that sparse and dense give consistent results."""
+    file = Path(__file__).parent / Path("_data/dummy.h5ad")
+    adata_dense = read_h5ad(file)
+    adata_sparse = read_h5ad(file)
+
+    # Use float64 for both
+    adata_dense.X = adata_dense.X.astype(np.float64)
+    adata_sparse.X = sparse.csr_matrix(adata_sparse.X, dtype=np.float64)
+
+    df_dense = spatial_autocorr(adata_dense, mode=mode, copy=True, n_perms=None)
+    df_sparse = spatial_autocorr(adata_sparse, mode=mode, copy=True, n_perms=None)
+
+    stat_col = "I" if mode == "moran" else "C"
+
+    # Results should be very close between sparse and dense
+    np.testing.assert_allclose(
+        df_dense[stat_col].values,
+        df_sparse[stat_col].values,
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
+
+def test_autocorr_dtype_parameter():
+    """Test that the dtype parameter works correctly."""
+    file = Path(__file__).parent / Path("_data/dummy.h5ad")
+    adata = read_h5ad(file)
+
+    # Input is float64, but force float32 computation
+    adata.X = adata.X.astype(np.float64)
+
+    df_f32 = spatial_autocorr(
+        adata, mode="moran", copy=True, n_perms=None, dtype=np.float32
+    )
+    df_f64 = spatial_autocorr(
+        adata, mode="moran", copy=True, n_perms=None, dtype=np.float64
+    )
+
+    # Both should produce valid results
+    assert not np.any(np.isinf(df_f32["I"].values))
+    assert not np.any(np.isinf(df_f64["I"].values))
+
+    # Results should be close but not identical due to precision differences
+    np.testing.assert_allclose(
+        df_f32["I"].values,
+        df_f64["I"].values,
+        rtol=1e-4,
+        atol=1e-4,
+    )
