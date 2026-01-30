@@ -16,7 +16,6 @@ import scipy.sparse as sp
 from statsmodels.stats.multitest import multipletests
 
 from rapids_singlecell._compat import DaskArray, _meta_dense
-from rapids_singlecell._cuda import _wilcoxon_cuda
 from rapids_singlecell.get import X_to_GPU
 from rapids_singlecell.get._aggregated import Aggregate
 from rapids_singlecell.preprocessing._utils import _check_gpu_X, _sparse_to_dense
@@ -143,9 +142,10 @@ def _average_ranks(
     sorted_vals = cp.asfortranarray(sorted_vals)
     sorter = cp.asfortranarray(sorter.astype(cp.int32))
 
-    # Launch nanobind kernel
+    from rapids_singlecell._cuda import _wilcoxon_cuda as _wc
+
     stream = cp.cuda.get_current_stream().ptr
-    _wilcoxon_cuda.average_rank(
+    _wc.average_rank(
         sorted_vals, sorter, matrix, n_rows=n_rows, n_cols=n_cols, stream=stream
     )
 
@@ -171,9 +171,10 @@ def _tie_correction(sorted_vals: cp.ndarray) -> cp.ndarray:
     # Ensure F-order
     sorted_vals = cp.asfortranarray(sorted_vals)
 
-    # Launch nanobind kernel
+    from rapids_singlecell._cuda import _wilcoxon_cuda as _wc
+
     stream = cp.cuda.get_current_stream().ptr
-    _wilcoxon_cuda.tie_correction(
+    _wc.tie_correction(
         sorted_vals, correction, n_rows=n_rows, n_cols=n_cols, stream=stream
     )
 
