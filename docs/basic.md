@@ -1,5 +1,5 @@
 ```{include} ../README.md
-:start-line: 8
+:start-line: 1
 :end-line: 17
 ```
 
