@@ -12,6 +12,7 @@ from ._multi_gpu import (
     _create_category_index_mapping,
     _get_device_attrs,
     _split_pairs,
+    parse_device_ids,
 )
 
 AnyRandom = Union[int, np.random.RandomState, None]  # noqa: UP007
@@ -21,6 +22,7 @@ __all__ = [
     "_create_category_index_mapping",
     "_get_device_attrs",
     "_split_pairs",
+    "parse_device_ids",
 ]
 
 

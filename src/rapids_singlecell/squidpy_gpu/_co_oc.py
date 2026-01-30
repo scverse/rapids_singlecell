@@ -10,8 +10,8 @@ from rapids_singlecell._utils import (
     _calculate_blocks_per_pair,
     _create_category_index_mapping,
     _split_pairs,
+    parse_device_ids,
 )
-from rapids_singlecell.pertpy_gpu._metrics._base_metric import parse_device_ids
 
 from ._utils import _assert_categorical_obs, _assert_spatial_basis
 from .kernels._co_oc import (
