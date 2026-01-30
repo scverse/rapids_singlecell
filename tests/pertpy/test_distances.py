@@ -872,7 +872,7 @@ def test_block_size_consistency() -> None:
 
     # Get result with default block size (1024 for Ampere+)
     distance = Distance(metric="edistance")
-    result_1024 = distance.pairwise(adata, groupby="group")
+    result = distance.pairwise(adata, groupby="group")
 
     # Temporarily override cc_major to force 256 block size
     device_id = cp.cuda.Device().id
@@ -886,13 +886,20 @@ def test_block_size_consistency() -> None:
     finally:
         _multi_gpu._DEVICE_ATTRS_CACHE[device_id]["cc_major"] = original_cc  # Restore
 
-    # Results should be identical (within floating point tolerance)
+    # Results should be identical between 256 and 1024 block paths
     np.testing.assert_allclose(
-        result_1024.values,
+        result.values,
         result_256.values,
         rtol=1e-5,
         atol=1e-6,
-        err_msg="Block size 1024 vs 256 produced different results",
+        err_msg="256-block and 1024-block paths should produce identical results",
+    )
+    # Diagonal should be zero (self-distance)
+    np.testing.assert_allclose(
+        np.diag(result.values),
+        0,
+        atol=1e-6,
+        err_msg="Diagonal (self-distance) should be zero",
     )
 
 

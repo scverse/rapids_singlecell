@@ -1,36 +1,110 @@
-# This workflow will upload a Python Package using Twine when a release is created
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python#publishing-to-package-registries
+# https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python#publishing-to-package-registries
+# https://github.com/pypa/cibuildwheel/blob/main/examples/github-deploy.yml
 
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
-name: Upload Python Package
+name: Build and upload to PyPI
 
 on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
   release:
     types: [published]
 
 jobs:
-  deploy:
-
-    runs-on: ubuntu-latest
-
-    environment: publish
-
-    permissions:
-      id-token: write
+  build_wheels:
+    name: Build wheels for ${{ matrix.os }}-cu${{ matrix.cuda_major }}
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      matrix:
+        include:
+          # CUDA 12 wheels
+          - os: linux-intel
+            cuda_major: "12"
+            runs-on: ubuntu-latest
+            cibw_image: "ghcr.io/scverse/rapids_singlecell:manylinux_2_28_x86_64_cuda12.9"
+            dockerfile: "docker/manylinux_2_28_x86_64_cuda12.9.Dockerfile"
+            cuda_archs: "75-real;80-real;86-real;89-real;90-real;100-real;120"
+          - os: linux-arm
+            cuda_major: "12"
+            runs-on: ubuntu-24.04-arm
+            cibw_image: "ghcr.io/scverse/rapids_singlecell:manylinux_2_28_aarch64_cuda12.9"
+            dockerfile: "docker/manylinux_2_28_aarch64_cuda12.9.Dockerfile"
+            cuda_archs: "75-real;80-real;86-real;89-real;90-real;100-real;120"
+          # CUDA 13 wheels
+          - os: linux-intel
+            cuda_major: "13"
+            runs-on: ubuntu-latest
+            cibw_image: "ghcr.io/scverse/rapids_singlecell:manylinux_2_28_x86_64_cuda13.0"
+            dockerfile: "docker/manylinux_2_28_x86_64_cuda13.0.Dockerfile"
+            cuda_archs: "75-real;80-real;86-real;89-real;90-real;100-real;120"
+          - os: linux-arm
+            cuda_major: "13"
+            runs-on: ubuntu-24.04-arm
+            cibw_image: "ghcr.io/scverse/rapids_singlecell:manylinux_2_28_aarch64_cuda13.0"
+            dockerfile: "docker/manylinux_2_28_aarch64_cuda13.0.Dockerfile"
+            cuda_archs: "75-real;80-real;86-real;89-real;90-real;100-real;120"
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.x'
-    - name: Install CLI tool
-      run: pip install build
-    - name: Build package
-      run: python -m build
-    - name: Publish package
-      uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: actions/checkout@v5
+
+      - name: Set package name for CUDA ${{ matrix.cuda_major }}
+        run: |
+          sed -i 's/name = "rapids_singlecell"/name = "rapids_singlecell-cu${{ matrix.cuda_major }}"/' pyproject.toml
+          grep '^name' pyproject.toml
+
+      - name: Build CUDA manylinux image
+        run: |
+          docker build -t "${{ matrix.cibw_image }}" -f "${{ matrix.dockerfile }}" docker
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.1.4
+        env:
+          CIBW_SKIP: '*-musllinux*'
+          CIBW_MANYLINUX_X86_64_IMAGE: ${{ matrix.os == 'linux-intel' && matrix.cibw_image || '' }}
+          CIBW_MANYLINUX_AARCH64_IMAGE: ${{ matrix.os == 'linux-arm' && matrix.cibw_image || '' }}
+          CIBW_ENVIRONMENT: >
+            CUDA_PATH=/usr/local/cuda
+            LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+            PATH=/usr/local/cuda/bin:$PATH
+            SKBUILD_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${{ matrix.cuda_archs }}"
+          CIBW_BEFORE_BUILD: >
+            python -m pip install -U pip
+            scikit-build-core cmake ninja nanobind
+          CIBW_TEST_SKIP: "*"
+          CIBW_TEST_COMMAND: ""
+          CIBW_REPAIR_WHEEL_COMMAND: "auditwheel repair -w {dest_dir} {wheel}"
+          CIBW_BUILD_VERBOSITY: "1"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-${{ matrix.os }}-cu${{ matrix.cuda_major }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build sdist
+        run: pipx run build --sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cibw-sdist
+          path: dist/*.tar.gz
+
+  upload_pypi:
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    environment: publish
+    permissions:
+      id-token: write
+    if: github.event_name == 'release' && github.event.action == 'published'
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -4,7 +4,7 @@ import cupy as cp
 import numpy as np
 import pytest
 from anndata import AnnData
-from cupyx.scipy.sparse import csr_matrix
+from cupyx.scipy.sparse import csc_matrix, csr_matrix
 
 import rapids_singlecell as rsc
 
@@ -38,7 +38,7 @@ def test_normalize_total_layers(dtype):
 
 
 @pytest.mark.parametrize(
-    "sparsity_func", [cp.array, csr_matrix], ids=lambda x: x.__name__
+    "sparsity_func", [cp.array, csr_matrix, csc_matrix], ids=lambda x: x.__name__
 )
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])
 @pytest.mark.parametrize("theta", [0.01, 1.0, 100, np.inf])

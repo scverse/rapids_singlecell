@@ -5,21 +5,28 @@ from typing import TYPE_CHECKING
 import cupy as cp
 import numpy as np
 
-from ._kernels._kmeans import _get_kmeans_err_kernel
-from ._kernels._normalize import _get_normalize_kernel_optimized
-from ._kernels._outer import (
-    _get_colsum_atomic_kernel,
-    _get_colsum_kernel,
-    _get_harmony_correction_kernel,
-    _get_outer_kernel,
-)
-from ._kernels._pen import _get_pen_kernel
-from ._kernels._scatter_add import (
-    _get_aggregated_matrix_kernel,
-    _get_scatter_add_kernel_optimized,
-    _get_scatter_add_kernel_with_bias_block,
-    _get_scatter_add_kernel_with_bias_cat0,
-)
+try:
+    from rapids_singlecell._cuda import (
+        _harmony_colsum_cuda as _hc_cs,
+    )
+    from rapids_singlecell._cuda import (
+        _harmony_kmeans_cuda as _hc_km,
+    )
+    from rapids_singlecell._cuda import (
+        _harmony_normalize_cuda as _hc_norm,
+    )
+    from rapids_singlecell._cuda import (
+        _harmony_outer_cuda as _hc_out,
+    )
+    from rapids_singlecell._cuda import (
+        _harmony_pen_cuda as _hc_pen,
+    )
+    from rapids_singlecell._cuda import (
+        _harmony_scatter_cuda as _hc_sc,
+    )
+except ImportError:
+    _hc_sc = _hc_out = _hc_cs = _hc_km = _hc_norm = _hc_pen = None
+
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -42,13 +49,12 @@ def _normalize_cp_p1(X: cp.ndarray) -> cp.ndarray:
 
     rows, cols = X.shape
 
-    # Fixed block size of 32
-    block_dim = 32
-    grid_dim = rows  # One block per row
-
-    normalize_p1 = _get_normalize_kernel_optimized(X.dtype)
-    # Launch the kernel
-    normalize_p1((grid_dim,), (block_dim,), (X, rows, cols))
+    _hc_norm.normalize(
+        X,
+        rows=rows,
+        cols=cols,
+        stream=cp.cuda.get_current_stream().ptr,
+    )
     return X
 
 
@@ -63,12 +69,16 @@ def _scatter_add_cp(
     """
     n_cells = X.shape[0]
     n_pcs = X.shape[1]
-    N = n_cells * n_pcs
-    threads_per_block = 256
-    blocks = (N + threads_per_block - 1) // threads_per_block
 
-    scatter_add_kernel = _get_scatter_add_kernel_optimized(X.dtype)
-    scatter_add_kernel((blocks,), (256,), (X, cats, n_cells, n_pcs, switcher, out))
+    _hc_sc.scatter_add(
+        X,
+        cats=cats,
+        n_cells=n_cells,
+        n_pcs=n_pcs,
+        switcher=switcher,
+        a=out,
+        stream=cp.cuda.get_current_stream().ptr,
+    )
 
 
 def _Z_correction(
@@ -82,12 +92,16 @@ def _Z_correction(
     """
     n_cells = Z.shape[0]
     n_pcs = Z.shape[1]
-    N = n_cells * n_pcs
-    threads_per_block = 256
-    blocks = (N + threads_per_block - 1) // threads_per_block
 
-    scatter_add_kernel = _get_harmony_correction_kernel(Z.dtype)
-    scatter_add_kernel((blocks,), (256,), (Z, W, cats, R, n_cells, n_pcs))
+    _hc_out.harmony_corr(
+        Z,
+        W=W,
+        cats=cats,
+        R=R,
+        n_cells=n_cells,
+        n_pcs=n_pcs,
+        stream=cp.cuda.get_current_stream().ptr,
+    )
 
 
 def _outer_cp(
@@ -95,13 +109,14 @@ def _outer_cp(
 ) -> None:
     n_cats, n_pcs = E.shape
 
-    # Determine the total number of elements to process and configure the grid.
-    N = n_cats * n_pcs
-    threads_per_block = 256
-    blocks = (N + threads_per_block - 1) // threads_per_block
-    outer_kernel = _get_outer_kernel(E.dtype)
-    outer_kernel(
-        (blocks,), (threads_per_block,), (E, Pr_b, R_sum, n_cats, n_pcs, switcher)
+    _hc_out.outer(
+        E,
+        Pr_b=Pr_b,
+        R_sum=R_sum,
+        n_cats=n_cats,
+        n_pcs=n_pcs,
+        switcher=switcher,
+        stream=cp.cuda.get_current_stream().ptr,
     )
 
 
@@ -122,12 +137,13 @@ def _get_aggregated_matrix(
     """
     Get the aggregated matrix for the correction step.
     """
-    aggregated_matrix_kernel = _get_aggregated_matrix_kernel(aggregated_matrix.dtype)
 
-    threads_per_block = 32
-    blocks = (n_batches + 1 + threads_per_block - 1) // threads_per_block
-    aggregated_matrix_kernel(
-        (blocks,), (threads_per_block,), (aggregated_matrix, sum, sum.sum(), n_batches)
+    _hc_sc.aggregated_matrix(
+        aggregated_matrix,
+        sum=sum,
+        top_corner=float(sum.sum()),
+        n_batches=n_batches,
+        stream=cp.cuda.get_current_stream().ptr,
     )
 
 
@@ -178,21 +194,29 @@ def _scatter_add_cp_bias_csr(
     n_cells = X.shape[0]
     n_pcs = X.shape[1]
 
-    threads_per_block = 1024
     if n_cells < 300_000:
-        blocks = int((n_pcs + 1) / 2)
-        scatter_kernel0 = _get_scatter_add_kernel_with_bias_cat0(X.dtype)
-        scatter_kernel0(
-            (blocks, 8), (threads_per_block,), (X, n_cells, n_pcs, out, bias)
+        _hc_sc.scatter_add_cat0(
+            X,
+            n_cells=n_cells,
+            n_pcs=n_pcs,
+            a=out,
+            bias=bias,
+            stream=cp.cuda.get_current_stream().ptr,
         )
+
     else:
         out[0] = X.T @ bias
-    blocks = int((n_batches) * (n_pcs + 1) / 2)
-    scatter_kernel = _get_scatter_add_kernel_with_bias_block(X.dtype)
-    scatter_kernel(
-        (blocks,),
-        (threads_per_block,),
-        (X, cat_offsets, cell_indices, n_cells, n_pcs, n_batches, out, bias),
+
+    _hc_sc.scatter_add_block(
+        X,
+        cat_offsets=cat_offsets,
+        cell_indices=cell_indices,
+        n_cells=n_cells,
+        n_pcs=n_pcs,
+        n_batches=n_batches,
+        a=out,
+        bias=bias,
+        stream=cp.cuda.get_current_stream().ptr,
     )
 
 
@@ -201,14 +225,13 @@ def _kmeans_error(R: cp.ndarray, dot: cp.ndarray) -> float:
     assert R.size == dot.size and R.dtype == dot.dtype
 
     out = cp.zeros(1, dtype=R.dtype)
-    threads = 256
-    blocks = min(
-        (R.size + threads - 1) // threads,
-        cp.cuda.Device().attributes["MultiProcessorCount"] * 8,
+    _hc_km.kmeans_err(
+        R.ravel(),
+        dot=dot.ravel(),
+        n=R.size,
+        out=out,
+        stream=cp.cuda.get_current_stream().ptr,
     )
-    kernel = _get_kmeans_err_kernel(R.dtype.name)
-    kernel((blocks,), (threads,), (R, dot, R.size, out))
-
     return out[0]
 
 
@@ -245,6 +268,17 @@ def _get_theta_array(
     return theta_array.ravel()
 
 
+def _dtype_code(dtype: cp.dtype) -> int:
+    if dtype == cp.float32:
+        return 0
+    elif dtype == cp.float64:
+        return 1
+    elif dtype == cp.int32:
+        return 2
+    else:
+        raise ValueError(f"Unsupported dtype: {dtype}")
+
+
 def _column_sum(X: cp.ndarray) -> cp.ndarray:
     """
     Sum each column of the 2D, C-contiguous float32 array A.
@@ -256,13 +290,14 @@ def _column_sum(X: cp.ndarray) -> cp.ndarray:
 
     out = cp.zeros(cols, dtype=X.dtype)
 
-    dev = cp.cuda.Device()
-    nSM = dev.attributes["MultiProcessorCount"]
-    max_blocks = nSM * 8
-    threads = max(int(round(1 / 32) * 32), 32)
-    blocks = min(cols, max_blocks)
-    _colsum = _get_colsum_kernel(X.dtype)
-    _colsum((blocks,), (threads,), (X, out, rows, cols))
+    _hc_cs.colsum(
+        X,
+        out=out,
+        rows=rows,
+        cols=cols,
+        stream=cp.cuda.get_current_stream().ptr,
+    )
+
     return out
 
 
@@ -277,13 +312,15 @@ def _column_sum_atomic(X: cp.ndarray) -> cp.ndarray:
         return X.sum(axis=0)
 
     out = cp.zeros(cols, dtype=X.dtype)
-    tile_rows = (rows + 31) // 32
-    tile_cols = (cols + 31) // 32
-    blocks = tile_rows * tile_cols
-    threads = (32, 32)
 
-    kernel = _get_colsum_atomic_kernel(X.dtype)
-    kernel((blocks,), threads, (X, out, rows, cols))
+    _hc_cs.colsum_atomic(
+        X,
+        out=out,
+        rows=rows,
+        cols=cols,
+        stream=cp.cuda.get_current_stream().ptr,
+    )
+
     return out
 
 
@@ -451,9 +488,14 @@ def _penalty_term(R: cp.ndarray, penalty: cp.ndarray, cats: cp.ndarray) -> cp.nd
     Calculate the penalty term for the Harmony algorithm.
     """
     n_cats, n_pcs = R.shape
-    N = n_cats * n_pcs
-    threads_per_block = 256
-    blocks = (N + threads_per_block - 1) // threads_per_block
-    pen_kernel = _get_pen_kernel(R.dtype)
-    pen_kernel((blocks,), (threads_per_block,), (R, penalty, cats, n_cats, n_pcs))
+
+    _hc_pen.pen(
+        R,
+        penalty=penalty,
+        cats=cats,
+        n_rows=n_cats,
+        n_cols=n_pcs,
+        stream=cp.cuda.get_current_stream().ptr,
+    )
+
     return R

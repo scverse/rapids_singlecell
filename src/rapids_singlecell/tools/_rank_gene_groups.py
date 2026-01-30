@@ -19,10 +19,6 @@ from rapids_singlecell._compat import DaskArray, _meta_dense
 from rapids_singlecell.get import X_to_GPU
 from rapids_singlecell.get._aggregated import Aggregate
 from rapids_singlecell.preprocessing._utils import _check_gpu_X, _sparse_to_dense
-from rapids_singlecell.tools._kernels._wilcoxon import (
-    _rank_kernel,
-    _tie_correction_kernel,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterable
@@ -34,13 +30,6 @@ type _CorrMethod = Literal["benjamini-hochberg", "bonferroni"]
 type _Method = Literal["logreg", "t-test", "t-test_overestim_var", "wilcoxon"]
 
 EPS = 1e-9
-WARP_SIZE = 32
-MAX_THREADS_PER_BLOCK = 512
-
-
-def _round_up_to_warp(n: int) -> int:
-    """Round up to nearest multiple of WARP_SIZE, capped at MAX_THREADS_PER_BLOCK."""
-    return min(MAX_THREADS_PER_BLOCK, ((n + WARP_SIZE - 1) // WARP_SIZE) * WARP_SIZE)
 
 
 def _select_top_n(scores: NDArray, n_top: int) -> NDArray:
@@ -153,13 +142,11 @@ def _average_ranks(
     sorted_vals = cp.asfortranarray(sorted_vals)
     sorter = cp.asfortranarray(sorter.astype(cp.int32))
 
-    # Launch kernel: one block per column, threads must be multiple of WARP_SIZE
-    threads_per_block = _round_up_to_warp(n_rows)
-    blocks = n_cols
-    _rank_kernel(
-        (blocks,),
-        (threads_per_block,),
-        (sorted_vals, sorter, matrix, n_rows, n_cols),
+    from rapids_singlecell._cuda import _wilcoxon_cuda as _wc
+
+    stream = cp.cuda.get_current_stream().ptr
+    _wc.average_rank(
+        sorted_vals, sorter, matrix, n_rows=n_rows, n_cols=n_cols, stream=stream
     )
 
     if return_sorted:
@@ -184,12 +171,11 @@ def _tie_correction(sorted_vals: cp.ndarray) -> cp.ndarray:
     # Ensure F-order
     sorted_vals = cp.asfortranarray(sorted_vals)
 
-    # Threads must be multiple of WARP_SIZE for correct warp reduction
-    threads_per_block = _round_up_to_warp(n_rows)
-    _tie_correction_kernel(
-        (n_cols,),
-        (threads_per_block,),
-        (sorted_vals, correction, n_rows, n_cols),
+    from rapids_singlecell._cuda import _wilcoxon_cuda as _wc
+
+    stream = cp.cuda.get_current_stream().ptr
+    _wc.tie_correction(
+        sorted_vals, correction, n_rows=n_rows, n_cols=n_cols, stream=stream
     )
 
     return correction
@@ -571,8 +557,7 @@ class _RankGenes:
                 # Hack for overestimating the variance for small groups
                 ns_rest = ns_group
             else:
-                msg = "Method does not exist."
-                raise ValueError(msg)
+                assert_never(method)
 
             # Welch's t-test using pre-computed stats
             with np.errstate(invalid="ignore"):
