@@ -18,7 +18,7 @@ from statsmodels.stats.multitest import multipletests
 from rapids_singlecell._compat import DaskArray, _meta_dense
 from rapids_singlecell.get import X_to_GPU
 from rapids_singlecell.get._aggregated import Aggregate
-from rapids_singlecell.preprocessing._utils import _sparse_to_dense
+from rapids_singlecell.preprocessing._utils import _check_gpu_X, _sparse_to_dense
 from rapids_singlecell.tools._kernels._wilcoxon import (
     _rank_kernel,
     _tie_correction_kernel,
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 type _CorrMethod = Literal["benjamini-hochberg", "bonferroni"]
-type _Method = Literal["logreg", "wilcoxon"]
+type _Method = Literal["logreg", "t-test", "t-test_overestim_var", "wilcoxon"]
 
 EPS = 1e-9
 WARP_SIZE = 32
@@ -204,6 +204,7 @@ class _RankGenes:
         groups: Iterable[str] | Literal["all"],
         groupby: str,
         *,
+        mask_var: NDArray[np.bool_] | None = None,
         reference: Literal["rest"] | str = "rest",
         use_raw: bool | None = None,
         layer: str | None = None,
@@ -266,10 +267,12 @@ class _RankGenes:
             self.X = adata.X
             self.var_names = adata.var_names
 
-        if pre_load and not isinstance(
-            self.X, cp.ndarray | cpsp.csr_matrix | cpsp.csc_matrix
-        ):
-            self.X = X_to_GPU(self.X)
+        # Apply mask_var to select subset of genes
+        if mask_var is not None:
+            self.X = self.X[:, mask_var]
+            self.var_names = self.var_names[mask_var]
+
+        self.pre_load = pre_load
 
         self.ireference = None
         if reference != "rest":
@@ -325,13 +328,25 @@ class _RankGenes:
         """Compute means, vars, and pts for each group.
 
         If data is already on GPU, uses Aggregate for fast single-pass computation.
-        Otherwise, sets flag for chunk-based computation during wilcoxon loop.
+        Otherwise, sets flag for chunk-based computation during wilcoxon loop,
+        unless force_compute is True (needed for t-test).
+
+        Parameters
+        ----------
+        force_compute
+            If True, compute stats immediately even if data is not on GPU.
+            Required for t-test methods that don't use chunked computation.
         """
         n_genes = self.X.shape[1]
         n_groups = len(self.groups_order)
 
         # Check if data is already on GPU
-        is_on_gpu = isinstance(self.X, cp.ndarray) or cpsp.issparse(self.X)
+        try:
+            _check_gpu_X(self.X, allow_dask=True)
+        except TypeError:
+            is_on_gpu = False
+        else:
+            is_on_gpu = True
 
         if not is_on_gpu:
             # Data not on GPU - defer to chunk-based computation
@@ -344,7 +359,9 @@ class _RankGenes:
 
         agg = Aggregate(groupby=self.labels.cat, data=self.X)
 
-        if cpsp.issparse(self.X):
+        if isinstance(self.X, DaskArray):
+            result = agg.count_mean_var_dask(dof=1)
+        elif cpsp.issparse(self.X):
             result = agg.count_mean_var_sparse(dof=1)
         else:
             result = agg.count_mean_var_dense(dof=1)
@@ -367,7 +384,8 @@ class _RankGenes:
                     pts[idx] = cp.asnumpy(result["count_nonzero"][cat_idx]) / n_cells
 
         self.means = means
-        self.vars = vars_
+        # Clip tiny negative variances to 0 (floating-point precision artifacts)
+        self.vars = np.maximum(vars_, 0)
         self.pts = pts
 
         # Compute rest statistics if reference='rest'
@@ -410,10 +428,11 @@ class _RankGenes:
 
                     rest_mean_sq = self.means_rest[idx] ** 2
                     if n_rest > 1:
-                        self.vars_rest[idx] = (
+                        self.vars_rest[idx] = np.maximum(
                             (rest_sq_sum / n_rest - rest_mean_sq)
                             * n_rest
-                            / (n_rest - 1)
+                            / (n_rest - 1),
+                            0,
                         )
 
                     if self.comp_pts:
@@ -520,6 +539,58 @@ class _RankGenes:
             if self.comp_pts:
                 ref_nnz = (ref_data != 0).sum(axis=0)
                 self.pts[self.ireference, start:stop] = cp.asnumpy(ref_nnz / n_ref)
+
+    def t_test(
+        self, method: Literal["t-test", "t-test_overestim_var"]
+    ) -> Generator[tuple[int, NDArray, NDArray], None, None]:
+        """Compute t-test statistics using Welch's t-test."""
+        from scipy import stats
+
+        self._basic_stats()
+
+        for group_index, (mask_obs, mean_group, var_group) in enumerate(
+            zip(self.groups_masks_obs, self.means, self.vars, strict=True)
+        ):
+            if self.ireference is not None and group_index == self.ireference:
+                continue
+
+            ns_group = np.count_nonzero(mask_obs)
+
+            if self.ireference is not None:
+                mean_rest = self.means[self.ireference]
+                var_rest = self.vars[self.ireference]
+                ns_other = np.count_nonzero(self.groups_masks_obs[self.ireference])
+            else:
+                mean_rest = self.means_rest[group_index]
+                var_rest = self.vars_rest[group_index]
+                ns_other = self.X.shape[0] - ns_group
+
+            if method == "t-test":
+                ns_rest = ns_other
+            elif method == "t-test_overestim_var":
+                # Hack for overestimating the variance for small groups
+                ns_rest = ns_group
+            else:
+                msg = "Method does not exist."
+                raise ValueError(msg)
+
+            # Welch's t-test using pre-computed stats
+            with np.errstate(invalid="ignore"):
+                scores, pvals = stats.ttest_ind_from_stats(
+                    mean1=mean_group,
+                    std1=np.sqrt(var_group),
+                    nobs1=ns_group,
+                    mean2=mean_rest,
+                    std2=np.sqrt(var_rest),
+                    nobs2=ns_rest,
+                    equal_var=False,  # Welch's
+                )
+
+            # Handle NaN values (when means are the same and vars are 0)
+            scores[np.isnan(scores)] = 0
+            pvals[np.isnan(pvals)] = 1
+
+            yield group_index, scores, pvals
 
     def wilcoxon(
         self, *, tie_correct: bool, chunk_size: int | None = None
@@ -778,7 +849,14 @@ class _RankGenes:
         **kwds,
     ) -> None:
         """Compute statistics for all groups."""
-        if method == "wilcoxon":
+        if self.pre_load or method in {"t-test", "t-test_overestim_var"}:
+            self.X = X_to_GPU(self.X)
+        if method in {"t-test", "t-test_overestim_var"}:
+            generate_test_results = self.t_test(method)
+        elif method == "wilcoxon":
+            if isinstance(self.X, DaskArray):
+                msg = "Wilcoxon test is not supported for Dask arrays. Please convert your data to CuPy arrays."
+                raise ValueError(msg)
             generate_test_results = self.wilcoxon(
                 tie_correct=tie_correct, chunk_size=chunk_size
             )
@@ -848,6 +926,7 @@ def rank_genes_groups(
     adata: AnnData,
     groupby: str,
     *,
+    mask_var: NDArray[np.bool_] | str | None = None,
     use_raw: bool | None = None,
     groups: Literal["all"] | Iterable[str] = "all",
     reference: str = "rest",
@@ -855,7 +934,7 @@ def rank_genes_groups(
     rankby_abs: bool = False,
     pts: bool = False,
     key_added: str | None = None,
-    method: _Method = "wilcoxon",
+    method: _Method | None = None,
     corr_method: _CorrMethod = "benjamini-hochberg",
     tie_correct: bool = False,
     layer: str | None = None,
@@ -868,12 +947,20 @@ def rank_genes_groups(
 
     Expects logarithmized data.
 
+    .. note::
+        **Dask support:** Only `'t-test'` and `'t-test_overestim_var'` methods
+        support Dask arrays. The `'wilcoxon'` and `'logreg'` methods do not
+        support Dask arrays and will raise an error if used with Dask input.
+
     Parameters
     ----------
     adata
         Annotated data matrix.
     groupby
         The key of the observations grouping to consider.
+    mask_var
+        Select subset of genes to use in statistical tests.
+        Can be a boolean array of shape `(n_vars,)` or a key in `adata.var`.
     use_raw
         Use `raw` attribute of `adata` if present.
     groups
@@ -893,10 +980,12 @@ def rank_genes_groups(
     key_added
         The key in `adata.uns` information is saved to.
     method
-        `'wilcoxon'` uses Wilcoxon rank-sum (default),
+        `'t-test'` uses Welch's t-test (default),
+        `'t-test_overestim_var'` overestimates variance of each group,
+        `'wilcoxon'` uses Wilcoxon rank-sum,
         `'logreg'` uses logistic regression.
     corr_method
-        p-value correction method. Used only for `'wilcoxon'`.
+        p-value correction method. Used only for `'t-test'`, `'t-test_overestim_var'`, and `'wilcoxon'`.
     tie_correct
         Use tie correction for `'wilcoxon'` scores.
     layer
@@ -923,11 +1012,11 @@ def rank_genes_groups(
         group. Ordered according to scores.
     `adata.uns['rank_genes_groups' | key_added]['logfoldchanges']`
         Structured array to be indexed by group id storing the log2
-        fold change for each gene for each group. Only for `'wilcoxon'`.
+        fold change for each gene for each group.
     `adata.uns['rank_genes_groups' | key_added]['pvals']`
-        p-values. Only for `'wilcoxon'`.
+        p-values. Only for `'t-test'`, `'t-test_overestim_var'`, and `'wilcoxon'`.
     `adata.uns['rank_genes_groups' | key_added]['pvals_adj']`
-        Corrected p-values. Only for `'wilcoxon'`.
+        Corrected p-values. Only for `'t-test'`, `'t-test_overestim_var'`, and `'wilcoxon'`.
     `adata.uns['rank_genes_groups' | key_added]['pts']`
         Fraction of cells expressing genes per group. Only if `pts=True`.
     `adata.uns['rank_genes_groups' | key_added]['pts_rest']`
@@ -937,17 +1026,35 @@ def rank_genes_groups(
         msg = "corr_method must be either 'benjamini-hochberg' or 'bonferroni'."
         raise ValueError(msg)
 
-    if method not in {"logreg", "wilcoxon"}:
-        msg = f"method must be one of 'logreg', 'wilcoxon'. Got {method!r}."
+    if method is None:
+        method = "t-test"
+
+    if method not in {"logreg", "t-test", "t-test_overestim_var", "wilcoxon"}:
+        msg = f"method must be one of 'logreg', 't-test', 't-test_overestim_var', 'wilcoxon'. Got {method!r}."
         raise ValueError(msg)
 
     if key_added is None:
         key_added = "rank_genes_groups"
 
+    # Process mask_var: convert string to boolean array
+    mask_var_array: NDArray[np.bool_] | None = None
+    if mask_var is not None:
+        if isinstance(mask_var, str):
+            if mask_var not in adata.var.columns:
+                msg = f"mask_var key {mask_var!r} not found in adata.var."
+                raise KeyError(msg)
+            mask_var_array = adata.var[mask_var].values.astype(bool)
+        else:
+            mask_var_array = np.asarray(mask_var, dtype=bool)
+            if mask_var_array.shape[0] != adata.n_vars:
+                msg = f"mask_var has wrong shape: {mask_var_array.shape[0]} != {adata.n_vars}"
+                raise ValueError(msg)
+
     test_obj = _RankGenes(
         adata,
         groups,
         groupby,
+        mask_var=mask_var_array,
         reference=reference,
         use_raw=use_raw,
         layer=layer,
