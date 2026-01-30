@@ -88,4 +88,4 @@ apptainer run --nv rsc.sif
 Most computations run on the GPU.
 See the Memory Management page for hardware guidance, managed memory, and known limits:
 
-- {doc}`MM`
+- {doc}`memory_management`
