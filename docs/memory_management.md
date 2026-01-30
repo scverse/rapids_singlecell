@@ -1,6 +1,10 @@
 # Memory Management
 
-In rapids-singlecell, efficient memory management is crucial for handling large-scale datasets. This is facilitated by the integration of the RAPIDS Memory Manager ({mod}`rmm`). {mod}`rmm` is automatically invoked upon importing `rapids-singlecell`, modifying the default allocator for cupy. Integrating {mod}`rmm` with `rapids-singlecell` slightly modifies the execution speed of {mod}`cupy`. This change typically results in a minimal performance trade-off. However, it's crucial to be aware that certain specific functions, like {func}`~.pp.harmony_integrate`, might experience a more significant impact on performance efficiency due to this integration. Users can overwrite the default behavior with {func}`rmm.reinitialize`.
+In rapids-singlecell, efficient memory management is crucial for handling large-scale datasets.
+This is facilitated by the integration of the RAPIDS Memory Manager ({mod}`rmm`). {mod}`rmm` is automatically invoked upon importing `rapids-singlecell`, modifying the default allocator for cupy.
+Integrating {mod}`rmm` with `rapids-singlecell` slightly modifies the execution speed of {mod}`cupy`. This change typically results in a minimal performance trade-off.
+However, it's crucial to be aware that certain specific functions, like {func}`~.pp.harmony_integrate`, might experience a more significant impact on performance efficiency due to this integration.
+Users can overwrite the default behavior with {func}`rmm.reinitialize`.
 
 ## Quick start
 
@@ -9,7 +13,10 @@ Pick one mode based on your dataset and hardware:
 - If your data fits in GPU VRAM: use the pool allocator for speed → see [Pool Allocator](#pool-allocator).
 - If your data is larger than VRAM: use managed memory to spill to host RAM → see [Managed Memory](#managed-memory).
 
-Why not both? Pool allocation and managed memory target different trade-offs. Pooling assumes you keep data in VRAM and optimizes allocation speed. Managed memory assumes you will exceed VRAM and optimizes for correctness by spilling to host RAM. Combining both can negate benefits and increase fragmentation, so choose one.
+Why not both? Pool allocation and managed memory target different trade-offs.
+Pooling assumes you keep data in VRAM and optimizes allocation speed.
+Managed memory assumes you will exceed VRAM and optimizes for correctness by spilling to host RAM.
+Combining both can negate benefits and increase fragmentation, so choose one.
 
 ## Managed Memory
 
@@ -65,11 +72,14 @@ For a more in-depth understanding of rmm and its functionalities, refer to the [
 
 ## System requirements and limits
 
-rapids-singlecell performs most computations on the GPU. Ensure your system has a CUDA-capable GPU with sufficient VRAM for your datasets.
+rapids-singlecell performs most computations on the GPU.
+Ensure your system has a CUDA-capable GPU with sufficient VRAM for your datasets.
 
 - With an RTX 3090, analyzing around 200,000 cells is typically feasible.
 - With an A100 80GB, analyses with 1,000,000+ cells are possible.
 
-For larger datasets, use {mod}`~rmm` managed memory to oversubscribe GPU memory to host RAM (similar to SWAP). This may introduce a performance penalty but can still outperform CPU-only runs. See the Managed Memory section above for how to enable it.
+For larger datasets, use {mod}`~rmm` managed memory to oversubscribe GPU memory to host RAM (similar to SWAP).
+This may introduce a performance penalty but can still outperform CPU-only runs. See the Managed Memory section above for how to enable it.
 
-Limit note: For GPU-backed {class}`~anndata.AnnData`, the upper limit is governed by the sparse matrix `.nnz` value of 2**31-1 (2,147,483,647). This is due to the maximum `indptr` size currently supported by {mod}`~cupy` for sparse matrices.
+Limit note: For GPU-backed {class}`~anndata.AnnData`, the upper limit is governed by the sparse matrix `.nnz` value of 2**31-1 (2,147,483,647).
+This is due to the maximum `indptr` size currently supported by {mod}`~cupy` for sparse matrices.

@@ -5,7 +5,8 @@ These functions offer accelerated near drop-in replacements for common tools pro
 ## Preprocessing `pp`
 Filtering of highly-variable genes, batch-effect correction, per-cell normalization.
 
-Any transformation of the data matrix that is not a tool. Other than `tools`, preprocessing steps usually don’t return an easily interpretable annotation, but perform a basic transformation on the data matrix.
+Any transformation of the data matrix that is not a tool.
+Other than `tools`, preprocessing steps usually don’t return an easily interpretable annotation, but perform a basic transformation on the data matrix.
 
 ### Basic Preprocessing
 ```{eval-rst}

@@ -144,9 +144,8 @@ exclude_patterns = [
 
 # -- Options for HTML output -------------------------------------------------
 
-# The theme to use for HTML and HTML Help pages.  See the documentation for
-# a list of builtin themes.
-#
+# The theme to use for HTML and HTML Help pages.
+#  See the documentation for a list of builtin themes.
 
 html_theme = "scanpydoc"
 html_theme_options = {
@@ -158,7 +157,7 @@ html_theme_options = {
 html_show_sphinx = False
 html_logo = "_static/logo_RTD.svg"
 html_static_path = ["_static"]
-html_css_files = ["_static/css/override.css"]
+html_css_files = ["css/override.css"]
 html_title = "rapids-singlecell"
 
 # OpenGraph metadata for social media previews
