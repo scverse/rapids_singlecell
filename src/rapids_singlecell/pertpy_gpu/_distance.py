@@ -42,6 +42,14 @@ class Distance:
         Key in adata.obsm for embeddings. Mutually exclusive with ``layer_key``.
         Defaults to ``"X_pca"`` if neither is specified.
 
+    Notes
+    -----
+    The bootstrap implementation differs from pertpy: rather than precomputing
+    an n×n cell distance matrix and sampling from it, this implementation
+    resamples cells and recomputes distances from scratch each iteration.
+    This scales better for large datasets (O(n) vs O(n²) memory) and leverages
+    multi-GPU parallelism for each bootstrap iteration.
+
     Examples
     --------
     >>> import rapids_singlecell as rsc

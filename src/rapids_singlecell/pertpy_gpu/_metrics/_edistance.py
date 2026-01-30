@@ -845,8 +845,7 @@ class EDistanceMetric(BaseMetric):
     ) -> tuple[cp.ndarray, cp.ndarray]:
         """Compute bootstrap statistics for pairwise distances.
 
-        Distributes bootstrap iterations across GPUs - each GPU gets a contiguous
-        batch of iterations to run independently.
+        Each bootstrap iteration uses all GPUs for its pairwise computation.
 
         Parameters
         ----------
@@ -870,104 +869,29 @@ class EDistanceMetric(BaseMetric):
         tuple
             (means, variances) matrices (k x k each)
         """
-        n_devices = len(device_ids)
+        # Get group sizes for bootstrap sampling (on GPU 0)
+        group_sizes = cp.diff(cat_offsets)
 
-        # Generate all bootstrap indices on CPU for reproducibility
-        bootstrap_indices = self._generate_bootstrap_indices(
-            cat_offsets, k, n_bootstrap, random_state
-        )
-
-        # Split iterations across devices - each GPU gets a batch
-        iters_per_device = (n_bootstrap + n_devices - 1) // n_devices
-
-        # Phase 1: Transfer data to all devices
-        streams: dict[int, cp.cuda.Stream] = {}
-        device_data: list[dict | None] = []
-
-        for i, device_id in enumerate(device_ids):
-            start_iter = i * iters_per_device
-            end_iter = min(start_iter + iters_per_device, n_bootstrap)
-            n_iters = end_iter - start_iter
-
-            if n_iters == 0:
-                device_data.append(None)
-                continue
-
-            with cp.cuda.Device(device_id):
-                streams[device_id] = cp.cuda.Stream(non_blocking=True)
-
-                with streams[device_id]:
-                    if device_id == device_ids[0]:
-                        dev_emb = embedding
-                        dev_off = cat_offsets
-                        dev_idx = cell_indices
-                    else:
-                        dev_emb = cp.asarray(embedding)
-                        dev_off = cp.asarray(cat_offsets)
-                        dev_idx = cp.asarray(cell_indices)
-
-                    device_data.append(
-                        {
-                            "embedding": dev_emb,
-                            "cat_offsets": dev_off,
-                            "cell_indices": dev_idx,
-                            "start_iter": start_iter,
-                            "n_iters": n_iters,
-                            "device_id": device_id,
-                        }
-                    )
-
-        # Phase 2: Run iterations on each device (batched per GPU)
-        for data in device_data:
-            if data is None:
-                continue
-
-            device_id = data["device_id"]
-            start_iter = data["start_iter"]
-            n_iters = data["n_iters"]
-
-            with cp.cuda.Device(device_id):
-                with streams[device_id]:
-                    results = []
-                    for j in range(n_iters):
-                        iter_idx = start_iter + j
-
-                        # Create bootstrap sample
-                        boot_cat_offsets, boot_cell_indices = (
-                            self._bootstrap_sample_cells_from_indices(
-                                cat_offsets=data["cat_offsets"],
-                                cell_indices=data["cell_indices"],
-                                k=k,
-                                bootstrap_group_indices=bootstrap_indices[iter_idx],
-                            )
-                        )
-
-                        # Compute pairwise means
-                        pairwise_means = self._pairwise_means(
-                            embedding=data["embedding"],
-                            cat_offsets=boot_cat_offsets,
-                            cell_indices=boot_cell_indices,
-                            k=k,
-                            device_ids=[device_id],
-                        )
-                        results.append(pairwise_means)
-
-                    data["results"] = results
-
-        # Phase 3: Synchronize all devices
-        for device_id in streams:
-            with cp.cuda.Device(device_id):
-                streams[device_id].synchronize()
-
-        # Phase 4: Gather results from all devices
+        # Run bootstrap iterations - each uses all GPUs for pairwise computation
         all_results = []
-        for data in device_data:
-            if data is None:
-                continue
-            device_id = data["device_id"]
-            with cp.cuda.Device(device_id):
-                for result in data["results"]:
-                    all_results.append(result.get())
+        for i in range(n_bootstrap):
+            # Generate bootstrap sample on GPU 0
+            boot_cat_offsets, boot_cell_indices = self._bootstrap_sample_cells(
+                cat_offsets=cat_offsets,
+                cell_indices=cell_indices,
+                group_sizes_gpu=group_sizes,
+                seed=random_state + i,
+            )
+
+            # Compute pairwise means using all GPUs
+            pairwise_means = self._pairwise_means(
+                embedding=embedding,
+                cat_offsets=boot_cat_offsets,
+                cell_indices=boot_cell_indices,
+                k=k,
+                device_ids=device_ids,
+            )
+            all_results.append(pairwise_means.get())
 
         # Compute statistics on first GPU
         with cp.cuda.Device(device_ids[0]):
@@ -991,8 +915,7 @@ class EDistanceMetric(BaseMetric):
     ) -> tuple[cp.ndarray, cp.ndarray]:
         """Compute bootstrap statistics for onesided distances.
 
-        Distributes bootstrap iterations across GPUs - each GPU gets a contiguous
-        batch of iterations to run independently.
+        Each bootstrap iteration uses all GPUs for its onesided computation.
 
         Parameters
         ----------
@@ -1018,105 +941,30 @@ class EDistanceMetric(BaseMetric):
         tuple
             (means, variances) matrices (k x k each)
         """
-        n_devices = len(device_ids)
+        # Get group sizes for bootstrap sampling (on GPU 0)
+        group_sizes = cp.diff(cat_offsets)
 
-        # Generate all bootstrap indices on CPU for reproducibility
-        bootstrap_indices = self._generate_bootstrap_indices(
-            cat_offsets, k, n_bootstrap, random_state
-        )
-
-        # Split iterations across devices - each GPU gets a batch
-        iters_per_device = (n_bootstrap + n_devices - 1) // n_devices
-
-        # Phase 1: Transfer data to all devices
-        streams: dict[int, cp.cuda.Stream] = {}
-        device_data: list[dict | None] = []
-
-        for i, device_id in enumerate(device_ids):
-            start_iter = i * iters_per_device
-            end_iter = min(start_iter + iters_per_device, n_bootstrap)
-            n_iters = end_iter - start_iter
-
-            if n_iters == 0:
-                device_data.append(None)
-                continue
-
-            with cp.cuda.Device(device_id):
-                streams[device_id] = cp.cuda.Stream(non_blocking=True)
-
-                with streams[device_id]:
-                    if device_id == device_ids[0]:
-                        dev_emb = embedding
-                        dev_off = cat_offsets
-                        dev_idx = cell_indices
-                    else:
-                        dev_emb = cp.asarray(embedding)
-                        dev_off = cp.asarray(cat_offsets)
-                        dev_idx = cp.asarray(cell_indices)
-
-                    device_data.append(
-                        {
-                            "embedding": dev_emb,
-                            "cat_offsets": dev_off,
-                            "cell_indices": dev_idx,
-                            "start_iter": start_iter,
-                            "n_iters": n_iters,
-                            "device_id": device_id,
-                        }
-                    )
-
-        # Phase 2: Run iterations on each device (batched per GPU)
-        for data in device_data:
-            if data is None:
-                continue
-
-            device_id = data["device_id"]
-            start_iter = data["start_iter"]
-            n_iters = data["n_iters"]
-
-            with cp.cuda.Device(device_id):
-                with streams[device_id]:
-                    results = []
-                    for j in range(n_iters):
-                        iter_idx = start_iter + j
-
-                        # Create bootstrap sample
-                        boot_cat_offsets, boot_cell_indices = (
-                            self._bootstrap_sample_cells_from_indices(
-                                cat_offsets=data["cat_offsets"],
-                                cell_indices=data["cell_indices"],
-                                k=k,
-                                bootstrap_group_indices=bootstrap_indices[iter_idx],
-                            )
-                        )
-
-                        # Compute onesided means
-                        onesided_means = self._onesided_means(
-                            embedding=data["embedding"],
-                            cat_offsets=boot_cat_offsets,
-                            cell_indices=boot_cell_indices,
-                            k=k,
-                            selected_idx=selected_idx,
-                            device_ids=[device_id],
-                        )
-                        results.append(onesided_means)
-
-                    data["results"] = results
-
-        # Phase 3: Synchronize all devices
-        for device_id in streams:
-            with cp.cuda.Device(device_id):
-                streams[device_id].synchronize()
-
-        # Phase 4: Gather results from all devices
+        # Run bootstrap iterations - each uses all GPUs for onesided computation
         all_results = []
-        for data in device_data:
-            if data is None:
-                continue
-            device_id = data["device_id"]
-            with cp.cuda.Device(device_id):
-                for result in data["results"]:
-                    all_results.append(result.get())
+        for i in range(n_bootstrap):
+            # Generate bootstrap sample on GPU 0
+            boot_cat_offsets, boot_cell_indices = self._bootstrap_sample_cells(
+                cat_offsets=cat_offsets,
+                cell_indices=cell_indices,
+                group_sizes_gpu=group_sizes,
+                seed=random_state + i,
+            )
+
+            # Compute onesided means using all GPUs
+            onesided_means = self._onesided_means(
+                embedding=embedding,
+                cat_offsets=boot_cat_offsets,
+                cell_indices=boot_cell_indices,
+                k=k,
+                selected_idx=selected_idx,
+                device_ids=device_ids,
+            )
+            all_results.append(onesided_means.get())
 
         # Compute statistics on first GPU
         with cp.cuda.Device(device_ids[0]):
@@ -1126,74 +974,62 @@ class EDistanceMetric(BaseMetric):
 
         return means, variances
 
-    def _generate_bootstrap_indices(
-        self,
-        cat_offsets: cp.ndarray,
-        k: int,
-        n_bootstrap: int = 100,
-        random_state: int = 0,
-    ) -> list[list[cp.ndarray]]:
-        """Generate bootstrap indices for all groups and all bootstrap iterations."""
-        # Use same RNG logic as CPU code
-        rng = np.random.default_rng(random_state)
-
-        # Convert to numpy for CPU-based random generation
-        cat_offsets_np = cat_offsets.get()
-
-        bootstrap_indices = []
-
-        for _ in range(n_bootstrap):
-            group_indices = []
-
-            for group_idx in range(k):
-                start_idx = cat_offsets_np[group_idx]
-                end_idx = cat_offsets_np[group_idx + 1]
-                group_size = end_idx - start_idx
-
-                if group_size > 0:
-                    bootstrap_group_indices = rng.choice(
-                        group_size, size=group_size, replace=True
-                    )
-                    group_indices.append(
-                        cp.array(bootstrap_group_indices, dtype=cp.int32)
-                    )
-                else:
-                    group_indices.append(cp.array([], dtype=cp.int32))
-
-            bootstrap_indices.append(group_indices)
-
-        return bootstrap_indices
-
-    def _bootstrap_sample_cells_from_indices(
+    def _bootstrap_sample_cells(
         self,
         *,
         cat_offsets: cp.ndarray,
         cell_indices: cp.ndarray,
-        k: int,
-        bootstrap_group_indices: list[cp.ndarray],
+        group_sizes_gpu: cp.ndarray,
+        seed: int,
     ) -> tuple[cp.ndarray, cp.ndarray]:
-        """Bootstrap sample cells using pre-generated indices."""
-        new_cell_indices = []
-        new_cat_offsets = cp.zeros(k + 1, dtype=cp.int32)
+        """Generate bootstrap sample on the current device (fully parallel).
 
-        for group_idx in range(k):
-            start_idx = cat_offsets[group_idx]
-            end_idx = cat_offsets[group_idx + 1]
-            group_size = end_idx - start_idx
+        Uses cupy random to generate indices directly on the GPU,
+        avoiding cross-device transfers in multi-GPU scenarios.
 
-            if group_size > 0:
-                # Get original cell indices for this group
-                group_cells = cell_indices[start_idx:end_idx]
+        Parameters
+        ----------
+        cat_offsets
+            Category offsets on current device
+        cell_indices
+            Cell indices on current device
+        group_sizes_gpu
+            Size of each group on current device
+        seed
+            Random seed for this bootstrap iteration
 
-                # Use pre-generated bootstrap indices
-                bootstrap_indices = bootstrap_group_indices[group_idx]
-                bootstrap_cells = group_cells[bootstrap_indices]
+        Returns
+        -------
+        tuple
+            (cat_offsets, new_cell_indices) on current device
+            Note: cat_offsets unchanged since bootstrap preserves group sizes
+        """
+        rng = cp.random.default_rng(seed)
+        total_cells = cell_indices.shape[0]
 
-                new_cell_indices.extend(bootstrap_cells.get().tolist())
+        if total_cells == 0:
+            return cat_offsets, cell_indices
 
-            new_cat_offsets[group_idx + 1] = len(new_cell_indices)
+        # Generate random floats for all cells at once
+        random_floats = rng.random(total_cells, dtype=cp.float32)
 
-        return new_cat_offsets, cp.array(new_cell_indices, dtype=cp.int32)
+        # cp.repeat requires list for repeats - small transfer (k integers)
+        group_sizes_list = group_sizes_gpu.get().tolist()
+
+        # Expand group sizes to per-cell (each cell knows its group's size)
+        cell_group_sizes = cp.repeat(group_sizes_gpu, group_sizes_list)
+
+        # Scale random floats to local indices within each group
+        bootstrap_local_idx = (random_floats * cell_group_sizes).astype(cp.int32)
+
+        # Convert local indices to global indices by adding group offsets
+        cell_group_offsets = cp.repeat(cat_offsets[:-1], group_sizes_list)
+        bootstrap_global_idx = bootstrap_local_idx + cell_group_offsets
+
+        # Gather bootstrap cells
+        new_cell_indices = cell_indices[bootstrap_global_idx]
+
+        return cat_offsets, new_cell_indices
 
     def _prepare_edistance_df_bootstrap(
         self,
