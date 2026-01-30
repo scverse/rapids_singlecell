@@ -7,6 +7,7 @@ import cupy as cp
 import numpy as np
 from cupyx.scipy import sparse
 
+from ._utils import _check_precision_issues
 from .kernels._autocorr import (
     get_gearys_C_num_dense_kernel,
     get_gearys_C_num_sparse_kernel,
@@ -54,6 +55,9 @@ def _gearys_C_cupy_dense(
 
     # Calculate Geary's C
     gearys_C = (n_samples - 1) * num / den
+
+    # Check for numerical issues before expensive permutations
+    _check_precision_issues(gearys_C, dtype)
 
     # Calculate p-values using permutation tests
     if n_permutations:
@@ -130,6 +134,9 @@ def _gearys_C_cupy_sparse(
 
     # Calculate Geary's C
     gearys_C = (n_samples - 1) * num / den
+
+    # Check for numerical issues before expensive permutations
+    _check_precision_issues(gearys_C, dtype)
 
     # Calculate p-values using permutation tests
     if n_permutations:

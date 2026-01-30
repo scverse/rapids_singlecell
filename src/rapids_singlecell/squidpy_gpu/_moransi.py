@@ -7,6 +7,7 @@ import cupy as cp
 import numpy as np
 from cupyx.scipy import sparse
 
+from ._utils import _check_precision_issues
 from .kernels._autocorr import (
     get_morans_I_num_dense_kernel,
     get_morans_I_num_sparse_kernel,
@@ -53,6 +54,9 @@ def _morans_I_cupy_dense(
 
     # Calculate Moran's I
     morans_I = num / den
+
+    # Check for numerical issues before expensive permutations
+    _check_precision_issues(morans_I, dtype)
 
     # Calculate p-values using permutation tests
     if n_permutations:
@@ -128,6 +132,9 @@ def _morans_I_cupy_sparse(
 
     # Calculate Moran's I
     morans_I = num / den
+
+    # Check for numerical issues before expensive permutations
+    _check_precision_issues(morans_I, dtype)
 
     if n_permutations:
         morans_I_permutations = cp.zeros((n_permutations, n_features), dtype=dtype)

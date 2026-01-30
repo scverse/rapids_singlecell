@@ -25,20 +25,27 @@ if TYPE_CHECKING:
 
 
 def _to_cupy(vals, *, use_sparse: bool, dtype):
-    """Convert input data to CuPy array with specified dtype."""
+    """Convert input data to CuPy array with specified dtype.
+
+    Note: `use_sparse` is only relevant for sparse input data.
+    Dense input is always returned as a dense CuPy array.
+    """
     is_sparse = sparse.issparse(vals) or sparse_gpu.isspmatrix(vals)
 
-    if is_sparse and use_sparse:
+    # Dense input - use_sparse is ignored
+    if not is_sparse:
+        return cp.array(vals, dtype=dtype, order="C")
+
+    # Sparse input - respect use_sparse parameter
+    if use_sparse:
         if sparse_gpu.isspmatrix(vals):
             return vals.tocsr().astype(dtype)
         return sparse_gpu.csr_matrix(vals.tocsr(), dtype=dtype)
 
-    if is_sparse:
-        if not sparse_gpu.isspmatrix(vals):
-            vals = sparse_gpu.csr_matrix(vals.tocsr(), dtype=dtype)
-        return _sparse_to_dense(vals, order="C")
-
-    return cp.array(vals, dtype=dtype, order="C")
+    # Sparse input but use_sparse=False - convert to dense
+    if not sparse_gpu.isspmatrix(vals):
+        vals = sparse_gpu.csr_matrix(vals.tocsr(), dtype=dtype)
+    return _sparse_to_dense(vals, order="C")
 
 
 def spatial_autocorr(
@@ -140,26 +147,32 @@ def spatial_autocorr(
 
     params = {"two_tailed": two_tailed}
 
+    def _run_autocorr(data, adj_matrix_cupy, mode, n_perms):
+        """Run spatial autocorrelation computation."""
+        if mode == "moran":
+            return _morans_I_cupy(data, adj_matrix_cupy, n_permutations=n_perms)
+        elif mode == "geary":
+            return _gearys_C_cupy(data, adj_matrix_cupy, n_permutations=n_perms)
+        else:
+            raise ValueError(f"Invalid mode: {mode}")
+
     data = _to_cupy(vals, use_sparse=use_sparse, dtype=compute_dtype)
-    # Run Spartial Autocorr
+
+    # Run full computation
+    score, score_perms = _run_autocorr(data, adj_matrix_cupy, mode, n_perms)
+
+    # Set mode-specific params
     if mode == "moran":
-        score, score_perms = _morans_I_cupy(
-            data, adj_matrix_cupy, n_permutations=n_perms
-        )
         params["stat"] = "I"
-        params["expected"] = -1.0 / (adata.shape[0] - 1)  # expected score
+        params["expected"] = -1.0 / (adata.shape[0] - 1)
         params["ascending"] = False
         params["mode"] = "moranI"
-    elif mode == "geary":
-        score, score_perms = _gearys_C_cupy(
-            data, adj_matrix_cupy, n_permutations=n_perms
-        )
+    else:  # geary
         params["stat"] = "C"
         params["expected"] = 1.0
         params["ascending"] = True
         params["mode"] = "gearyC"
-    else:
-        raise NotImplementedError(f"Mode `{mode}` is not yet implemented.")
+
     g = sparse.csr_matrix(adj_matrix_cupy.get())
     score = score.get()
     if n_perms is not None:

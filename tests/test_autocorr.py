@@ -140,3 +140,35 @@ def test_autocorr_dtype_parameter():
         rtol=1e-4,
         atol=1e-4,
     )
+
+
+def test_autocorr_float32_nan_raises_error():
+    """Test that float32 nan/inf raises an error with helpful message."""
+    from anndata import AnnData
+
+    # Create data with a constant gene (zero variance) that causes nan in float32
+    np.random.seed(42)
+    n_cells = 100
+    n_genes = 5
+
+    X = np.random.rand(n_cells, n_genes).astype(np.float32)
+    # Make one gene constant - this will cause division by zero (nan)
+    X[:, 0] = 1.0
+
+    adata = AnnData(X)
+    adata.var_names = [f"gene_{i}" for i in range(n_genes)]
+
+    # Create simple connectivity
+    from sklearn.neighbors import kneighbors_graph
+
+    positions = np.random.rand(n_cells, 2)
+    adj = kneighbors_graph(positions, n_neighbors=5, mode="connectivity")
+    adata.obsp["spatial_connectivities"] = adj
+
+    # Run with float32 - should raise error suggesting float64
+    with pytest.raises(ValueError, match="float64"):
+        spatial_autocorr(adata, mode="moran", copy=True, n_perms=None)
+
+    # With float64, should also raise error (for constant genes) but with bug report message
+    with pytest.raises(ValueError, match="bug report"):
+        spatial_autocorr(adata, mode="moran", copy=True, n_perms=None, dtype=np.float64)
