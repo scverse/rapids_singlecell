@@ -120,6 +120,7 @@ def _gearys_C_cupy_sparse(
 
     # Calculate the denominator for Geary's C
     means = data.mean(axis=0).ravel()
+    means = means.astype(dtype)
     den = cp.zeros(n_features, dtype=dtype)
     counter = cp.zeros(n_features, dtype=cp.int32)
     block_den = math.ceil(data.nnz / 32)

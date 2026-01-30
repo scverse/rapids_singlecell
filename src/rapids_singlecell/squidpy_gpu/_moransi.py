@@ -98,7 +98,7 @@ def _morans_I_cupy_sparse(
     num = cp.zeros(n_features, dtype=dtype)
     num_kernel = get_morans_I_num_sparse_kernel(np.dtype(dtype))
     means = data.mean(axis=0).ravel()
-
+    means = means.astype(dtype)
     sg = n_samples
     # Launch the kernel
     num_kernel(
