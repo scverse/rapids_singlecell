@@ -23,10 +23,10 @@
 installation.md
 usage_principles.md
 api/index.md
-MM.md
+memory_management.md
 out_of_core.md
+tutorials.md
 release-notes/index.md
 references.md
-notebooks.rst
 acknowledgements.md
 ```
