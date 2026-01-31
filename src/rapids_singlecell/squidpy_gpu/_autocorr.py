@@ -62,6 +62,7 @@ def spatial_autocorr(
     use_raw: bool = False,
     use_sparse: bool = True,
     dtype: np.dtype | None = None,
+    multi_gpu: bool | list[int] | str | None = None,
     copy: bool = False,
 ) -> pd.DataFrame | None:
     """
@@ -102,6 +103,13 @@ def spatial_autocorr(
         dtype
             Data type for computation. If None, uses input data dtype.
             For best numerical stability, especially with genes having low variance, use `np.float64`.
+        multi_gpu
+            GPU selection for permutation tests:
+            - None: Use all GPUs if available (default)
+            - True: Use all available GPUs
+            - False: Use only GPU 0
+            - list[int]: Use specific GPU IDs (e.g., [0, 2])
+            - str: Comma-separated GPU IDs (e.g., "0,2")
         copy
             If True, return the results as a DataFrame instead of storing them in `adata.uns`, by default False.
 
@@ -147,19 +155,23 @@ def spatial_autocorr(
 
     params = {"two_tailed": two_tailed}
 
-    def _run_autocorr(data, adj_matrix_cupy, mode, n_perms):
+    def _run_autocorr(data, adj_matrix_cupy, mode, n_perms, multi_gpu):
         """Run spatial autocorrelation computation."""
         if mode == "moran":
-            return _morans_I_cupy(data, adj_matrix_cupy, n_permutations=n_perms)
+            return _morans_I_cupy(
+                data, adj_matrix_cupy, n_permutations=n_perms, multi_gpu=multi_gpu
+            )
         elif mode == "geary":
-            return _gearys_C_cupy(data, adj_matrix_cupy, n_permutations=n_perms)
+            return _gearys_C_cupy(
+                data, adj_matrix_cupy, n_permutations=n_perms, multi_gpu=multi_gpu
+            )
         else:
             raise ValueError(f"Invalid mode: {mode}")
 
     data = _to_cupy(vals, use_sparse=use_sparse, dtype=compute_dtype)
 
     # Run full computation
-    score, score_perms = _run_autocorr(data, adj_matrix_cupy, mode, n_perms)
+    score, score_perms = _run_autocorr(data, adj_matrix_cupy, mode, n_perms, multi_gpu)
 
     # Set mode-specific params
     if mode == "moran":
