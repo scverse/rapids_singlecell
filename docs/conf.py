@@ -178,6 +178,7 @@ nitpick_ignore = [
     ("py:class", "anndata._core.raw.Raw"),
     ("py:class", "scanpy._utils.Empty"),
     ("py:data", "typing.Union"),
+    ("py:class", "cuml.linear_model.LogisticRegression"),
     *[
         ("py:class", f"anndata._core.aligned_mapping.{cls}{kind}")
         for cls in "Layers AxisArrays PairwiseArrays".split()

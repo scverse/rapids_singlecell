@@ -47,7 +47,7 @@ client = Client(cluster)
 
 ### Notes
 * `threads_per_worker=1` is recommended for GPU workloads. More threads can be faster but often increase temporary allocations, causing VRAM spikes/overflows; some dask-cuda releases also showed leaks with multi-threaded workers. With row chunks around ~20,000, 4–5 threads can still work on many GPUs.
-* For capacity over speed, enable RMM managed memory (see {doc}MM). For highest peer-to-peer (NVLink) performance, prefer the RMM pool allocator and avoid managed memory.
+* For capacity over speed, enable RMM managed memory (see {doc}`memory_management`). For highest peer-to-peer (NVLink) performance, prefer the RMM pool allocator and avoid managed memory.
 * Multi-GPU transport: use UCX (`protocol="ucx"`) to enable NVLink. UCX typically uses more memory; TCP is more stable but slower.
 * UCX is not compatible with CUDA managed memory. For UCX/NVLink, disable managed memory. TCP can be used with managed memory.
 
@@ -126,7 +126,7 @@ Persisting loads data into GPU memory across workers. This can quickly cause OOM
 
 - Use `LocalCUDACluster(CUDA_VISIBLE_DEVICES="0,1,2,3")` to scale across GPUs.
 - Ensure chunks are large enough to amortize scheduling but small enough to fit per-worker VRAM.
-- Combine with RMM pool allocator for speed, or managed memory for capacity (see {doc}`MM`).
+- Combine with RMM pool allocator for speed, or managed memory for capacity (see {doc}`memory_management`).
 - NVLink: peer-to-peer performance is best with the RMM pool allocator. Managed memory can reduce or prevent effective NVLink use.
 
 ## Functions that support Dask
@@ -136,11 +136,11 @@ The functions below are implemented to run on Dask‑backed `AnnData` with GPU a
 - {func}`~.pp.calculate_qc_metrics`
 - {func}`~.pp.normalize_total`
 - {func}`~.pp.log1p`
-- {func}`~.pp.highly_variable_genes` (flavors: `cell_ranger`, `seurat_v3`)
+- {func}`~.pp.highly_variable_genes` (flavors: `seurat`, `cell_ranger`, `poisson_gene_selection`)
 - {func}`~.pp.scale`
 - {func}`~.pp.pca`
 - {func}`~.tl.score_genes`
-- {func}`~.tl.rank_genes_groups_logreg`
+- {func}`~.tl.rank_genes_groups` (methods: `logreg`, `t-test`, `t-test_overestim_var`; NOT `wilcoxon`)
 - {func}`~rapids_singlecell.get.aggregate`
 
 ## Troubleshooting
