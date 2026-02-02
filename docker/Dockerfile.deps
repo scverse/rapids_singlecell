@@ -28,17 +28,20 @@ rm -rf /var/lib/apt/lists/*
 EOF
 
 RUN <<EOF
-# install conda environment
+# install conda environment + pytest in a single layer to reduce disk usage
 set -x
+# Clean any existing cache first
+mamba clean -afy
+# Install environment with pytest, cleaning package cache during solve
 mamba env update -n base -f rsc_rapids.yml
-mamba clean -afy
-EOF
-
-RUN <<EOF
-# install pytest
-set -x
 mamba install -y -n base pytest -c conda-forge
+# Aggressive cleanup to free disk space
 mamba clean -afy
+rm -rf /opt/conda/pkgs/*
+rm -rf /root/.cache
+find /opt/conda -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+find /opt/conda -name '*.pyc' -delete 2>/dev/null || true
+find /opt/conda -name '*.a' -delete 2>/dev/null || true
 EOF
 
 RUN <<EOF

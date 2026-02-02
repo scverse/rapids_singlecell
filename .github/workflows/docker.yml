@@ -45,7 +45,7 @@ jobs:
           remove-codeql: true
           remove-docker-images: true
           root-reserve-mb: 35000
-          swap-size-mb: 1048
+          swap-size-mb: 4096
 
       - name: Check out the repo
         uses: actions/checkout@v4
