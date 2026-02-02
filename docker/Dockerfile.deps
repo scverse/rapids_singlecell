@@ -27,13 +27,19 @@ apt-get -q clean -y
 rm -rf /var/lib/apt/lists/*
 EOF
 
-RUN <<EOF
-# install conda environment + pytest in a single layer to reduce disk usage
+# Use BuildKit cache mount for conda packages to avoid disk space issues
+RUN --mount=type=cache,target=/opt/conda/pkgs,sharing=locked <<EOF
+# install conda environment
 set -x
-mamba env update -n base -f rsc_rapids.yml && \
-mamba install -y -n base pytest -c conda-forge && \
-mamba clean -afy && \
-rm -rf /opt/conda/pkgs/* /root/.cache
+mamba env update -n base -f rsc_rapids.yml
+mamba clean -afy
+EOF
+
+RUN --mount=type=cache,target=/opt/conda/pkgs,sharing=locked <<EOF
+# install pytest
+set -x
+mamba install -y -n base pytest -c conda-forge
+mamba clean -afy
 EOF
 
 RUN <<EOF
