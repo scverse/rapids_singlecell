@@ -38,79 +38,118 @@ def pca(
     chunk_size: int = None,
     key_added: str | None = None,
     copy: bool = False,
+    **kwargs,
 ) -> None | AnnData:
-    """
-    Performs PCA using the cuml decomposition function.
+    """\
+    Principal component analysis using GPU acceleration.
+
+    Uses the following implementations based on data type (defaults for `svd_solver` in parentheses):
+
+    .. list-table::
+       :header-rows: 1
+
+       * -
+         - Dense
+         - Sparse
+         - Dask
+       * - `zero_center=True`
+         - cuML PCA (`'full'`)
+         - Custom (`'lanczos'` if n_vars > 8k, else `'covariance_eigh'`)
+         - Custom (`'covariance_eigh'`)
+       * - `zero_center=False`
+         - cuML TruncatedSVD (`'full'`)
+         - Custom (`'lanczos'` if n_vars > 8k, else `'covariance_eigh'`)
+         - Custom (`'covariance_eigh'`)
+       * - `chunked=True`
+         - cuML IncrementalPCA
+         - cuML IncrementalPCA
+         - Not supported
 
     Parameters
     ----------
-        adata
-            AnnData object
+    adata
+        AnnData object
 
-        n_comps
-            Number of principal components to compute. Defaults to 50, or 1 - minimum \
-            dimension size of selected representation
+    n_comps
+        Number of principal components to compute. Defaults to 50, or 1 - minimum
+        dimension size of selected representation.
 
-        layer
-            If provided, use `adata.layers[layer]` for expression values instead of `adata.X`.
+    layer
+        If provided, use `adata.layers[layer]` for expression values instead of `adata.X`.
 
-        zero_center
-            If `True`, compute standard PCA from covariance matrix. \
-            If `False`, omit zero-centering variables
+    zero_center
+        If `True`, compute standard PCA from covariance matrix.
+        If `False`, omit zero-centering variables (truncated SVD).
 
-        svd_solver
-            Solver to use for the PCA computation. \
-            Must be one of {'full', 'jacobi', 'auto', 'covariance_eigh'}. \
-            Defaults to 'auto'. Sparse matrices will always use `'covariance_eigh'`.
+    svd_solver
+        SVD solver to use. See table above for which implementation is used based on
+        data type, as well as the default solver when `svd_solver=None`.
 
-            `'covariance_eigh'`
-                Classic eigendecomposition of the covariance matrix, suited for tall-and-skinny matrices.
-                Works with dask, array must be CSR or dense and chunked as `(N, adata.shape[1])`.
-            `'full'`
-                From `cuml` for dense arrays uses a eigendecomposition of the covariance matrix then discards components.
-            `'jacobi'`
-                From `cuml` for dense arrays. Jacobi is much faster as it iteratively corrects, but is less accurate.
-            `'auto'`
-                Automatically chooses the best solver based on the shape of the data matrix. Will choose `'covariance_eigh'` for dense dask arrays.
+        `None`
+            Choose automatically based on data type (see table above).
+        `'covariance_eigh'`
+            Eigendecomposition of the covariance matrix. Fast for sparse matrices
+            with fewer than ~8,000 features. Works with Dask arrays.
+        `'lanczos'`
+            Lanczos bidiagonalization with implicit restarts. Memory efficient for
+            large sparse matrices (>8,000 features). Best singular value accuracy.
+            Does not support Dask arrays.
+        `'randomized'`
+            Randomized SVD (Halko et al. 2009) with CholeskyQR2 orthogonalization
+            (Tomás et al. 2024). Faster than Lanczos but approximate.
+            Does not support Dask arrays.
+        `'full'`
+            cuML: Full eigendecomposition of covariance matrix. For dense arrays only.
+        `'jacobi'`
+            cuML: Jacobi iterative solver. Faster but less accurate. For dense arrays only.
 
-        random_state
-            Change to use different initial states for the optimization.
+    random_state
+        Random state for initialization.
 
-        mask_var
-            Mask to use for the PCA computation. \
-            If `None`, all variables are used. \
-            If `np.ndarray`, use the provided mask. \
-            If `str`, use the mask stored in `adata.var[mask_var]`.
+    mask_var
+        Mask to use for the PCA computation.
+        If `None`, all variables are used.
+        If `np.ndarray`, use the provided mask.
+        If `str`, use the mask stored in `adata.var[mask_var]`.
 
-        use_highly_variable
-            Whether to use highly variable genes only, stored in \
-            `.var['highly_variable']`. \
-            By default uses them if they have been determined beforehand.
+    use_highly_variable
+        Whether to use highly variable genes only, stored in
+        `.var['highly_variable']`.
+        By default uses them if they have been determined beforehand.
 
-        dtype
-            Numpy data type string to which to convert the result.
+    dtype
+        Numpy data type string to which to convert the result.
 
-        chunked
-            If `True`, perform an incremental PCA on segments of `chunk_size`. \
-            The incremental PCA automatically zero centers and ignores settings of \
-            `random_seed` and `svd_solver`. If `False`, perform a full PCA.
+    chunked
+        If `True`, perform an incremental PCA on segments of `chunk_size`.
+        The incremental PCA automatically zero centers and ignores settings of
+        `random_seed` and `svd_solver`. If `False`, perform a full PCA.
 
-        chunk_size
-            Number of observations to include in each chunk. \
-            Required if `chunked=True` was passed.
+    chunk_size
+        Number of observations to include in each chunk.
+        Required if `chunked=True` was passed.
 
-        key_added
-            If not specified, the embedding is stored as
-            :attr:`~anndata.AnnData.obsm`\\ `['X_pca']`, the loadings as
-            :attr:`~anndata.AnnData.varm`\\ `['PCs']`, and the the parameters in
-            :attr:`~anndata.AnnData.uns`\\ `['pca']`.
-            If specified, the embedding is stored as
-            :attr:`~anndata.AnnData.obsm`\\ ``[key_added]``, the loadings as
-            :attr:`~anndata.AnnData.varm`\\ ``[key_added]``, and the the parameters in
-            :attr:`~anndata.AnnData.uns`\\ ``[key_added]``.
+    key_added
+        If not specified, the embedding is stored as
+        :attr:`~anndata.AnnData.obsm`\\ `['X_pca']`, the loadings as
+        :attr:`~anndata.AnnData.varm`\\ `['PCs']`, and the parameters in
+        :attr:`~anndata.AnnData.uns`\\ `['pca']`.
+        If specified, the embedding is stored as
+        :attr:`~anndata.AnnData.obsm`\\ `[key_added]`, the loadings as
+        :attr:`~anndata.AnnData.varm`\\ `[key_added]`, and the parameters in
+        :attr:`~anndata.AnnData.uns`\\ `[key_added]`.
 
-        copy
-            Whether to return a copy or update `adata`.
+    copy
+        Whether to return a copy or update `adata`.
+
+    **kwargs
+        Additional arguments for specific SVD solvers.
+        For `svd_solver='randomized'`:
+
+        - `n_oversamples`: Extra random vectors for better approximation.
+          Higher values improve accuracy. Default is 10.
+        - `n_iter`: Number of power iterations. Higher values improve
+          accuracy for matrices with slowly decaying singular values. Default is 2.
 
     Returns
     -------
@@ -143,22 +182,35 @@ def pca(
     del use_highly_variable
     X = X[:, mask_var] if mask_var is not None else X
 
-    if svd_solver is None:
-        svd_solver = "auto"
-
     if n_comps is None:
         min_dim = min(X.shape[0], X.shape[1])
         if 50 >= min_dim:
             n_comps = min_dim - 1
         else:
             n_comps = 50
+
+    # Auto-select sparse solver based on matrix dimensions
+    # Lanczos is faster for large feature counts (>8000)
+    # Covariance is faster for smaller matrices due to optimized kernels
+    if svd_solver is None and (cpissparse(X) or issparse(X)):
+        n_vars = X.shape[1]
+        if n_vars > 8000:
+            svd_solver = "lanczos"
+        else:
+            svd_solver = "covariance_eigh"
+
     if isinstance(X, DaskArray):
         if chunked:
             raise ValueError(
                 "Dask arrays are not supported for chunked PCA computation."
             )
         _check_gpu_X(X, allow_dask=True)
-        if svd_solver == "auto":
+        if svd_solver in ("lanczos", "randomized"):
+            raise NotImplementedError(
+                f"'{svd_solver}' SVD solver does not support Dask arrays. "
+                "Use svd_solver='covariance_eigh' instead."
+            )
+        if svd_solver is None:
             svd_solver = "covariance_eigh"
         if (
             isinstance(X._meta, cp.ndarray)
@@ -173,13 +225,35 @@ def pca(
         if chunked:
             pca_func, X_pca = _run_chunked_pca(X, n_comps, chunk_size)
         elif cpissparse(X) or issparse(X):
-            pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
+            if svd_solver in ("lanczos", "randomized"):
+                pca_func, X_pca = _run_sparse_svd_pca(
+                    X,
+                    n_comps,
+                    svd_solver,
+                    zero_center=zero_center,
+                    random_state=random_state,
+                    n_oversamples=kwargs.get("n_oversamples"),
+                    n_iter=kwargs.get("n_iter"),
+                )
+            else:
+                pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
         else:
             pca_func, X_pca = _run_cuml_pca(X, n_comps, svd_solver=svd_solver)
 
     else:  # not zero_center
         if cpissparse(X) or issparse(X):
-            pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
+            if svd_solver in ("lanczos", "randomized"):
+                pca_func, X_pca = _run_sparse_svd_pca(
+                    X,
+                    n_comps,
+                    svd_solver,
+                    zero_center=zero_center,
+                    random_state=random_state,
+                    n_oversamples=kwargs.get("n_oversamples"),
+                    n_iter=kwargs.get("n_iter"),
+                )
+            else:
+                pca_func, X_pca = _run_covariance_pca(X, n_comps, zero_center)
         else:
             pca_func, X_pca = _run_cuml_tsvd(X, n_comps, svd_solver=svd_solver)
 
@@ -218,6 +292,7 @@ def _as_numpy(X):
 
 
 def _run_covariance_pca(X, n_comps, zero_center):
+    """Run PCA using covariance matrix eigendecomposition."""
     if issparse(X):
         X = sparse_scipy_to_cp(X, dtype=X.dtype)
     from ._sparse_pca._sparse_pca import PCA_sparse
@@ -226,7 +301,45 @@ def _run_covariance_pca(X, n_comps, zero_center):
         X = X.tocsr()
     if issparse_cupy(X):
         X.sort_indices()
+
     pca_func = PCA_sparse(n_components=n_comps, zero_center=zero_center)
+    X_pca = pca_func.fit_transform(X)
+    return pca_func, X_pca
+
+
+def _run_sparse_svd_pca(
+    X,
+    n_comps,
+    svd_solver,
+    *,
+    zero_center: bool = True,
+    random_state: int = 0,
+    n_oversamples: int | None = None,
+    n_iter: int | None = None,
+):
+    """Run PCA using SVD solvers (lanczos, randomized)."""
+    if issparse(X):
+        X = sparse_scipy_to_cp(X, dtype=X.dtype)
+    from ._sparse_pca._sparse_svd_pca import PCA_sparse_svd
+
+    if not isspmatrix_csr(X):
+        X = X.tocsr()
+    if issparse_cupy(X):
+        X.sort_indices()
+
+    # Build kwargs for PCA_sparse_svd
+    kwargs = {
+        "n_components": n_comps,
+        "svd_solver": svd_solver,
+        "zero_center": zero_center,
+        "random_state": random_state,
+    }
+    if n_oversamples is not None:
+        kwargs["n_oversamples"] = n_oversamples
+    if n_iter is not None:
+        kwargs["n_iter"] = n_iter
+
+    pca_func = PCA_sparse_svd(**kwargs)
     X_pca = pca_func.fit_transform(X)
     return pca_func, X_pca
 
@@ -246,17 +359,15 @@ def _run_chunked_pca(X, n_comps, chunk_size):
         start_idx = batch * chunk_size
         stop_idx = min(batch * chunk_size + chunk_size, X.shape[0])
         chunk = X[start_idx:stop_idx, :]
-        if issparse(chunk) or cpissparse(chunk):
-            chunk = chunk.toarray()
         X_pca[start_idx:stop_idx] = pca_func.transform(chunk)
 
     return pca_func, X_pca
 
 
-def _run_cuml_pca(X, n_comps, *, svd_solver: str):
+def _run_cuml_pca(X, n_comps, *, svd_solver: str | None):
     from cuml.decomposition import PCA
 
-    if svd_solver == "covariance_eigh":
+    if svd_solver is None or svd_solver == "covariance_eigh":
         svd_solver = "auto"
     pca_func = PCA(
         n_components=n_comps,
@@ -267,9 +378,11 @@ def _run_cuml_pca(X, n_comps, *, svd_solver: str):
     return pca_func, X_pca
 
 
-def _run_cuml_tsvd(X, n_comps, *, svd_solver: str = "auto"):
+def _run_cuml_tsvd(X, n_comps, *, svd_solver: str | None = None):
     from cuml.decomposition import TruncatedSVD
 
+    if svd_solver is None:
+        svd_solver = "auto"
     pca_func = TruncatedSVD(
         n_components=n_comps,
         algorithm=svd_solver,

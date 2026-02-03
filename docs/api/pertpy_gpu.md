@@ -1,6 +1,7 @@
 # pertpy-GPU: `ptg`
 
-[pertpy](https://pertpy.readthedocs.io) contains tools for perturbation analysis. {mod}`rapids_singlecell.ptg` accelerates some of these methods.
+[pertpy](https://pertpy.readthedocs.io) provides tools for perturbation analysis.
+{mod}`rapids_singlecell.ptg` accelerates some of these methods.
 
 ```{eval-rst}
 .. module:: rapids_singlecell.ptg

@@ -1,11 +1,7 @@
-# Welcome to the rapids-singlecell documentation
-
-rapids-singlecell provides GPU-accelerated single-cell analysis with an AnnData-first API. It is largely compatible with Scanpy and includes selected functionality from Squidpy and decoupler. Computations use CuPy and NVIDIA RAPIDS for performance on large datasets.
-
-- **GPU acceleration**: Common single-cell workflows on `AnnData` run on the GPU.
-- **Ecosystem compatibility**: Works with Scanpy APIs; includes pieces from Squidpy and decoupler.
-- **Simple installation**: Available via Conda and PyPI.
-
+```{include} ../README.md
+:start-line: 0
+:end-line: 17
+```
 
 [//]: # (numfocus-fiscal-sponsor-attribution)
 
@@ -29,14 +25,14 @@ If you like scverse® and want to support our mission, please consider making a 
 :gutter: 2
 
 :::{grid-item-card} Installation {octicon}`plug;1em;`
-:link: Installation
- :link-type: doc
+:link: installation
+:link-type: doc
 
 New to *rapids-singlecell*? Check out the installation guide.
 :::
 
 :::{grid-item-card} Tutorials {octicon}`play;1em;`
-:link: notebooks
+:link: tutorials
 :link-type: doc
 
 The tutorials walk you through real-world applications of rapids-singlecell.

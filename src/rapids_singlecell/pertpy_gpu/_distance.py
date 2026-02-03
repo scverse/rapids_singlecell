@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
 if TYPE_CHECKING:
@@ -40,6 +41,14 @@ class Distance:
     obsm_key
         Key in adata.obsm for embeddings. Mutually exclusive with ``layer_key``.
         Defaults to ``"X_pca"`` if neither is specified.
+
+    Notes
+    -----
+    The bootstrap implementation differs from pertpy: rather than precomputing
+    an n×n cell distance matrix and sampling from it, this implementation
+    resamples cells and recomputes distances from scratch each iteration.
+    This scales better for large datasets (O(n) vs O(n²) memory) and leverages
+    multi-GPU parallelism for each bootstrap iteration.
 
     Examples
     --------
@@ -88,6 +97,44 @@ class Distance:
                 f"Unknown metric: {self.metric}. Supported metrics: ['edistance']"
             )
 
+    def _check_multi_gpu_support(
+        self, *, multi_gpu: bool | list[int] | str | None
+    ) -> bool | list[int] | str:
+        """Check if metric supports multi-GPU and resolve None default.
+
+        Parameters
+        ----------
+        multi_gpu
+            The multi_gpu parameter passed by the user. None means use default
+            (True if supported, False otherwise).
+
+        Returns
+        -------
+        multi_gpu
+            Returns False if metric doesn't support multi-GPU, otherwise
+            returns the resolved value (True if None was passed and supported).
+        """
+        # If None, default to True if supported, False otherwise
+        if multi_gpu is None:
+            return self._metric_impl.supports_multi_gpu
+
+        if not self._metric_impl.supports_multi_gpu:
+            # Check if user explicitly requested multi-GPU
+            uses_multi_gpu = (
+                multi_gpu is True
+                or (isinstance(multi_gpu, list) and len(multi_gpu) > 1)
+                or (isinstance(multi_gpu, str) and "," in multi_gpu)
+            )
+            if uses_multi_gpu:
+                warnings.warn(
+                    f"Metric '{self.metric}' does not support multi-GPU. "
+                    "Falling back to single GPU (device 0).",
+                    UserWarning,
+                    stacklevel=3,
+                )
+            return False
+        return multi_gpu
+
     def __call__(
         self,
         X: np.ndarray | cp.ndarray,
@@ -132,6 +179,7 @@ class Distance:
         bootstrap: bool = False,
         n_bootstrap: int = 100,
         random_state: int = 0,
+        multi_gpu: bool | list[int] | str | None = None,
     ):
         """
         Compute pairwise distances between all cell groups.
@@ -150,6 +198,13 @@ class Distance:
             Number of bootstrap iterations (if bootstrap=True)
         random_state
             Random seed for reproducibility
+        multi_gpu
+            GPU selection:
+            - None: Use all GPUs if metric supports it, else GPU 0 (default)
+            - True: Use all available GPUs
+            - False: Use only GPU 0
+            - list[int]: Use specific GPU IDs (e.g., [0, 2])
+            - str: Comma-separated GPU IDs (e.g., "0,2")
 
         Returns
         -------
@@ -162,6 +217,7 @@ class Distance:
         >>> distance = Distance(metric='edistance')
         >>> result = distance.pairwise(adata, groupby='condition')
         """
+        multi_gpu = self._check_multi_gpu_support(multi_gpu=multi_gpu)
         return self._metric_impl.pairwise(
             adata=adata,
             groupby=groupby,
@@ -169,6 +225,7 @@ class Distance:
             bootstrap=bootstrap,
             n_bootstrap=n_bootstrap,
             random_state=random_state,
+            multi_gpu=multi_gpu,
         )
 
     def onesided_distances(
@@ -181,6 +238,7 @@ class Distance:
         bootstrap: bool = False,
         n_bootstrap: int = 100,
         random_state: int = 0,
+        multi_gpu: bool | list[int] | str | None = None,
     ) -> pd.Series | tuple[pd.Series, pd.Series]:
         """
         Compute distances from one selected group to all other groups.
@@ -201,6 +259,13 @@ class Distance:
             Number of bootstrap iterations (if bootstrap=True)
         random_state
             Random seed for reproducibility
+        multi_gpu
+            GPU selection:
+            - None: Use all GPUs if metric supports it, else GPU 0 (default)
+            - True: Use all available GPUs
+            - False: Use only GPU 0
+            - list[int]: Use specific GPU IDs (e.g., [0, 2])
+            - str: Comma-separated GPU IDs (e.g., "0,2")
 
         Returns
         -------
@@ -219,6 +284,7 @@ class Distance:
             raise NotImplementedError(
                 f"Metric '{self.metric}' does not support onesided_distances"
             )
+        multi_gpu = self._check_multi_gpu_support(multi_gpu=multi_gpu)
         return self._metric_impl.onesided_distances(
             adata=adata,
             groupby=groupby,
@@ -227,6 +293,7 @@ class Distance:
             bootstrap=bootstrap,
             n_bootstrap=n_bootstrap,
             random_state=random_state,
+            multi_gpu=multi_gpu,
         )
 
     def bootstrap(

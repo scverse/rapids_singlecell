@@ -7,31 +7,40 @@ Shared memory is constant: CELL_TILE * FEAT_TILE * dtype_size.
 
 from __future__ import annotations
 
-import cupy as cp
 import numpy as np
 from cuml.common.kernel_utils import cuda_kernel_factory
+
+from rapids_singlecell._utils import _get_device_attrs
 
 # Common tile sizes for feature dimension
 # Larger tiles = fewer iterations but more shared memory
 TILE_SIZES = [32, 50, 64]
 
-# Cache for device attributes (lazy initialization)
-_DEVICE_ATTRS: dict | None = None
+# Feature tile sizes for CELL_TILE=64 configuration (Ampere+)
+# 25 is optimal for common PC counts (50, 100), 16 for better coalescing otherwise
+FEAT_TILE_64_PREFERRED = 25
+FEAT_TILE_64_COALESCED = 16
 
 
-def _get_device_attrs() -> dict:
-    """Get device attributes for the current device (cached)."""
-    global _DEVICE_ATTRS
-    if _DEVICE_ATTRS is None:
-        device = cp.cuda.Device()
-        # compute_capability is a string like "120" for CC 12.0, or "86" for CC 8.6
-        cc_str = str(device.compute_capability)
-        cc_major = int(cc_str[:-1]) if len(cc_str) > 1 else int(cc_str)
-        _DEVICE_ATTRS = {
-            "max_shared_mem": device.attributes["MaxSharedMemoryPerBlock"],
-            "cc_major": cc_major,
-        }
-    return _DEVICE_ATTRS
+def _choose_feat_tile_64(n_features: int) -> int:
+    """
+    Choose feat_tile for CELL_TILE=64 configuration.
+
+    Uses 25 for common PC counts (divisible by 25), otherwise 16 for coalescing.
+
+    Parameters
+    ----------
+    n_features
+        Number of features in the embedding
+
+    Returns
+    -------
+    int
+        Optimal feat_tile (25 or 16)
+    """
+    if n_features % FEAT_TILE_64_PREFERRED == 0:
+        return FEAT_TILE_64_PREFERRED
+    return FEAT_TILE_64_COALESCED
 
 
 def _choose_feat_tile(
@@ -126,20 +135,21 @@ def get_compute_group_distances_kernel(
 
     device_attrs = _get_device_attrs()
     max_shared = device_attrs["max_shared_mem"]
+    is_ampere_plus = device_attrs["cc_major"] >= 8
 
-    # Cell tile based on dtype to avoid register pressure
-    cell_tile = 16 if is_double else 32
-
-    # Auto-select feat_tile based on n_features and available shared memory
-    feat_tile = _choose_feat_tile(n_features, max_shared, cell_tile, dtype_size)
-
-    # Default block size for Ampere+ (3090, A100, H100, etc.)
-    block_size = 1024
-
-    # For pre-Ampere GPUs (CC < 8.0, e.g., T4) with float64, reduce block size
-    # to avoid CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES due to register pressure
-    if is_double and device_attrs["cc_major"] < 8:
-        block_size = 256
+    # Cell tile and block size based on dtype and compute capability
+    # Register pressure per block: cell_tile * block_size (for dist_sq array)
+    # 64 * 512 = 32 * 1024 = 32,768 registers/block
+    if is_double:
+        cell_tile = 16
+        block_size = 256 if not is_ampere_plus else 1024
+        feat_tile = _choose_feat_tile(n_features, max_shared, cell_tile, dtype_size)
+    else:
+        # float32: use CELL_TILE=64 with block_size=512
+        # Same register pressure as CELL_TILE=32 with block_size=1024, but faster
+        cell_tile = 64
+        block_size = 512
+        feat_tile = _choose_feat_tile_64(n_features)
 
     kernel_code = """
 (const {0}* __restrict__ embedding,

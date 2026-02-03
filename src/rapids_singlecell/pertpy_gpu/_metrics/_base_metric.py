@@ -3,10 +3,15 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
+from rapids_singlecell._utils import parse_device_ids
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from anndata import AnnData
+
+# Re-export for backwards compatibility
+__all__ = ["BaseMetric", "parse_device_ids"]
 
 
 class BaseMetric(ABC):
@@ -20,7 +25,15 @@ class BaseMetric(ABC):
     ----------
     obsm_key
         Key in adata.obsm for embeddings (default: 'X_pca')
+
+    Attributes
+    ----------
+    supports_multi_gpu
+        Whether this metric supports multi-GPU computation.
+        Subclasses should override this to True if they implement multi-GPU.
     """
+
+    supports_multi_gpu: bool = False
 
     def __init__(self, obsm_key: str = "X_pca"):
         """Initialize base metric with obsm_key."""
@@ -36,6 +49,7 @@ class BaseMetric(ABC):
         bootstrap: bool = False,
         n_bootstrap: int = 100,
         random_state: int = 0,
+        multi_gpu: bool | list[int] | str | None = None,
     ):
         """
         Compute pairwise distances between all cell groups.
@@ -54,6 +68,13 @@ class BaseMetric(ABC):
             Number of bootstrap iterations (if bootstrap=True)
         random_state
             Random seed for reproducibility
+        multi_gpu
+            GPU selection:
+            - None: Use all GPUs if metric supports it, else GPU 0 (default)
+            - True: Use all available GPUs
+            - False: Use only GPU 0
+            - list[int]: Use specific GPU IDs (e.g., [0, 2])
+            - str: Comma-separated GPU IDs (e.g., "0,2")
 
         Returns
         -------
@@ -72,6 +93,7 @@ class BaseMetric(ABC):
         bootstrap: bool = False,
         n_bootstrap: int = 100,
         random_state: int = 0,
+        multi_gpu: bool | list[int] | str | None = None,
     ):
         """
         Compute distances from one selected group to all other groups.
@@ -92,6 +114,13 @@ class BaseMetric(ABC):
             Number of bootstrap iterations (if bootstrap=True)
         random_state
             Random seed for reproducibility
+        multi_gpu
+            GPU selection:
+            - None: Use all GPUs if metric supports it, else GPU 0 (default)
+            - True: Use all available GPUs
+            - False: Use only GPU 0
+            - list[int]: Use specific GPU IDs (e.g., [0, 2])
+            - str: Comma-separated GPU IDs (e.g., "0,2")
 
         Returns
         -------
@@ -111,6 +140,7 @@ class BaseMetric(ABC):
         *,
         n_bootstrap: int = 100,
         random_state: int = 0,
+        multi_gpu: bool | list[int] | str | None = None,
     ):
         """
         Compute bootstrap mean and variance for distance between two specific groups.
@@ -129,6 +159,13 @@ class BaseMetric(ABC):
             Number of bootstrap iterations
         random_state
             Random seed for reproducibility
+        multi_gpu
+            GPU selection:
+            - None: Use all GPUs if metric supports it, else GPU 0 (default)
+            - True: Use all available GPUs
+            - False: Use only GPU 0
+            - list[int]: Use specific GPU IDs (e.g., [0, 2])
+            - str: Comma-separated GPU IDs (e.g., "0,2")
 
         Returns
         -------
