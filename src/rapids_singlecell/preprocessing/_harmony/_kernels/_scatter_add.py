@@ -32,6 +32,63 @@ def _get_scatter_add_kernel_optimized(dtype):
     )
 
 
+scatter_add_kernel_shared = r"""(const {0}* __restrict__ v,
+                const int* __restrict__ cats,
+                int n_cells,
+                int n_pcs,
+                int n_batches,
+                int switcher,
+                {0}* __restrict__ a)
+{
+    // Dynamic shared memory: [n_batches * n_pcs] for local accumulation
+    extern __shared__ {0} shared_acc[];
+
+    // Initialize shared memory to zero
+    for (int i = threadIdx.x; i < n_batches * n_pcs; i += blockDim.x) {
+        shared_acc[i] = {0}(0);
+    }
+    __syncthreads();
+
+    // Calculate cell range for this block
+    int cells_per_block = (n_cells + gridDim.x - 1) / gridDim.x;
+    int start_cell = blockIdx.x * cells_per_block;
+    int end_cell = min(start_cell + cells_per_block, n_cells);
+
+    // Each thread processes cells with stride, accumulating into shared memory
+    for (int cell = start_cell + threadIdx.x; cell < end_cell; cell += blockDim.x) {
+        int cat = cats[cell];
+        size_t v_base = (size_t)cell * n_pcs;
+        int shared_base = cat * n_pcs;
+
+        // Process all PCs for this cell
+        for (int pc = 0; pc < n_pcs; pc++) {
+            {0} val = v[v_base + pc];
+            atomicAdd(&shared_acc[shared_base + pc], val);
+        }
+    }
+    __syncthreads();
+
+    // Write shared memory results to global memory with atomics
+    for (int i = threadIdx.x; i < n_batches * n_pcs; i += blockDim.x) {
+        {0} val = shared_acc[i];
+        if (val != {0}(0)) {
+            if (switcher == 0) {
+                atomicAdd(&a[i], -val);
+            } else {
+                atomicAdd(&a[i], val);
+            }
+        }
+    }
+}
+"""
+
+
+def _get_scatter_add_kernel_shared(dtype):
+    return cuda_kernel_factory(
+        scatter_add_kernel_shared, (dtype,), "scatter_add_kernel_shared"
+    )
+
+
 aggregated_matrix_kernel = r"""({0}* __restrict__ aggregated_matrix,
                 const {0}* __restrict__ sum,
                 {0}* __restrict__ top_corner,

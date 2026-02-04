@@ -204,6 +204,7 @@ def harmonize(
             sigma=sigma,
             block_proportion=block_proportion,
             colsum_func=colsum_func_small,
+            n_batches=n_batches,
         )
         # Correction step
         Z_hat = _correction(
@@ -281,7 +282,7 @@ def _initialize_centroids(
 
     if Phi is None:
         O = cp.zeros((n_batches, R.shape[1]), dtype=Z_norm.dtype)
-        _scatter_add_cp(R, O, cats, 1)
+        _scatter_add_cp(R, O, cats, 1, n_batches=n_batches)
     else:
         O = cp.dot(Phi.T, R)
 
@@ -317,6 +318,7 @@ def _clustering(
     sigma: float,
     block_proportion: float,
     colsum_func: callable = None,
+    n_batches: int | None = None,
 ) -> None:
     """
     Perform iterative clustering updates on normalized input data, adjusting
@@ -351,7 +353,9 @@ def _clustering(
             # Remove contribution of current block from O
             if Phi is None:
                 cats_in = cats[idx_in]
-                _scatter_add_cp(R_in, O, cats_in, 0)  # Subtract from O
+                _scatter_add_cp(
+                    R_in, O, cats_in, 0, n_batches=n_batches
+                )  # Subtract from O
             else:
                 Phi_in = Phi[idx_in]
                 cp.cublas.gemm("T", "N", Phi_in, R_in, alpha=-1, beta=1, out=O)
@@ -378,7 +382,7 @@ def _clustering(
 
             # Add contribution of updated block back to O
             if Phi is None:
-                _scatter_add_cp(R_out, O, cats_in, 1)  # Add to O
+                _scatter_add_cp(R_out, O, cats_in, 1, n_batches=n_batches)  # Add to O
             else:
                 cp.cublas.gemm("T", "N", Phi_in, R_out, alpha=1, beta=1, out=O)
 

@@ -17,6 +17,7 @@ from ._kernels._pen import _get_pen_kernel
 from ._kernels._scatter_add import (
     _get_aggregated_matrix_kernel,
     _get_scatter_add_kernel_optimized,
+    _get_scatter_add_kernel_shared,
     _get_scatter_add_kernel_with_bias_block,
     _get_scatter_add_kernel_with_bias_cat0,
 )
@@ -41,13 +42,13 @@ def _normalize_cp_p1(X: cp.ndarray) -> cp.ndarray:
     assert X.ndim == 2, "Input must be a 2D array."
 
     rows, cols = X.shape
-
-    # Fixed block size of 32
-    block_dim = 32
     grid_dim = rows  # One block per row
 
+    # Scale block size with columns, minimum 32, max 256
+    # More threads = more parallelism for wide rows
+    block_dim = min(256, max(32, ((cols + 31) // 32) * 32))
+
     normalize_p1 = _get_normalize_kernel_optimized(X.dtype)
-    # Launch the kernel
     normalize_p1((grid_dim,), (block_dim,), (X, rows, cols))
     return X
 
@@ -57,12 +58,60 @@ def _scatter_add_cp(
     out: cp.ndarray,
     cats: cp.ndarray,
     switcher: int,
+    n_batches: int | None = None,
 ) -> None:
     """
     Scatter add operation for Harmony algorithm.
+
+    Uses shared memory kernel when n_batches is provided and output fits
+    in shared memory (< 48KB). This reduces global atomic contention.
+
+    The shared memory kernel is only beneficial when atomic contention is high,
+    which occurs when n_cells / n_batches is large (many cells per batch bucket).
+    With many batches, contention is naturally low and the original kernel is faster.
     """
     n_cells = X.shape[0]
     n_pcs = X.shape[1]
+
+    # Use shared memory kernel if:
+    # 1. n_batches is provided
+    # 2. Output fits in shared memory (< 48KB)
+    # 3. Matrix is large enough to benefit (>= 50k cells)
+    # 4. High atomic contention expected (cells_per_batch > 10000)
+    #    With many batches, contention is naturally low and original kernel is faster
+    min_cells_for_shared = 50000
+    min_cells_per_batch = 10000  # Threshold for high contention
+    max_shared_mem = 48 * 1024  # 48KB typical max
+
+    if n_batches is not None and n_cells >= min_cells_for_shared:
+        cells_per_batch = n_cells // n_batches
+        shared_mem_needed = n_batches * n_pcs * X.dtype.itemsize
+        if (
+            shared_mem_needed <= max_shared_mem
+            and cells_per_batch >= min_cells_per_batch
+        ):
+            # Use optimized shared memory kernel
+            dev = cp.cuda.Device()
+            n_sm = dev.attributes["MultiProcessorCount"]
+            # Use enough blocks to keep GPU busy, but not too many
+            # Each block should have at least ~64 cells to process
+            min_cells_per_block = 64
+            max_blocks_by_cells = max(
+                1, (n_cells + min_cells_per_block - 1) // min_cells_per_block
+            )
+            n_blocks = min(n_sm * 4, max_blocks_by_cells)
+            threads = 256
+
+            kernel = _get_scatter_add_kernel_shared(X.dtype)
+            kernel(
+                (n_blocks,),
+                (threads,),
+                (X, cats, n_cells, n_pcs, n_batches, switcher, out),
+                shared_mem=shared_mem_needed,
+            )
+            return
+
+    # Fall back to original kernel
     N = n_cells * n_pcs
     threads_per_block = 256
     blocks = (N + threads_per_block - 1) // threads_per_block
@@ -259,7 +308,8 @@ def _column_sum(X: cp.ndarray) -> cp.ndarray:
     dev = cp.cuda.Device()
     nSM = dev.attributes["MultiProcessorCount"]
     max_blocks = nSM * 8
-    threads = max(int(round(1 / 32) * 32), 32)
+    # Scale thread count with rows, capped at 1024, minimum 32
+    threads = min(1024, max(32, ((rows + 31) // 32) * 32))
     blocks = min(cols, max_blocks)
     _colsum = _get_colsum_kernel(X.dtype)
     _colsum((blocks,), (threads,), (X, out, rows, cols))
@@ -268,8 +318,10 @@ def _column_sum(X: cp.ndarray) -> cp.ndarray:
 
 def _column_sum_atomic(X: cp.ndarray) -> cp.ndarray:
     """
-    Sum each column of the 2D, C-contiguous array A
-    using 32×32 tiles + one atomic per tile-column.
+    Sum each column of the 2D, C-contiguous array A.
+
+    Uses 2D grid: blockIdx.x = column tile, blockIdx.y = row tile.
+    Each thread processes multiple rows to reduce atomic contention.
     """
     assert X.ndim == 2
     rows, cols = X.shape
@@ -277,13 +329,27 @@ def _column_sum_atomic(X: cp.ndarray) -> cp.ndarray:
         return X.sum(axis=0)
 
     out = cp.zeros(cols, dtype=X.dtype)
-    tile_rows = (rows + 31) // 32
-    tile_cols = (cols + 31) // 32
-    blocks = tile_rows * tile_cols
+
+    # Grid dimensions
+    tile_cols = (cols + 31) // 32  # Number of 32-column tiles
+
+    # Choose rows_per_tile to balance parallelism vs atomic contention
+    # More rows per tile = fewer atomics but less parallelism
+    dev = cp.cuda.Device()
+    n_sm = dev.attributes["MultiProcessorCount"]
+
+    # Target: enough row-tiles to keep GPU busy, but not too many atomics
+    # Aim for ~4 blocks per SM minimum
+    target_row_tiles = max(1, n_sm * 4 // max(1, tile_cols))
+    rows_per_tile = max(32, (rows + target_row_tiles - 1) // target_row_tiles)
+
+    tile_rows = (rows + rows_per_tile - 1) // rows_per_tile
+
     threads = (32, 32)
+    grid = (tile_cols, tile_rows)
 
     kernel = _get_colsum_atomic_kernel(X.dtype)
-    kernel((blocks,), threads, (X, out, rows, cols))
+    kernel(grid, threads, (X, out, rows, cols, rows_per_tile))
     return out
 
 
