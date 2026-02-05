@@ -60,6 +60,8 @@ def _scatter_add_cp(
     cats: cp.ndarray,
     switcher: int,
     n_batches: int | None = None,
+    *,
+    use_shared: bool | None = None,
 ) -> None:
     """
     Scatter add operation for Harmony algorithm.
@@ -70,55 +72,80 @@ def _scatter_add_cp(
     The shared memory kernel is only beneficial when atomic contention is high,
     which occurs when n_cells / n_batches is large (many cells per batch bucket).
     With many batches, contention is naturally low and the original kernel is faster.
+
+    Parameters
+    ----------
+    X
+        Input array of shape (n_cells, n_pcs)
+    out
+        Output array of shape (n_batches, n_pcs)
+    cats
+        Category indices for each cell
+    switcher
+        0 for subtraction, 1 for addition
+    n_batches
+        Number of batch categories
+    use_shared
+        Force shared memory kernel (True), force optimized kernel (False),
+        or auto-select based on heuristics (None, default)
     """
     n_cells = X.shape[0]
     n_pcs = X.shape[1]
 
-    # Use shared memory kernel if:
-    # 1. n_batches is provided
-    # 2. Output fits in shared memory (< 48KB)
-    # 3. Matrix is large enough to benefit (>= 50k cells)
-    # 4. High atomic contention expected (cells_per_batch > 10000)
-    #    With many batches, contention is naturally low and original kernel is faster
-    min_cells_for_shared = 50000
-    min_cells_per_batch = 10000  # Threshold for high contention
-    max_shared_mem = 48 * 1024  # 48KB typical max
+    # Determine whether to use shared memory kernel
+    if use_shared is None:
+        # Auto-select based on heuristics
+        # Use shared memory kernel if:
+        # 1. n_batches is provided
+        # 2. Output fits in shared memory (< 48KB)
+        # 3. Matrix is large enough to benefit (>= 50k cells)
+        # 4. High atomic contention expected (cells_per_batch > 10000)
+        #    With many batches, contention is naturally low and original kernel is faster
+        min_cells_for_shared = 50000
+        min_cells_per_batch = 10000  # Threshold for high contention
+        max_shared_mem = 48 * 1024  # 48KB typical max
 
-    if n_batches is not None and n_cells >= min_cells_for_shared:
-        cells_per_batch = n_cells // n_batches
+        use_shared = False
+        if n_batches is not None and n_cells >= min_cells_for_shared:
+            cells_per_batch = n_cells // n_batches
+            shared_mem_needed = n_batches * n_pcs * X.dtype.itemsize
+            if (
+                shared_mem_needed <= max_shared_mem
+                and cells_per_batch >= min_cells_per_batch
+            ):
+                use_shared = True
+
+    if use_shared:
+        if n_batches is None:
+            raise ValueError("n_batches must be provided when use_shared=True")
+        # Use optimized shared memory kernel
+        dev = cp.cuda.Device()
+        n_sm = dev.attributes["MultiProcessorCount"]
+        # Use enough blocks to keep GPU busy, but not too many
+        # Each block should have at least ~64 cells to process
+        min_cells_per_block = 64
+        max_blocks_by_cells = max(
+            1, (n_cells + min_cells_per_block - 1) // min_cells_per_block
+        )
+        n_blocks = min(n_sm * 4, max_blocks_by_cells)
+        threads = 256
         shared_mem_needed = n_batches * n_pcs * X.dtype.itemsize
-        if (
-            shared_mem_needed <= max_shared_mem
-            and cells_per_batch >= min_cells_per_batch
-        ):
-            # Use optimized shared memory kernel
-            dev = cp.cuda.Device()
-            n_sm = dev.attributes["MultiProcessorCount"]
-            # Use enough blocks to keep GPU busy, but not too many
-            # Each block should have at least ~64 cells to process
-            min_cells_per_block = 64
-            max_blocks_by_cells = max(
-                1, (n_cells + min_cells_per_block - 1) // min_cells_per_block
-            )
-            n_blocks = min(n_sm * 4, max_blocks_by_cells)
-            threads = 256
 
-            kernel = _get_scatter_add_kernel_shared(X.dtype)
-            kernel(
-                (n_blocks,),
-                (threads,),
-                (X, cats, n_cells, n_pcs, n_batches, switcher, out),
-                shared_mem=shared_mem_needed,
-            )
-            return
+        kernel = _get_scatter_add_kernel_shared(X.dtype)
+        kernel(
+            (n_blocks,),
+            (threads,),
+            (X, cats, n_cells, n_pcs, n_batches, switcher, out),
+            shared_mem=shared_mem_needed,
+        )
+    else:
+        # Use original kernel
+        N = n_cells * n_pcs
+        threads_per_block = 256
+        blocks = (N + threads_per_block - 1) // threads_per_block
 
-    # Fall back to original kernel
-    N = n_cells * n_pcs
-    threads_per_block = 256
-    blocks = (N + threads_per_block - 1) // threads_per_block
-
-    scatter_add_kernel = _get_scatter_add_kernel_optimized(X.dtype)
-    scatter_add_kernel((blocks,), (256,), (X, cats, n_cells, n_pcs, switcher, out))
+        scatter_add_kernel = _get_scatter_add_kernel_optimized(X.dtype)
+        scatter_add_kernel((blocks,), (256,), (X, cats, n_cells, n_pcs, switcher, out))
 
 
 def _Z_correction(
