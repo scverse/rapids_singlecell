@@ -268,3 +268,82 @@ def _get_scatter_add_kernel_with_bias_block(dtype):
         (dtype,),
         "scatter_add_kernel_with_bias_block",
     )
+
+
+scatter_add_batched_kernel = r"""(const {0}* __restrict__ X,
+                const {0}* __restrict__ R,
+                const int* __restrict__ cat_offsets,
+                const int* __restrict__ cell_indices,
+                {0}* __restrict__ result,
+                int n_cells,
+                int n_pcs,
+                int n_clusters,
+                int n_batches)
+{
+    // Grid: (n_batches, n_cluster_tiles)
+    // Each block handles one batch and a tile of clusters
+    // Uses shared memory to accumulate, then writes to global
+
+    int batch = blockIdx.x;
+    int cluster_tile_size = 4;  // Process 4 clusters per block
+    int cluster_start = blockIdx.y * cluster_tile_size;
+    int cluster_end = min(cluster_start + cluster_tile_size, n_clusters);
+    int n_clusters_in_tile = cluster_end - cluster_start;
+
+    int start_idx = cat_offsets[batch];
+    int end_idx = cat_offsets[batch + 1];
+
+    // Shared memory layout: [cluster_tile_size][n_pcs]
+    // Max: 4 * 256 * 4 bytes = 4KB (safe for any GPU)
+    extern __shared__ {0} shared_acc[];
+
+    // Initialize shared memory
+    for (int i = threadIdx.x; i < cluster_tile_size * n_pcs; i += blockDim.x) {
+        shared_acc[i] = {0}(0);
+    }
+    __syncthreads();
+
+    // Each thread processes multiple cells
+    for (int idx = start_idx + threadIdx.x; idx < end_idx; idx += blockDim.x) {
+        int cell = cell_indices[idx];
+
+        // Load X row into registers (process 2 PCs at a time)
+        for (int p = 0; p < n_pcs; p += 2) {
+            {0} x0 = X[cell * n_pcs + p];
+            {0} x1 = (p + 1 < n_pcs) ? X[cell * n_pcs + p + 1] : {0}(0);
+
+            // For each cluster in tile
+            for (int k_local = 0; k_local < n_clusters_in_tile; k_local++) {
+                int k = cluster_start + k_local;
+                {0} r_val = R[cell * n_clusters + k];
+
+                atomicAdd(&shared_acc[k_local * n_pcs + p], r_val * x0);
+                if (p + 1 < n_pcs) {
+                    atomicAdd(&shared_acc[k_local * n_pcs + p + 1], r_val * x1);
+                }
+            }
+        }
+    }
+    __syncthreads();
+
+    // Write to global memory
+    // result layout: (n_clusters, n_batches+1, n_pcs) row-major
+    // result[k, batch+1, p] = result[k * (n_batches+1) * n_pcs + (batch+1) * n_pcs + p]
+    for (int i = threadIdx.x; i < n_clusters_in_tile * n_pcs; i += blockDim.x) {
+        int k_local = i / n_pcs;
+        int p = i % n_pcs;
+        int k = cluster_start + k_local;
+
+        size_t out_idx = (size_t)k * (n_batches + 1) * n_pcs + (batch + 1) * n_pcs + p;
+        result[out_idx] = shared_acc[i];
+    }
+}
+"""
+
+
+def _get_scatter_add_batched_kernel(dtype):
+    return cuda_kernel_factory(
+        scatter_add_batched_kernel,
+        (dtype,),
+        "scatter_add_batched_kernel",
+    )

@@ -172,3 +172,45 @@ def _get_colsum_atomic_kernel(dtype):
         (dtype,),
         "colsum_atomic",
     )
+
+
+_batched_correction_kernel_code = r"""
+({0}* __restrict__ Z,
+    const {0}* __restrict__ W_all,
+    const int* __restrict__ cats,
+    const {0}* __restrict__ R,
+    int n_cells,
+    int n_pcs,
+    int n_clusters,
+    int n_batches_p1)
+{
+    // Each thread handles one (cell, pc) pair
+    // Accumulates corrections from all clusters
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n_cells * n_pcs) return;
+
+    int cell = idx / n_pcs;
+    int pc = idx % n_pcs;
+
+    int cat = cats[cell];
+
+    {0} total_correction = {0}(0);
+
+    // Accumulate corrections from all clusters
+    for (int k = 0; k < n_clusters; k++) {
+        // W_all layout: (n_clusters, n_batches+1, n_pcs) row-major
+        // W_all[k, cat+1, pc] = W_all[k * n_batches_p1 * n_pcs + (cat+1) * n_pcs + pc]
+        {0} w_val = W_all[k * n_batches_p1 * n_pcs + (cat + 1) * n_pcs + pc];
+        {0} r_val = R[cell * n_clusters + k];
+        total_correction += w_val * r_val;
+    }
+
+    Z[idx] -= total_correction;
+}
+"""
+
+
+def _get_batched_correction_kernel(dtype):
+    return cuda_kernel_factory(
+        _batched_correction_kernel_code, (dtype,), "batched_correction_kernel"
+    )

@@ -52,7 +52,7 @@ def adata_reference():
     return adata
 
 
-@pytest.mark.parametrize("correction_method", ["fast", "original"])
+@pytest.mark.parametrize("correction_method", ["fast", "original", "batched"])
 @pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
 def test_harmony_integrate(correction_method, dtype):
     """
@@ -63,8 +63,14 @@ def test_harmony_integrate(correction_method, dtype):
     and makes sure it has the same dimensions as the original PCA table.
     """
     adata = sc.datasets.pbmc68k_reduced()
+    # batched requires use_gemm=False
+    use_gemm = correction_method != "batched"
     rsc.pp.harmony_integrate(
-        adata, "bulk_labels", correction_method=correction_method, dtype=dtype
+        adata,
+        "bulk_labels",
+        correction_method=correction_method,
+        dtype=dtype,
+        use_gemm=use_gemm,
     )
     assert adata.obsm["X_pca_harmony"].shape == adata.obsm["X_pca"].shape
 
@@ -134,7 +140,7 @@ def test_benchmark_colsum_algorithms(dtype):
 @pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
 @pytest.mark.parametrize("use_gemm", [True, False])
 @pytest.mark.parametrize("column", ["gemm", "columns", "atomics", "cupy"])
-@pytest.mark.parametrize("correction_method", ["fast", "original"])
+@pytest.mark.parametrize("correction_method", ["fast", "original", "batched"])
 def test_harmony_integrate_reference(
     adata_reference, *, dtype, use_gemm, column, correction_method
 ):

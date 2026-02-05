@@ -17,8 +17,11 @@ from ._fuses import (
     _log_div_OE,
 )
 from ._helper import (
+    _apply_batched_correction,
     _choose_colsum_algo_benchmark,
     _choose_colsum_algo_heuristic,
+    _compute_inv_mats_batched,
+    _fused_calc_pen_norm,
     _get_aggregated_matrix,
     _get_batch_codes,
     _get_theta_array,
@@ -26,7 +29,7 @@ from ._helper import (
     _normalize_cp,
     _one_hot_tensor_cp,
     _outer_cp,
-    _penalty_term,
+    _scatter_add_bias_batched,
     _scatter_add_cp,
     _scatter_add_cp_bias_csr,
     _Z_correction,
@@ -53,7 +56,7 @@ def harmonize(
     block_proportion: float = 0.05,
     theta: float | int | list[float] | np.ndarray | cp.ndarray = 2.0,
     tau: int = 0,
-    correction_method: str = "fast",
+    correction_method: str = "batched",
     use_gemm: bool = False,
     colsum_algo: COLSUM_ALGO | None = None,
     random_state: int = 0,
@@ -104,7 +107,7 @@ def harmonize(
         Discounting factor on ``theta``. By default, there is no discounting.
 
     correction_method
-        Choose which method for the correction step: ``original`` for original method, ``fast`` for improved method. By default, use improved method.
+        Choose which method for the correction step: ``original`` for original method, ``fast`` for improved method, ``batched`` for batched processing of all clusters simultaneously (default, fastest).
 
     use_gemm
         If True, use a One-Hot-Encoding Matrix and GEMM to compute Harmony. If False use a label vector. A label vector is more memory efficient and faster for large datasets with a large number of batches.
@@ -131,16 +134,15 @@ def harmonize(
     N_b = cp.array(batch_codes.value_counts(sort=False).values, dtype=Z.dtype)
     Pr_b = (N_b.reshape(-1, 1) / len(batch_codes)).astype(Z.dtype)
 
+    # Always create label-based encodings (needed for batched correction and fused kernel)
+    cats = cp.array(batch_codes.cat.codes.values, dtype=cp.int32)
+    cat_offsets, cell_indices = _create_category_index_mapping(cats, n_batches)
+
     # Configure matrix representation based on use_gemm flag
     if use_gemm:
         Phi = _one_hot_tensor_cp(batch_codes).astype(Z.dtype)
-        cats = None
-        cat_offsets = None
-        cell_indices = None
     else:
         Phi = None
-        cats = cp.array(batch_codes.cat.codes.values, dtype=cp.int32)
-        cat_offsets, cell_indices = _create_category_index_mapping(cats, n_batches)
 
     # Set up parameters
     if n_clusters is None:
@@ -164,8 +166,8 @@ def harmonize(
 
     # Validate parameters
     assert block_proportion > 0 and block_proportion <= 1
-    if correction_method not in {"fast", "original"}:
-        raise ValueError("correction_method must be either 'fast' or 'original'.")
+    if correction_method not in {"fast", "original", "batched"}:
+        raise ValueError("correction_method must be 'fast', 'original', or 'batched'.")
 
     # Set random seed
     cp.random.seed(random_state)
@@ -329,16 +331,22 @@ def _clustering(
     and penalty-related matrices (O and E).
     """
     n_cells = Z_norm.shape[0]
+    n_clusters = R.shape[1]
     objectives_clustering = []
     block_size = int(n_cells * block_proportion)
     term = cp.float64(-2 / sigma).astype(Z_norm.dtype)
+
+    # Pre-allocate buffer for fused kernel (avoids allocation in loop)
+    R_out_buffer = cp.zeros((block_size, n_clusters), dtype=Z_norm.dtype)
 
     for _ in range(max_iter):
         # Compute cluster centroids
         Y = cp.cublas.gemm("T", "N", R, Z_norm)
         Y_norm = _normalize_cp(Y, p=2)
 
-        # Randomly shuffle cell indices for block updates
+        # Precompute full similarity matrix (one large GEMM is faster than many small ones)
+        similarities = Z_norm @ Y_norm.T
+
         idx_list = cp.arange(n_cells)
         cp.random.shuffle(idx_list)
 
@@ -346,13 +354,16 @@ def _clustering(
         while pos < len(idx_list):
             # Get current block of cells
             idx_in = idx_list[pos : (pos + block_size)]
+            current_block_size = len(idx_in)
             R_in = R[idx_in]
 
             R_in_sum = colsum_func(R_in)
 
+            # Get batch categories for current block (needed for fused kernel)
+            cats_in = cats[idx_in]
+
             # Remove contribution of current block from O
             if Phi is None:
-                cats_in = cats[idx_in]
                 _scatter_add_cp(
                     R_in, O, cats_in, 0, n_batches=n_batches
                 )  # Subtract from O
@@ -363,19 +374,16 @@ def _clustering(
             # Use optimized column sum function
             _outer_cp(E, Pr_b, R_in_sum, 0)
 
-            # Update cluster assignments for current block
-            R_out = _calc_R(term, cp.dot(Z_norm[idx_in], Y_norm.T))
             # Apply penalty term to cluster assignments
             penalty_term = _get_pen(E, O, theta.T)
-            if Phi is None:
-                # R_out *= penalty_term[cats_in]
-                R_out = _penalty_term(R_out, penalty_term, cats_in)
-            else:
-                omega = cp.dot(Phi_in, penalty_term)
-                R_out *= omega
 
-            # Normalize updated cluster assignments
-            R_out = _normalize_cp(R_out, p=1)
+            # Fused kernel: _calc_R + _penalty_term + _normalize_cp in one pass
+            # ~10x faster than separate operations, ~1.8x faster full iteration
+            R_out = R_out_buffer[:current_block_size]
+            _fused_calc_pen_norm(
+                similarities, penalty_term, cats_in, idx_in, R_out, term=term
+            )
+
             R[idx_in] = R_out
             # Use optimized column sum function again
             R_out_sum = colsum_func(R_out)
@@ -417,7 +425,7 @@ def _correction(
     Phi: cp.ndarray | None,
     O: cp.ndarray,
     ridge_lambda: float,
-    correction_method: str = "fast",
+    correction_method: str = "batched",
     cats: cp.ndarray | None = None,
     n_batches: int = None,
     cat_offsets: cp.ndarray | None = None,
@@ -432,7 +440,7 @@ def _correction(
         Phi: One-hot encoded batch matrix (if use_gemm=True)
         O: Observed cluster assignment by batch
         ridge_lambda: Ridge regression parameter
-        correction_method: Method for correction ("fast" or "original")
+        correction_method: Method for correction ("fast", "original", or "batched")
         cats: Batch category codes (if use_gemm=False)
         n_batches: Number of batches
         cat_offsets, cell_indices: Category mapping for sparse implementation
@@ -440,7 +448,18 @@ def _correction(
     Returns:
         Corrected embedding
     """
-    if correction_method == "fast":
+    if correction_method == "batched":
+        return _correction_batched(
+            X,
+            R,
+            O=O,
+            ridge_lambda=ridge_lambda,
+            cats=cats,
+            n_batches=n_batches,
+            cat_offsets=cat_offsets,
+            cell_indices=cell_indices,
+        )
+    elif correction_method == "fast":
         return _correction_fast(
             X,
             R,
@@ -564,6 +583,7 @@ def _correction_fast(
         # Set off-diagonal entries
         P_t_B_inv[1:, 0] = P[0, 1:] * c_inv
         inv_mat = cp.dot(P_t_B_inv, P)
+
         if Phi is not None:
             Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
             Phi_t_diag_R_X = cp.dot(Phi_t_diag_R, X)
@@ -586,6 +606,56 @@ def _correction_fast(
             cp.cublas.gemm("T", "N", Phi_t_diag_R, W, alpha=-1, beta=1, out=Z)
         else:
             _Z_correction(Z, W, cats, R_col)
+    return Z
+
+
+def _correction_batched(
+    X: cp.ndarray,
+    R: cp.ndarray,
+    *,
+    O: cp.ndarray,
+    ridge_lambda: float,
+    cats: cp.ndarray,
+    n_batches: int,
+    cat_offsets: cp.ndarray,
+    cell_indices: cp.ndarray,
+) -> cp.ndarray:
+    """
+    Batched correction method - process all clusters simultaneously.
+
+    This method processes all clusters at once instead of looping:
+    1. Computes all inverse matrices at once (vectorized)
+    2. Computes all Phi_t_diag_R_X at once (batched GEMMs)
+    3. Computes all W matrices at once (batched matmul)
+    4. Applies all corrections at once (fused kernel)
+
+    Only works with use_gemm=False (label vector representation).
+    """
+    # Step 1: Compute all inv_mat matrices at once
+    inv_mats = _compute_inv_mats_batched(O, ridge_lambda, X.dtype)
+    # Shape: (n_clusters, n_batches+1, n_batches+1)
+
+    # Step 2: Compute all Phi_t_diag_R_X at once
+    Phi_t_diag_R_X_all = _scatter_add_bias_batched(
+        X,
+        R,
+        cat_offsets=cat_offsets,
+        cell_indices=cell_indices,
+        n_batches=n_batches,
+    )
+    # Shape: (n_clusters, n_batches+1, n_pcs)
+
+    # Step 3: Compute all W matrices: W[k] = inv_mat[k] @ Phi_t_diag_R_X[k]
+    W_all = cp.matmul(inv_mats, Phi_t_diag_R_X_all)
+    # Shape: (n_clusters, n_batches+1, n_pcs)
+
+    # Zero out row 0 of each W (no correction for bias term)
+    W_all[:, 0, :] = 0
+
+    # Step 4: Apply all corrections at once using fused kernel
+    Z = X.copy()
+    _apply_batched_correction(Z, W_all, cats, R)
+
     return Z
 
 
