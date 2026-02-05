@@ -4,43 +4,55 @@ from cuml.common.kernel_utils import cuda_kernel_factory
 
 normalize_kernel_optimized = r"""
 ({0} * X, long long rows, long long cols) {
-    __shared__ {0}  shared[32];  // Shared memory for partial sums (one per thread)
+    // Shared memory for warp-level partial sums (max 32 warps = 1024 threads)
+    __shared__ {0} warp_sums[32];
 
     long long row = blockIdx.x;  // One block per row
-    long long tid = threadIdx.x;  // Thread index within the block
+    int tid = threadIdx.x;
+    int lane = tid & 31;
+    int warp_id = tid >> 5;
+    int num_warps = blockDim.x >> 5;
 
-    // Ensure we're within matrix bounds
     if (row >= rows) return;
 
-    // Step 1: Compute partial sums within each thread
-    {0}  norm = 0.0;
-    for (long long col = tid; col < cols; col += blockDim.x) {
-        norm += fabs(X[row * cols + col]);// Manhattan norm
+    {0}* row_ptr = X + row * cols;
 
+    // Step 1: Each thread accumulates its portion
+    {0} acc = {0}(0);
+    for (long long col = tid; col < cols; col += blockDim.x) {
+        acc += fabs(row_ptr[col]);
     }
 
-    // Store partial sum in shared memory
-    shared[tid] = norm;
-    __syncthreads();
-
-    // Step 2: Perform shared memory reduction using warp shuffle
+    // Step 2: Warp-level reduction using shuffle (on register value)
     #pragma unroll
-    for (long long offset = 16; offset > 0; offset /= 2) {
-        shared[tid] += __shfl_down_sync(0xFFFFFFFF, shared[tid], offset);
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        acc += __shfl_down_sync(0xffffffff, acc, offset);
+    }
+
+    // Lane 0 of each warp writes to shared memory
+    if (lane == 0) {
+        warp_sums[warp_id] = acc;
     }
     __syncthreads();
 
-    // First thread calculates the final norm
-    if (tid == 0) {
-        {0}  final_norm = shared[0];
-        final_norm = fmaxf(final_norm, 1e-12);
-        shared[0] = 1.0 / final_norm;  // Store reciprocal for normalization
+    // Step 3: First warp reduces all warp results
+    if (tid < 32) {
+        {0} val = (tid < num_warps) ? warp_sums[tid] : {0}(0);
+        #pragma unroll
+        for (int offset = 16; offset > 0; offset >>= 1) {
+            val += __shfl_down_sync(0xffffffff, val, offset);
+        }
+        if (tid == 0) {
+            {0} final_norm = fmax(val, {0}(1e-12));
+            warp_sums[0] = {0}(1) / final_norm;
+        }
     }
     __syncthreads();
 
-    // Step 3: Normalize the row
+    // Step 4: Normalize the row
+    {0} scale = warp_sums[0];
     for (long long col = tid; col < cols; col += blockDim.x) {
-        X[row * cols + col] *= shared[0];
+        row_ptr[col] *= scale;
     }
 }
 """

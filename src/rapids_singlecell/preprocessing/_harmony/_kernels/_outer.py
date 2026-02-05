@@ -114,32 +114,53 @@ _colsum_atomic_code = r"""
 (const {0}* __restrict__ A,
         {0}* __restrict__ out,
         size_t rows,
-        size_t cols) {
-    // how many 32-wide column tiles
-    size_t tile_cols = (cols + 31) / 32;
-    size_t tid      = blockIdx.x;
-    size_t tile_r   = tid / tile_cols;
-    size_t tile_c   = tid % tile_cols;
+        size_t cols,
+        size_t rows_per_tile) {
+    // Block handles one column-tile, processes rows_per_tile rows
+    // blockIdx.x = column tile index
+    // blockIdx.y = row tile index
+    // Uses shared memory to reduce atomics: one per column per block
 
-    // compute our element coords
-    size_t row = tile_r * 32 + threadIdx.x;
-    size_t col = tile_c * 32 + threadIdx.y;
+    // Shared memory for column sums (one per column in tile)
+    __shared__ {0} col_sums[32];
 
-    {0} v = {0}(0);
-    if (row < rows && col < cols) {
-        // coalesced load: all threads in this warp touch
-        // col = tile_c*32 + warp_lane in [0..31]
-        v = A[row * cols + col];
+    size_t col = blockIdx.x * 32 + threadIdx.y;
+    size_t start_row = blockIdx.y * rows_per_tile;
+    size_t end_row = min(start_row + rows_per_tile, rows);
+
+    // Initialize shared memory (first warp)
+    if (threadIdx.x < 32) {
+        col_sums[threadIdx.x] = {0}(0);
+    }
+    __syncthreads();
+
+    // Each thread accumulates multiple rows
+    {0} acc = {0}(0);
+    if (col < cols) {
+        #pragma unroll 4
+        for (size_t row = start_row + threadIdx.x; row < end_row; row += 32) {
+            acc += A[row * cols + col];
+        }
     }
 
-    // warp-level sum over the 32 rows in this tile-column
+    // Warp-level reduction across 32 threads (different rows)
+    #pragma unroll
     for (int off = 16; off > 0; off >>= 1) {
-        v += __shfl_down_sync(0xffffffff, v, off);
+        acc += __shfl_down_sync(0xffffffff, acc, off);
     }
 
-    // lane 0 of each warp writes one atomicAdd for this column
-    if (threadIdx.x == 0 && col < cols) {
-        atomicAdd(&out[col], v);
+    // Lane 0 of each warp accumulates into shared memory
+    if (threadIdx.x == 0 && threadIdx.y < 32) {
+        atomicAdd(&col_sums[threadIdx.y], acc);
+    }
+    __syncthreads();
+
+    // First warp writes to global memory (one atomic per column)
+    if (threadIdx.x == 0 && threadIdx.y < 32) {
+        size_t out_col = blockIdx.x * 32 + threadIdx.y;
+        if (out_col < cols && col_sums[threadIdx.y] != {0}(0)) {
+            atomicAdd(&out[out_col], col_sums[threadIdx.y]);
+        }
     }
 }
 """
@@ -150,4 +171,46 @@ def _get_colsum_atomic_kernel(dtype):
         _colsum_atomic_code,
         (dtype,),
         "colsum_atomic",
+    )
+
+
+_batched_correction_kernel_code = r"""
+({0}* __restrict__ Z,
+    const {0}* __restrict__ W_all,
+    const int* __restrict__ cats,
+    const {0}* __restrict__ R,
+    int n_cells,
+    int n_pcs,
+    int n_clusters,
+    int n_batches_p1)
+{
+    // Each thread handles one (cell, pc) pair
+    // Accumulates corrections from all clusters
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n_cells * n_pcs) return;
+
+    int cell = idx / n_pcs;
+    int pc = idx % n_pcs;
+
+    int cat = cats[cell];
+
+    {0} total_correction = {0}(0);
+
+    // Accumulate corrections from all clusters
+    for (int k = 0; k < n_clusters; k++) {
+        // W_all layout: (n_clusters, n_batches+1, n_pcs) row-major
+        // W_all[k, cat+1, pc] = W_all[k * n_batches_p1 * n_pcs + (cat+1) * n_pcs + pc]
+        {0} w_val = W_all[k * n_batches_p1 * n_pcs + (cat + 1) * n_pcs + pc];
+        {0} r_val = R[cell * n_clusters + k];
+        total_correction += w_val * r_val;
+    }
+
+    Z[idx] -= total_correction;
+}
+"""
+
+
+def _get_batched_correction_kernel(dtype):
+    return cuda_kernel_factory(
+        _batched_correction_kernel_code, (dtype,), "batched_correction_kernel"
     )
