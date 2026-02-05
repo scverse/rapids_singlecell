@@ -78,6 +78,51 @@ class TestDask:
             rtol=1e-5,
         )
 
+    def test_zscore_dask_vs_dense(self, adata, net):
+        """Test that Dask and dense produce similar results for zscore."""
+        import dask.array as da
+
+        # Dense baseline
+        dense = adata.copy()
+        dc.zscore(dense, net, tmin=0)
+
+        # Dask
+        dask_adata = adata.copy()
+        chunks = (10, adata.shape[1])
+        dask_adata.X = da.from_array(np.asarray(adata.X), chunks=chunks)
+        dc.zscore(dask_adata, net, tmin=0)
+
+        np.testing.assert_allclose(
+            dense.obsm["score_zscore"].values,
+            dask_adata.obsm["score_zscore"].values,
+            rtol=1e-4,
+        )
+        np.testing.assert_allclose(
+            dense.obsm["padj_zscore"].values,
+            dask_adata.obsm["padj_zscore"].values,
+            rtol=1e-4,
+        )
+
+    def test_waggr_dask_vs_dense(self, adata, net):
+        """Test that Dask and dense produce similar results for waggr."""
+        import dask.array as da
+
+        # Dense baseline
+        dense = adata.copy()
+        dc.waggr(dense, net, tmin=0, times=0)
+
+        # Dask
+        dask_adata = adata.copy()
+        chunks = (10, adata.shape[1])
+        dask_adata.X = da.from_array(np.asarray(adata.X), chunks=chunks)
+        dc.waggr(dask_adata, net, tmin=0, times=0)
+
+        np.testing.assert_allclose(
+            dense.obsm["score_waggr"].values,
+            dask_adata.obsm["score_waggr"].values,
+            rtol=1e-4,
+        )
+
 
 class TestBatchOrdering:
     """Tests to verify batch ordering is preserved correctly."""
