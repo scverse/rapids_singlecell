@@ -116,8 +116,8 @@ _sparse_qc_kernel_csr_sub = r"""
                 sums_cells_i += data[gene];
 
             }
-        sums_cells[cell] = sums_cells_i;
         }
+        sums_cells[cell] = sums_cells_i;
     }
 """
 
