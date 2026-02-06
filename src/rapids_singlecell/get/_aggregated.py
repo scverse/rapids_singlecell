@@ -260,9 +260,9 @@ class Aggregate:
                 self.data.shape[0],
             ),
         )
-
-        keys = cp.stack([src_col, src_row])
-        order = cp.lexsort(keys)
+        n_groups = self.n_cells.shape[0]
+        fused_key = src_row.astype(cp.int64) * self.data.shape[1] + src_col
+        order = cp.argsort(fused_key)
 
         src_row = src_row[order]
         src_col = src_col[order]
@@ -273,7 +273,7 @@ class Aggregate:
             "T diff",
             """
             T diff_out = 1;
-            if (i == 0 || row[i - 1] == row[i] && col[i - 1] == col[i]) {
+            if (i == 0 || (row[i - 1] == row[i] && col[i - 1] == col[i])) {
             diff_out = 0;
             }
             diff = diff_out;
@@ -299,10 +299,9 @@ class Aggregate:
             "cupyx_scipy_sparse_coo_sum_duplicates_assign",
         )(src_row, src_col, index, rows, indices)
 
-        # Calculate the indptr
-        transitions = cp.where(cp.diff(rows) > 0)[0]
-        indptr = cp.zeros(9, dtype=cp.int32)
-        indptr[1:-1] = transitions + 1
+        # Calculate the indptr using searchsorted to handle empty groups
+        group_boundaries = cp.arange(n_groups + 1, dtype=cp.int32)
+        indptr = cp.searchsorted(rows[: nnz + 1], group_boundaries).astype(cp.int32)
         indptr[-1] = nnz + 1
 
         # Calculate the the sparse matrices
@@ -327,14 +326,17 @@ class Aggregate:
             means = cp.zeros(nnz + 1, dtype=cp.float64)
             var = cp.zeros(nnz + 1, dtype=cp.float64)
             cp.ElementwiseKernel(
-                "float64 src, int32 rows, int32 index, raw float64 ncells",
+                "float64 src, int32 index",
                 "raw float64 means, raw float64 var",
                 """
-                atomicAdd(&means[index], src / ncells[rows]);
-                atomicAdd(&var[index], (src * src) / ncells[rows]);
+                atomicAdd(&means[index], src);
+                atomicAdd(&var[index], src * src);
                 """,
                 "create_mean_var_sparse_matrix",
-            )(src_data, src_row, index, self.n_cells, means, var)
+            )(src_data, index, means, var)
+            n_cells_sparse = self.n_cells[rows[: nnz + 1]].ravel()
+            means /= n_cells_sparse
+            var /= n_cells_sparse
             if "mean" in funcs:
                 results["mean"] = cp_sparse.csr_matrix(
                     (means, indices, indptr),
