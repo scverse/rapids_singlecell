@@ -67,6 +67,7 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinx_tabs.tabs",
     "sphinxext.opengraph",
+    "sphinxcontrib.bibtex",
 ]
 
 autosummary_generate = True
