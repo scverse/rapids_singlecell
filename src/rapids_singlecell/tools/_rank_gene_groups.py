@@ -16,6 +16,7 @@ import scipy.sparse as sp
 from statsmodels.stats.multitest import multipletests
 
 from rapids_singlecell._compat import DaskArray, _meta_dense
+from rapids_singlecell._utils._csr_to_csc import _fast_csr_to_csc
 from rapids_singlecell.get import X_to_GPU
 from rapids_singlecell.get._aggregated import Aggregate
 from rapids_singlecell.preprocessing._utils import _check_gpu_X, _sparse_to_dense
@@ -100,27 +101,40 @@ def _choose_chunk_size(requested: int | None) -> int:
     return 128
 
 
+def _csc_columns_to_gpu(X_csc, start: int, stop: int, n_rows: int) -> cp.ndarray:
+    """
+    Extract columns from a CSC matrix via direct indptr pointer slicing.
+
+    Works for both scipy and CuPy CSC matrices. Much faster than
+    ``X[:, start:stop]`` which rebuilds index arrays internally.
+    """
+    s_ptr = int(X_csc.indptr[start])
+    e_ptr = int(X_csc.indptr[stop])
+    chunk_data = cp.asarray(X_csc.data[s_ptr:e_ptr])
+    chunk_indices = cp.asarray(X_csc.indices[s_ptr:e_ptr])
+    chunk_indptr = cp.asarray(X_csc.indptr[start : stop + 1] - s_ptr)
+    csc_chunk = cpsp.csc_matrix(
+        (chunk_data, chunk_indices, chunk_indptr), shape=(n_rows, stop - start)
+    )
+    return _sparse_to_dense(csc_chunk, order="F").astype(cp.float64)
+
+
 def _get_column_block(X, start: int, stop: int) -> cp.ndarray:
-    """
-    Extract a column block from matrix X and convert to dense CuPy array.
-
-    Handles scipy sparse, cupy sparse, numpy arrays, and cupy arrays.
-    Returns F-order array for efficient column operations.
-    """
-    X_chunk = X[:, start:stop]
-
-    match X_chunk:
+    """Extract a column block as a dense F-order float64 CuPy array."""
+    match X:
+        case sp.csc_matrix() | sp.csc_array():
+            return _csc_columns_to_gpu(X, start, stop, X.shape[0])
         case sp.spmatrix() | sp.sparray():
-            # SciPy sparse -> CuPy sparse CSC -> dense
-            X_chunk = cpsp.csc_matrix(X_chunk.tocsc())
-            return _sparse_to_dense(X_chunk, order="F").astype(cp.float64)
+            chunk = cpsp.csc_matrix(X[:, start:stop].tocsc())
+            return _sparse_to_dense(chunk, order="F").astype(cp.float64)
+        case cpsp.csc_matrix():
+            return _csc_columns_to_gpu(X, start, stop, X.shape[0])
         case cpsp.spmatrix():
-            # CuPy sparse -> dense
-            return _sparse_to_dense(X_chunk, order="F").astype(cp.float64)
+            return _sparse_to_dense(X[:, start:stop], order="F").astype(cp.float64)
         case np.ndarray() | cp.ndarray():
-            return cp.asarray(X_chunk, dtype=cp.float64, order="F")
+            return cp.asarray(X[:, start:stop], dtype=cp.float64, order="F")
         case _:
-            raise ValueError(f"Unsupported matrix type: {type(X_chunk)}")
+            raise ValueError(f"Unsupported matrix type: {type(X)}")
 
 
 def _average_ranks(
@@ -653,8 +667,11 @@ class _RankGenes:
         # Accumulate results per group
         all_scores = {i: [] for i in range(len(self.groups_order))}
         all_pvals = {i: [] for i in range(len(self.groups_order))}
-        if isinstance(X, sp.spmatrix or sp.sparray):
-            X = X.tocsc()
+
+        # One-time CSR→CSC via fast parallel Numba kernel; _get_column_block
+        # then uses direct indptr pointer copy for each chunk.
+        if isinstance(X, sp.spmatrix | sp.sparray):
+            X = _fast_csr_to_csc(X) if X.format == "csr" else X.tocsc()
 
         for start in range(0, n_total_genes, chunk_width):
             stop = min(start + chunk_width, n_total_genes)
@@ -738,9 +755,14 @@ class _RankGenes:
 
             # Subset matrix ONCE before chunking (10x faster than filtering each chunk)
             X_subset = X[mask_combined, :]
-            # Convert to CSC for efficient column slicing in the chunk loop
-            if cpsp.isspmatrix_csr(X_subset):
-                X_subset = X_subset.tocsc()
+
+            # One-time CSR→CSC via fast parallel Numba kernel
+            if isinstance(X_subset, sp.spmatrix | sp.sparray):
+                X_subset = (
+                    _fast_csr_to_csc(X_subset)
+                    if X_subset.format == "csr"
+                    else X_subset.tocsc()
+                )
 
             # Create mask for group within the combined array (constant across chunks)
             combined_indices = np.where(mask_combined)[0]
