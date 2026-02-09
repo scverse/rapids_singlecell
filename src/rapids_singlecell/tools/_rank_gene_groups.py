@@ -16,6 +16,7 @@ import scipy.sparse as sp
 from statsmodels.stats.multitest import multipletests
 
 from rapids_singlecell._compat import DaskArray, _meta_dense
+from rapids_singlecell._utils._csr_to_csc import _fast_csr_to_csc
 from rapids_singlecell.get import X_to_GPU
 from rapids_singlecell.get._aggregated import Aggregate
 from rapids_singlecell.preprocessing._utils import _check_gpu_X, _sparse_to_dense
@@ -100,13 +101,42 @@ def _choose_chunk_size(requested: int | None) -> int:
     return 128
 
 
-def _get_column_block(X, start: int, stop: int) -> cp.ndarray:
+def _csc_columns_to_gpu(
+    X_csc: sp.csc_matrix, start: int, stop: int, n_rows: int
+) -> cp.ndarray:
+    """
+    Extract columns from a scipy CSC matrix via direct pointer copy to GPU.
+
+    Instead of using scipy's ``X[:, start:stop]`` (which rebuilds indices),
+    this directly slices the underlying data/indices/indptr arrays and
+    constructs a CuPy CSC matrix from them.
+    """
+    s_ptr = X_csc.indptr[start]
+    e_ptr = X_csc.indptr[stop]
+    chunk_data = cp.asarray(X_csc.data[s_ptr:e_ptr])
+    chunk_indices = cp.asarray(X_csc.indices[s_ptr:e_ptr])
+    chunk_indptr = cp.asarray(X_csc.indptr[start : stop + 1] - s_ptr)
+    csc_chunk = cpsp.csc_matrix(
+        (chunk_data, chunk_indices, chunk_indptr), shape=(n_rows, stop - start)
+    )
+    return _sparse_to_dense(csc_chunk, order="F").astype(cp.float64)
+
+
+def _get_column_block(
+    X, start: int, stop: int, *, X_csc: sp.csc_matrix | None = None
+) -> cp.ndarray:
     """
     Extract a column block from matrix X and convert to dense CuPy array.
 
     Handles scipy sparse, cupy sparse, numpy arrays, and cupy arrays.
     Returns F-order array for efficient column operations.
+
+    If *X_csc* is provided (pre-computed scipy CSC), columns are extracted
+    via direct indptr pointer copy — much faster than scipy's column slicing.
     """
+    if X_csc is not None:
+        return _csc_columns_to_gpu(X_csc, start, stop, X_csc.shape[0])
+
     X_chunk = X[:, start:stop]
 
     match X_chunk:
@@ -653,14 +683,18 @@ class _RankGenes:
         # Accumulate results per group
         all_scores = {i: [] for i in range(len(self.groups_order))}
         all_pvals = {i: [] for i in range(len(self.groups_order))}
-        if isinstance(X, sp.spmatrix or sp.sparray):
-            X = X.tocsc()
+
+        # One-time CSR→CSC for scipy sparse (fast Numba kernel + direct
+        # pointer copy is much faster than scipy's X[:, start:stop]).
+        X_csc = None
+        if isinstance(X, sp.spmatrix | sp.sparray):
+            X_csc = _fast_csr_to_csc(X) if X.format == "csr" else X.tocsc()
 
         for start in range(0, n_total_genes, chunk_width):
             stop = min(start + chunk_width, n_total_genes)
 
             # Slice and convert to dense GPU array (F-order for column ops)
-            block = _get_column_block(X, start, stop)
+            block = _get_column_block(X, start, stop, X_csc=X_csc)
 
             # Accumulate stats for this chunk
             self._accumulate_chunk_stats_vs_rest(
@@ -738,9 +772,15 @@ class _RankGenes:
 
             # Subset matrix ONCE before chunking (10x faster than filtering each chunk)
             X_subset = X[mask_combined, :]
-            # Convert to CSC for efficient column slicing in the chunk loop
-            if cpsp.isspmatrix_csr(X_subset):
-                X_subset = X_subset.tocsc()
+
+            # One-time CSR→CSC for scipy sparse subsets
+            X_subset_csc = None
+            if isinstance(X_subset, sp.spmatrix | sp.sparray):
+                X_subset_csc = (
+                    _fast_csr_to_csc(X_subset)
+                    if X_subset.format == "csr"
+                    else X_subset.tocsc()
+                )
 
             # Create mask for group within the combined array (constant across chunks)
             combined_indices = np.where(mask_combined)[0]
@@ -757,7 +797,7 @@ class _RankGenes:
                 stop = min(start + chunk_width, n_total_genes)
 
                 # Get block for combined cells only
-                block = _get_column_block(X_subset, start, stop)
+                block = _get_column_block(X_subset, start, stop, X_csc=X_subset_csc)
 
                 # Accumulate stats for this chunk
                 self._accumulate_chunk_stats_with_ref(
