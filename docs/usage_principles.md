@@ -57,9 +57,7 @@ sc.pl.tsne(adata, color="leiden")
 
 ### Decoupler-GPU
 
-`dcg` offers accelerated drop in replacements for {func}`~rapids_singlecell.dcg.mlm`, {func}`~rapids_singlecell.dcg.ulm` and {func}`~rapids_singlecell.dcg.aucell`
-
-Example:
+`dcg` offers accelerated drop in replacements for {func}`~rapids_singlecell.dcg.mlm`, {func}`~rapids_singlecell.dcg.ulm` and {func}`~rapids_singlecell.dcg.aucell` like:
 
 ```python
 import decoupler as dc
@@ -72,7 +70,7 @@ sc.pl.umap(acts_mlm, color=['NK cells'], cmap='coolwarm', vcenter=0)
 
 ### Pertpy-compatible API (use `rsc.ptg`)
 
-rapids_singlecell exposes a pertpy-compatible, GPU-accelerated API under {mod}`rapids_singlecell.ptg`.
+rapids_singlecell exposes a pertpy-compatible, GPU-accelerated API under {mod}`rapids_singlecell.ptg` like:
 
 Example:
 
@@ -88,9 +86,7 @@ res, res_var = distance.pairwise(
 
 ### Squidpy GPU helpers (use `rsc.squidpy_gpu`)
 
-rapids_singlecell includes GPU-accelerated implementations of common `squidpy` workflows under {mod}`rapids_singlecell.gr`.
-
-Examples:
+rapids_singlecell includes GPU-accelerated implementations of common `squidpy` workflows under {mod}`rapids_singlecell.gr` like:
 
 ```python
 from rapids_singlecell import squidpy_gpu as sqg
