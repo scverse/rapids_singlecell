@@ -35,6 +35,7 @@ repository_url = "https://github.com/scverse/rapids_singlecell"
 release = info["Version"]
 
 templates_path = ["_templates"]
+bibtex_bibfiles = ["references.bib"]
 nitpicky = True  # Warn about broken links
 needs_sphinx = "4.5"
 suppress_warnings = [
