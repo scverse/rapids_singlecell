@@ -72,8 +72,6 @@ sc.pl.umap(acts_mlm, color=['NK cells'], cmap='coolwarm', vcenter=0)
 
 rapids_singlecell exposes a pertpy-compatible, GPU-accelerated API under {mod}`rapids_singlecell.ptg` like:
 
-Example:
-
 ```python
 from rapids_singlecell import ptg
 
@@ -97,8 +95,6 @@ sqg.spatial_autocorr(
 	mode="moran",
 	n_perms=500,
 )
-
 sqg.co_occurrence(adata, cluster_key="labels", interval=50)
-
 sqg.ligrec(adata, cluster_key="labels", n_perms=1000)
 ```
