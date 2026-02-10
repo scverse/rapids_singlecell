@@ -95,11 +95,25 @@ def normalize_total(
             raise ValueError(
                 f"`max_fraction` must be between 0 and 1, got {max_fraction}."
             )
-        X = _normalize_total_exclude(X, target_sum, max_fraction)
+
+    if isinstance(X, DaskArray):
+        X = _normalize_total_dask(X, target_sum)
+    elif isinstance(X, sparse.csr_matrix):
+        X = _normalize_total_csr(
+            X,
+            target_sum,
+            exclude_highly_expressed=exclude_highly_expressed,
+            max_fraction=max_fraction,
+        )
+    elif isinstance(X, cp.ndarray):
+        X = _normalize_total_dense(
+            X,
+            target_sum,
+            exclude_highly_expressed=exclude_highly_expressed,
+            max_fraction=max_fraction,
+        )
     else:
-        if target_sum is None:
-            target_sum = _get_target_sum(X)
-        X = _normalize_total(X, target_sum)
+        raise ValueError(f"Cannot normalize {type(X)}")
 
     if inplace:
         _set_obs_rep(adata, X, layer=layer)
@@ -110,76 +124,62 @@ def normalize_total(
         return X
 
 
-def _normalize_total(X: ArrayTypesDask, target_sum: float):
-    if isinstance(X, sparse.csr_matrix):
-        return _normalize_total_csr(X, target_sum)
-    elif isinstance(X, DaskArray):
-        return _normalize_total_dask(X, target_sum)
-    elif isinstance(X, cp.ndarray):
-        from ._kernels._norm_kernel import _mul_dense
-
-        if not X.flags.c_contiguous:
-            X = cp.asarray(X, order="C")
-        mul_kernel = _mul_dense(X.dtype)
-        mul_kernel(
-            (math.ceil(X.shape[0] / 128),),
-            (128,),
-            (X, X.shape[0], X.shape[1], int(target_sum)),
-        )
-        return X
-    else:
-        raise ValueError(f"Cannot normalize {type(X)}")
+def _counts_to_scales(
+    counts_per_cell: cp.ndarray, target_sum: float | None = None
+) -> cp.ndarray:
+    """Compute per-cell scale factors. Uses median of nonzero counts if target_sum is None."""
+    nonzero = counts_per_cell > 0
+    if target_sum is None:
+        target_sum = cp.median(counts_per_cell[nonzero])
+    scales = cp.zeros_like(counts_per_cell)
+    scales[nonzero] = (
+        cp.array(target_sum, dtype=counts_per_cell.dtype) / counts_per_cell[nonzero]
+    )
+    return scales
 
 
-def _normalize_total_exclude(
-    X: csr_matrix | cp.ndarray,
+def _normalize_total_csr(
+    X: sparse.csr_matrix,
     target_sum: float | None,
+    *,
+    exclude_highly_expressed: bool,
     max_fraction: float,
-) -> csr_matrix | cp.ndarray:
-    if isinstance(X, sparse.csr_matrix):
-        return _normalize_total_exclude_csr(X, target_sum, max_fraction)
-    elif isinstance(X, cp.ndarray):
-        return _normalize_total_exclude_dense(X, target_sum, max_fraction)
-    else:
-        raise ValueError(f"Cannot normalize {type(X)}")
-
-
-def _normalize_total_exclude_csr(
-    X: csr_matrix,
-    target_sum: float | None,
-    max_fraction: float,
-) -> csr_matrix:
-    from ._kernels._norm_kernel import _find_hi_genes_csr, _get_sparse_sum_major
-
+) -> sparse.csr_matrix:
     n_cells, n_genes = X.shape
+    gene_is_hi = None
 
-    # Step 1: Compute initial row sums
-    counts_per_cell = cp.zeros(n_cells, dtype=X.dtype)
-    sum_kernel = _get_sparse_sum_major(X.dtype)
-    sum_kernel(
-        (n_cells,),
-        (64,),
-        (X.indptr, X.data, counts_per_cell, n_cells),
-    )
+    if exclude_highly_expressed:
+        from ._kernels._norm_kernel import _find_hi_genes_csr
 
-    # Step 2: Find highly expressed genes (no nnz-sized allocations)
-    thresholds = (max_fraction * counts_per_cell).astype(X.dtype)
-    gene_is_hi = cp.zeros(n_genes, dtype=cp.bool_)
-    hi_kernel = _find_hi_genes_csr(X.dtype)
-    hi_kernel(
-        (math.ceil(n_cells / 128),),
-        (128,),
-        (X.indptr, X.indices, X.data, thresholds, gene_is_hi, n_cells),
-    )
+        gene_is_hi = cp.zeros(n_genes, dtype=cp.bool_)
+        kernel = _find_hi_genes_csr(X.dtype)
+        kernel(
+            (n_cells,),
+            (256,),
+            (
+                X.indptr,
+                X.indices,
+                X.data,
+                gene_is_hi,
+                X.dtype.type(max_fraction),
+                n_cells,
+            ),
+        )
 
-    if target_sum is not None:
-        # Fused: masked row sum + scale in a single pass
+    if target_sum is not None and gene_is_hi is None:
+        # Fused: row sum + scale in one pass
+        from ._kernels._norm_kernel import _mul_csr
+
+        kernel = _mul_csr(X.dtype)
+        kernel((n_cells,), (256,), (X.indptr, X.data, n_cells, int(target_sum)))
+    elif target_sum is not None:
+        # Fused: masked row sum + scale in one pass
         from ._kernels._norm_kernel import _masked_mul_csr
 
-        fused_kernel = _masked_mul_csr(X.dtype)
-        fused_kernel(
-            (math.ceil(n_cells / 128),),
-            (128,),
+        kernel = _masked_mul_csr(X.dtype)
+        kernel(
+            (n_cells,),
+            (256,),
             (
                 X.indptr,
                 X.indices,
@@ -190,87 +190,72 @@ def _normalize_total_exclude_csr(
             ),
         )
     else:
-        # Two-pass: need adjusted counts for median first
-        from ._kernels._norm_kernel import _masked_sum_major, _prescaled_mul_csr
+        # Two-pass: compute counts → median → prescaled multiply
+        from ._kernels._norm_kernel import _prescaled_mul_csr
 
-        adjusted_counts = cp.zeros(n_cells, dtype=X.dtype)
-        masked_kernel = _masked_sum_major(X.dtype)
-        masked_kernel(
-            (n_cells,),
-            (64,),
-            (X.indptr, X.indices, X.data, gene_is_hi, adjusted_counts, n_cells),
-        )
+        if gene_is_hi is None:
+            from ._kernels._norm_kernel import _get_sparse_sum_major
 
-        nonzero_counts = adjusted_counts[adjusted_counts > 0]
-        target_sum = cp.median(nonzero_counts)
+            counts = cp.zeros(n_cells, dtype=X.dtype)
+            kernel = _get_sparse_sum_major(X.dtype)
+            kernel((n_cells,), (256,), (X.indptr, X.data, counts, n_cells))
+        else:
+            from ._kernels._norm_kernel import _masked_sum_major
 
-        scales = cp.zeros(n_cells, dtype=X.dtype)
-        nonzero = adjusted_counts > 0
-        scales[nonzero] = cp.array(target_sum, dtype=X.dtype) / adjusted_counts[nonzero]
+            counts = cp.zeros(n_cells, dtype=X.dtype)
+            kernel = _masked_sum_major(X.dtype)
+            kernel(
+                (n_cells,),
+                (256,),
+                (X.indptr, X.indices, X.data, gene_is_hi, counts, n_cells),
+            )
 
-        prescaled_kernel = _prescaled_mul_csr(X.dtype)
-        prescaled_kernel(
-            (math.ceil(n_cells / 128),),
-            (128,),
-            (X.indptr, X.data, scales, n_cells),
-        )
+        scales = _counts_to_scales(counts)
+        kernel = _prescaled_mul_csr(X.dtype)
+        kernel((n_cells,), (256,), (X.indptr, X.data, scales, n_cells))
+
     return X
 
 
-def _normalize_total_exclude_dense(
+def _normalize_total_dense(
     X: cp.ndarray,
     target_sum: float | None,
+    *,
+    exclude_highly_expressed: bool,
     max_fraction: float,
 ) -> cp.ndarray:
-    from ._kernels._norm_kernel import _prescaled_mul_dense
-
     if not X.flags.c_contiguous:
         X = cp.asarray(X, order="C")
 
-    n_cells, n_genes = X.shape
+    n_cells, n_cols = X.shape
 
-    # Step 1: Compute initial row sums
-    counts_per_cell = X.sum(axis=1)
+    if target_sum is not None and not exclude_highly_expressed:
+        # Fused: row sum + scale in one pass
+        from ._kernels._norm_kernel import _mul_dense
 
-    # Step 2: Find highly expressed genes
-    hi_exp = X > max_fraction * counts_per_cell.reshape(-1, 1)
-    gene_subset = ~hi_exp.any(axis=0)
+        kernel = _mul_dense(X.dtype)
+        kernel((n_cells,), (256,), (X, n_cells, n_cols, int(target_sum)))
+    else:
+        # Compute per-cell counts, then prescaled multiply
+        from ._kernels._norm_kernel import _prescaled_mul_dense
 
-    # Step 3: Recompute row sums excluding highly expressed genes
-    adjusted_counts = X[:, gene_subset].sum(axis=1)
+        counts_per_cell = X.sum(axis=1)
+        if exclude_highly_expressed:
+            hi_exp = X > max_fraction * counts_per_cell.reshape(-1, 1)
+            gene_subset = ~hi_exp.any(axis=0)
+            counts_per_cell = X[:, gene_subset].sum(axis=1)
 
-    # Step 4: Compute target_sum from median of adjusted counts if not provided
+        scales = _counts_to_scales(counts_per_cell, target_sum)
+        kernel = _prescaled_mul_dense(X.dtype)
+        kernel((n_cells,), (256,), (X, scales, n_cells, n_cols))
+
+    return X
+
+
+def _normalize_total_dask(X: DaskArray, target_sum: float | None) -> DaskArray:
     if target_sum is None:
-        nonzero_counts = adjusted_counts[adjusted_counts > 0]
-        target_sum = cp.median(nonzero_counts)
+        target_sum = _get_target_sum_dask(X)
 
-    # Step 5: Compute per-cell scale factors and apply
-    scales = cp.zeros(n_cells, dtype=X.dtype)
-    mask = adjusted_counts > 0
-    scales[mask] = cp.array(target_sum, dtype=X.dtype) / adjusted_counts[mask]
-
-    mul_kernel = _prescaled_mul_dense(X.dtype)
-    mul_kernel(
-        (math.ceil(n_cells / 128),),
-        (128,),
-        (X, scales, n_cells, n_genes),
-    )
-    return X
-
-
-def _normalize_total_csr(X: sparse.csr_matrix, target_sum: int) -> sparse.csr_matrix:
-    from ._kernels._norm_kernel import _mul_csr
-
-    mul_kernel = _mul_csr(X.dtype)
-    mul_kernel(
-        (math.ceil(X.shape[0] / 128),),
-        (128,),
-        (X.indptr, X.data, X.shape[0], int(target_sum)),
-    )
-    return X
-
-
-def _normalize_total_dask(X: DaskArray, target_sum: int) -> DaskArray:
     if isinstance(X._meta, sparse.csr_matrix):
         from ._kernels._norm_kernel import _mul_csr
 
@@ -279,8 +264,8 @@ def _normalize_total_dask(X: DaskArray, target_sum: int) -> DaskArray:
 
         def __mul(X_part):
             mul_kernel(
-                (math.ceil(X_part.shape[0] / 32),),
-                (32,),
+                (X_part.shape[0],),
+                (256,),
                 (X_part.indptr, X_part.data, X_part.shape[0], int(target_sum)),
             )
             return X_part
@@ -294,8 +279,8 @@ def _normalize_total_dask(X: DaskArray, target_sum: int) -> DaskArray:
 
         def __mul(X_part):
             mul_kernel(
-                (math.ceil(X_part.shape[0] / 128),),
-                (128,),
+                (X_part.shape[0],),
+                (256,),
                 (X_part, X_part.shape[0], X_part.shape[1], int(target_sum)),
             )
             return X_part
@@ -304,30 +289,6 @@ def _normalize_total_dask(X: DaskArray, target_sum: int) -> DaskArray:
     else:
         raise ValueError(f"Cannot normalize {type(X)}")
     return X
-
-
-def _get_target_sum(X: ArrayTypesDask) -> int:
-    if isinstance(X, sparse.csr_matrix):
-        return _get_target_sum_csr(X)
-    elif isinstance(X, DaskArray):
-        return _get_target_sum_dask(X)
-    else:
-        return cp.median(X.sum(axis=1))
-
-
-def _get_target_sum_csr(X: sparse.csr_matrix) -> int:
-    from ._kernels._norm_kernel import _get_sparse_sum_major
-
-    counts_per_cell = cp.zeros(X.shape[0], dtype=X.dtype)
-    sum_kernel = _get_sparse_sum_major(X.dtype)
-    sum_kernel(
-        (X.shape[0],),
-        (64,),
-        (X.indptr, X.data, counts_per_cell, X.shape[0]),
-    )
-    counts_per_cell = counts_per_cell[counts_per_cell > 0]
-    target_sum = cp.median(counts_per_cell)
-    return target_sum
 
 
 def _get_target_sum_dask(X: DaskArray) -> int:
@@ -340,8 +301,8 @@ def _get_target_sum_dask(X: DaskArray) -> int:
         def __sum(X_part):
             counts_per_cell = cp.zeros(X_part.shape[0], dtype=X_part.dtype)
             sum_kernel(
-                (X.shape[0],),
-                (64,),
+                (X_part.shape[0],),
+                (256,),
                 (X_part.indptr, X_part.data, counts_per_cell, X_part.shape[0]),
             )
             return counts_per_cell
