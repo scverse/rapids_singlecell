@@ -48,6 +48,7 @@ test-minimal = [
     "pytest",
     "pytest-cov",
     "pytest-timeout",
+    "pytest-rerunfailures",
     "anyio",
     "pooch",
     "profimp",
