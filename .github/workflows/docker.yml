@@ -27,7 +27,7 @@ jobs:
     strategy:
       matrix:
         RAPIDS_VER:
-          - "25.12"
+          - "26.02"
     name: Build Docker images
     runs-on: ubuntu-latest
     permissions:
@@ -67,7 +67,7 @@ jobs:
 
       - name: create yaml file for conda environment
         run: |
-          grep -v -- '- rapids-singlecell' conda/rsc_rapids_${{ matrix.RAPIDS_VER }}.yml > docker/rsc_rapids.yml
+          grep -v -- '- rapids-singlecell' conda/rsc_rapids_${{ matrix.RAPIDS_VER }}_cuda13.yml > docker/rsc_rapids.yml
         shell: bash
 
       - name: Build and push Docker base images

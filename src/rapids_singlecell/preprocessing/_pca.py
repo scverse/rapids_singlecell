@@ -41,7 +41,7 @@ def pca(
     **kwargs,
 ) -> None | AnnData:
     """\
-    Principal component analysis using GPU acceleration.
+    Principal component analysis using GPU acceleration :cite:p:`Halko2009,Tomas2024`.
 
     Uses the following implementations based on data type (defaults for `svd_solver` in parentheses):
 

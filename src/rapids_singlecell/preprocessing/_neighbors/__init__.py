@@ -48,9 +48,9 @@ def neighbors(
     copy: bool = False,
 ) -> AnnData | None:
     """\
-    Compute a neighborhood graph of observations with cuml.
+    Compute a neighborhood graph of observations :cite:p:`Ootomo2024`.
 
-    The neighbor search efficiency of this heavily relies on cuml,
+    The neighbor search efficiency of this heavily relies on cuVS,
     which also provides a method for estimating connectivities of data points -
     the connectivity of the manifold.
 
@@ -263,7 +263,7 @@ def bbknn(
     copy: bool = False,
 ) -> AnnData | None:
     """\
-    Batch balanced KNN, altering the KNN procedure to identify each cell's top neighbours in
+    Batch balanced KNN :cite:p:`Polanski2019`, altering the KNN procedure to identify each cell's top neighbours in
     each batch separately instead of the entire cell pool with no accounting for batch.
     The nearest neighbours for each batch are then merged to create a final list of
     neighbours for the cell.

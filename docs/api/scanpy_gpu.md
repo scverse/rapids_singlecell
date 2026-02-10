@@ -28,6 +28,7 @@ Other than `tools`, preprocessing steps usually don’t return an easily interpr
    pp.flag_gene_family
    pp.filter_highly_variable
 ```
+
 ### Batch effect correction
 
 ```{eval-rst}
@@ -45,7 +46,6 @@ Other than `tools`, preprocessing steps usually don’t return an easily interpr
    pp.scrublet
    pp.scrublet_simulate_doublets
 ```
-
 
 ### Neighbors
 ```{eval-rst}

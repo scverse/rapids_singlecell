@@ -38,6 +38,7 @@ def _load_connectivities(
             "Run `pp.neighbors` first."
         )
 
+
     neighbors_dict = adata.uns[neighbors_key]
 
     if neighbors_key == "neighbors":
@@ -146,9 +147,10 @@ def diffmap(
     density_normalize: bool = True,
 ) -> None:
     """
-    Diffusion maps for visualizing single-cell data.
+    Diffusion Maps :cite:p:`Coifman2005,Haghverdi2015`.
 
-    This is a reimplementation of scanpy's function.
+    Diffusion maps has been proposed for visualizing single-cell data.
+    This is a reimplementation of scanpys function.
 
     The width ("sigma") of the connectivity kernel is implicitly determined by
     the number of neighbors used to compute the single-cell graph in
