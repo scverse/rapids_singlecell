@@ -32,12 +32,13 @@ gramm_kernel_csr = r"""
         for(int idx2 = idx1 + col; idx2 < end; idx2 += blockDim.x){
             int index2 = index[idx2];
             {0} data2 = data[idx2];
-            atomicAdd(&out[(size_t)index1 * ncols + index2], data1 * data2);
+            int lo = min(index1, index2);
+            int hi = max(index1, index2);
+            atomicAdd(&out[(size_t)lo * ncols + hi], data1 * data2);
         }
     }
 }
 """
-
 
 copy_kernel = r"""
 ({0} *output, int ncols) {
@@ -51,6 +52,7 @@ copy_kernel = r"""
     }
 }
 """
+
 check_zero_genes = r"""
 extern "C" __global__ void check_zero_genes(const int* indices, int* genes, int nnz) {
     int value = blockIdx.x * blockDim.x + threadIdx.x;
