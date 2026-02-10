@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import warnings
+from functools import partial
 from typing import TYPE_CHECKING, Union
 
 import cupy as cp
@@ -27,8 +28,10 @@ if TYPE_CHECKING:
 def normalize_total(
     adata: AnnData,
     *,
-    target_sum: int | None = None,
-    layer: int | str = None,
+    target_sum: float | None = None,
+    exclude_highly_expressed: bool = False,
+    max_fraction: float = 0.05,
+    layer: str | None = None,
     inplace: bool = True,
     copy: bool = False,
 ) -> Union[AnnData, csr_matrix, cp.ndarray, None]:  # noqa: UP007
@@ -43,6 +46,18 @@ def normalize_total(
         target_sum
             If `None`, after normalization, each observation (cell) has a total count
             equal to the median of total counts for observations (cells) before normalization.
+
+        exclude_highly_expressed
+            Exclude (very) highly expressed genes for the computation of the
+            normalization factor (size factor) for each cell. A gene is considered
+            highly expressed, if it has more than `max_fraction` of the total counts
+            in at least one cell. The not-excluded genes will sum up to
+            `target_sum`.
+
+        max_fraction
+            If `exclude_highly_expressed=True`, consider cells as highly expressed
+            that have more counts than `max_fraction` of the original total counts
+            in at least one cell.
 
         layer
             Layer to normalize instead of `X`. If `None`, `X` is normalized.
@@ -70,10 +85,21 @@ def normalize_total(
 
     if sparse.isspmatrix_csc(X):
         X = X.tocsr()
-    if not target_sum:
-        target_sum = _get_target_sum(X)
 
-    X = _normalize_total(X, target_sum)
+    if exclude_highly_expressed:
+        if isinstance(X, DaskArray):
+            raise NotImplementedError(
+                "`exclude_highly_expressed` is not supported for Dask arrays."
+            )
+        if not 0 < max_fraction < 1:
+            raise ValueError(
+                f"`max_fraction` must be between 0 and 1, got {max_fraction}."
+            )
+        X = _normalize_total_exclude(X, target_sum, max_fraction)
+    else:
+        if target_sum is None:
+            target_sum = _get_target_sum(X)
+        X = _normalize_total(X, target_sum)
 
     if inplace:
         _set_obs_rep(adata, X, layer=layer)
@@ -84,7 +110,7 @@ def normalize_total(
         return X
 
 
-def _normalize_total(X: ArrayTypesDask, target_sum: int):
+def _normalize_total(X: ArrayTypesDask, target_sum: float):
     if isinstance(X, sparse.csr_matrix):
         return _normalize_total_csr(X, target_sum)
     elif isinstance(X, DaskArray):
@@ -103,6 +129,133 @@ def _normalize_total(X: ArrayTypesDask, target_sum: int):
         return X
     else:
         raise ValueError(f"Cannot normalize {type(X)}")
+
+
+def _normalize_total_exclude(
+    X: csr_matrix | cp.ndarray,
+    target_sum: float | None,
+    max_fraction: float,
+) -> csr_matrix | cp.ndarray:
+    if isinstance(X, sparse.csr_matrix):
+        return _normalize_total_exclude_csr(X, target_sum, max_fraction)
+    elif isinstance(X, cp.ndarray):
+        return _normalize_total_exclude_dense(X, target_sum, max_fraction)
+    else:
+        raise ValueError(f"Cannot normalize {type(X)}")
+
+
+def _normalize_total_exclude_csr(
+    X: csr_matrix,
+    target_sum: float | None,
+    max_fraction: float,
+) -> csr_matrix:
+    from ._kernels._norm_kernel import _find_hi_genes_csr, _get_sparse_sum_major
+
+    n_cells, n_genes = X.shape
+
+    # Step 1: Compute initial row sums
+    counts_per_cell = cp.zeros(n_cells, dtype=X.dtype)
+    sum_kernel = _get_sparse_sum_major(X.dtype)
+    sum_kernel(
+        (n_cells,),
+        (64,),
+        (X.indptr, X.data, counts_per_cell, n_cells),
+    )
+
+    # Step 2: Find highly expressed genes (no nnz-sized allocations)
+    thresholds = (max_fraction * counts_per_cell).astype(X.dtype)
+    gene_is_hi = cp.zeros(n_genes, dtype=cp.bool_)
+    hi_kernel = _find_hi_genes_csr(X.dtype)
+    hi_kernel(
+        (math.ceil(n_cells / 128),),
+        (128,),
+        (X.indptr, X.indices, X.data, thresholds, gene_is_hi, n_cells),
+    )
+
+    if target_sum is not None:
+        # Fused: masked row sum + scale in a single pass
+        from ._kernels._norm_kernel import _masked_mul_csr
+
+        fused_kernel = _masked_mul_csr(X.dtype)
+        fused_kernel(
+            (math.ceil(n_cells / 128),),
+            (128,),
+            (
+                X.indptr,
+                X.indices,
+                X.data,
+                gene_is_hi,
+                n_cells,
+                X.dtype.type(target_sum),
+            ),
+        )
+    else:
+        # Two-pass: need adjusted counts for median first
+        from ._kernels._norm_kernel import _masked_sum_major, _prescaled_mul_csr
+
+        adjusted_counts = cp.zeros(n_cells, dtype=X.dtype)
+        masked_kernel = _masked_sum_major(X.dtype)
+        masked_kernel(
+            (n_cells,),
+            (64,),
+            (X.indptr, X.indices, X.data, gene_is_hi, adjusted_counts, n_cells),
+        )
+
+        nonzero_counts = adjusted_counts[adjusted_counts > 0]
+        target_sum = cp.median(nonzero_counts)
+
+        scales = cp.zeros(n_cells, dtype=X.dtype)
+        nonzero = adjusted_counts > 0
+        scales[nonzero] = cp.array(target_sum, dtype=X.dtype) / adjusted_counts[nonzero]
+
+        prescaled_kernel = _prescaled_mul_csr(X.dtype)
+        prescaled_kernel(
+            (math.ceil(n_cells / 128),),
+            (128,),
+            (X.indptr, X.data, scales, n_cells),
+        )
+    return X
+
+
+def _normalize_total_exclude_dense(
+    X: cp.ndarray,
+    target_sum: float | None,
+    max_fraction: float,
+) -> cp.ndarray:
+    from ._kernels._norm_kernel import _prescaled_mul_dense
+
+    if not X.flags.c_contiguous:
+        X = cp.asarray(X, order="C")
+
+    n_cells, n_genes = X.shape
+
+    # Step 1: Compute initial row sums
+    counts_per_cell = X.sum(axis=1)
+
+    # Step 2: Find highly expressed genes
+    hi_exp = X > max_fraction * counts_per_cell.reshape(-1, 1)
+    gene_subset = ~hi_exp.any(axis=0)
+
+    # Step 3: Recompute row sums excluding highly expressed genes
+    adjusted_counts = X[:, gene_subset].sum(axis=1)
+
+    # Step 4: Compute target_sum from median of adjusted counts if not provided
+    if target_sum is None:
+        nonzero_counts = adjusted_counts[adjusted_counts > 0]
+        target_sum = cp.median(nonzero_counts)
+
+    # Step 5: Compute per-cell scale factors and apply
+    scales = cp.zeros(n_cells, dtype=X.dtype)
+    mask = adjusted_counts > 0
+    scales[mask] = cp.array(target_sum, dtype=X.dtype) / adjusted_counts[mask]
+
+    mul_kernel = _prescaled_mul_dense(X.dtype)
+    mul_kernel(
+        (math.ceil(n_cells / 128),),
+        (128,),
+        (X, scales, n_cells, n_genes),
+    )
+    return X
 
 
 def _normalize_total_csr(X: sparse.csr_matrix, target_sum: int) -> sparse.csr_matrix:
@@ -212,35 +365,44 @@ def _get_target_sum_dask(X: DaskArray) -> int:
     return target_sum
 
 
-def _calc_log1p(X: ArrayTypesDask) -> ArrayTypesDask:
+def _calc_log1p(X: ArrayTypesDask, base: float | None = None) -> ArrayTypesDask:
     if isinstance(X, DaskArray):
         meta = _meta_sparse if isinstance(X._meta, csr_matrix) else _meta_dense
-        X = X.map_blocks(_calc_log1p, meta=meta(X.dtype))
+        X = X.map_blocks(partial(_calc_log1p, base=base), meta=meta(X.dtype))
     else:
         X = X.copy()
         if sparse.issparse(X):
             X = X.log1p()
+            if base is not None:
+                X.data /= cp.log(base)
         else:
             X = cp.log1p(X)
+            if base is not None:
+                X /= cp.log(base)
     return X
 
 
 def log1p(
     adata: AnnData,
     *,
+    base: float | None = None,
     layer: str | None = None,
     obsm: str | None = None,
     inplace: bool = True,
     copy: bool = False,
 ) -> Union[AnnData, spmatrix, cp.ndarray, None]:  # noqa: UP007
     """\
-    Calculated the natural logarithm of one plus the sparse matrix.
+    Logarithmize the data matrix.
 
+    Computes :math:`X = \\log(X + 1)`, where :math:`log` denotes the natural logarithm
+    unless a different `base` is given.
 
     Parameters
     ----------
         adata
             AnnData object
+        base
+            Base of the logarithm. Natural logarithm is used by default.
         layer
             Layer to normalize instead of `X`. If `None`, `X` is normalized.
         obsm
@@ -252,8 +414,8 @@ def log1p(
 
     Returns
     -------
-    The resulting sparse matrix after applying the natural logarithm of one plus the input matrix. \
-    If `copy` is set to True, returns the new sparse matrix. Otherwise, updates the `adata` object \
+    The resulting matrix after applying the logarithm of one plus the input matrix. \
+    If `copy` is set to True, returns the modified AnnData. Otherwise, updates the `adata` object \
     in-place and returns None.
 
     """
@@ -267,19 +429,9 @@ def log1p(
 
     if not inplace:
         X = X.copy()
-    """
-        if isinstance(X, cp.ndarray):
-        X = cp.log1p(X)
-    elif sparse.issparse(X):
-        X = X.log1p()
-    elif isinstance(X, DaskArray):
-        if isinstance(X._meta, cp.ndarray):
-            X = X.map_blocks(lambda x: cp.log1p(x), meta=_meta_dense(X.dtype))
-        elif isinstance(X._meta, sparse.csr_matrix):
-            X = X.map_blocks(lambda x: x.log1p(), meta=_meta_sparse(X.dtype))
-    """
-    X = _calc_log1p(X)
-    adata.uns["log1p"] = {"base": None}
+
+    X = _calc_log1p(X, base=base)
+    adata.uns["log1p"] = {"base": base}
     if inplace:
         _set_obs_rep(adata, X, layer=layer, obsm=obsm)
 
