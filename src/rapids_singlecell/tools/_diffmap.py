@@ -38,7 +38,6 @@ def _load_connectivities(
             "Run `pp.neighbors` first."
         )
 
-
     neighbors_dict = adata.uns[neighbors_key]
 
     if neighbors_key == "neighbors":
