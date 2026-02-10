@@ -32,3 +32,7 @@ repos:
     -   id: codespell
         additional_dependencies:
         - tomli
+        exclude: |
+          (?x)(
+              docs/references.bib|
+          )
