@@ -299,7 +299,7 @@ def normalize_pearson_residuals(
     inplace: bool = True,
 ) -> Union[cp.ndarray, None]:  # noqa: UP007
     """\
-    Applies analytic Pearson residual normalization, based on Lause21.
+    Applies analytic Pearson residual normalization :cite:p:`Lause2021`.
     The residuals are based on a negative binomial offset model with overdispersion
     `theta` shared across genes. By default, residuals are clipped to `sqrt(n_obs)`
     and overdispersion `theta=100` is used.

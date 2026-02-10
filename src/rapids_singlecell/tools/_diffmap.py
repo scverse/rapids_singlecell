@@ -20,8 +20,9 @@ def diffmap(
     density_normalize: bool = True,
 ) -> None:
     """
-    Diffusion maps has been proposed for visualizing single-cell data.
+    Diffusion Maps :cite:p:`Coifman2005,Haghverdi2015`.
 
+    Diffusion maps has been proposed for visualizing single-cell data.
     This is a reimplementation of scanpys function.
 
     The width ("sigma") of the connectivity kernel is implicitly determined by
