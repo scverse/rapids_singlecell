@@ -39,6 +39,7 @@ doc = [
     "sphinx-design",
     "sphinx-tabs",
     "sphinxext-opengraph",
+    "sphinxcontrib.bibtex",
     "scanpydoc[typehints,theme]>=0.9.4",
     "dask",
     "pytest",

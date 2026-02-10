@@ -28,7 +28,7 @@ jobs:
       stable-dev: ${{ steps.get-envs.outputs.stable-dev }}
       prerelease: ${{ steps.get-envs.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           filter: blob:none
           fetch-depth: 0
@@ -74,7 +74,7 @@ jobs:
       ENV_NAME: ${{ matrix.env.name }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           filter: blob:none
@@ -131,7 +131,7 @@ jobs:
       ENV_NAME: ${{ matrix.env.name }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           filter: blob:none
