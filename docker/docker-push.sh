@@ -3,7 +3,7 @@ set -euxo pipefail
 
 docker_account=scverse
 rapids_version=26.02
-grep -v -- '- rapids-singlecell' conda/rsc_rapids_${rapids_version}.yml > rsc_rapids.yml
+grep -v -- '- rapids-singlecell' conda/rsc_rapids_${rapids_version}_cuda13.yml > rsc_rapids.yml
 docker build -t rapids-singlecell-deps:latest -f docker/Dockerfile.deps .
 rm rsc_rapids.yml
 docker build -t rapids-singlecell:latest -f docker/Dockerfile .
