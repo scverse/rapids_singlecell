@@ -63,7 +63,7 @@ def scrublet(
     random_state: AnyRandom = 0,
 ) -> AnnData | None:
     """\
-    Predict doublets using Scrublet.
+    Predict doublets using Scrublet :cite:p:`Wolock2019`.
 
     Predict cell doublets using a nearest-neighbor classifier of observed
     transcriptomes and simulated doublets. Works best if the input is a raw

@@ -18,7 +18,9 @@ def draw_graph(
     adata: AnnData, *, init_pos: str | bool | None = None, max_iter: int = 500
 ) -> None:
     """
-    Force-directed graph drawing with cugraph's implementation of Force Atlas 2.
+    Force-directed graph drawing :cite:p:`Fruchterman1991,Jacomy2014`.
+
+    Uses cugraph's implementation of Force Atlas 2.
     This is a reimplementation of scanpys function for GPU compute.
 
     Parameters

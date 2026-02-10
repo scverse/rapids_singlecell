@@ -24,7 +24,7 @@ def harmony_integrate(
     **kwargs,
 ) -> None:
     """
-    Integrate different experiments using the Harmony algorithm.
+    Integrate different experiments using the Harmony algorithm :cite:p:`Korsunsky2019`.
 
     This GPU-accelerated implementation is based on the `harmony-pytorch` package.
     As Harmony works by adjusting the

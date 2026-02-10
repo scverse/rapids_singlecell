@@ -27,8 +27,10 @@ def calculate_qc_metrics(
     layer: str = None,
 ) -> None:
     """\
-    Calculates basic qc Parameters. Calculates number of genes per cell (n_genes) and number of counts per cell (n_counts).
-    Loosely based on calculate_qc_metrics from scanpy [Wolf et al. 2018]. Updates :attr:`~anndata.AnnData.obs` and :attr:`~anndata.AnnData.var`  with columns with qc data.
+    Calculates basic qc Parameters :cite:p:`McCarthy2017`.
+
+    Calculates number of genes per cell (n_genes) and number of counts per cell (n_counts).
+    Loosely based on calculate_qc_metrics from scanpy :cite:p:`Wolf2018`. Updates :attr:`~anndata.AnnData.obs` and :attr:`~anndata.AnnData.var`  with columns with qc data.
 
     Parameters
     ----------
