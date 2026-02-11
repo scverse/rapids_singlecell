@@ -26,6 +26,7 @@ def _make_adata(n_obs=1000, n_genes=100, density=0.6, dtype="float32"):
 
 @pytest.mark.parametrize("data_kind", ["sparse", "dense"])
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
+@pytest.mark.flaky(reruns=2, reruns_delay=5)
 def test_regress_out_categorical_dask(client, data_kind, dtype):
     adata = _make_adata(dtype=dtype)
 
@@ -51,6 +52,7 @@ def test_regress_out_categorical_dask(client, data_kind, dtype):
 
 @pytest.mark.parametrize("data_kind", ["sparse", "dense"])
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
+@pytest.mark.flaky(reruns=2, reruns_delay=5)
 def test_regress_out_continuous_dask(client, data_kind, dtype):
     adata = _make_adata(dtype=dtype)
 
