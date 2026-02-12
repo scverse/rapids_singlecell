@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import cupy as cp
+import dask.array as da
 import numpy as np
 import pytest
+from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
 from scanpy.datasets import pbmc3k_processed
 from scipy import sparse
 
 import rapids_singlecell as rsc
+from rapids_singlecell.preprocessing._utils import _check_gpu_X
 from testing.rapids_singlecell._helper import (
     as_dense_cupy_dask_array,
     as_sparse_cupy_dask_array,
@@ -57,3 +60,22 @@ def test_get_anndata(client, data_kind):
         )
     else:
         cp.testing.assert_array_equal(adata.X, dask_adata.X.compute())
+
+
+@pytest.mark.parametrize("data_kind", ["sparse", "dense"])
+def test_check_gpu_X_column_chunked(data_kind):
+    """Test that _check_gpu_X rejects Dask arrays chunked along the column axis."""
+    X = np.random.default_rng(0).random((100, 50))
+    if data_kind == "sparse":
+        X_gpu = cp_csr_matrix(sparse.csr_matrix(X))
+    else:
+        X_gpu = cp.array(X)
+
+    # Column-chunked: should raise
+    col_chunked = da.from_array(X_gpu, chunks=(50, 25))
+    with pytest.raises(ValueError, match="chunked along the column axis"):
+        _check_gpu_X(col_chunked, allow_dask=True)
+
+    # Row-chunked only: should pass
+    row_chunked = da.from_array(X_gpu, chunks=(50, 50))
+    _check_gpu_X(row_chunked, allow_dask=True)

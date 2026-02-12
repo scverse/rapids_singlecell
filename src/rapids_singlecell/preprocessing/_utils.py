@@ -296,6 +296,11 @@ def _check_nonnegative_integers(X):
 def _check_gpu_X(X, *, require_cf=False, allow_dask=False, allow_csc=True):
     if isinstance(X, DaskArray):
         if allow_dask:
+            if X.ndim >= 2 and len(X.chunks[1]) > 1:
+                raise ValueError(
+                    "The DaskArray is chunked along the column axis."
+                    "Rapids-singlecell requires each row to be contained in a single block."
+                )
             return _check_gpu_X(X._meta, allow_csc=False)
         else:
             raise TypeError(
