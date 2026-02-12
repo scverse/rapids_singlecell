@@ -1,0 +1,534 @@
+from __future__ import annotations
+
+import warnings
+from typing import TYPE_CHECKING
+
+import cupy as cp
+import cupyx.scipy.sparse as cpsp
+import cupyx.scipy.special as cupyx_special
+import numpy as np
+
+from ._kernels._wilcoxon_binned import (
+    _get_csc_hist_kernel,
+    _get_csr_hist_kernel,
+    _get_dense_hist_kernel,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+    from numpy.typing import NDArray
+
+    from ._core import _RankGenes
+
+_BINNED_DEFAULT_CHUNK = 500
+_CHUNK_BUDGET = 30_000_000  # default chunk * n_groups * n_bins (500 * 60 * 1000)
+
+
+def wilcoxon_binned(
+    rg: _RankGenes,
+    *,
+    n_bins: int = 1000,
+    chunk_size: int | None = None,
+) -> Generator[tuple[int, NDArray, NDArray], None, None]:
+    """Histogram-based approximate Wilcoxon rank-sum test.
+
+    Approximates ranks by discretizing expression values into ``n_bins``
+    fixed-width bins, then computing rank sums from cumulative histogram
+    counts. This avoids the O(n log n) per-gene sort required by exact
+    Wilcoxon, making it feasible for datasets with millions of cells and
+    compatible with Dask arrays.
+
+    Supports both one-vs-rest (``reference='rest'``) and one-vs-one
+    (``reference='<group>'``) comparisons.
+
+    Parameters
+    ----------
+    rg
+        The _RankGenes instance.
+    n_bins
+        Number of histogram bins. Higher = better approximation.
+    chunk_size
+        Genes processed per GPU batch. Controls peak GPU memory.
+    """
+    rg._basic_stats()
+    X = rg.X
+    ireference = rg.ireference
+
+    n_groups = len(rg.groups_order)
+    n_cells, n_genes = X.shape
+    group_sizes = rg.groups_masks_obs.sum(axis=1).astype(np.int64)
+
+    # Build integer group codes per cell.
+    # Cells not in any selected group get code = n_groups (dummy group)
+    # so they still contribute to total bin counts for correct midranks.
+    group_codes_np = np.full(n_cells, n_groups, dtype=np.int32)
+    for idx, mask in enumerate(rg.groups_masks_obs):
+        group_codes_np[mask] = idx
+
+    has_unselected = (group_codes_np == n_groups).any()
+
+    # For one-vs-one with a group subset, only the selected groups' cells
+    # matter for pairwise rankings. Filter X down so kernels don't iterate
+    # over irrelevant cells.
+    if ireference is not None and has_unselected:
+        from dask.array import Array as DaskArray
+
+        if not isinstance(X, DaskArray):
+            selected = group_codes_np != n_groups
+            X = X[selected]
+            group_codes_np = group_codes_np[selected]
+            n_cells = int(group_sizes.sum())
+            has_unselected = False
+
+    if has_unselected:
+        n_dummy = n_cells - group_sizes.sum()
+        n_cells_per_group_hist = np.concatenate([group_sizes, np.array([n_dummy])])
+    else:
+        n_cells_per_group_hist = group_sizes
+
+    # Warn for small groups
+    if ireference is not None:
+        n_ref = int(group_sizes[ireference])
+        for gi, (name, size) in enumerate(
+            zip(rg.groups_order, group_sizes, strict=False)
+        ):
+            if gi == ireference:
+                continue
+            if size <= 25 or n_ref <= 25:
+                warnings.warn(
+                    f"Group {name} has size {size} (reference {n_ref}); normal "
+                    "approximation of the Wilcoxon statistic may be inaccurate.",
+                    RuntimeWarning,
+                    stacklevel=4,
+                )
+    else:
+        for name, size in zip(rg.groups_order, group_sizes, strict=False):
+            rest = n_cells - size
+            if size <= 25 or rest <= 25:
+                warnings.warn(
+                    f"Group {name} has size {size} (rest {rest}); normal "
+                    "approximation of the Wilcoxon statistic may be inaccurate.",
+                    RuntimeWarning,
+                    stacklevel=4,
+                )
+
+    # Prepare GPU arrays and bin arithmetic
+    # Bin range [0, 15] covers log1p-normalized data; values above 15 are
+    # extremely rare.
+    n_bins_total = n_bins + 1
+    bin_low = 0.0
+    inv_bin_width = float(n_bins / 15.0)
+
+    group_codes = cp.asarray(group_codes_np, dtype=cp.int32)
+    n_cells_per_group = cp.asarray(group_sizes, dtype=cp.int64)
+    n_cells_per_group_hist_gpu = cp.asarray(n_cells_per_group_hist, dtype=cp.int64)
+
+    batch_kwargs = {
+        "group_codes": group_codes,
+        "n_groups": n_groups,
+        "n_bins": n_bins,
+        "bin_low": bin_low,
+        "inv_bin_width": inv_bin_width,
+        "n_bins_total": n_bins_total,
+        "n_cells_per_group": n_cells_per_group,
+        "n_cells_total": n_cells,
+        "n_cells_per_group_hist": n_cells_per_group_hist_gpu,
+        "total_counts_from_all": has_unselected,
+        "ireference": ireference,
+    }
+
+    # Pre-allocate output
+    all_z = np.empty((n_groups, n_genes), dtype=np.float64)
+    all_p = np.empty((n_groups, n_genes), dtype=np.float64)
+
+    if chunk_size is not None:
+        chunk_width = chunk_size
+    else:
+        # Scale chunk inversely with n_groups * n_bins to keep histogram memory stable.
+        # Budget = 500 genes * 30 groups * 1000 bins = 15M.
+        chunk_width = _CHUNK_BUDGET // max(n_groups * n_bins, 1)
+    print(f"Chunk width: {chunk_width}")
+    for start in range(0, n_genes, chunk_width):
+        stop = min(start + chunk_width, n_genes)
+
+        z_b, p_b = process_gene_batch(X, start=start, stop=stop, **batch_kwargs)
+
+        all_z[:, start:stop] = cp.asnumpy(z_b)
+        all_p[:, start:stop] = cp.asnumpy(p_b)
+
+    # LFC computed from exact means in _basic_stats() via compute_statistics
+    for group_index in range(n_groups):
+        if group_index == ireference:
+            continue
+        yield group_index, all_z[group_index], all_p[group_index]
+
+
+def process_gene_batch(
+    X,
+    *,
+    start: int,
+    stop: int,
+    group_codes: cp.ndarray,
+    n_groups: int,
+    n_bins: int,
+    bin_low: float,
+    inv_bin_width: float,
+    n_bins_total: int,
+    n_cells_per_group: cp.ndarray,
+    n_cells_total: int,
+    n_cells_per_group_hist: cp.ndarray,
+    total_counts_from_all: bool,
+    ireference: int | None = None,
+) -> tuple[cp.ndarray, cp.ndarray]:
+    """Process one gene batch, dispatching on Dask vs in-memory."""
+    from dask.array import Array as DaskArray
+
+    n_hist_groups = n_cells_per_group_hist.shape[0]
+    n_genes_batch = stop - start
+
+    if isinstance(X, DaskArray):
+        hist = _process_dask(
+            X,
+            start=start,
+            stop=stop,
+            group_codes=group_codes,
+            n_hist_groups=n_hist_groups,
+            n_genes_batch=n_genes_batch,
+            n_bins=n_bins,
+            bin_low=bin_low,
+            inv_bin_width=inv_bin_width,
+            n_bins_total=n_bins_total,
+        )
+    elif isinstance(X, cpsp.csc_matrix):
+        hist = _launch_csc(
+            X,
+            group_codes,
+            n_hist_groups,
+            start=start,
+            stop=stop,
+            n_bins=n_bins,
+            bin_low=bin_low,
+            inv_bin_width=inv_bin_width,
+        )
+    elif isinstance(X, cpsp.csr_matrix):
+        hist = _launch_csr(
+            X,
+            group_codes,
+            n_hist_groups,
+            start=start,
+            stop=stop,
+            n_bins=n_bins,
+            bin_low=bin_low,
+            inv_bin_width=inv_bin_width,
+        )
+    else:
+        hist = _launch_dense(
+            X[:, start:stop],
+            group_codes,
+            n_hist_groups,
+            n_bins=n_bins,
+            bin_low=bin_low,
+            inv_bin_width=inv_bin_width,
+        )
+
+    # If there's a dummy group, compute total_counts before slicing
+    tc = None
+    if total_counts_from_all:
+        tc = hist.sum(axis=1)
+        hist = hist[:, :n_groups, :]
+
+    if ireference is not None:
+        return _compute_stats_vs_ref(hist, ireference, n_cells_per_group)
+    return _compute_stats(hist, n_cells_per_group, n_cells_total, total_counts=tc)
+
+
+def _compute_stats(
+    hist: cp.ndarray,
+    n_cells_per_group: cp.ndarray,
+    n_cells_total: int,
+    *,
+    total_counts: cp.ndarray | None = None,
+) -> tuple[cp.ndarray, cp.ndarray]:
+    """Compute Wilcoxon z-scores from histograms."""
+    n = cp.int64(n_cells_total)
+
+    if total_counts is None:
+        total_counts = hist.sum(axis=1)
+    cum_before = cp.cumsum(total_counts, axis=1) - total_counts
+    midranks = (cum_before + (total_counts + 1) / 2.0).astype(cp.float32)
+
+    hist_f = hist.astype(cp.float32)
+    rank_sums = cp.einsum("igb,ib->ig", hist_f, midranks).T
+
+    n_g = n_cells_per_group[:, None].astype(cp.float64)
+    n_rest = n - n_g
+    expected = n_g * (n + 1) / 2.0
+    variance = n_g * n_rest * (n + 1) / 12.0
+
+    z_scores = (rank_sums - expected) / cp.sqrt(variance)
+    cp.nan_to_num(z_scores, copy=False)
+    pvals = 2.0 * (1.0 - cupyx_special.ndtr(cp.abs(z_scores)))
+
+    return z_scores, pvals
+
+
+def _compute_stats_vs_ref(
+    hist: cp.ndarray,
+    ireference: int,
+    n_cells_per_group: cp.ndarray,
+) -> tuple[cp.ndarray, cp.ndarray]:
+    """Compute Wilcoxon z-scores for each group vs a specific reference.
+
+    For each group *g*, midranks are derived from the pairwise histogram
+    ``hist_g + hist_ref`` so that only cells in the compared pair
+    contribute to the ranking.
+    """
+    # hist shape: (n_genes, n_groups, n_bins_total)
+    ref_hist = hist[:, ireference : ireference + 1, :]  # (n_genes, 1, n_bins_total)
+
+    # Pairwise total per group: counts from group_i + reference
+    pair_total = hist + ref_hist  # broadcasts over group axis
+
+    # Midranks from pairwise cumulative counts
+    cum_before = cp.cumsum(pair_total, axis=2) - pair_total
+    midranks = (cum_before + (pair_total + 1) / 2.0).astype(cp.float32)
+
+    # Rank sum: for each group sum hist[gene, g, bin] * midranks[gene, g, bin]
+    hist_f = hist.astype(cp.float32)
+    rank_sums = cp.einsum("igb,igb->ig", hist_f, midranks).T  # (n_groups, n_genes)
+
+    n_g = n_cells_per_group[:, None].astype(cp.float64)
+    n_r = cp.float64(n_cells_per_group[ireference])
+    n_combined = n_g + n_r
+
+    expected = n_g * (n_combined + 1) / 2.0
+    variance = n_g * n_r * (n_combined + 1) / 12.0
+
+    z_scores = (rank_sums - expected) / cp.sqrt(variance)
+    cp.nan_to_num(z_scores, copy=False)
+    pvals = 2.0 * (1.0 - cupyx_special.ndtr(cp.abs(z_scores)))
+
+    return z_scores, pvals
+
+
+def _launch_dense(
+    chunk: cp.ndarray,
+    group_codes: cp.ndarray,
+    n_groups: int,
+    *,
+    n_bins: int,
+    bin_low: float,
+    inv_bin_width: float,
+) -> cp.ndarray:
+    n_cells, n_genes = chunk.shape
+    chunk_f = cp.asfortranarray(chunk)
+    hist = cp.zeros((n_genes, n_groups, n_bins + 1), dtype=cp.uint32)
+
+    _get_dense_hist_kernel(chunk_f.dtype)(
+        (n_genes,),
+        (256,),
+        (
+            chunk_f,
+            group_codes,
+            hist,
+            n_cells,
+            n_genes,
+            n_groups,
+            n_bins,
+            cp.float64(bin_low),
+            cp.float64(inv_bin_width),
+        ),
+    )
+    return hist
+
+
+def _launch_csc(
+    X: cpsp.csc_matrix,
+    group_codes: cp.ndarray,
+    n_groups: int,
+    *,
+    start: int,
+    stop: int,
+    n_bins: int,
+    bin_low: float,
+    inv_bin_width: float,
+) -> cp.ndarray:
+    """Read directly from CSC indptr via gene_start — no column slicing."""
+    n_cells = X.shape[0]
+    n_genes = stop - start
+    hist = cp.zeros((n_genes, n_groups, n_bins + 1), dtype=cp.uint32)
+
+    _get_csc_hist_kernel(X.data.dtype)(
+        (n_genes,),
+        (256,),
+        (
+            X.data,
+            X.indices,
+            X.indptr,
+            group_codes,
+            hist,
+            n_cells,
+            n_genes,
+            n_groups,
+            n_bins,
+            cp.float64(bin_low),
+            cp.float64(inv_bin_width),
+            cp.int32(start),
+        ),
+    )
+    return hist
+
+
+def _launch_csr(
+    X: cpsp.csr_matrix,
+    group_codes: cp.ndarray,
+    n_groups: int,
+    *,
+    start: int,
+    stop: int,
+    n_bins: int,
+    bin_low: float,
+    inv_bin_width: float,
+) -> cp.ndarray:
+    """Read directly from CSR via gene_start — no column slicing."""
+    n_cells = X.shape[0]
+    n_genes = stop - start
+    hist = cp.zeros((n_genes, n_groups, n_bins + 1), dtype=cp.uint32)
+
+    _get_csr_hist_kernel(X.data.dtype)(
+        (n_cells,),
+        (256,),
+        (
+            X.data,
+            X.indices,
+            X.indptr,
+            group_codes,
+            hist,
+            n_cells,
+            n_genes,
+            n_groups,
+            n_bins,
+            cp.float64(bin_low),
+            cp.float64(inv_bin_width),
+            cp.int32(start),
+        ),
+    )
+    return hist
+
+
+def _process_dask(
+    X,
+    *,
+    start: int,
+    stop: int,
+    group_codes: cp.ndarray,
+    n_hist_groups: int,
+    n_genes_batch: int,
+    n_bins: int,
+    bin_low: float,
+    inv_bin_width: float,
+    n_bins_total: int,
+) -> cp.ndarray:
+    """Build histogram from a Dask array.
+
+    Receives the full (unsliced) Dask array and column range
+    ``[start, stop)``.  Column selection happens inside each block
+    handler on the materialised CuPy chunk, keeping the Dask graph
+    simple (no column-slice node per gene batch).
+    """
+    import dask.array as da
+
+    bin_low_d = cp.float64(bin_low)
+    inv_bw_d = cp.float64(inv_bin_width)
+
+    gene_start = cp.int32(start)
+
+    if cpsp.issparse(X._meta):
+        kernel = _get_csr_hist_kernel(X.dtype)
+        kernel.compile()
+
+        def _hist_block(block, block_info=None):
+            if block_info is None or block_info == []:
+                return cp.zeros(
+                    (1, n_genes_batch, n_hist_groups, n_bins_total), dtype=cp.uint32
+                )
+            row_start = block_info[0]["array-location"][0][0]
+            row_stop = block_info[0]["array-location"][0][1]
+            codes_chunk = group_codes[row_start:row_stop]
+
+            blk = (
+                block if isinstance(block, cpsp.csr_matrix) else cpsp.csr_matrix(block)
+            )
+            hist = cp.zeros(
+                (n_genes_batch, n_hist_groups, n_bins_total), dtype=cp.uint32
+            )
+            kernel(
+                (blk.shape[0],),
+                (256,),
+                (
+                    blk.data,
+                    blk.indices,
+                    blk.indptr,
+                    codes_chunk,
+                    hist,
+                    blk.shape[0],
+                    n_genes_batch,
+                    n_hist_groups,
+                    n_bins,
+                    bin_low_d,
+                    inv_bw_d,
+                    gene_start,
+                ),
+            )
+            return hist[None, ...]
+
+    elif isinstance(X._meta, cp.ndarray):
+        kernel = _get_dense_hist_kernel(X.dtype)
+        kernel.compile()
+
+        def _hist_block(block, block_info=None):
+            if block_info is None or block_info == []:
+                return cp.zeros(
+                    (1, n_genes_batch, n_hist_groups, n_bins_total), dtype=cp.uint32
+                )
+            row_start = block_info[0]["array-location"][0][0]
+            row_stop = block_info[0]["array-location"][0][1]
+            codes_chunk = group_codes[row_start:row_stop]
+
+            blk = cp.asfortranarray(cp.asarray(block[:, start:stop]))
+            hist = cp.zeros(
+                (n_genes_batch, n_hist_groups, n_bins_total), dtype=cp.uint32
+            )
+            kernel(
+                (n_genes_batch,),
+                (256,),
+                (
+                    blk,
+                    codes_chunk,
+                    hist,
+                    blk.shape[0],
+                    n_genes_batch,
+                    n_hist_groups,
+                    n_bins,
+                    bin_low_d,
+                    inv_bw_d,
+                ),
+            )
+            return hist[None, ...]
+
+    partial_hists = da.map_blocks(
+        _hist_block,
+        X,
+        dtype=cp.uint32,
+        meta=cp.empty((), dtype=cp.uint32),
+        drop_axis=1,
+        new_axis=[1, 2, 3],
+        chunks=(
+            tuple(1 for _ in X.chunks[0]),
+            (n_genes_batch,),
+            (n_hist_groups,),
+            (n_bins_total,),
+        ),
+    )
+    return partial_hists.sum(axis=0).compute()
