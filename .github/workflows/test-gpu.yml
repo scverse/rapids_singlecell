@@ -1,25 +1,44 @@
 name: GPU Tests
 
 on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
   push:
     branches: [main]
-  pull_request:
-    types:
-      - labeled
-      - opened
-      - synchronize
 # Cancel the job if new commits are pushed
 # https://stackoverflow.com/questions/66335225/how-to-cancel-previous-runs-in-the-pr-when-you-push-new-commitsupdate-the-curre
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.issue.number || github.ref }}
   cancel-in-progress: true
 jobs:
   check:
     runs-on: ubuntu-latest
+    # Skip issue_comment unless it's /test-gpu on a PR
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/test-gpu'))
+    permissions:
+      pull-requests: write
     steps:
-      - uses: flying-sheep/check@v1
-        with:
-          success: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-gpu-ci') }}
+      - name: Check permissions
+        if: github.event_name == 'issue_comment' || github.event_name == 'workflow_dispatch'
+        run: |
+          PERMISSION=$(gh api repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission --jq '.permission')
+          if [[ "$PERMISSION" != "admin" && "$PERMISSION" != "maintain" ]]; then
+            echo "::error::Only maintainers or admins can trigger this workflow. Your permission: $PERMISSION"
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: React to comment
+        if: github.event_name == 'issue_comment'
+        run: |
+          gh api repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions -f content=rocket
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
   get-envs:
     runs-on: ubuntu-latest
@@ -32,6 +51,7 @@ jobs:
         with:
           filter: blob:none
           fetch-depth: 0
+          ref: ${{ github.event_name == 'issue_comment' && format('refs/pull/{0}/head', github.event.issue.number) || '' }}
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: false
@@ -78,6 +98,7 @@ jobs:
         with:
           fetch-depth: 0
           filter: blob:none
+          ref: ${{ github.event_name == 'issue_comment' && format('refs/pull/{0}/head', github.event.issue.number) || '' }}
 
       - uses: astral-sh/setup-uv@v6
         with:
@@ -135,6 +156,7 @@ jobs:
         with:
           fetch-depth: 0
           filter: blob:none
+          ref: ${{ github.event_name == 'issue_comment' && format('refs/pull/{0}/head', github.event.issue.number) || '' }}
 
       - uses: astral-sh/setup-uv@v6
         with:
@@ -145,16 +167,6 @@ jobs:
 
       - name: Run tests
         run: uvx hatch run ${{ matrix.env.name }}:run -v --color=yes
-
-  remove-label:
-    name: Remove 'run-gpu-ci' Label
-    runs-on: ubuntu-latest
-    if: ${{ always() && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-gpu-ci') }}
-    steps:
-      - uses: actions-ecosystem/action-remove-labels@v1
-        with:
-          labels: 'run-gpu-ci'
-          github_token: ${{ secrets.GITHUB_TOKEN }}
 
   stable-dev-green:
     name: CI-Pass
