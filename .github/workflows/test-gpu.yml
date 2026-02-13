@@ -218,7 +218,7 @@ jobs:
 
   stable-dev-green:
     name: CI-Pass
-    if: always()
+    if: always() && github.event_name != 'pull_request'
     needs:
       - check
       - get-envs
@@ -255,7 +255,7 @@ jobs:
 
   all-green:
     name: All Tests Green
-    if: always()
+    if: always() && github.event_name != 'pull_request'
     needs:
       - check
       - get-envs
