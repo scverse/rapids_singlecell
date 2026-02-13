@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import cupy as cp
 import cupyx.scipy.sparse as cpsp
@@ -16,6 +16,71 @@ if TYPE_CHECKING:
 EPS = 1e-9
 WARP_SIZE = 32
 MAX_THREADS_PER_BLOCK = 512
+
+
+def _select_groups(
+    labels: pd.Series,
+    selected: list | None,
+) -> tuple[NDArray, NDArray[np.int32], NDArray[np.int64]]:
+    """Build integer group codes from a categorical Series.
+
+    Parameters
+    ----------
+    labels
+        Categorical Series (from ``adata.obs[groupby]``).
+    selected
+        Group names to keep, or ``None`` for all groups.
+        Must already include the reference group if applicable.
+
+    Returns
+    -------
+    groups_order
+        Selected group names as a numpy array.
+    group_codes
+        Per-cell int32 codes: ``0..n_groups-1`` for selected cells,
+        ``n_groups`` (sentinel) for unselected cells.
+    group_sizes
+        Number of cells per selected group (int64).
+    """
+    all_categories = labels.cat.categories
+
+    if selected is None:
+        selected = list(all_categories)
+    elif len(selected) > 2:
+        # Sort to match original category order (scanpy convention)
+        cat_order = {str(c): i for i, c in enumerate(all_categories)}
+        selected.sort(key=lambda x: cat_order.get(str(x), len(all_categories)))
+
+    n_groups = len(selected)
+    groups_order = np.array(selected)
+
+    # Map original category index → selected group index
+    str_to_sel = {str(name): idx for idx, name in enumerate(selected)}
+    orig_to_sel: dict[int, int] = {}
+    for cat_idx, cat_name in enumerate(all_categories):
+        sel_idx = str_to_sel.get(str(cat_name))
+        if sel_idx is not None:
+            orig_to_sel[cat_idx] = sel_idx
+
+    orig_codes = labels.cat.codes.to_numpy()
+    group_codes = np.full(len(orig_codes), n_groups, dtype=np.int32)
+    for orig_idx, sel_idx in orig_to_sel.items():
+        group_codes[orig_codes == orig_idx] = sel_idx
+
+    group_sizes = np.bincount(group_codes, minlength=n_groups + 1)[:n_groups].astype(
+        np.int64
+    )
+
+    # Validate singlet groups
+    invalid_groups = {str(selected[i]) for i in range(n_groups) if group_sizes[i] < 2}
+    if invalid_groups:
+        msg = (
+            f"Could not calculate statistics for groups {', '.join(invalid_groups)} "
+            "since they only contain one sample."
+        )
+        raise ValueError(msg)
+
+    return groups_order, group_codes, group_sizes
 
 
 def _round_up_to_warp(n: int) -> int:
@@ -35,42 +100,6 @@ def _select_top_n(scores: NDArray, n_top: int) -> NDArray:
     partial_indices = np.argsort(scores[partition])[::-1]
     global_indices = reference_indices[partition][partial_indices]
     return global_indices
-
-
-def _select_groups(
-    labels: pd.Series, groups_order_subset: Literal["all"] | list[str] = "all"
-) -> tuple[NDArray, NDArray[np.bool_]]:
-    """Select groups and create masks for each group."""
-    groups_order = labels.cat.categories
-    groups_masks = np.zeros(
-        (len(labels.cat.categories), len(labels.cat.codes)), dtype=bool
-    )
-    for iname, name in enumerate(labels.cat.categories):
-        if labels.cat.categories[iname] in labels.cat.codes:
-            mask = labels.cat.categories[iname] == labels.cat.codes
-        else:
-            mask = iname == labels.cat.codes
-        groups_masks[iname] = mask.values
-    groups_ids = list(range(len(groups_order)))
-    if groups_order_subset != "all":
-        groups_ids = []
-        for name in groups_order_subset:
-            groups_ids.append(np.where(name == labels.cat.categories)[0])
-        if len(groups_ids) == 0:
-            groups_ids = np.where(
-                np.isin(
-                    np.arange(len(labels.cat.categories)).astype(str),
-                    np.array(groups_order_subset),
-                )
-            )[0]
-        groups_ids = [groups_id.item() for groups_id in groups_ids]
-        if len(groups_ids) > 2:
-            groups_ids = np.sort(groups_ids)
-        groups_masks = groups_masks[groups_ids]
-        groups_order_subset = labels.cat.categories[groups_ids].to_numpy()
-    else:
-        groups_order_subset = groups_order.to_numpy()
-    return groups_order_subset, groups_masks
 
 
 def _choose_chunk_size(requested: int | None) -> int:

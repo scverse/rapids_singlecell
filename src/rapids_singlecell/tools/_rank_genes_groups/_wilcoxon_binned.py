@@ -17,8 +17,6 @@ from ._kernels._wilcoxon_binned import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-
     from numpy.typing import NDArray
 
     from ._core import _RankGenes
@@ -73,7 +71,7 @@ def wilcoxon_binned(
     n_bins: int | None = None,
     chunk_size: int | None = None,
     bin_range: Literal["log1p", "auto"] | None = None,
-) -> Generator[tuple[int, NDArray, NDArray], None, None]:
+) -> list[tuple[int, NDArray, NDArray]]:
     """Histogram-based approximate Wilcoxon rank-sum test.
 
     Approximates ranks by discretizing expression values into ``n_bins``
@@ -136,18 +134,14 @@ def wilcoxon_binned(
 
     n_groups = len(rg.groups_order)
     n_cells, n_genes = X.shape
-    group_sizes = rg.groups_masks_obs.sum(axis=1).astype(np.int64)
+    group_sizes = rg.group_sizes
 
-    # Build integer group codes per cell.
-    # Cells not in any selected group get code = n_groups. For vs-rest
-    # they are binned into a dummy group so they contribute to total
-    # counts for correct midranks. For vs-reference they are skipped
-    # by the kernel bounds guard (grp >= n_groups).
-    group_codes_np = np.full(n_cells, n_groups, dtype=np.int32)
-    for idx, mask in enumerate(rg.groups_masks_obs):
-        group_codes_np[mask] = idx
-
-    has_unselected = (group_codes_np == n_groups).any()
+    # group_codes: 0..n_groups-1 for selected cells, n_groups (sentinel)
+    # for unselected. For vs-rest, unselected cells are binned into a
+    # dummy group so they contribute to total counts for correct midranks.
+    # For vs-reference, the kernel bounds guard (grp >= n_groups) skips them.
+    group_codes_np = rg.group_codes
+    has_unselected = bool(np.any(group_codes_np == n_groups))
 
     # For one-vs-one with a group subset, only the selected groups' cells
     # matter for pairwise rankings. Filter X down so kernels don't iterate
@@ -248,10 +242,11 @@ def wilcoxon_binned(
         all_p[:, start:stop] = cp.asnumpy(p_b)
 
     # LFC computed from exact means in _basic_stats() via compute_statistics
-    for group_index in range(n_groups):
-        if group_index == ireference:
-            continue
-        yield group_index, all_z[group_index], all_p[group_index]
+    return [
+        (group_index, all_z[group_index], all_p[group_index])
+        for group_index in range(n_groups)
+        if group_index != ireference
+    ]
 
 
 def process_gene_batch(

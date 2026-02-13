@@ -14,8 +14,6 @@ from ._kernels._wilcoxon import _rank_kernel, _tie_correction_kernel
 from ._utils import _choose_chunk_size, _get_column_block, _round_up_to_warp
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-
     from numpy.typing import NDArray
 
     from ._core import _RankGenes
@@ -95,17 +93,17 @@ def _tie_correction(sorted_vals: cp.ndarray) -> cp.ndarray:
 
 def wilcoxon(
     rg: _RankGenes, *, tie_correct: bool, chunk_size: int | None = None
-) -> Generator[tuple[int, NDArray, NDArray], None, None]:
+) -> list[tuple[int, NDArray, NDArray]]:
     """Compute Wilcoxon rank-sum test statistics."""
     # Compute basic stats - uses Aggregate if on GPU, else defers to chunks
     rg._basic_stats()
     X = rg.X
     n_cells, n_total_genes = rg.X.shape
-    group_sizes = rg.groups_masks_obs.sum(axis=1).astype(np.int64)
+    group_sizes = rg.group_sizes
 
     if rg.ireference is not None:
         # Compare each group against a specific reference group
-        yield from _wilcoxon_with_reference(
+        return _wilcoxon_with_reference(
             rg,
             X,
             n_total_genes,
@@ -113,17 +111,16 @@ def wilcoxon(
             tie_correct=tie_correct,
             chunk_size=chunk_size,
         )
-    else:
-        # Compare each group against "rest" (all other cells)
-        yield from _wilcoxon_vs_rest(
-            rg,
-            X,
-            n_cells,
-            n_total_genes,
-            group_sizes,
-            tie_correct=tie_correct,
-            chunk_size=chunk_size,
-        )
+    # Compare each group against "rest" (all other cells)
+    return _wilcoxon_vs_rest(
+        rg,
+        X,
+        n_cells,
+        n_total_genes,
+        group_sizes,
+        tie_correct=tie_correct,
+        chunk_size=chunk_size,
+    )
 
 
 def _wilcoxon_vs_rest(
@@ -135,10 +132,12 @@ def _wilcoxon_vs_rest(
     *,
     tie_correct: bool,
     chunk_size: int | None,
-) -> Generator[tuple[int, NDArray, NDArray], None, None]:
+) -> list[tuple[int, NDArray, NDArray]]:
     """Wilcoxon test: each group vs rest of cells."""
+    n_groups = len(rg.groups_order)
+
     # Warn for small groups
-    for name, size in zip(rg.groups_order, group_sizes, strict=False):
+    for name, size in zip(rg.groups_order, group_sizes, strict=True):
         rest = n_cells - size
         if size <= 25 or rest <= 25:
             warnings.warn(
@@ -148,15 +147,20 @@ def _wilcoxon_vs_rest(
                 stacklevel=4,
             )
 
-    group_matrix = cp.asarray(rg.groups_masks_obs.T, dtype=cp.float64)
+    # Build one-hot indicator matrix from group codes
+    codes_gpu = cp.asarray(rg.group_codes, dtype=cp.int64)
+    group_matrix = cp.zeros((n_cells, n_groups), dtype=cp.float64)
+    valid_idx = cp.where(codes_gpu < n_groups)[0]
+    group_matrix[valid_idx, codes_gpu[valid_idx]] = 1.0
+
     group_sizes_dev = cp.asarray(group_sizes, dtype=cp.float64)
     rest_sizes = n_cells - group_sizes_dev
 
     chunk_width = _choose_chunk_size(chunk_size)
 
     # Accumulate results per group
-    all_scores = {i: [] for i in range(len(rg.groups_order))}
-    all_pvals = {i: [] for i in range(len(rg.groups_order))}
+    all_scores: dict[int, list] = {i: [] for i in range(n_groups)}
+    all_pvals: dict[int, list] = {i: [] for i in range(n_groups)}
 
     # One-time CSR->CSC via fast parallel Numba kernel; _get_column_block
     # then uses direct indptr pointer copy for each chunk.
@@ -198,15 +202,15 @@ def _wilcoxon_vs_rest(
         z_host = z.get()
         p_host = p_values.get()
 
-        for idx in range(len(rg.groups_order)):
+        for idx in range(n_groups):
             all_scores[idx].append(z_host[idx])
             all_pvals[idx].append(p_host[idx])
 
-    # Yield results per group
-    for group_index in range(len(rg.groups_order)):
-        scores = np.concatenate(all_scores[group_index])
-        pvals = np.concatenate(all_pvals[group_index])
-        yield group_index, scores, pvals
+    # Collect results per group
+    return [
+        (gi, np.concatenate(all_scores[gi]), np.concatenate(all_pvals[gi]))
+        for gi in range(n_groups)
+    ]
 
 
 def _wilcoxon_with_reference(
@@ -217,12 +221,15 @@ def _wilcoxon_with_reference(
     *,
     tie_correct: bool,
     chunk_size: int | None,
-) -> Generator[tuple[int, NDArray, NDArray], None, None]:
+) -> list[tuple[int, NDArray, NDArray]]:
     """Wilcoxon test: each group vs a specific reference group."""
-    mask_ref = rg.groups_masks_obs[rg.ireference]
+    codes = rg.group_codes
     n_ref = int(group_sizes[rg.ireference])
+    mask_ref = codes == rg.ireference
 
-    for group_index, mask_obs in enumerate(rg.groups_masks_obs):
+    results: list[tuple[int, NDArray, NDArray]] = []
+
+    for group_index in range(len(rg.groups_order)):
         if group_index == rg.ireference:
             continue
 
@@ -240,6 +247,7 @@ def _wilcoxon_with_reference(
             )
 
         # Combined mask: group + reference
+        mask_obs = codes == group_index
         mask_combined = mask_obs | mask_ref
 
         # Subset matrix ONCE before chunking (10x faster than filtering each chunk)
@@ -253,10 +261,8 @@ def _wilcoxon_with_reference(
                 else X_subset.tocsc()
             )
 
-        # Create mask for group within the combined array (constant across chunks)
-        combined_indices = np.where(mask_combined)[0]
-        group_indices_in_combined = np.isin(combined_indices, np.where(mask_obs)[0])
-        group_mask_gpu = cp.asarray(group_indices_in_combined)
+        # Within the combined array, True = group cell, False = reference cell
+        group_mask_gpu = cp.asarray(mask_obs[mask_combined])
 
         chunk_width = _choose_chunk_size(chunk_size)
 
@@ -304,4 +310,6 @@ def _wilcoxon_with_reference(
             scores[start:stop] = z.get()
             pvals[start:stop] = p_values.get()
 
-        yield group_index, scores, pvals
+        results.append((group_index, scores, pvals))
+
+    return results
