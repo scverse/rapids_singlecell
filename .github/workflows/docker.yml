@@ -33,8 +33,11 @@ jobs:
     if: >-
       github.event_name != 'issue_comment' ||
       (github.event.issue.pull_request && startsWith(github.event.comment.body, '/test-docker'))
+    outputs:
+      head-sha: ${{ steps.get-sha.outputs.sha }}
     permissions:
       pull-requests: write
+      statuses: write
     steps:
       - name: Check permissions
         if: github.event_name == 'issue_comment' || github.event_name == 'workflow_dispatch'
@@ -54,6 +57,26 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Get PR head SHA
+        id: get-sha
+        if: github.event_name == 'issue_comment'
+        run: |
+          SHA=$(gh pr view ${{ github.event.issue.number }} --repo ${{ github.repository }} --json headRefOid -q .headRefOid)
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set pending status on PR
+        if: github.event_name == 'issue_comment'
+        run: |
+          gh api repos/${{ github.repository }}/statuses/${{ steps.get-sha.outputs.sha }} \
+            -f state=pending \
+            -f context="Docker Build" \
+            -f description="Docker build running..." \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build_docker_images:
     needs: check
     strategy:
@@ -67,6 +90,7 @@ jobs:
       packages: write
       contents: read
       attestations: write
+      statuses: write
     steps:
       - name: Free disk space
         run: |
@@ -155,3 +179,25 @@ jobs:
         run: |
           docker image ls -a
         shell: bash
+
+      - name: Set success status on PR
+        if: success() && github.event_name == 'issue_comment'
+        run: |
+          gh api repos/${{ github.repository }}/statuses/${{ needs.check.outputs.head-sha }} \
+            -f state=success \
+            -f context="Docker Build" \
+            -f description="Docker build passed" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set failure status on PR
+        if: failure() && github.event_name == 'issue_comment'
+        run: |
+          gh api repos/${{ github.repository }}/statuses/${{ needs.check.outputs.head-sha }} \
+            -f state=failure \
+            -f context="Docker Build" \
+            -f description="Docker build failed" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
