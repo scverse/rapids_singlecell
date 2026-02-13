@@ -296,7 +296,9 @@ class TestRankingKernel:
     @pytest.fixture
     def average_ranks(self):
         """Import the ranking function."""
-        from rapids_singlecell.tools._rank_gene_groups import _average_ranks
+        from rapids_singlecell.tools._rank_genes_groups._wilcoxon import (
+            _average_ranks,
+        )
 
         return _average_ranks
 
@@ -370,7 +372,7 @@ class TestTieCorrectionKernel:
     @pytest.fixture
     def tie_correction(self):
         """Import the tie correction function and ranking function."""
-        from rapids_singlecell.tools._rank_gene_groups import (
+        from rapids_singlecell.tools._rank_genes_groups._wilcoxon import (
             _average_ranks,
             _tie_correction,
         )
