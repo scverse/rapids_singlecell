@@ -5,6 +5,9 @@
 name: Docker
 
 on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
   push:
     branches: [main]
     paths:
@@ -23,7 +26,36 @@ on:
     types: [published]
 
 jobs:
+  check:
+    name: Check trigger
+    runs-on: ubuntu-latest
+    # Skip issue_comment unless it's /test-docker on a PR
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/test-docker'))
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Check permissions
+        if: github.event_name == 'issue_comment' || github.event_name == 'workflow_dispatch'
+        run: |
+          PERMISSION=$(gh api repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission --jq '.permission')
+          if [[ "$PERMISSION" != "admin" && "$PERMISSION" != "maintain" ]]; then
+            echo "::error::Only maintainers or admins can trigger this workflow. Your permission: $PERMISSION"
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: React to comment
+        if: github.event_name == 'issue_comment'
+        run: |
+          gh api repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions -f content=rocket
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build_docker_images:
+    needs: check
     strategy:
       matrix:
         RAPIDS_VER:
@@ -50,6 +82,8 @@ jobs:
 
       - name: Check out the repo
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'issue_comment' && format('refs/pull/{0}/head', github.event.issue.number) || '' }}
 
       - name: Log in to the Container registry
         uses: docker/login-action@v3
