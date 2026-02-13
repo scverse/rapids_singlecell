@@ -6,42 +6,18 @@ on:
     types: [created]
   push:
     branches: [main]
-  pull_request:
-    types:
-      - opened
-      - synchronize
 # Cancel the job if new commits are pushed
 # https://stackoverflow.com/questions/66335225/how-to-cancel-previous-runs-in-the-pr-when-you-push-new-commitsupdate-the-curre
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.issue.number || github.ref }}
   cancel-in-progress: true
 jobs:
-  set-pending:
-    name: GPU Tests Pending
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      statuses: write
-    steps:
-      - name: Set pending status on PR
-        run: |
-          for context in "CI-Pass" "All Tests Green"; do
-            gh api repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha }} \
-              -f state=pending \
-              -f context="$context" \
-              -f description="Waiting for /test-gpu command..."
-          done
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   check:
     runs-on: ubuntu-latest
-    # Skip pull_request (handled by set-pending) and issue_comment unless /test-gpu
+    # Skip issue_comment unless it's /test-gpu on a PR
     if: >-
-      github.event_name != 'pull_request' && (
-        github.event_name != 'issue_comment' ||
-        (github.event.issue.pull_request && startsWith(github.event.comment.body, '/test-gpu'))
-      )
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/test-gpu'))
     outputs:
       head-sha: ${{ steps.get-sha.outputs.sha }}
     permissions:
@@ -218,7 +194,7 @@ jobs:
 
   stable-dev-green:
     name: CI-Pass
-    if: always() && github.event_name != 'pull_request'
+    if: always()
     needs:
       - check
       - get-envs
@@ -255,7 +231,7 @@ jobs:
 
   all-green:
     name: All Tests Green
-    if: always() && github.event_name != 'pull_request'
+    if: always()
     needs:
       - check
       - get-envs
