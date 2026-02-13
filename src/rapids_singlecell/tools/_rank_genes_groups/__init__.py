@@ -161,6 +161,16 @@ def rank_genes_groups(
         )
         raise ValueError(msg)
 
+    if tie_correct and method == "wilcoxon_binned":
+        import warnings
+
+        warnings.warn(
+            "tie_correct is not supported for 'wilcoxon_binned' and will be ignored. "
+            "Tie correction is only available for the exact 'wilcoxon' method.",
+            UserWarning,
+            stacklevel=2,
+        )
+
     if key_added is None:
         key_added = "rank_genes_groups"
 

@@ -55,7 +55,10 @@ def _data_range(X) -> tuple[float, float]:
                 chunks=((1,) * len(X.chunks[0]),),
             )
             return 0.0, float(maxes.max().compute())
-        return float(X.min()), float(X.max())
+        import dask
+
+        lo, hi = dask.compute(X.min(), X.max())
+        return float(lo), float(hi)
     if cpsp.issparse(X):
         if X.nnz == 0:
             return 0.0, 0.0
@@ -118,7 +121,10 @@ def wilcoxon_binned(
         n_bins = _DASK_N_BINS if isinstance(X, DaskArray) else _DEFAULT_N_BINS
 
     # Sparse kernels assume non-negative data (pre-fill+correct pattern).
-    # Dense kernel handles any range. For Dask sparse we assume non-negative.
+    # Dense kernel handles any range.
+    # NOTE: Dask sparse is not validated here because checking .data.min()
+    # would require materializing all blocks. The sparse histogram kernels
+    # will silently produce incorrect results for negative Dask sparse data.
     if not isinstance(X, DaskArray) and cpsp.issparse(X) and X.nnz > 0:
         if float(X.data.min()) < 0:
             msg = (
@@ -225,7 +231,7 @@ def wilcoxon_binned(
         chunk_width = chunk_size
     else:
         # Scale chunk inversely with n_groups * n_bins to keep histogram memory stable.
-        # Budget = 500 genes * 30 groups * 1000 bins = 15M.
+        # Budget = 500 genes * 60 groups * 1000 bins = 30M.
         chunk_width = _CHUNK_BUDGET // max(n_groups * n_bins, 1)
     for start in range(0, n_genes, chunk_width):
         stop = min(start + chunk_width, n_genes)
@@ -528,7 +534,7 @@ def _process_dask(
 
     gene_start = cp.int32(start)
 
-    if cpsp.issparse(X._meta):
+    if cpsp.isspmatrix_csr(X._meta):
         # Uses CSR kernel; blocks that arrive as CSC are converted below.
         kernel = _get_csr_hist_kernel(X.dtype)
         kernel.compile()
@@ -541,23 +547,19 @@ def _process_dask(
             row_start = block_info[0]["array-location"][0][0]
             row_stop = block_info[0]["array-location"][0][1]
             codes_chunk = group_codes[row_start:row_stop]
-
-            blk = (
-                block if isinstance(block, cpsp.csr_matrix) else cpsp.csr_matrix(block)
-            )
             hist = cp.zeros(
                 (n_genes_batch, n_hist_groups, n_bins_total), dtype=cp.uint32
             )
             kernel(
-                (blk.shape[0],),
+                (block.shape[0],),
                 (256,),
                 (
-                    blk.data,
-                    blk.indices,
-                    blk.indptr,
+                    block.data,
+                    block.indices,
+                    block.indptr,
                     codes_chunk,
                     hist,
-                    blk.shape[0],
+                    block.shape[0],
                     n_genes_batch,
                     n_hist_groups,
                     n_bins,

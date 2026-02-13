@@ -22,13 +22,8 @@ _fused_dense_hist_kernel = r"""
         double val = (double)col[c];
         int grp    = gcodes[c];
 
-        int bin;
-        if (val == 0.0) {
-            bin = 0;
-        } else {
-            int raw = (int)((val - bin_low) * inv_bin_width);
-            bin = min(max(raw, 0), n_bins - 1) + 1;
-        }
+        int raw = (int)((val - bin_low) * inv_bin_width);
+        int bin = min(max(raw, 0), n_bins - 1) + 1;
         atomicAdd(&dst[grp * nbt + bin], 1u);
     }
 }

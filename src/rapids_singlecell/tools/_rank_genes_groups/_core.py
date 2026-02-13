@@ -66,7 +66,7 @@ class _RankGenes:
 
         # Validate singlet groups
         invalid_groups = set()
-        for name, mask in zip(self.groups_order, self.groups_masks_obs, strict=False):
+        for name, mask in zip(self.groups_order, self.groups_masks_obs, strict=True):
             if np.count_nonzero(mask) < 2:
                 invalid_groups.add(str(name))
         if invalid_groups:
