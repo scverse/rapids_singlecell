@@ -1,22 +1,3 @@
-"""CUDA histogram kernels for wilcoxon_binned.
-
-All kernels use n_bins+1 bins where bin 0 is reserved for zeros and
-bins 1..n_bins form a regular grid over [bin_low, bin_high].
-
-Dense kernel:  Each value is binned inside the kernel. Zero values go
-               to bin 0, nonzero values to bins 1..n_bins.
-
-Sparse CSR kernel:
-               Only iterates over stored (nonzero) entries and places them
-               into bins 1..n_bins. Bin 0 (zero counts) is computed
-               outside the kernel as group_size - sum(bins 1..n_bins).
-
-Sparse CSC kernel:
-               Same as CSR but one block per gene (column).
-
-Both sparse kernels require non-negative input data.
-"""
-
 from __future__ import annotations
 
 from cuml.common.kernel_utils import cuda_kernel_factory
