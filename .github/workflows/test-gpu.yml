@@ -6,14 +6,10 @@ on:
     types: [created]
   push:
     branches: [main]
-  pull_request:
-    types:
-      - opened
-      - synchronize
 # Cancel the job if new commits are pushed
 # https://stackoverflow.com/questions/66335225/how-to-cancel-previous-runs-in-the-pr-when-you-push-new-commitsupdate-the-curre
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.issue.number || github.ref }}
   cancel-in-progress: true
 jobs:
   check:
@@ -43,10 +39,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: flying-sheep/check@v1
-        if: github.event_name == 'pull_request'
-        with:
-          success: false
 
   get-envs:
     runs-on: ubuntu-latest
