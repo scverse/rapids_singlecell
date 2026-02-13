@@ -22,6 +22,8 @@ _fused_dense_hist_kernel = r"""
         double val = (double)col[c];
         int grp    = gcodes[c];
 
+        if (grp >= n_groups) continue;  // skip unselected cells
+
         int raw = (int)((val - bin_low) * inv_bin_width);
         int bin = min(max(raw, 0), n_bins - 1) + 1;
         atomicAdd(&dst[grp * nbt + bin], 1u);
@@ -47,6 +49,8 @@ _fused_csr_hist_kernel = r"""
     if (row >= n_cells) return;
 
     const int grp       = gcodes[row];
+    if (grp >= n_groups) return;  // skip unselected cells
+
     const int nbt       = n_bins + 1;
     const int row_start = indptr[row];
     const int row_end   = indptr[row + 1];
@@ -103,6 +107,8 @@ _fused_csc_hist_kernel = r"""
 
         const int row = indices[i];
         const int grp = gcodes[row];
+        if (grp >= n_groups) continue;  // skip unselected cells
+
         int raw = (int)((val - bin_low) * inv_bin_width);
         int bin = min(max(raw, 0), n_bins - 1) + 1;
 

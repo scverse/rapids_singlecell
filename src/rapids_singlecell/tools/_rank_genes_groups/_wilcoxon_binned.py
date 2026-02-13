@@ -139,8 +139,10 @@ def wilcoxon_binned(
     group_sizes = rg.groups_masks_obs.sum(axis=1).astype(np.int64)
 
     # Build integer group codes per cell.
-    # Cells not in any selected group get code = n_groups (dummy group)
-    # so they still contribute to total bin counts for correct midranks.
+    # Cells not in any selected group get code = n_groups. For vs-rest
+    # they are binned into a dummy group so they contribute to total
+    # counts for correct midranks. For vs-reference they are skipped
+    # by the kernel bounds guard (grp >= n_groups).
     group_codes_np = np.full(n_cells, n_groups, dtype=np.int32)
     for idx, mask in enumerate(rg.groups_masks_obs):
         group_codes_np[mask] = idx
@@ -149,9 +151,13 @@ def wilcoxon_binned(
 
     # For one-vs-one with a group subset, only the selected groups' cells
     # matter for pairwise rankings. Filter X down so kernels don't iterate
-    # over irrelevant cells.
+    # over irrelevant cells. For Dask we can't cheaply subset rows, but
+    # the kernel bounds guard (grp >= n_groups → skip) avoids wasted
+    # atomicAdds, so we just clear the flag without allocating a dummy group.
     if ireference is not None and has_unselected:
-        if not isinstance(X, DaskArray):
+        if isinstance(X, DaskArray):
+            has_unselected = False
+        else:
             selected = group_codes_np != n_groups
             X = X[selected]
             group_codes_np = group_codes_np[selected]
@@ -322,7 +328,8 @@ def process_gene_batch(
     if is_sparse:
         _fill_sparse_zero_bin(hist, n_cells_per_group_hist)
 
-    # If there's a dummy group, compute total_counts before slicing
+    # If there's a dummy group (vs-rest with unselected cells),
+    # compute total_counts from all groups before slicing off the dummy.
     tc = None
     if total_counts_from_all:
         tc = hist.sum(axis=1)

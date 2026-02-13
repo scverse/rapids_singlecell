@@ -91,7 +91,10 @@ def rank_genes_groups(
         p-value correction method. Used only for `'t-test'`,
         `'t-test_overestim_var'`, `'wilcoxon'`, and `'wilcoxon_binned'`.
     tie_correct
-        Use tie correction for `'wilcoxon'` scores.
+        Use tie correction for `'wilcoxon'` scores. Not applicable to
+        `'wilcoxon_binned'` — binning already discretizes values into shared
+        bins, so ties are artifacts of the approximation rather than true
+        ties in the data.
     layer
         Key from `adata.layers` whose value will be used to perform tests on.
     chunk_size
@@ -160,16 +163,6 @@ def rank_genes_groups(
             f"'wilcoxon', 'wilcoxon_binned'. Got {method!r}."
         )
         raise ValueError(msg)
-
-    if tie_correct and method == "wilcoxon_binned":
-        import warnings
-
-        warnings.warn(
-            "tie_correct is not supported for 'wilcoxon_binned' and will be ignored. "
-            "Tie correction is only available for the exact 'wilcoxon' method.",
-            UserWarning,
-            stacklevel=2,
-        )
 
     if key_added is None:
         key_added = "rank_genes_groups"
