@@ -63,6 +63,7 @@ def test_wilcoxon_binned_dask(client, data_kind):
         adata,
         groupby=groupby,
         method="wilcoxon_binned",
+        n_bins=1000,
         bin_range="log1p",
         use_raw=False,
     )
@@ -70,6 +71,7 @@ def test_wilcoxon_binned_dask(client, data_kind):
         dask_data,
         groupby=groupby,
         method="wilcoxon_binned",
+        n_bins=1000,
         bin_range="log1p",
         use_raw=False,
     )
@@ -91,6 +93,7 @@ def test_wilcoxon_binned_dask_group_subset(client, data_kind):
         groupby=groupby,
         method="wilcoxon_binned",
         groups=groups,
+        n_bins=1000,
         bin_range="log1p",
         use_raw=False,
     )
@@ -99,6 +102,7 @@ def test_wilcoxon_binned_dask_group_subset(client, data_kind):
         groupby=groupby,
         method="wilcoxon_binned",
         groups=groups,
+        n_bins=1000,
         bin_range="log1p",
         use_raw=False,
     )
@@ -118,6 +122,7 @@ def test_wilcoxon_binned_dask_reference(client, data_kind):
         groupby=groupby,
         method="wilcoxon_binned",
         reference=reference,
+        n_bins=1000,
         bin_range="log1p",
         use_raw=False,
     )
@@ -126,6 +131,7 @@ def test_wilcoxon_binned_dask_reference(client, data_kind):
         groupby=groupby,
         method="wilcoxon_binned",
         reference=reference,
+        n_bins=1000,
         bin_range="log1p",
         use_raw=False,
     )
