@@ -41,7 +41,8 @@ def rank_genes_groups(
     layer: str | None = None,
     chunk_size: int | None = None,
     pre_load: bool = False,
-    n_bins: int = 1000,
+    n_bins: int | None = None,
+    bin_range: Literal["log1p", "auto"] | None = None,
     **kwds,
 ) -> None:
     """
@@ -89,19 +90,30 @@ def rank_genes_groups(
         (faster for large datasets, supports Dask arrays),
         `'logreg'` uses logistic regression.
     corr_method
-        p-value correction method. Used only for `'t-test'`, `'t-test_overestim_var'`, and `'wilcoxon'`.
+        p-value correction method. Used only for `'t-test'`,
+        `'t-test_overestim_var'`, `'wilcoxon'`, and `'wilcoxon_binned'`.
     tie_correct
         Use tie correction for `'wilcoxon'` scores.
     layer
         Key from `adata.layers` whose value will be used to perform tests on.
     chunk_size
         Number of genes to process at once for `'wilcoxon'` and
-        `'wilcoxon_binned'`. Default is 128 for `'wilcoxon'`, 500 for `'wilcoxon_binned'`.
+        `'wilcoxon_binned'`. Default is 128 for `'wilcoxon'`. For
+        `'wilcoxon_binned'` the default is sized dynamically based on
+        ``n_groups`` and ``n_bins`` to keep histogram memory stable.
     pre_load
         Pre-load the data into GPU memory. Used only for `'wilcoxon'`.
     n_bins
         Number of histogram bins for `'wilcoxon_binned'`. Higher values give
-        a better approximation at slightly increased cost. Default is 1000.
+        a better approximation at slightly increased cost. Default is 1000
+        for in-memory arrays and 200 for Dask arrays.
+    bin_range
+        How to determine the histogram bin range for `'wilcoxon_binned'`.
+        ``None`` (default) uses ``'auto'`` for in-memory arrays and
+        ``'log1p'`` for Dask arrays (to avoid a costly data scan).
+        ``'log1p'`` uses a fixed [0, 15] range suitable for most log1p-normalized data.
+        ``'auto'`` computes the actual data range. Use this for z-scored
+        or unnormalized data.
     **kwds
         Additional arguments passed to the method. For `'logreg'`, these are
         passed to :class:`cuml.linear_model.LogisticRegression`.
@@ -121,9 +133,11 @@ def rank_genes_groups(
         Structured array to be indexed by group id storing the log2
         fold change for each gene for each group.
     `adata.uns['rank_genes_groups' | key_added]['pvals']`
-        p-values. Only for `'t-test'`, `'t-test_overestim_var'`, and `'wilcoxon'`.
+        p-values. Only for `'t-test'`, `'t-test_overestim_var'`,
+        `'wilcoxon'`, and `'wilcoxon_binned'`.
     `adata.uns['rank_genes_groups' | key_added]['pvals_adj']`
-        Corrected p-values. Only for `'t-test'`, `'t-test_overestim_var'`, and `'wilcoxon'`.
+        Corrected p-values. Only for `'t-test'`, `'t-test_overestim_var'`,
+        `'wilcoxon'`, and `'wilcoxon_binned'`.
     `adata.uns['rank_genes_groups' | key_added]['pts']`
         Fraction of cells expressing genes per group. Only if `pts=True`.
     `adata.uns['rank_genes_groups' | key_added]['pts_rest']`
@@ -191,6 +205,7 @@ def rank_genes_groups(
         tie_correct=tie_correct,
         chunk_size=chunk_size,
         n_bins=n_bins,
+        bin_range=bin_range,
         **kwds,
     )
 

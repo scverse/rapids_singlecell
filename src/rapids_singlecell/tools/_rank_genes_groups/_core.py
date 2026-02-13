@@ -110,6 +110,7 @@ class _RankGenes:
             self.ireference = np.where(self.groups_order == reference)[0][0]
 
         # Set up expm1 function based on log base
+        self.is_log1p = "log1p" in adata.uns
         base = adata.uns.get("log1p", {}).get("base")
         if base is not None:
             self.expm1_func = lambda x: np.expm1(x * np.log(base))
@@ -131,6 +132,7 @@ class _RankGenes:
 
         self.stats: pd.DataFrame | None = None
         self._compute_stats_in_chunks: bool = False
+        self._ref_chunk_computed: set[int] = set()
 
     def _init_stats_arrays(self, n_genes: int) -> None:
         """Pre-allocate stats arrays before chunk loop."""
@@ -159,14 +161,7 @@ class _RankGenes:
         """Compute means, vars, and pts for each group.
 
         If data is already on GPU, uses Aggregate for fast single-pass computation.
-        Otherwise, sets flag for chunk-based computation during wilcoxon loop,
-        unless force_compute is True (needed for t-test).
-
-        Parameters
-        ----------
-        force_compute
-            If True, compute stats immediately even if data is not on GPU.
-            Required for t-test methods that don't use chunked computation.
+        Otherwise, sets flag for chunk-based computation during the wilcoxon loop.
         """
         n_genes = self.X.shape[1]
         n_groups = len(self.groups_order)
@@ -358,7 +353,8 @@ class _RankGenes:
             self.pts[group_index, start:stop] = cp.asnumpy(group_nnz / n_group)
 
         # Reference stats (only compute once, on first non-reference group)
-        if self.means[self.ireference, start] == 0:  # Not yet computed
+        if start not in self._ref_chunk_computed:
+            self._ref_chunk_computed.add(start)
             ref_data = block[~group_mask_gpu]
             ref_mean = ref_data.mean(axis=0)
             self.means[self.ireference, start:stop] = cp.asnumpy(ref_mean)
@@ -390,13 +386,16 @@ class _RankGenes:
     def wilcoxon_binned(
         self,
         *,
-        n_bins: int = 1000,
+        n_bins: int | None = None,
         chunk_size: int | None = None,
+        bin_range: Literal["log1p", "auto"] | None = None,
     ) -> Generator[tuple[int, NDArray, NDArray], None, None]:
         """Histogram-based approximate Wilcoxon rank-sum test (one-vs-rest)."""
         from ._wilcoxon_binned import wilcoxon_binned
 
-        return wilcoxon_binned(self, n_bins=n_bins, chunk_size=chunk_size)
+        return wilcoxon_binned(
+            self, n_bins=n_bins, chunk_size=chunk_size, bin_range=bin_range
+        )
 
     def logreg(self, **kwds) -> Generator[tuple[int, NDArray, None], None, None]:
         """Compute logistic regression scores."""
@@ -413,7 +412,8 @@ class _RankGenes:
         rankby_abs: bool = False,
         tie_correct: bool = False,
         chunk_size: int | None = None,
-        n_bins: int = 1000,
+        n_bins: int | None = None,
+        bin_range: Literal["log1p", "auto"] | None = None,
         **kwds,
     ) -> None:
         """Compute statistics for all groups."""
@@ -434,7 +434,7 @@ class _RankGenes:
             )
         elif method == "wilcoxon_binned":
             generate_test_results = self.wilcoxon_binned(
-                n_bins=n_bins, chunk_size=chunk_size
+                n_bins=n_bins, chunk_size=chunk_size, bin_range=bin_range
             )
         elif method == "logreg":
             generate_test_results = self.logreg(**kwds)

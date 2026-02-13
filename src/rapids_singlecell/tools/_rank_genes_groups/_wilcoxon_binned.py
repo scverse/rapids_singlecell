@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
 import cupyx.scipy.sparse as cpsp
 import cupyx.scipy.special as cupyx_special
 import numpy as np
+
+from rapids_singlecell._compat import DaskArray
 
 from ._kernels._wilcoxon_binned import (
     _get_csc_hist_kernel,
@@ -21,15 +23,53 @@ if TYPE_CHECKING:
 
     from ._core import _RankGenes
 
-_BINNED_DEFAULT_CHUNK = 500
 _CHUNK_BUDGET = 30_000_000  # default chunk * n_groups * n_bins (500 * 60 * 1000)
+_LOG1P_RANGE = (0.0, 15.0)  # covers log1p(x) for raw counts up to ~3.3 million
+
+
+def _fill_sparse_zero_bin(hist: cp.ndarray, group_counts: cp.ndarray) -> None:
+    """Fill bin 0 with zero counts for sparse histograms (in-place).
+
+    Sparse kernels only populate bins 1..n_bins (nonzero values).
+    Bin 0 = group_size - sum(bins 1..n_bins) for each gene/group.
+    """
+    nonzero_per_group = hist.sum(axis=2)  # (n_genes, n_groups)
+    hist[:, :, 0] = group_counts[None, :].astype(cp.uint32) - nonzero_per_group
+
+
+def _data_range(X) -> tuple[float, float]:
+    """Compute (min, max) of the data, including implicit zeros for sparse."""
+    if isinstance(X, DaskArray):
+        if cpsp.issparse(X._meta):
+            # Dask sparse: min is 0 (structural zeros).
+            # Compute max per block, then global max.
+            def _block_max(block, block_info=None):
+                if block.nnz > 0:
+                    return block.data.max().reshape(1)
+                return cp.zeros(1, dtype=block.dtype)
+
+            maxes = X.map_blocks(
+                _block_max,
+                dtype=X.dtype,
+                drop_axis=1,
+                chunks=((1,) * len(X.chunks[0]),),
+            )
+            return 0.0, float(maxes.max().compute())
+        return float(X.min()), float(X.max())
+    if cpsp.issparse(X):
+        if X.nnz == 0:
+            return 0.0, 0.0
+        d = X.data
+        return min(0.0, float(d.min())), float(d.max())
+    return float(X.min()), float(X.max())
 
 
 def wilcoxon_binned(
     rg: _RankGenes,
     *,
-    n_bins: int = 1000,
+    n_bins: int | None = None,
     chunk_size: int | None = None,
+    bin_range: Literal["log1p", "auto"] | None = None,
 ) -> Generator[tuple[int, NDArray, NDArray], None, None]:
     """Histogram-based approximate Wilcoxon rank-sum test.
 
@@ -48,12 +88,45 @@ def wilcoxon_binned(
         The _RankGenes instance.
     n_bins
         Number of histogram bins. Higher = better approximation.
+        Default is 1000 for in-memory arrays and 200 for Dask arrays.
     chunk_size
         Genes processed per GPU batch. Controls peak GPU memory.
+    bin_range
+        How to determine the histogram bin range.
+        ``None`` (default) uses ``'auto'`` for in-memory arrays and
+        ``'log1p'`` for Dask arrays (to avoid a costly data scan).
+        ``'log1p'`` uses a fixed [0, 15] range suitable for
+        log1p-normalized data.
+        ``'auto'`` computes the actual (min, max) of the data. Use this
+        for z-scored or unnormalized data.
     """
+    if not rg.is_log1p:
+        warnings.warn(
+            "wilcoxon_binned expects log-normalized data "
+            "(adata.uns['log1p'] not found).",
+            UserWarning,
+            stacklevel=4,
+        )
+
     rg._basic_stats()
     X = rg.X
     ireference = rg.ireference
+
+    _DASK_N_BINS = 200
+    _DEFAULT_N_BINS = 1000
+    if n_bins is None:
+        n_bins = _DASK_N_BINS if isinstance(X, DaskArray) else _DEFAULT_N_BINS
+
+    # Sparse kernels assume non-negative data (pre-fill+correct pattern).
+    # Dense kernel handles any range. For Dask sparse we assume non-negative.
+    if not isinstance(X, DaskArray) and cpsp.issparse(X) and X.nnz > 0:
+        if float(X.data.min()) < 0:
+            msg = (
+                "Sparse input contains negative values. The sparse histogram "
+                "kernels assume non-negative data. Convert to dense or use "
+                "bin_range='auto' with a dense array."
+            )
+            raise ValueError(msg)
 
     n_groups = len(rg.groups_order)
     n_cells, n_genes = X.shape
@@ -72,8 +145,6 @@ def wilcoxon_binned(
     # matter for pairwise rankings. Filter X down so kernels don't iterate
     # over irrelevant cells.
     if ireference is not None and has_unselected:
-        from dask.array import Array as DaskArray
-
         if not isinstance(X, DaskArray):
             selected = group_codes_np != n_groups
             X = X[selected]
@@ -91,7 +162,7 @@ def wilcoxon_binned(
     if ireference is not None:
         n_ref = int(group_sizes[ireference])
         for gi, (name, size) in enumerate(
-            zip(rg.groups_order, group_sizes, strict=False)
+            zip(rg.groups_order, group_sizes, strict=True)
         ):
             if gi == ireference:
                 continue
@@ -103,7 +174,7 @@ def wilcoxon_binned(
                     stacklevel=4,
                 )
     else:
-        for name, size in zip(rg.groups_order, group_sizes, strict=False):
+        for name, size in zip(rg.groups_order, group_sizes, strict=True):
             rest = n_cells - size
             if size <= 25 or rest <= 25:
                 warnings.warn(
@@ -113,12 +184,20 @@ def wilcoxon_binned(
                     stacklevel=4,
                 )
 
+    # Resolve bin range: None → auto for in-memory, log1p for Dask
+    if bin_range is None:
+        bin_range = "log1p" if isinstance(X, DaskArray) else "auto"
+
     # Prepare GPU arrays and bin arithmetic
-    # Bin range [0, 15] covers log1p-normalized data; values above 15 are
-    # extremely rare.
+    if bin_range == "auto":
+        bin_low, bin_high = _data_range(X)
+    else:
+        bin_low, bin_high = _LOG1P_RANGE
     n_bins_total = n_bins + 1
-    bin_low = 0.0
-    inv_bin_width = float(n_bins / 15.0)
+    bin_width = bin_high - bin_low
+    if bin_width <= 0:
+        bin_width = 1.0
+    inv_bin_width = float(n_bins / bin_width)
 
     group_codes = cp.asarray(group_codes_np, dtype=cp.int32)
     n_cells_per_group = cp.asarray(group_sizes, dtype=cp.int64)
@@ -148,7 +227,6 @@ def wilcoxon_binned(
         # Scale chunk inversely with n_groups * n_bins to keep histogram memory stable.
         # Budget = 500 genes * 30 groups * 1000 bins = 15M.
         chunk_width = _CHUNK_BUDGET // max(n_groups * n_bins, 1)
-    print(f"Chunk width: {chunk_width}")
     for start in range(0, n_genes, chunk_width):
         stop = min(start + chunk_width, n_genes)
 
@@ -182,11 +260,10 @@ def process_gene_batch(
     ireference: int | None = None,
 ) -> tuple[cp.ndarray, cp.ndarray]:
     """Process one gene batch, dispatching on Dask vs in-memory."""
-    from dask.array import Array as DaskArray
-
     n_hist_groups = n_cells_per_group_hist.shape[0]
     n_genes_batch = stop - start
 
+    is_sparse = False
     if isinstance(X, DaskArray):
         hist = _process_dask(
             X,
@@ -200,6 +277,7 @@ def process_gene_batch(
             inv_bin_width=inv_bin_width,
             n_bins_total=n_bins_total,
         )
+        is_sparse = cpsp.issparse(X._meta)
     elif isinstance(X, cpsp.csc_matrix):
         hist = _launch_csc(
             X,
@@ -211,6 +289,7 @@ def process_gene_batch(
             bin_low=bin_low,
             inv_bin_width=inv_bin_width,
         )
+        is_sparse = True
     elif isinstance(X, cpsp.csr_matrix):
         hist = _launch_csr(
             X,
@@ -222,6 +301,7 @@ def process_gene_batch(
             bin_low=bin_low,
             inv_bin_width=inv_bin_width,
         )
+        is_sparse = True
     else:
         hist = _launch_dense(
             X[:, start:stop],
@@ -231,6 +311,10 @@ def process_gene_batch(
             bin_low=bin_low,
             inv_bin_width=inv_bin_width,
         )
+
+    # Sparse kernels only fill bins 1..n_bins; compute bin 0 (zeros) here.
+    if is_sparse:
+        _fill_sparse_zero_bin(hist, n_cells_per_group_hist)
 
     # If there's a dummy group, compute total_counts before slicing
     tc = None
@@ -256,9 +340,9 @@ def _compute_stats(
     if total_counts is None:
         total_counts = hist.sum(axis=1)
     cum_before = cp.cumsum(total_counts, axis=1) - total_counts
-    midranks = (cum_before + (total_counts + 1) / 2.0).astype(cp.float32)
+    midranks = cum_before + (total_counts + 1) / 2.0
 
-    hist_f = hist.astype(cp.float32)
+    hist_f = hist.astype(cp.float64)
     rank_sums = cp.einsum("igb,ib->ig", hist_f, midranks).T
 
     n_g = n_cells_per_group[:, None].astype(cp.float64)
@@ -292,10 +376,10 @@ def _compute_stats_vs_ref(
 
     # Midranks from pairwise cumulative counts
     cum_before = cp.cumsum(pair_total, axis=2) - pair_total
-    midranks = (cum_before + (pair_total + 1) / 2.0).astype(cp.float32)
+    midranks = cum_before + (pair_total + 1) / 2.0
 
     # Rank sum: for each group sum hist[gene, g, bin] * midranks[gene, g, bin]
-    hist_f = hist.astype(cp.float32)
+    hist_f = hist.astype(cp.float64)
     rank_sums = cp.einsum("igb,igb->ig", hist_f, midranks).T  # (n_groups, n_genes)
 
     n_g = n_cells_per_group[:, None].astype(cp.float64)
@@ -445,6 +529,7 @@ def _process_dask(
     gene_start = cp.int32(start)
 
     if cpsp.issparse(X._meta):
+        # Uses CSR kernel; blocks that arrive as CSC are converted below.
         kernel = _get_csr_hist_kernel(X.dtype)
         kernel.compile()
 

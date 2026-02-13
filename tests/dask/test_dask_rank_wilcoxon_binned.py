@@ -60,10 +60,18 @@ def test_wilcoxon_binned_dask(client, data_kind):
     adata, dask_data, groupby = _setup_data(data_kind)
 
     rsc.tl.rank_genes_groups(
-        adata, groupby=groupby, method="wilcoxon_binned", use_raw=False
+        adata,
+        groupby=groupby,
+        method="wilcoxon_binned",
+        bin_range="log1p",
+        use_raw=False,
     )
     rsc.tl.rank_genes_groups(
-        dask_data, groupby=groupby, method="wilcoxon_binned", use_raw=False
+        dask_data,
+        groupby=groupby,
+        method="wilcoxon_binned",
+        bin_range="log1p",
+        use_raw=False,
     )
 
     _compare_scores(adata.uns["rank_genes_groups"], dask_data.uns["rank_genes_groups"])
@@ -83,6 +91,7 @@ def test_wilcoxon_binned_dask_group_subset(client, data_kind):
         groupby=groupby,
         method="wilcoxon_binned",
         groups=groups,
+        bin_range="log1p",
         use_raw=False,
     )
     rsc.tl.rank_genes_groups(
@@ -90,6 +99,7 @@ def test_wilcoxon_binned_dask_group_subset(client, data_kind):
         groupby=groupby,
         method="wilcoxon_binned",
         groups=groups,
+        bin_range="log1p",
         use_raw=False,
     )
 
@@ -108,6 +118,7 @@ def test_wilcoxon_binned_dask_reference(client, data_kind):
         groupby=groupby,
         method="wilcoxon_binned",
         reference=reference,
+        bin_range="log1p",
         use_raw=False,
     )
     rsc.tl.rank_genes_groups(
@@ -115,6 +126,7 @@ def test_wilcoxon_binned_dask_reference(client, data_kind):
         groupby=groupby,
         method="wilcoxon_binned",
         reference=reference,
+        bin_range="log1p",
         use_raw=False,
     )
 

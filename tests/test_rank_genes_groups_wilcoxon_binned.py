@@ -363,3 +363,79 @@ class TestWilcoxonBinnedEdgeCases:
             pvals = np.asarray(result["pvals"][group], dtype=float)
             assert np.all(pvals >= 0)
             assert np.all(pvals <= 1)
+
+    def test_sparse_negative_values_raises(self, adata_blobs):
+        """Sparse input with negative values should raise ValueError."""
+        import cupy as cp
+        import cupyx.scipy.sparse as cpsp
+
+        adata = adata_blobs.copy()
+        rsc.get.anndata_to_GPU(adata)
+        # Make sparse with negative values
+        dense = cp.array(adata.X)
+        dense[:, 0] = -1.0
+        adata.X = cpsp.csr_matrix(dense)
+
+        with pytest.raises(ValueError, match="Sparse input contains negative values"):
+            rsc.tl.rank_genes_groups(
+                adata, "blobs", method="wilcoxon_binned", use_raw=False
+            )
+
+    def test_log1p_warning(self, adata_blobs):
+        """Warning should fire when adata.uns['log1p'] is missing."""
+        adata = adata_blobs.copy()
+        rsc.get.anndata_to_GPU(adata)
+        # Ensure no log1p key
+        adata.uns.pop("log1p", None)
+
+        with pytest.warns(UserWarning, match="log1p"):
+            rsc.tl.rank_genes_groups(
+                adata, "blobs", method="wilcoxon_binned", use_raw=False
+            )
+
+    def test_constant_data(self, adata_blobs):
+        """All-constant data (bin_width <= 0) should not crash."""
+        adata = adata_blobs.copy()
+        adata.X = np.ones_like(adata.X)
+        rsc.get.anndata_to_GPU(adata)
+
+        rsc.tl.rank_genes_groups(
+            adata, "blobs", method="wilcoxon_binned", use_raw=False
+        )
+
+        result = adata.uns["rank_genes_groups"]
+        for group in result["pvals"].dtype.names:
+            pvals = np.asarray(result["pvals"][group], dtype=float)
+            assert np.all(np.isfinite(pvals))
+
+    def test_bin_range_auto_vs_log1p_similar(self, adata_blobs):
+        """bin_range='auto' and 'log1p' should give similar results on log1p data."""
+        adata_auto = adata_blobs.copy()
+        adata_log1p = adata_blobs.copy()
+        rsc.get.anndata_to_GPU(adata_auto)
+        rsc.get.anndata_to_GPU(adata_log1p)
+
+        rsc.tl.rank_genes_groups(
+            adata_auto,
+            "blobs",
+            method="wilcoxon_binned",
+            use_raw=False,
+            bin_range="auto",
+        )
+        rsc.tl.rank_genes_groups(
+            adata_log1p,
+            "blobs",
+            method="wilcoxon_binned",
+            use_raw=False,
+            bin_range="log1p",
+        )
+
+        for group in adata_auto.uns["rank_genes_groups"]["scores"].dtype.names:
+            scores_auto = np.asarray(
+                adata_auto.uns["rank_genes_groups"]["scores"][group], dtype=float
+            )
+            scores_log1p = np.asarray(
+                adata_log1p.uns["rank_genes_groups"]["scores"][group], dtype=float
+            )
+            corr = np.corrcoef(scores_auto, scores_log1p)[0, 1]
+            assert corr > 0.99, f"Group {group}: auto vs log1p correlation {corr:.4f}"
