@@ -15,6 +15,7 @@ from scanpy.get import _get_obs_rep
 from scipy.sparse import csr_matrix, issparse
 from tqdm.auto import tqdm
 
+from rapids_singlecell._compat import DaskArray
 from rapids_singlecell.decoupler_gpu._helper._docs import docs
 from rapids_singlecell.decoupler_gpu._helper._log import _log
 from rapids_singlecell.preprocessing._utils import _check_use_raw
@@ -50,6 +51,16 @@ def _validate_mat(
     verbose: bool = False,
 ) -> tuple[DataType_matrix, np.ndarray, np.ndarray]:
     assert isinstance(empty, bool), "empty must be bool"
+
+    # Skip validation for Dask arrays - validation is deferred to chunk processing
+    if isinstance(mat, DaskArray):
+        _log(
+            "Dask array detected, skipping validation (will be validated per chunk)",
+            level="info",
+            verbose=verbose,
+        )
+        return mat, row, col
+
     # Accept any sparse format but transform to csr
     if issparse(mat) and not isinstance(mat, csr_matrix):
         mat = csr_matrix(mat)

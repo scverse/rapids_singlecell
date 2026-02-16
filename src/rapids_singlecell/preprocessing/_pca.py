@@ -41,7 +41,7 @@ def pca(
     **kwargs,
 ) -> None | AnnData:
     """\
-    Principal component analysis using GPU acceleration.
+    Principal component analysis using GPU acceleration :cite:p:`Halko2009,Tomas2024`.
 
     Uses the following implementations based on data type (defaults for `svd_solver` in parentheses):
 
@@ -106,50 +106,50 @@ def pca(
     random_state
         Random state for initialization.
 
-        mask_var
-            Mask to use for the PCA computation. \
-            If `None`, all variables are used. \
-            If `np.ndarray`, use the provided mask. \
-            If `str`, use the mask stored in `adata.var[mask_var]`.
+    mask_var
+        Mask to use for the PCA computation.
+        If `None`, all variables are used.
+        If `np.ndarray`, use the provided mask.
+        If `str`, use the mask stored in `adata.var[mask_var]`.
 
-        use_highly_variable
-            Whether to use highly variable genes only, stored in \
-            `.var['highly_variable']`. \
-            By default uses them if they have been determined beforehand.
+    use_highly_variable
+        Whether to use highly variable genes only, stored in
+        `.var['highly_variable']`.
+        By default uses them if they have been determined beforehand.
 
-        dtype
-            Numpy data type string to which to convert the result.
+    dtype
+        Numpy data type string to which to convert the result.
 
-        chunked
-            If `True`, perform an incremental PCA on segments of `chunk_size`. \
-            The incremental PCA automatically zero centers and ignores settings of \
-            `random_seed` and `svd_solver`. If `False`, perform a full PCA.
+    chunked
+        If `True`, perform an incremental PCA on segments of `chunk_size`.
+        The incremental PCA automatically zero centers and ignores settings of
+        `random_seed` and `svd_solver`. If `False`, perform a full PCA.
 
-        chunk_size
-            Number of observations to include in each chunk. \
-            Required if `chunked=True` was passed.
+    chunk_size
+        Number of observations to include in each chunk.
+        Required if `chunked=True` was passed.
 
-        key_added
-            If not specified, the embedding is stored as
-            :attr:`~anndata.AnnData.obsm`\\ `['X_pca']`, the loadings as
-            :attr:`~anndata.AnnData.varm`\\ `['PCs']`, and the the parameters in
-            :attr:`~anndata.AnnData.uns`\\ `['pca']`.
-            If specified, the embedding is stored as
-            :attr:`~anndata.AnnData.obsm`\\ ``[key_added]``, the loadings as
-            :attr:`~anndata.AnnData.varm`\\ ``[key_added]``, and the the parameters in
-            :attr:`~anndata.AnnData.uns`\\ ``[key_added]``.
+    key_added
+        If not specified, the embedding is stored as
+        :attr:`~anndata.AnnData.obsm`\\ `['X_pca']`, the loadings as
+        :attr:`~anndata.AnnData.varm`\\ `['PCs']`, and the parameters in
+        :attr:`~anndata.AnnData.uns`\\ `['pca']`.
+        If specified, the embedding is stored as
+        :attr:`~anndata.AnnData.obsm`\\ `[key_added]`, the loadings as
+        :attr:`~anndata.AnnData.varm`\\ `[key_added]`, and the parameters in
+        :attr:`~anndata.AnnData.uns`\\ `[key_added]`.
 
-        copy
-            Whether to return a copy or update `adata`.
+    copy
+        Whether to return a copy or update `adata`.
 
-        **kwargs
-            Additional arguments for specific SVD solvers.
-            For ``svd_solver='randomized'``:
+    **kwargs
+        Additional arguments for specific SVD solvers.
+        For `svd_solver='randomized'`:
 
-            - ``n_oversamples`` : Extra random vectors for better approximation.
-              Higher values improve accuracy. Default is 10.
-            - ``n_iter`` : Number of power iterations. Higher values improve
-              accuracy for matrices with slowly decaying singular values. Default is 2.
+        - `n_oversamples`: Extra random vectors for better approximation.
+          Higher values improve accuracy. Default is 10.
+        - `n_iter`: Number of power iterations. Higher values improve
+          accuracy for matrices with slowly decaying singular values. Default is 2.
 
     Returns
     -------

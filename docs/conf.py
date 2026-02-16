@@ -35,6 +35,7 @@ repository_url = "https://github.com/scverse/rapids_singlecell"
 release = info["Version"]
 
 templates_path = ["_templates"]
+bibtex_bibfiles = ["references.bib"]
 nitpicky = True  # Warn about broken links
 needs_sphinx = "4.5"
 suppress_warnings = [
@@ -44,8 +45,6 @@ suppress_warnings = [
 
 # -- General configuration ---------------------------------------------------
 
-# Add any Sphinx extension module names here, as strings.
-# They can be extensions coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
 extensions = [
     "myst_nb",
     "sphinx_design",
@@ -66,6 +65,7 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinx_tabs.tabs",
     "sphinxext.opengraph",
+    "sphinxcontrib.bibtex",
 ]
 
 autosummary_generate = True
@@ -144,9 +144,6 @@ exclude_patterns = [
 
 # -- Options for HTML output -------------------------------------------------
 
-# The theme to use for HTML and HTML Help pages.
-#  See the documentation for a list of builtin themes.
-
 html_theme = "scanpydoc"
 html_theme_options = {
     "repository_url": repository_url,
@@ -178,6 +175,7 @@ nitpick_ignore = [
     ("py:class", "anndata._core.raw.Raw"),
     ("py:class", "scanpy._utils.Empty"),
     ("py:data", "typing.Union"),
+    ("py:class", "cuml.linear_model.LogisticRegression"),
     *[
         ("py:class", f"anndata._core.aligned_mapping.{cls}{kind}")
         for cls in "Layers AxisArrays PairwiseArrays".split()

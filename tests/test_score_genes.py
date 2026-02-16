@@ -162,10 +162,11 @@ def test_score_genes_deplete():
     # here's an arbitrary gene set
     gene_set = adata_dense.var_names[:10]
 
+    gene_idx = np.where(adata_dense.var_names.isin(gene_set))[0]
     for adata in [adata_sparse, adata_dense]:
         # deplete these genes in 50 cells,
         ix_obs = np.random.choice(adata.shape[0], 50)
-        adata[ix_obs][:, gene_set].X = 0
+        adata.X[np.ix_(ix_obs, gene_idx)] = 0
 
         rsc.tl.score_genes(adata, gene_list=gene_set, score_name="Test")
         scores = adata.obs["Test"].values

@@ -195,6 +195,13 @@ class Aggregate:
         """
 
         assert dof >= 0
+        from ._kernels._aggr_elementwise import (
+            _scatter_count_nonzero,
+            _scatter_mean_var,
+            _scatter_sum,
+            _sum_duplicates_assign,
+            _sum_duplicates_diff,
+        )
 
         if self.data.format == "csc":
             self.data = self.data.tocsr()
@@ -215,26 +222,13 @@ class Aggregate:
             mask=mask,
             n_cells=self.data.shape[0],
         )
-
-        keys = cp.stack([src_col, src_row])
-        order = cp.lexsort(keys)
+        n_groups = self.n_cells.shape[0]
+        fused_key = src_row.astype(cp.int64) * self.data.shape[1] + src_col
+        order = cp.argsort(fused_key)
 
         src_row = src_row[order]
         src_col = src_col[order]
         src_data = src_data[order]
-
-        _sum_duplicates_diff = cp.ElementwiseKernel(
-            "raw T row, raw T col",
-            "T diff",
-            """
-            T diff_out = 1;
-            if (i == 0 || row[i - 1] == row[i] && col[i - 1] == col[i]) {
-            diff_out = 0;
-            }
-            diff = diff_out;
-            """,
-            "cupyx_scipy_sparse_coo_sum_duplicates_diff",
-        )
 
         diff = _sum_duplicates_diff(src_row, src_col, size=src_row.size)
         index = cp.cumsum(diff, dtype=cp.int32)
@@ -244,20 +238,11 @@ class Aggregate:
         rows = cp.zeros(nnz + 1, dtype=cp.int32)
         indices = cp.zeros(nnz + 1, dtype=cp.int32)
 
-        cp.ElementwiseKernel(
-            "int32 src_row, int32 src_col, int32 index",
-            "raw int32 rows, raw int32 indices",
-            """
-            rows[index] = src_row;
-            indices[index] = src_col;
-            """,
-            "cupyx_scipy_sparse_coo_sum_duplicates_assign",
-        )(src_row, src_col, index, rows, indices)
+        _sum_duplicates_assign(src_row, src_col, index, rows, indices)
 
-        # Calculate the indptr
-        transitions = cp.where(cp.diff(rows) > 0)[0]
-        indptr = cp.zeros(9, dtype=cp.int32)
-        indptr[1:-1] = transitions + 1
+        # Calculate the indptr using searchsorted to handle empty groups
+        group_boundaries = cp.arange(n_groups + 1, dtype=cp.int32)
+        indptr = cp.searchsorted(rows[: nnz + 1], group_boundaries).astype(cp.int32)
         indptr[-1] = nnz + 1
 
         # Calculate the the sparse matrices
@@ -265,14 +250,7 @@ class Aggregate:
 
         if "sum" in funcs:
             sums = cp.zeros(nnz + 1, dtype=cp.float64)
-            cp.ElementwiseKernel(
-                "float64 src, int32 index",
-                "raw float64 sums",
-                """
-                atomicAdd(&sums[index], src);
-                """,
-                "create_sum_sparse_matrix",
-            )(src_data, index, sums)
+            _scatter_sum(src_data, index, sums)
 
             results["sum"] = cp_sparse.csr_matrix(
                 (sums, indices, indptr),
@@ -281,15 +259,10 @@ class Aggregate:
         if "var" in funcs or "mean" in funcs:
             means = cp.zeros(nnz + 1, dtype=cp.float64)
             var = cp.zeros(nnz + 1, dtype=cp.float64)
-            cp.ElementwiseKernel(
-                "float64 src, int32 rows, int32 index, raw float64 ncells",
-                "raw float64 means, raw float64 var",
-                """
-                atomicAdd(&means[index], src / ncells[rows]);
-                atomicAdd(&var[index], (src * src) / ncells[rows]);
-                """,
-                "create_mean_var_sparse_matrix",
-            )(src_data, src_row, index, self.n_cells, means, var)
+            _scatter_mean_var(src_data, index, means, var)
+            n_cells_sparse = self.n_cells[rows[: nnz + 1]].ravel()
+            means /= n_cells_sparse
+            var /= n_cells_sparse
             if "mean" in funcs:
                 results["mean"] = cp_sparse.csr_matrix(
                     (means, indices, indptr),
@@ -313,16 +286,7 @@ class Aggregate:
                 results["var"] = var
         if "count_nonzero" in funcs:
             counts = cp.zeros(nnz + 1, dtype=cp.float32)
-            cp.ElementwiseKernel(
-                "float64 src,int32 index",
-                "raw float32 counts",
-                """
-                if (src != 0){
-                    atomicAdd(&counts[index], 1.0f);
-                }
-                """,
-                "create_count_nonzero_sparse_matrix",
-            )(src_data, index, counts)
+            _scatter_count_nonzero(src_data, index, counts)
             results["count_nonzero"] = cp_sparse.csr_matrix(
                 (counts, indices, indptr),
                 shape=(self.n_cells.shape[0], self.data.shape[1]),

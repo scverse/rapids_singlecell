@@ -3,11 +3,12 @@
 #include <cuda_runtime.h>
 
 // Moran's I - dense numerator
-__global__ void morans_I_num_dense_kernel(const float* __restrict__ data_centered,
+template <typename T>
+__global__ void morans_I_num_dense_kernel(const T* __restrict__ data_centered,
                                           const int* __restrict__ adj_row_ptr,
                                           const int* __restrict__ adj_col_ind,
-                                          const float* __restrict__ adj_data,
-                                          float* __restrict__ num, int n_samples, int n_features) {
+                                          const T* __restrict__ adj_data, T* __restrict__ num,
+                                          int n_samples, int n_features) {
   int f = blockIdx.x * blockDim.x + threadIdx.x;
   int i = blockIdx.y * blockDim.y + threadIdx.y;
   if (i >= n_samples || f >= n_features) {
@@ -17,18 +18,19 @@ __global__ void morans_I_num_dense_kernel(const float* __restrict__ data_centere
   int k_end = adj_row_ptr[i + 1];
   for (int k = k_start; k < k_end; ++k) {
     int j = adj_col_ind[k];
-    float w = adj_data[k];
-    float prod = data_centered[i * n_features + f] * data_centered[j * n_features + f];
+    T w = adj_data[k];
+    T prod = data_centered[i * n_features + f] * data_centered[j * n_features + f];
     atomicAdd(&num[f], w * prod);
   }
 }
 
 // Moran's I - sparse numerator
+template <typename T>
 __global__ void morans_I_num_sparse_kernel(
     const int* __restrict__ adj_row_ptr, const int* __restrict__ adj_col_ind,
-    const float* __restrict__ adj_data, const int* __restrict__ data_row_ptr,
-    const int* __restrict__ data_col_ind, const float* __restrict__ data_values, int n_samples,
-    int n_features, const float* __restrict__ mean_array, float* __restrict__ num) {
+    const T* __restrict__ adj_data, const int* __restrict__ data_row_ptr,
+    const int* __restrict__ data_col_ind, const T* __restrict__ data_values, int n_samples,
+    int n_features, const T* __restrict__ mean_array, T* __restrict__ num) {
   int i = blockIdx.x;
   if (i >= n_samples) {
     return;
@@ -36,22 +38,22 @@ __global__ void morans_I_num_sparse_kernel(
   int numThreads = blockDim.x;
   int threadid = threadIdx.x;
 
-  __shared__ float cell1[3072];
-  __shared__ float cell2[3072];
+  __shared__ T cell1[3072];
+  __shared__ T cell2[3072];
   int numruns = (n_features + 3072 - 1) / 3072;
   int k_start = adj_row_ptr[i];
   int k_end = adj_row_ptr[i + 1];
   for (int k = k_start; k < k_end; ++k) {
     int j = adj_col_ind[k];
-    float w = adj_data[k];
+    T w = adj_data[k];
     int cell1_start = data_row_ptr[i];
     int cell1_stop = data_row_ptr[i + 1];
     int cell2_start = data_row_ptr[j];
     int cell2_stop = data_row_ptr[j + 1];
     for (int run = 0; run < numruns; ++run) {
       for (int idx = threadid; idx < 3072; idx += numThreads) {
-        cell1[idx] = 0.0f;
-        cell2[idx] = 0.0f;
+        cell1[idx] = T(0);
+        cell2[idx] = T(0);
       }
       __syncthreads();
       int batch_start = 3072 * run;
@@ -73,7 +75,7 @@ __global__ void morans_I_num_sparse_kernel(
       for (int gene = threadid; gene < 3072; gene += numThreads) {
         int global_gene = batch_start + gene;
         if (global_gene < n_features) {
-          float prod =
+          T prod =
               (cell1[gene] - mean_array[global_gene]) * (cell2[gene] - mean_array[global_gene]);
           atomicAdd(&num[global_gene], w * prod);
         }
@@ -83,11 +85,12 @@ __global__ void morans_I_num_sparse_kernel(
 }
 
 // Geary's C - dense numerator
-__global__ void gearys_C_num_dense_kernel(const float* __restrict__ data,
+template <typename T>
+__global__ void gearys_C_num_dense_kernel(const T* __restrict__ data,
                                           const int* __restrict__ adj_row_ptr,
                                           const int* __restrict__ adj_col_ind,
-                                          const float* __restrict__ adj_data,
-                                          float* __restrict__ num, int n_samples, int n_features) {
+                                          const T* __restrict__ adj_data, T* __restrict__ num,
+                                          int n_samples, int n_features) {
   int f = blockIdx.x * blockDim.x + threadIdx.x;
   int i = blockIdx.y * blockDim.y + threadIdx.y;
   if (i >= n_samples || f >= n_features) {
@@ -97,25 +100,26 @@ __global__ void gearys_C_num_dense_kernel(const float* __restrict__ data,
   int k_end = adj_row_ptr[i + 1];
   for (int k = k_start; k < k_end; ++k) {
     int j = adj_col_ind[k];
-    float w = adj_data[k];
-    float diff = data[i * n_features + f] - data[j * n_features + f];
+    T w = adj_data[k];
+    T diff = data[i * n_features + f] - data[j * n_features + f];
     atomicAdd(&num[f], w * diff * diff);
   }
 }
 
 // Geary's C - sparse numerator
+template <typename T>
 __global__ void gearys_C_num_sparse_kernel(const int* __restrict__ adj_row_ptr,
                                            const int* __restrict__ adj_col_ind,
-                                           const float* __restrict__ adj_data,
+                                           const T* __restrict__ adj_data,
                                            const int* __restrict__ data_row_ptr,
                                            const int* __restrict__ data_col_ind,
-                                           const float* __restrict__ data_values, int n_samples,
-                                           int n_features, float* __restrict__ num) {
+                                           const T* __restrict__ data_values, int n_samples,
+                                           int n_features, T* __restrict__ num) {
   int i = blockIdx.x;
   int numThreads = blockDim.x;
   int threadid = threadIdx.x;
-  __shared__ float cell1[3072];
-  __shared__ float cell2[3072];
+  __shared__ T cell1[3072];
+  __shared__ T cell2[3072];
   int numruns = (n_features + 3072 - 1) / 3072;
   if (i >= n_samples) {
     return;
@@ -124,15 +128,15 @@ __global__ void gearys_C_num_sparse_kernel(const int* __restrict__ adj_row_ptr,
   int k_end = adj_row_ptr[i + 1];
   for (int k = k_start; k < k_end; ++k) {
     int j = adj_col_ind[k];
-    float w = adj_data[k];
+    T w = adj_data[k];
     int cell1_start = data_row_ptr[i];
     int cell1_stop = data_row_ptr[i + 1];
     int cell2_start = data_row_ptr[j];
     int cell2_stop = data_row_ptr[j + 1];
     for (int run = 0; run < numruns; ++run) {
       for (int idx = threadid; idx < 3072; idx += numThreads) {
-        cell1[idx] = 0.0f;
-        cell2[idx] = 0.0f;
+        cell1[idx] = T(0);
+        cell2[idx] = T(0);
       }
       __syncthreads();
       int batch_start = 3072 * run;
@@ -154,7 +158,7 @@ __global__ void gearys_C_num_sparse_kernel(const int* __restrict__ adj_row_ptr,
       for (int gene = threadid; gene < 3072; gene += numThreads) {
         int global_gene = batch_start + gene;
         if (global_gene < n_features) {
-          float diff = cell1[gene] - cell2[gene];
+          T diff = cell1[gene] - cell2[gene];
           atomicAdd(&num[global_gene], w * diff * diff);
         }
       }
@@ -163,16 +167,17 @@ __global__ void gearys_C_num_sparse_kernel(const int* __restrict__ adj_row_ptr,
 }
 
 // Pre-denominator for sparse paths
+template <typename T>
 __global__ void pre_den_sparse_kernel(const int* __restrict__ data_col_ind,
-                                      const float* __restrict__ data_values, int nnz,
-                                      const float* __restrict__ mean_array, float* __restrict__ den,
+                                      const T* __restrict__ data_values, int nnz,
+                                      const T* __restrict__ mean_array, T* __restrict__ den,
                                       int* __restrict__ counter) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= nnz) {
     return;
   }
   int geneidx = data_col_ind[i];
-  float value = data_values[i] - mean_array[geneidx];
+  T value = data_values[i] - mean_array[geneidx];
   atomicAdd(&counter[geneidx], 1);
   atomicAdd(&den[geneidx], value * value);
 }

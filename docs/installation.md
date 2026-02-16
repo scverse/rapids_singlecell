@@ -6,17 +6,17 @@ These *yaml* files install everything needed to run the example notebooks and ge
 `````{tab-set}
 ````{tab-item} CUDA 13
 ```bash
-conda env create -f conda/rsc_rapids_25.12.yml
+conda env create -f conda/rsc_rapids_26.02_cuda13.yml
 # or
-mamba env create -f conda/rsc_rapids_25.12.yml
+mamba env create -f conda/rsc_rapids_26.02_cuda13.yml
 ```
 *Python 3.13, CUDA 13.0*
 ````
 ````{tab-item} CUDA 12
 ```bash
-conda env create -f conda/rsc_rapids_25.10.yml
+conda env create -f conda/rsc_rapids_26.02_cuda12.yml
 # or
-mamba env create -f conda/rsc_rapids_25.10.yml
+mamba env create -f conda/rsc_rapids_26.02_cuda12.yml
 ```
 *Python 3.13, CUDA 12.9*
 ````

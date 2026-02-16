@@ -136,12 +136,10 @@ def leiden(
     copy: bool = False,
 ) -> AnnData | None:
     """
-    Performs Leiden clustering using cuGraph, which implements the method
-    described in:
+    Cluster cells into subgroups using the Leiden algorithm :cite:p:`Traag2019`.
 
-    Traag, V.A., Waltman, L., & van Eck, N.J. (2019). From Louvain to
-    Leiden: guaranteeing well-connected communities. Sci. Rep., 9(1), 5233.
-    DOI: 10.1038/s41598-019-41695-z
+    Performs Leiden clustering using cuGraph, an improved version of the
+    Louvain algorithm :cite:p:`Blondel2008`.
 
     Parameters
     ----------
@@ -296,12 +294,7 @@ def louvain(
     copy: bool = False,
 ) -> AnnData | None:
     """
-    Performs Louvain clustering using cuGraph, which implements the method
-    described in:
-
-    Blondel, V.D., Guillaume, J.-L., Lambiotte, R., & Lefebvre, E. (2008).
-    Fast unfolding of community hierarchies in large networks, J. Stat.
-    Mech., P10008. DOI: 10.1088/1742-5468/2008/10/P10008
+    Cluster cells into subgroups using the Louvain algorithm :cite:p:`Blondel2008`.
 
     Parameters
     ----------

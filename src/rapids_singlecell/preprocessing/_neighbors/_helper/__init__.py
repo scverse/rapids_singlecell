@@ -3,19 +3,14 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
-import cuml.internals.logger as logger
 import cupy as cp
 import cuvs
 import numpy as np
-from cuml.manifold.umap import fuzzy_simplicial_set
 from cupyx.scipy import sparse as cp_sparse
 from packaging.version import parse as parse_version
 from scipy import sparse as sc_sparse
 
-from rapids_singlecell._utils import _get_logger_level
-
 if TYPE_CHECKING:
-    from rapids_singlecell._utils import AnyRandom
     from rapids_singlecell.preprocessing._neighbors import _Algorithms, _Metrics
 
 
@@ -133,33 +128,6 @@ def _fix_self_distances(knn_dist: cp.ndarray, metric: _Metrics) -> cp.ndarray:
         knn_dist[:, 0] = 0.0
 
     return knn_dist
-
-
-def _get_connectivities(
-    n_neighbors: int,
-    *,
-    n_obs: int,
-    random_state: AnyRandom,
-    metric: _Metrics,
-    knn_indices: cp.ndarray,
-    knn_dist: cp.ndarray,
-) -> cp_sparse.coo_matrix:
-    set_op_mix_ratio = 1.0
-    local_connectivity = 1.0
-    X_conn = cp.empty((n_obs, 1), dtype=np.float32)
-    logger_level = _get_logger_level(logger)
-    connectivities = fuzzy_simplicial_set(
-        X_conn,
-        n_neighbors,
-        random_state,
-        metric=metric,
-        knn_indices=knn_indices,
-        knn_dists=knn_dist,
-        set_op_mix_ratio=set_op_mix_ratio,
-        local_connectivity=local_connectivity,
-    )
-    logger.set_level(logger_level)
-    return connectivities
 
 
 def _trimming(cnts: cp_sparse.csr_matrix, trim: int) -> cp_sparse.csr_matrix:

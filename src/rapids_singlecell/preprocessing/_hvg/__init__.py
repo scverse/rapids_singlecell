@@ -48,12 +48,13 @@ def highly_variable_genes(
     batch_key: str | None = None,
 ) -> None:
     """\
-    Annotate highly variable genes.
+    Annotate highly variable genes :cite:p:`Satija2015,Zheng2017,Stuart2019,Lause2021,Andrews2019`.
+
     Expects logarithmized data, except when `flavor='seurat_v3','seurat_v3_paper','pearson_residuals','poisson_gene_selection'`, in which count data is expected.
 
     Reimplementation of scanpy's function.
     Depending on flavor, this reproduces the R-implementations of Seurat, Cell Ranger, Seurat v3 and Pearson Residuals.
-    Flavor `poisson_gene_selection` is an implementation of scvi, which is based on M3Drop. It requires gpu accelerated pytorch to be installed.
+    Flavor `poisson_gene_selection` calculates analytical Poisson gene selection based on M3Drop using CuPy with CUDA kernels.
 
     For these dispersion-based methods, the normalized dispersion is obtained by scaling
     with the mean and standard deviation of the dispersions for genes falling into a given
