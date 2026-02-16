@@ -23,6 +23,7 @@ __global__ void sparse_sum_csc_kernel(const int* __restrict__ indptr, const int*
   sums_genes[gene] = col_sum;
 }
 
+// Welford's single-pass algorithm for variance of clipped Pearson residuals (CSC sparse)
 template <typename T>
 __global__ void csc_hvg_res_kernel(const int* __restrict__ indptr, const int* __restrict__ index,
                                    const T* __restrict__ data, const T* __restrict__ sums_genes,
@@ -30,82 +31,64 @@ __global__ void csc_hvg_res_kernel(const int* __restrict__ indptr, const int* __
                                    const T inv_sum_total, const T clip, const T inv_theta,
                                    int n_genes, int n_cells) {
   int gene = blockDim.x * blockIdx.x + threadIdx.x;
-  if (gene >= n_genes) {
-    return;
-  }
+  if (gene >= n_genes) return;
+
   int start = indptr[gene];
   int stop = indptr[gene + 1];
 
-  int sparse_idx = start;
-  T var_sum = (T)0;
-  T sum_clipped_res = (T)0;
-  // first pass to compute mean of clipped residuals per gene
-  for (int cell = 0; cell < n_cells; ++cell) {
-    T mu = sums_genes[gene] * sums_cells[cell] * inv_sum_total;
-    T value = (T)0;
-    if (sparse_idx < stop && index[sparse_idx] == cell) {
-      value = data[sparse_idx];
-      ++sparse_idx;
-    }
-    T mu_sum = value - mu;
-    T clipped_res = mu_sum / sqrt(mu + mu * mu * inv_theta);
-    if (clipped_res < -clip) clipped_res = -clip;
-    if (clipped_res > clip) clipped_res = clip;
-    sum_clipped_res += clipped_res;
-  }
-  T mean_clipped_res = sum_clipped_res / n_cells;
+  T gene_sum = sums_genes[gene];
 
-  // second pass for variance
-  sparse_idx = start;
+  // Welford's online algorithm: single pass for mean and variance
+  T mean = (T)0;
+  T M2 = (T)0;
+  int sparse_idx = start;
+
   for (int cell = 0; cell < n_cells; ++cell) {
-    T mu = sums_genes[gene] * sums_cells[cell] * inv_sum_total;
+    T mu = gene_sum * sums_cells[cell] * inv_sum_total;
     T value = (T)0;
     if (sparse_idx < stop && index[sparse_idx] == cell) {
       value = data[sparse_idx];
       ++sparse_idx;
     }
-    T mu_sum = value - mu;
-    T clipped_res = mu_sum / sqrt(mu + mu * mu * inv_theta);
-    if (clipped_res < -clip) clipped_res = -clip;
-    if (clipped_res > clip) clipped_res = clip;
-    T diff = clipped_res - mean_clipped_res;
-    var_sum += diff * diff;
+    T diff = value - mu;
+    T x = fmin(fmax(diff * rsqrt(mu + mu * mu * inv_theta), -clip), clip);
+
+    // Welford update
+    T delta = x - mean;
+    mean += delta / (T)(cell + 1);
+    T delta2 = x - mean;
+    M2 = fma(delta, delta2, M2);
   }
-  residuals[gene] = var_sum / n_cells;
+  residuals[gene] = M2 / (T)n_cells;
 }
 
+// Welford's single-pass algorithm for variance of clipped Pearson residuals (dense, column-major)
 template <typename T>
 __global__ void dense_hvg_res_kernel(const T* __restrict__ data, const T* __restrict__ sums_genes,
                                      const T* __restrict__ sums_cells, T* __restrict__ residuals,
                                      const T inv_sum_total, const T clip, const T inv_theta,
                                      int n_genes, int n_cells) {
   int gene = blockDim.x * blockIdx.x + threadIdx.x;
-  if (gene >= n_genes) {
-    return;
-  }
-  T var_sum = (T)0;
-  T sum_clipped_res = (T)0;
+  if (gene >= n_genes) return;
+
+  T gene_sum = sums_genes[gene];
+
+  // Welford's online algorithm: single pass for mean and variance
+  T mean = (T)0;
+  T M2 = (T)0;
+
   for (int cell = 0; cell < n_cells; ++cell) {
     long long res_index = static_cast<long long>(gene) * n_cells + cell;
-    T mu = sums_genes[gene] * sums_cells[cell] * inv_sum_total;
+    T mu = gene_sum * sums_cells[cell] * inv_sum_total;
     T value = data[res_index];
-    T mu_sum = value - mu;
-    T clipped_res = mu_sum / sqrt(mu + mu * mu * inv_theta);
-    if (clipped_res < -clip) clipped_res = -clip;
-    if (clipped_res > clip) clipped_res = clip;
-    sum_clipped_res += clipped_res;
+    T diff = value - mu;
+    T x = fmin(fmax(diff * rsqrt(mu + mu * mu * inv_theta), -clip), clip);
+
+    // Welford update
+    T delta = x - mean;
+    mean += delta / (T)(cell + 1);
+    T delta2 = x - mean;
+    M2 = fma(delta, delta2, M2);
   }
-  T mean_clipped_res = sum_clipped_res / n_cells;
-  for (int cell = 0; cell < n_cells; ++cell) {
-    long long res_index = static_cast<long long>(gene) * n_cells + cell;
-    T mu = sums_genes[gene] * sums_cells[cell] * inv_sum_total;
-    T value = data[res_index];
-    T mu_sum = value - mu;
-    T clipped_res = mu_sum / sqrt(mu + mu * mu * inv_theta);
-    if (clipped_res < -clip) clipped_res = -clip;
-    if (clipped_res > clip) clipped_res = clip;
-    T diff = clipped_res - mean_clipped_res;
-    var_sum += diff * diff;
-  }
-  residuals[gene] = var_sum / n_cells;
+  residuals[gene] = M2 / (T)n_cells;
 }

@@ -4,9 +4,9 @@
 #include <type_traits>
 
 template <typename T>
-__global__ void scatter_add_kernel_optimized(const T* __restrict__ v, const int* __restrict__ cats,
-                                             std::size_t n_cells, std::size_t n_pcs,
-                                             std::size_t switcher, T* __restrict__ a) {
+__global__ void scatter_add_kernel(const T* __restrict__ v, const int* __restrict__ cats,
+                                   std::size_t n_cells, std::size_t n_pcs, std::size_t switcher,
+                                   T* __restrict__ a) {
   std::size_t i = blockIdx.x * blockDim.x + threadIdx.x;
   std::size_t N = n_cells * n_pcs;
   if (i >= N) return;
@@ -102,6 +102,50 @@ __global__ void scatter_add_kernel_with_bias_cat0(const T* __restrict__ v, int n
         atomicAdd(&a[out_base], (T)val.x);
         if (has_pc1) atomicAdd(&a[out_base + 1], (T)val.y);
       }
+    }
+  }
+}
+
+// ---------- scatter_add_shared ----------
+// Uses dynamic shared memory for local accumulation to reduce global atomic contention.
+template <typename T>
+__global__ void scatter_add_shared_kernel(const T* __restrict__ v, const int* __restrict__ cats,
+                                          int n_cells, int n_pcs, int n_batches, int switcher,
+                                          T* __restrict__ a) {
+  // Dynamic shared memory: [n_batches * n_pcs] for local accumulation
+  extern __shared__ unsigned char smem_raw[];
+  T* shared_acc = reinterpret_cast<T*>(smem_raw);
+
+  // Initialize shared memory to zero
+  for (int i = threadIdx.x; i < n_batches * n_pcs; i += blockDim.x) shared_acc[i] = T(0);
+  __syncthreads();
+
+  // Calculate cell range for this block
+  int cells_per_block = (n_cells + gridDim.x - 1) / gridDim.x;
+  int start_cell = blockIdx.x * cells_per_block;
+  int end_cell = min(start_cell + cells_per_block, n_cells);
+
+  // Each thread processes cells with stride, accumulating into shared memory
+  for (int cell = start_cell + threadIdx.x; cell < end_cell; cell += blockDim.x) {
+    int cat = cats[cell];
+    std::size_t v_base = (std::size_t)cell * n_pcs;
+    int shared_base = cat * n_pcs;
+
+    for (int pc = 0; pc < n_pcs; pc++) {
+      T val = v[v_base + pc];
+      atomicAdd(&shared_acc[shared_base + pc], val);
+    }
+  }
+  __syncthreads();
+
+  // Write shared memory results to global memory
+  for (int i = threadIdx.x; i < n_batches * n_pcs; i += blockDim.x) {
+    T val = shared_acc[i];
+    if (val != T(0)) {
+      if (switcher == 0)
+        atomicAdd(&a[i], -val);
+      else
+        atomicAdd(&a[i], val);
     }
   }
 }

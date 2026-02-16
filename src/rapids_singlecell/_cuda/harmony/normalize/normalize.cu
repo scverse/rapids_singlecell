@@ -12,9 +12,9 @@ using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 template <typename T>
 static inline void launch_normalize(T* X, long long rows, long long cols, cudaStream_t stream) {
-  dim3 block(32);
+  dim3 block(256);
   dim3 grid(rows);
-  normalize_kernel_optimized<T><<<grid, block, 0, stream>>>(X, rows, cols);
+  normalize_kernel<T><<<grid, block, 0, stream>>>(X, rows, cols);
 }
 
 NB_MODULE(_harmony_normalize_cuda, m) {

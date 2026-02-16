@@ -17,7 +17,7 @@ static inline void launch_scatter_add(const T* v, const int* cats, std::size_t n
   dim3 block(256);
   std::size_t N = n_cells * n_pcs;
   dim3 grid((unsigned)((N + block.x - 1) / block.x));
-  scatter_add_kernel_optimized<T><<<grid, block, 0, stream>>>(v, cats, n_cells, n_pcs, switcher, a);
+  scatter_add_kernel<T><<<grid, block, 0, stream>>>(v, cats, n_cells, n_pcs, switcher, a);
 }
 
 template <typename T>
@@ -27,6 +27,17 @@ static inline void launch_aggregated_matrix(T* aggregated_matrix, const T* sum, 
   dim3 grid((n_batches + 1 + 31) / 32);
   aggregated_matrix_kernel<T>
       <<<grid, block, 0, stream>>>(aggregated_matrix, sum, top_corner, n_batches);
+}
+
+template <typename T>
+static inline void launch_scatter_add_shared(const T* v, const int* cats, int n_cells, int n_pcs,
+                                             int n_batches, int switcher, T* a, int n_blocks,
+                                             cudaStream_t stream) {
+  dim3 block(256);
+  dim3 grid(n_blocks);
+  std::size_t shared_mem = (std::size_t)n_batches * n_pcs * sizeof(T);
+  scatter_add_shared_kernel<T>
+      <<<grid, block, shared_mem, stream>>>(v, cats, n_cells, n_pcs, n_batches, switcher, a);
 }
 
 template <typename T>
@@ -88,6 +99,28 @@ NB_MODULE(_harmony_scatter_cuda, m) {
                                          n_batches, (cudaStream_t)stream);
       },
       "aggregated_matrix"_a, nb::kw_only(), "sum"_a, "top_corner"_a, "n_batches"_a, "stream"_a = 0);
+
+  // scatter_add_shared - float32
+  m.def(
+      "scatter_add_shared",
+      [](cuda_array<const float> v, cuda_array<const int> cats, int n_cells, int n_pcs,
+         int n_batches, int switcher, cuda_array<float> a, int n_blocks, std::uintptr_t stream) {
+        launch_scatter_add_shared<float>(v.data(), cats.data(), n_cells, n_pcs, n_batches, switcher,
+                                         a.data(), n_blocks, (cudaStream_t)stream);
+      },
+      "v"_a, nb::kw_only(), "cats"_a, "n_cells"_a, "n_pcs"_a, "n_batches"_a, "switcher"_a, "a"_a,
+      "n_blocks"_a, "stream"_a = 0);
+
+  // scatter_add_shared - float64
+  m.def(
+      "scatter_add_shared",
+      [](cuda_array<const double> v, cuda_array<const int> cats, int n_cells, int n_pcs,
+         int n_batches, int switcher, cuda_array<double> a, int n_blocks, std::uintptr_t stream) {
+        launch_scatter_add_shared<double>(v.data(), cats.data(), n_cells, n_pcs, n_batches,
+                                          switcher, a.data(), n_blocks, (cudaStream_t)stream);
+      },
+      "v"_a, nb::kw_only(), "cats"_a, "n_cells"_a, "n_pcs"_a, "n_batches"_a, "switcher"_a, "a"_a,
+      "n_blocks"_a, "stream"_a = 0);
 
   // scatter_add_cat0 - float32
   m.def(

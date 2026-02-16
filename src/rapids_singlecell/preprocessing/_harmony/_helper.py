@@ -19,17 +19,13 @@ try:
         _harmony_outer_cuda as _hc_out,
     )
     from rapids_singlecell._cuda import (
+        _harmony_pen_cuda as _hc_pen,
+    )
+    from rapids_singlecell._cuda import (
         _harmony_scatter_cuda as _hc_sc,
     )
 except ImportError:
-    _hc_sc = _hc_out = _hc_cs = _hc_km = _hc_norm = None
-
-# Python kernel imports for functions without .cu equivalents
-from ._kernels._fused_block import _get_fused_calc_pen_norm_kernel
-from ._kernels._outer import _get_batched_correction_kernel
-from ._kernels._scatter_add import (
-    _get_scatter_add_kernel_shared,
-)
+    _hc_sc = _hc_out = _hc_cs = _hc_km = _hc_norm = _hc_pen = None
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -118,7 +114,6 @@ def _scatter_add_cp(
     if use_shared:
         if n_batches is None:
             raise ValueError("n_batches must be provided when use_shared=True")
-        # Shared memory kernel (Python dispatch, no .cu equivalent yet)
         dev = cp.cuda.Device()
         n_sm = dev.attributes["MultiProcessorCount"]
         min_cells_per_block = 64
@@ -126,15 +121,17 @@ def _scatter_add_cp(
             1, (n_cells + min_cells_per_block - 1) // min_cells_per_block
         )
         n_blocks = min(n_sm * 4, max_blocks_by_cells)
-        threads = 256
-        shared_mem_needed = n_batches * n_pcs * X.dtype.itemsize
 
-        kernel = _get_scatter_add_kernel_shared(X.dtype)
-        kernel(
-            (n_blocks,),
-            (threads,),
-            (X, cats, n_cells, n_pcs, n_batches, switcher, out),
-            shared_mem=shared_mem_needed,
+        _hc_sc.scatter_add_shared(
+            X,
+            cats=cats,
+            n_cells=n_cells,
+            n_pcs=n_pcs,
+            n_batches=n_batches,
+            switcher=switcher,
+            a=out,
+            n_blocks=n_blocks,
+            stream=cp.cuda.get_current_stream().ptr,
         )
     else:
         # Use nanobind .cu kernel
@@ -581,21 +578,22 @@ def _fused_calc_pen_norm(
     term
         Softmax temperature term (-2 / sigma)
     """
-    # No .cu equivalent yet - uses Python kernel dispatch
     block_size, n_clusters = R_out.shape
 
     # Convert idx_in to size_t (uint64) for kernel compatibility
     if idx_in.dtype != cp.uint64:
         idx_in = idx_in.astype(cp.uint64)
 
-    # Scale block dimension with columns, minimum 32, max 256
-    block_dim = min(256, max(32, ((n_clusters + 31) // 32) * 32))
-
-    kernel = _get_fused_calc_pen_norm_kernel(similarities.dtype)
-    kernel(
-        (block_size,),
-        (block_dim,),
-        (similarities, penalty, cats, idx_in, R_out, term, block_size, n_clusters),
+    _hc_pen.fused_pen_norm(
+        similarities,
+        penalty=penalty,
+        cats=cats,
+        idx_in=idx_in,
+        R_out=R_out,
+        term=float(term),
+        n_rows=block_size,
+        n_cols=n_clusters,
+        stream=cp.cuda.get_current_stream().ptr,
     )
 
 
@@ -729,18 +727,18 @@ def _apply_batched_correction(
     R
         Cluster assignment matrix, shape (n_cells, n_clusters)
     """
-    # No .cu equivalent yet - uses Python kernel dispatch
     n_cells, n_pcs = Z.shape
     n_clusters = R.shape[1]
     n_batches_p1 = W_all.shape[1]
 
-    N = n_cells * n_pcs
-    threads_per_block = 256
-    blocks = (N + threads_per_block - 1) // threads_per_block
-
-    kernel = _get_batched_correction_kernel(Z.dtype)
-    kernel(
-        (blocks,),
-        (threads_per_block,),
-        (Z, W_all, cats, R, n_cells, n_pcs, n_clusters, n_batches_p1),
+    _hc_out.batched_correction(
+        Z,
+        W_all=W_all,
+        cats=cats,
+        R=R,
+        n_cells=n_cells,
+        n_pcs=n_pcs,
+        n_clusters=n_clusters,
+        n_batches_p1=n_batches_p1,
+        stream=cp.cuda.get_current_stream().ptr,
     )

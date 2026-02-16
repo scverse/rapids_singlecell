@@ -28,6 +28,17 @@ static inline void launch_harmony_corr(T* Z, const T* W, const int* cats, const 
   harmony_correction_kernel<T><<<grid, block, 0, stream>>>(Z, W, cats, R, n_cells, n_pcs);
 }
 
+template <typename T>
+static inline void launch_batched_correction(T* Z, const T* W_all, const int* cats, const T* R,
+                                             int n_cells, int n_pcs, int n_clusters,
+                                             int n_batches_p1, cudaStream_t stream) {
+  dim3 block(256);
+  long long N = (long long)n_cells * n_pcs;
+  dim3 grid((unsigned)((N + block.x - 1) / block.x));
+  batched_correction_kernel<T>
+      <<<grid, block, 0, stream>>>(Z, W_all, cats, R, n_cells, n_pcs, n_clusters, n_batches_p1);
+}
+
 NB_MODULE(_harmony_outer_cuda, m) {
   // outer - float32
   m.def(
@@ -70,4 +81,28 @@ NB_MODULE(_harmony_outer_cuda, m) {
                                     (cudaStream_t)stream);
       },
       "Z"_a, nb::kw_only(), "W"_a, "cats"_a, "R"_a, "n_cells"_a, "n_pcs"_a, "stream"_a = 0);
+
+  // batched_correction - float32
+  m.def(
+      "batched_correction",
+      [](cuda_array<float> Z, cuda_array<const float> W_all, cuda_array<const int> cats,
+         cuda_array<const float> R, int n_cells, int n_pcs, int n_clusters, int n_batches_p1,
+         std::uintptr_t stream) {
+        launch_batched_correction<float>(Z.data(), W_all.data(), cats.data(), R.data(), n_cells,
+                                         n_pcs, n_clusters, n_batches_p1, (cudaStream_t)stream);
+      },
+      "Z"_a, nb::kw_only(), "W_all"_a, "cats"_a, "R"_a, "n_cells"_a, "n_pcs"_a, "n_clusters"_a,
+      "n_batches_p1"_a, "stream"_a = 0);
+
+  // batched_correction - float64
+  m.def(
+      "batched_correction",
+      [](cuda_array<double> Z, cuda_array<const double> W_all, cuda_array<const int> cats,
+         cuda_array<const double> R, int n_cells, int n_pcs, int n_clusters, int n_batches_p1,
+         std::uintptr_t stream) {
+        launch_batched_correction<double>(Z.data(), W_all.data(), cats.data(), R.data(), n_cells,
+                                          n_pcs, n_clusters, n_batches_p1, (cudaStream_t)stream);
+      },
+      "Z"_a, nb::kw_only(), "W_all"_a, "cats"_a, "R"_a, "n_cells"_a, "n_pcs"_a, "n_clusters"_a,
+      "n_batches_p1"_a, "stream"_a = 0);
 }

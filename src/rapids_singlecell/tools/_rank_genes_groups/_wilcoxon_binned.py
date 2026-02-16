@@ -10,11 +10,10 @@ import numpy as np
 
 from rapids_singlecell._compat import DaskArray
 
-from ._kernels._wilcoxon_binned import (
-    _get_csc_hist_kernel,
-    _get_csr_hist_kernel,
-    _get_dense_hist_kernel,
-)
+try:
+    from rapids_singlecell._cuda import _wilcoxon_binned_cuda as _wb
+except ImportError:
+    _wb = None
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -422,20 +421,17 @@ def _launch_dense(
     chunk_f = cp.asfortranarray(chunk)
     hist = cp.zeros((n_genes, n_groups, n_bins + 1), dtype=cp.uint32)
 
-    _get_dense_hist_kernel(chunk_f.dtype)(
-        (n_genes,),
-        (256,),
-        (
-            chunk_f,
-            group_codes,
-            hist,
-            n_cells,
-            n_genes,
-            n_groups,
-            n_bins,
-            cp.float64(bin_low),
-            cp.float64(inv_bin_width),
-        ),
+    _wb.dense_hist(
+        chunk_f,
+        group_codes,
+        hist,
+        n_cells=n_cells,
+        n_genes=n_genes,
+        n_groups=n_groups,
+        n_bins=n_bins,
+        bin_low=float(bin_low),
+        inv_bin_width=float(inv_bin_width),
+        stream=cp.cuda.get_current_stream().ptr,
     )
     return hist
 
@@ -456,23 +452,20 @@ def _launch_csc(
     n_genes = stop - start
     hist = cp.zeros((n_genes, n_groups, n_bins + 1), dtype=cp.uint32)
 
-    _get_csc_hist_kernel(X.data.dtype)(
-        (n_genes,),
-        (256,),
-        (
-            X.data,
-            X.indices,
-            X.indptr,
-            group_codes,
-            hist,
-            n_cells,
-            n_genes,
-            n_groups,
-            n_bins,
-            cp.float64(bin_low),
-            cp.float64(inv_bin_width),
-            cp.int32(start),
-        ),
+    _wb.csc_hist(
+        X.data,
+        X.indices,
+        X.indptr,
+        group_codes,
+        hist,
+        n_cells=n_cells,
+        n_genes=n_genes,
+        n_groups=n_groups,
+        n_bins=n_bins,
+        bin_low=float(bin_low),
+        inv_bin_width=float(inv_bin_width),
+        gene_start=start,
+        stream=cp.cuda.get_current_stream().ptr,
     )
     return hist
 
@@ -493,23 +486,20 @@ def _launch_csr(
     n_genes = stop - start
     hist = cp.zeros((n_genes, n_groups, n_bins + 1), dtype=cp.uint32)
 
-    _get_csr_hist_kernel(X.data.dtype)(
-        (n_cells,),
-        (256,),
-        (
-            X.data,
-            X.indices,
-            X.indptr,
-            group_codes,
-            hist,
-            n_cells,
-            n_genes,
-            n_groups,
-            n_bins,
-            cp.float64(bin_low),
-            cp.float64(inv_bin_width),
-            cp.int32(start),
-        ),
+    _wb.csr_hist(
+        X.data,
+        X.indices,
+        X.indptr,
+        group_codes,
+        hist,
+        n_cells=n_cells,
+        n_genes=n_genes,
+        n_groups=n_groups,
+        n_bins=n_bins,
+        bin_low=float(bin_low),
+        inv_bin_width=float(inv_bin_width),
+        gene_start=start,
+        stream=cp.cuda.get_current_stream().ptr,
     )
     return hist
 
@@ -536,15 +526,7 @@ def _process_dask(
     """
     import dask.array as da
 
-    bin_low_d = cp.float64(bin_low)
-    inv_bw_d = cp.float64(inv_bin_width)
-
-    gene_start = cp.int32(start)
-
     if cpsp.isspmatrix_csr(X._meta):
-        # Uses CSR kernel; blocks that arrive as CSC are converted below.
-        kernel = _get_csr_hist_kernel(X.dtype)
-        kernel.compile()
 
         def _hist_block(block, block_info=None):
             if block_info is None or block_info == []:
@@ -557,29 +539,24 @@ def _process_dask(
             hist = cp.zeros(
                 (n_genes_batch, n_hist_groups, n_bins_total), dtype=cp.uint32
             )
-            kernel(
-                (block.shape[0],),
-                (256,),
-                (
-                    block.data,
-                    block.indices,
-                    block.indptr,
-                    codes_chunk,
-                    hist,
-                    block.shape[0],
-                    n_genes_batch,
-                    n_hist_groups,
-                    n_bins,
-                    bin_low_d,
-                    inv_bw_d,
-                    gene_start,
-                ),
+            _wb.csr_hist(
+                block.data,
+                block.indices,
+                block.indptr,
+                codes_chunk,
+                hist,
+                n_cells=block.shape[0],
+                n_genes=n_genes_batch,
+                n_groups=n_hist_groups,
+                n_bins=n_bins,
+                bin_low=float(bin_low),
+                inv_bin_width=float(inv_bin_width),
+                gene_start=start,
+                stream=cp.cuda.get_current_stream().ptr,
             )
             return hist[None, ...]
 
     elif isinstance(X._meta, cp.ndarray):
-        kernel = _get_dense_hist_kernel(X.dtype)
-        kernel.compile()
 
         def _hist_block(block, block_info=None):
             if block_info is None or block_info == []:
@@ -594,20 +571,17 @@ def _process_dask(
             hist = cp.zeros(
                 (n_genes_batch, n_hist_groups, n_bins_total), dtype=cp.uint32
             )
-            kernel(
-                (n_genes_batch,),
-                (256,),
-                (
-                    blk,
-                    codes_chunk,
-                    hist,
-                    blk.shape[0],
-                    n_genes_batch,
-                    n_hist_groups,
-                    n_bins,
-                    bin_low_d,
-                    inv_bw_d,
-                ),
+            _wb.dense_hist(
+                blk,
+                codes_chunk,
+                hist,
+                n_cells=blk.shape[0],
+                n_genes=n_genes_batch,
+                n_groups=n_hist_groups,
+                n_bins=n_bins,
+                bin_low=float(bin_low),
+                inv_bin_width=float(inv_bin_width),
+                stream=cp.cuda.get_current_stream().ptr,
             )
             return hist[None, ...]
 

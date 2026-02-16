@@ -5,7 +5,10 @@ from typing import TYPE_CHECKING
 import cupy as cp
 from cupyx.scipy import sparse
 
-from rapids_singlecell._cuda import _autocorr_cuda as _ac
+try:
+    from rapids_singlecell._cuda import _autocorr_cuda as _ac
+except ImportError:
+    _ac = None
 from rapids_singlecell._utils import parse_device_ids
 
 from ._utils import _check_precision_issues

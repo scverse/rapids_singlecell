@@ -149,21 +149,17 @@ def _normalize_total_csr(
     gene_is_hi = None
 
     if exclude_highly_expressed:
-        from ._kernels._norm_kernel import _find_hi_genes_csr
+        from rapids_singlecell._cuda import _norm_cuda as _nc
 
         gene_is_hi = cp.zeros(n_genes, dtype=cp.bool_)
-        kernel = _find_hi_genes_csr(X.dtype)
-        kernel(
-            (n_cells,),
-            (256,),
-            (
-                X.indptr,
-                X.indices,
-                X.data,
-                gene_is_hi,
-                X.dtype.type(max_fraction),
-                n_cells,
-            ),
+        _nc.find_hi_genes_csr(
+            X.indptr,
+            X.indices,
+            X.data,
+            gene_is_hi=gene_is_hi,
+            max_fraction=float(max_fraction),
+            nrows=n_cells,
+            stream=cp.cuda.get_current_stream().ptr,
         )
 
     if target_sum is not None and gene_is_hi is None:
@@ -179,28 +175,22 @@ def _normalize_total_csr(
         )
     elif target_sum is not None:
         # Fused: masked row sum + scale in one pass
-        from ._kernels._norm_kernel import _masked_mul_csr
+        from rapids_singlecell._cuda import _norm_cuda as _nc
 
-        kernel = _masked_mul_csr(X.dtype)
-        kernel(
-            (n_cells,),
-            (256,),
-            (
-                X.indptr,
-                X.indices,
-                X.data,
-                gene_is_hi,
-                n_cells,
-                X.dtype.type(target_sum),
-            ),
+        _nc.masked_mul_csr(
+            X.indptr,
+            X.indices,
+            X.data,
+            gene_mask=gene_is_hi,
+            nrows=n_cells,
+            tsum=float(target_sum),
+            stream=cp.cuda.get_current_stream().ptr,
         )
     else:
         # Two-pass: compute counts → median → prescaled multiply
-        from ._kernels._norm_kernel import _prescaled_mul_csr
+        from rapids_singlecell._cuda import _norm_cuda as _nc
 
         if gene_is_hi is None:
-            from rapids_singlecell._cuda import _norm_cuda as _nc
-
             counts = cp.zeros(n_cells, dtype=X.dtype)
             _nc.sum_major(
                 X.indptr,
@@ -210,19 +200,25 @@ def _normalize_total_csr(
                 stream=cp.cuda.get_current_stream().ptr,
             )
         else:
-            from ._kernels._norm_kernel import _masked_sum_major
-
             counts = cp.zeros(n_cells, dtype=X.dtype)
-            kernel = _masked_sum_major(X.dtype)
-            kernel(
-                (n_cells,),
-                (256,),
-                (X.indptr, X.indices, X.data, gene_is_hi, counts, n_cells),
+            _nc.masked_sum_major(
+                X.indptr,
+                X.indices,
+                X.data,
+                gene_mask=gene_is_hi,
+                sums=counts,
+                major=n_cells,
+                stream=cp.cuda.get_current_stream().ptr,
             )
 
         scales = _counts_to_scales(counts)
-        kernel = _prescaled_mul_csr(X.dtype)
-        kernel((n_cells,), (256,), (X.indptr, X.data, scales, n_cells))
+        _nc.prescaled_mul_csr(
+            X.indptr,
+            X.data,
+            scales=scales,
+            nrows=n_cells,
+            stream=cp.cuda.get_current_stream().ptr,
+        )
 
     return X
 
@@ -252,7 +248,7 @@ def _normalize_total_dense(
         )
     else:
         # Compute per-cell counts, then prescaled multiply
-        from ._kernels._norm_kernel import _prescaled_mul_dense
+        from rapids_singlecell._cuda import _norm_cuda as _nc
 
         counts_per_cell = X.sum(axis=1)
         if exclude_highly_expressed:
@@ -261,8 +257,13 @@ def _normalize_total_dense(
             counts_per_cell = X[:, gene_subset].sum(axis=1)
 
         scales = _counts_to_scales(counts_per_cell, target_sum)
-        kernel = _prescaled_mul_dense(X.dtype)
-        kernel((n_cells,), (256,), (X, scales, n_cells, n_cols))
+        _nc.prescaled_mul_dense(
+            X,
+            scales=scales,
+            nrows=n_cells,
+            ncols=n_cols,
+            stream=cp.cuda.get_current_stream().ptr,
+        )
 
     return X
 
