@@ -5,8 +5,6 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-
     from numpy.typing import NDArray
 
     from ._core import _RankGenes
@@ -14,24 +12,26 @@ if TYPE_CHECKING:
 
 def t_test(
     rg: _RankGenes, method: Literal["t-test", "t-test_overestim_var"]
-) -> Generator[tuple[int, NDArray, NDArray], None, None]:
+) -> list[tuple[int, NDArray, NDArray]]:
     """Compute t-test statistics using Welch's t-test."""
     from scipy import stats
 
     rg._basic_stats()
 
-    for group_index, (mask_obs, mean_group, var_group) in enumerate(
-        zip(rg.groups_masks_obs, rg.means, rg.vars, strict=True)
-    ):
+    results: list[tuple[int, NDArray, NDArray]] = []
+
+    for group_index in range(len(rg.groups_order)):
         if rg.ireference is not None and group_index == rg.ireference:
             continue
 
-        ns_group = np.count_nonzero(mask_obs)
+        mean_group = rg.means[group_index]
+        var_group = rg.vars[group_index]
+        ns_group = int(rg.group_sizes[group_index])
 
         if rg.ireference is not None:
             mean_rest = rg.means[rg.ireference]
             var_rest = rg.vars[rg.ireference]
-            ns_other = np.count_nonzero(rg.groups_masks_obs[rg.ireference])
+            ns_other = int(rg.group_sizes[rg.ireference])
         else:
             mean_rest = rg.means_rest[group_index]
             var_rest = rg.vars_rest[group_index]
@@ -62,4 +62,6 @@ def t_test(
         scores[np.isnan(scores)] = 0
         pvals[np.isnan(pvals)] = 1
 
-        yield group_index, scores, pvals
+        results.append((group_index, scores, pvals))
+
+    return results
