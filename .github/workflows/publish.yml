@@ -93,8 +93,27 @@ jobs:
           name: cibw-sdist
           path: dist/*.tar.gz
 
-  upload_pypi:
-    needs: [build_wheels, build_sdist]
+  upload_wheels:
+    needs: [build_wheels]
+    runs-on: ubuntu-latest
+    environment: publish-cu${{ matrix.cuda_major }}
+    permissions:
+      id-token: write
+    if: github.event_name == 'release' && github.event.action == 'published'
+    strategy:
+      matrix:
+        cuda_major: ["12", "13"]
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: cibw-wheels-*-cu${{ matrix.cuda_major }}-*
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  upload_sdist:
+    needs: [build_sdist]
     runs-on: ubuntu-latest
     environment: publish
     permissions:
@@ -103,8 +122,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v5
         with:
-          pattern: cibw-*
+          name: cibw-sdist
           path: dist
-          merge-multiple: true
 
       - uses: pypa/gh-action-pypi-publish@release/v1
