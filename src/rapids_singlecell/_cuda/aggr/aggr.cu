@@ -7,8 +7,8 @@ using namespace nb::literals;
 
 template <typename T>
 static inline void launch_csr_aggr(const int* indptr, const int* index, const T* data, double* out,
-                                   const int* cats, const bool* mask, std::size_t n_cells,
-                                   std::size_t n_genes, std::size_t n_groups, cudaStream_t stream) {
+                                   const int* cats, const bool* mask, size_t n_cells,
+                                   size_t n_genes, size_t n_groups, cudaStream_t stream) {
   dim3 grid((unsigned)n_cells);
   dim3 block(64);
   csr_aggr_kernel<T><<<grid, block, 0, stream>>>(indptr, index, data, out, cats, mask, n_cells,
@@ -17,8 +17,8 @@ static inline void launch_csr_aggr(const int* indptr, const int* index, const T*
 
 template <typename T>
 static inline void launch_csc_aggr(const int* indptr, const int* index, const T* data, double* out,
-                                   const int* cats, const bool* mask, std::size_t n_cells,
-                                   std::size_t n_genes, std::size_t n_groups, cudaStream_t stream) {
+                                   const int* cats, const bool* mask, size_t n_cells,
+                                   size_t n_genes, size_t n_groups, cudaStream_t stream) {
   dim3 grid((unsigned)n_genes);
   dim3 block(64);
   csc_aggr_kernel<T><<<grid, block, 0, stream>>>(indptr, index, data, out, cats, mask, n_cells,
@@ -27,8 +27,8 @@ static inline void launch_csc_aggr(const int* indptr, const int* index, const T*
 
 template <typename T>
 static inline void launch_dense_aggr_C(const T* data, double* out, const int* cats,
-                                       const bool* mask, std::size_t n_cells, std::size_t n_genes,
-                                       std::size_t n_groups, cudaStream_t stream) {
+                                       const bool* mask, size_t n_cells, size_t n_genes,
+                                       size_t n_groups, cudaStream_t stream) {
   dim3 block(256);
   dim3 grid((unsigned)((n_cells * n_genes + block.x - 1) / block.x));
   dense_aggr_kernel_C<T>
@@ -37,8 +37,8 @@ static inline void launch_dense_aggr_C(const T* data, double* out, const int* ca
 
 template <typename T>
 static inline void launch_dense_aggr_F(const T* data, double* out, const int* cats,
-                                       const bool* mask, std::size_t n_cells, std::size_t n_genes,
-                                       std::size_t n_groups, cudaStream_t stream) {
+                                       const bool* mask, size_t n_cells, size_t n_genes,
+                                       size_t n_groups, cudaStream_t stream) {
   dim3 block(256);
   dim3 grid((unsigned)((n_cells * n_genes + block.x - 1) / block.x));
   dense_aggr_kernel_F<T>
@@ -70,8 +70,7 @@ void def_sparse_aggr(nb::module_& m) {
       "sparse_aggr",
       [](cuda_array_c<const int> indptr, cuda_array_c<const int> index, cuda_array_c<const T> data,
          cuda_array_c<double> out, cuda_array_c<const int> cats, cuda_array_c<const bool> mask,
-         std::size_t n_cells, std::size_t n_genes, std::size_t n_groups, bool is_csc,
-         std::uintptr_t stream) {
+         size_t n_cells, size_t n_genes, size_t n_groups, bool is_csc, std::uintptr_t stream) {
         if (is_csc) {
           launch_csc_aggr<T>(indptr.data(), index.data(), data.data(), out.data(), cats.data(),
                              mask.data(), n_cells, n_genes, n_groups, (cudaStream_t)stream);
@@ -89,8 +88,8 @@ void def_dense_aggr(nb::module_& m) {
   m.def(
       "dense_aggr",
       [](cuda_array_contig<const T, DataContig> data, cuda_array_c<double> out,
-         cuda_array_c<const int> cats, cuda_array_c<const bool> mask, std::size_t n_cells,
-         std::size_t n_genes, std::size_t n_groups, bool is_fortran, std::uintptr_t stream) {
+         cuda_array_c<const int> cats, cuda_array_c<const bool> mask, size_t n_cells,
+         size_t n_genes, size_t n_groups, bool is_fortran, std::uintptr_t stream) {
         if constexpr (std::is_same_v<DataContig, nb::f_contig>) {
           launch_dense_aggr_F<T>(data.data(), out.data(), cats.data(), mask.data(), n_cells,
                                  n_genes, n_groups, (cudaStream_t)stream);

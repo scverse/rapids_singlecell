@@ -5,17 +5,17 @@
 
 template <typename T>
 __global__ void scatter_add_kernel(const T* __restrict__ v, const int* __restrict__ cats,
-                                   std::size_t n_cells, std::size_t n_pcs, std::size_t switcher,
+                                   size_t n_cells, size_t n_pcs, size_t switcher,
                                    T* __restrict__ a) {
-  std::size_t i = blockIdx.x * blockDim.x + threadIdx.x;
-  std::size_t N = n_cells * n_pcs;
+  size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+  size_t N = n_cells * n_pcs;
   if (i >= N) return;
 
-  std::size_t row = i / n_pcs;
-  std::size_t col = i % n_pcs;
+  size_t row = i / n_pcs;
+  size_t col = i % n_pcs;
 
-  std::size_t cat = static_cast<std::size_t>(cats[row]);
-  std::size_t out_index = cat * n_pcs + col;
+  size_t cat = static_cast<size_t>(cats[row]);
+  size_t out_index = cat * n_pcs + col;
 
   if (switcher == 0)
     atomicAdd(&a[out_index], -v[i]);
@@ -59,7 +59,7 @@ __global__ void scatter_add_kernel_with_bias_cat0(const T* __restrict__ v, int n
   int end_cell = min(start_cell + cells_per_eighth, n_cells);
 
   for (int i = start_cell + threadIdx.x; i < end_cell; i += blockDim.x) {
-    std::size_t base = static_cast<std::size_t>(i) * n_pcs + pc0;
+    size_t base = static_cast<size_t>(i) * n_pcs + pc0;
     VecPC vv = *(const VecPC*)(v + base);
     T bb = __ldg(bias + i);
     acc0 += (T)vv.x * bb;
@@ -128,7 +128,7 @@ __global__ void scatter_add_shared_kernel(const T* __restrict__ v, const int* __
   // Each thread processes cells with stride, accumulating into shared memory
   for (int cell = start_cell + threadIdx.x; cell < end_cell; cell += blockDim.x) {
     int cat = cats[cell];
-    std::size_t v_base = (std::size_t)cell * n_pcs;
+    size_t v_base = (size_t)cell * n_pcs;
     int shared_base = cat * n_pcs;
 
     for (int pc = 0; pc < n_pcs; pc++) {
@@ -176,7 +176,7 @@ __global__ void scatter_add_kernel_with_bias_block(const T* __restrict__ v,
 
   for (int i = start_idx + threadIdx.x; i < end_idx; i += blockDim.x) {
     int cell_idx = cell_indices[i];
-    std::size_t in_index = static_cast<std::size_t>(cell_idx) * n_pcs + pc0;
+    size_t in_index = static_cast<size_t>(cell_idx) * n_pcs + pc0;
     VecPC vv = *(const VecPC*)(v + in_index);
     T bb = __ldg(bias + cell_idx);
     acc0 += (T)vv.x * bb;

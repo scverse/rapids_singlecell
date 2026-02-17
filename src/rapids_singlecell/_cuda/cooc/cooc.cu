@@ -189,13 +189,13 @@ static inline bool launch_reduce_shared(const int* result, float* out, int k, in
   cudaDeviceProp prop;
   cudaGetDeviceProperties(&prop, device);
   if (prop.sharedMemPerBlock <
-      static_cast<std::size_t>(k) * static_cast<std::size_t>(k + 1) * sizeof(float)) {
+      static_cast<size_t>(k) * static_cast<size_t>(k + 1) * sizeof(float)) {
     return false;
   }
 
   dim3 grid(l_val);
   dim3 block(32);
-  std::size_t smem = static_cast<std::size_t>(k) * static_cast<std::size_t>(k + 1) * sizeof(float);
+  size_t smem = static_cast<size_t>(k) * static_cast<size_t>(k + 1) * sizeof(float);
   occur_reduction_kernel_shared<<<grid, block, smem, stream>>>(result, out, k, l_val, format);
   return true;
 }
@@ -205,7 +205,7 @@ static inline void launch_reduce_global(const int* result, float* inter_out, flo
                                         int l_val, int format, cudaStream_t stream) {
   dim3 grid(l_val);
   dim3 block(32);
-  std::size_t smem = static_cast<std::size_t>(k) * sizeof(float);
+  size_t smem = static_cast<size_t>(k) * sizeof(float);
   occur_reduction_kernel_global<<<grid, block, smem, stream>>>(result, inter_out, out, k, l_val,
                                                                format);
 }

@@ -6,24 +6,24 @@
 template <typename T>
 __global__ void fused_pen_norm_kernel(const T* __restrict__ similarities,
                                       const T* __restrict__ penalty, const int* __restrict__ cats,
-                                      const std::size_t* __restrict__ idx_in, T* __restrict__ R_out,
-                                      T term, std::size_t n_rows, std::size_t n_cols) {
-  std::size_t row = blockIdx.x;
+                                      const size_t* __restrict__ idx_in, T* __restrict__ R_out,
+                                      T term, size_t n_rows, size_t n_cols) {
+  size_t row = blockIdx.x;
   if (row >= n_rows) return;
 
   int cat = cats[row];
-  std::size_t sim_row = idx_in[row];
+  size_t sim_row = idx_in[row];
 
   // Phase 1: compute exp(term * (1 - sim)) * penalty and accumulate sum
   T local_sum = T(0);
-  for (std::size_t col = threadIdx.x; col < n_cols; col += blockDim.x) {
+  for (size_t col = threadIdx.x; col < n_cols; col += blockDim.x) {
     T sim = similarities[sim_row * n_cols + col];
     T val;
     if constexpr (std::is_same<T, float>::value)
       val = expf(term * (T(1) - sim));
     else
       val = exp(term * (T(1) - sim));
-    val *= penalty[(std::size_t)cat * n_cols + col];
+    val *= penalty[(size_t)cat * n_cols + col];
     R_out[row * n_cols + col] = val;
     local_sum += val;
   }
@@ -55,6 +55,6 @@ __global__ void fused_pen_norm_kernel(const T* __restrict__ similarities,
 
   // Phase 4: normalize
   T inv_sum = T(1) / row_sum;
-  for (std::size_t col = threadIdx.x; col < n_cols; col += blockDim.x)
+  for (size_t col = threadIdx.x; col < n_cols; col += blockDim.x)
     R_out[row * n_cols + col] *= inv_sum;
 }

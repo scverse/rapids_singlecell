@@ -3,12 +3,12 @@
 #include <cuda_runtime.h>
 
 template <typename T>
-__global__ void colsum_kernel(const T* __restrict__ A, T* __restrict__ out, std::size_t rows,
-                              std::size_t cols) {
-  std::size_t tid = threadIdx.x;
-  for (std::size_t col = blockIdx.x; col < cols; col += gridDim.x) {
+__global__ void colsum_kernel(const T* __restrict__ A, T* __restrict__ out, size_t rows,
+                              size_t cols) {
+  size_t tid = threadIdx.x;
+  for (size_t col = blockIdx.x; col < cols; col += gridDim.x) {
     T acc = (T)0;
-    for (std::size_t i = tid; i < rows; i += blockDim.x) {
+    for (size_t i = tid; i < rows; i += blockDim.x) {
       acc += A[i * cols + col];
     }
     for (int offset = 16; offset > 0; offset >>= 1)
@@ -28,13 +28,13 @@ __global__ void colsum_kernel(const T* __restrict__ A, T* __restrict__ out, std:
 // blockIdx.x = column tile, blockIdx.y = row tile.
 // Uses shared memory to reduce atomics: one per column per block.
 template <typename T>
-__global__ void colsum_atomic_kernel(const T* __restrict__ A, T* __restrict__ out, std::size_t rows,
-                                     std::size_t cols, std::size_t rows_per_tile) {
+__global__ void colsum_atomic_kernel(const T* __restrict__ A, T* __restrict__ out, size_t rows,
+                                     size_t cols, size_t rows_per_tile) {
   __shared__ T col_sums[32];
 
-  std::size_t col = blockIdx.x * 32 + threadIdx.y;
-  std::size_t start_row = blockIdx.y * rows_per_tile;
-  std::size_t end_row = start_row + rows_per_tile;
+  size_t col = blockIdx.x * 32 + threadIdx.y;
+  size_t start_row = blockIdx.y * rows_per_tile;
+  size_t end_row = start_row + rows_per_tile;
   if (end_row > rows) end_row = rows;
 
   // Initialize shared memory
@@ -44,7 +44,7 @@ __global__ void colsum_atomic_kernel(const T* __restrict__ A, T* __restrict__ ou
   // Each thread accumulates multiple rows
   T acc = (T)0;
   if (col < cols) {
-    for (std::size_t row = start_row + threadIdx.x; row < end_row; row += 32) {
+    for (size_t row = start_row + threadIdx.x; row < end_row; row += 32) {
       acc += A[row * cols + col];
     }
   }
@@ -58,7 +58,7 @@ __global__ void colsum_atomic_kernel(const T* __restrict__ A, T* __restrict__ ou
 
   // First warp writes to global memory (one atomic per column)
   if (threadIdx.x == 0 && threadIdx.y < 32) {
-    std::size_t out_col = blockIdx.x * 32 + threadIdx.y;
+    size_t out_col = blockIdx.x * 32 + threadIdx.y;
     if (out_col < cols && col_sums[threadIdx.y] != (T)0)
       atomicAdd(&out[out_col], col_sums[threadIdx.y]);
   }

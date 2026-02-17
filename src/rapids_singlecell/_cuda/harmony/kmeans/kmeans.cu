@@ -6,7 +6,7 @@
 using namespace nb::literals;
 
 template <typename T>
-static inline void launch_kmeans_err(const T* r, const T* dot, std::size_t n, T* out,
+static inline void launch_kmeans_err(const T* r, const T* dot, size_t n, T* out,
                                      cudaStream_t stream) {
   int threads = 256;
   int blocks = min((int)((n + threads - 1) / threads), (int)(8 * 128));
@@ -17,7 +17,7 @@ NB_MODULE(_harmony_kmeans_cuda, m) {
   // kmeans_err - float32
   m.def(
       "kmeans_err",
-      [](cuda_array_c<const float> r, cuda_array_c<const float> dot, std::size_t n,
+      [](cuda_array_c<const float> r, cuda_array_c<const float> dot, size_t n,
          cuda_array_c<float> out, std::uintptr_t stream) {
         launch_kmeans_err<float>(r.data(), dot.data(), n, out.data(), (cudaStream_t)stream);
       },
@@ -26,7 +26,7 @@ NB_MODULE(_harmony_kmeans_cuda, m) {
   // kmeans_err - float64
   m.def(
       "kmeans_err",
-      [](cuda_array_c<const double> r, cuda_array_c<const double> dot, std::size_t n,
+      [](cuda_array_c<const double> r, cuda_array_c<const double> dot, size_t n,
          cuda_array_c<double> out, std::uintptr_t stream) {
         launch_kmeans_err<double>(r.data(), dot.data(), n, out.data(), (cudaStream_t)stream);
       },

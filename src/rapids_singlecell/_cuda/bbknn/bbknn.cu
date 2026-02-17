@@ -9,8 +9,7 @@ static inline void launch_find_top_k_per_row(const float* data, const int* indpt
                                              int trim, float* vals, cudaStream_t stream) {
   dim3 block(64);
   dim3 grid((n_rows + 64 - 1) / 64);
-  std::size_t shared_mem_size =
-      static_cast<std::size_t>(64) * static_cast<std::size_t>(trim) * sizeof(float);
+  size_t shared_mem_size = static_cast<size_t>(64) * static_cast<size_t>(trim) * sizeof(float);
   find_top_k_per_row_kernel<<<grid, block, shared_mem_size, stream>>>(data, indptr, n_rows, trim,
                                                                       vals);
 }

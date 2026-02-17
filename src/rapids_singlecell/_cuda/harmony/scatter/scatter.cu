@@ -6,11 +6,10 @@
 using namespace nb::literals;
 
 template <typename T>
-static inline void launch_scatter_add(const T* v, const int* cats, std::size_t n_cells,
-                                      std::size_t n_pcs, std::size_t switcher, T* a,
-                                      cudaStream_t stream) {
+static inline void launch_scatter_add(const T* v, const int* cats, size_t n_cells, size_t n_pcs,
+                                      size_t switcher, T* a, cudaStream_t stream) {
   dim3 block(256);
-  std::size_t N = n_cells * n_pcs;
+  size_t N = n_cells * n_pcs;
   dim3 grid((unsigned)((N + block.x - 1) / block.x));
   scatter_add_kernel<T><<<grid, block, 0, stream>>>(v, cats, n_cells, n_pcs, switcher, a);
 }
@@ -30,7 +29,7 @@ static inline void launch_scatter_add_shared(const T* v, const int* cats, int n_
                                              cudaStream_t stream) {
   dim3 block(256);
   dim3 grid(n_blocks);
-  std::size_t shared_mem = (std::size_t)n_batches * n_pcs * sizeof(T);
+  size_t shared_mem = (size_t)n_batches * n_pcs * sizeof(T);
   scatter_add_shared_kernel<T>
       <<<grid, block, shared_mem, stream>>>(v, cats, n_cells, n_pcs, n_batches, switcher, a);
 }
@@ -58,8 +57,8 @@ NB_MODULE(_harmony_scatter_cuda, m) {
   // scatter_add - float32
   m.def(
       "scatter_add",
-      [](cuda_array_c<const float> v, cuda_array_c<const int> cats, std::size_t n_cells,
-         std::size_t n_pcs, std::size_t switcher, cuda_array_c<float> a, std::uintptr_t stream) {
+      [](cuda_array_c<const float> v, cuda_array_c<const int> cats, size_t n_cells, size_t n_pcs,
+         size_t switcher, cuda_array_c<float> a, std::uintptr_t stream) {
         launch_scatter_add<float>(v.data(), cats.data(), n_cells, n_pcs, switcher, a.data(),
                                   (cudaStream_t)stream);
       },
@@ -68,8 +67,8 @@ NB_MODULE(_harmony_scatter_cuda, m) {
   // scatter_add - float64
   m.def(
       "scatter_add",
-      [](cuda_array_c<const double> v, cuda_array_c<const int> cats, std::size_t n_cells,
-         std::size_t n_pcs, std::size_t switcher, cuda_array_c<double> a, std::uintptr_t stream) {
+      [](cuda_array_c<const double> v, cuda_array_c<const int> cats, size_t n_cells, size_t n_pcs,
+         size_t switcher, cuda_array_c<double> a, std::uintptr_t stream) {
         launch_scatter_add<double>(v.data(), cats.data(), n_cells, n_pcs, switcher, a.data(),
                                    (cudaStream_t)stream);
       },
