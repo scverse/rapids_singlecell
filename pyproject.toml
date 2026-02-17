@@ -135,6 +135,7 @@ local_scheme = "node-and-date"
 # Use limited ABI wheels (one wheel for all Python minor versions on one platform)
 wheel.py-api = "cp312"
 wheel.packages = [ "src/rapids_singlecell", "src/testing" ]
+wheel.exclude = [ "**/*.cu", "**/*.cuh", "**/*.h" ]
 cmake.version = ">=3.24"
 cmake.build-type = "Release"
 ninja.version = ">=1.10"
