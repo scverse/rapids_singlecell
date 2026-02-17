@@ -64,9 +64,10 @@ static nb::object get_kernel_config(int n_features, bool is_double) {
   int feat_tile;
 
   if (is_double) {
-    // float64: CELL_TILE=16, block_size depends on compute capability
+    // float64: CELL_TILE=16
+    // double kernels use 74 regs/thread; cap at 512 to stay within 64K register limit
     cell_tile = 16;
-    block_size = is_ampere_plus ? 1024 : 256;
+    block_size = is_ampere_plus ? 512 : 256;
     feat_tile = choose_feat_tile(n_features, prop.sharedMemPerBlock, cell_tile, dtype_size);
   } else {
     // float32: CELL_TILE=64 with block_size=512

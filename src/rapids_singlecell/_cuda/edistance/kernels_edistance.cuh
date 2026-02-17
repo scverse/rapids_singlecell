@@ -109,16 +109,27 @@ __global__ void edistance_kernel(const T* __restrict__ embedding,
     }
   }
 
-  // Warp shuffle reduction within each warp
+  // Warp shuffle reduction
 #pragma unroll
   for (int offset = 16; offset > 0; offset >>= 1)
     local_sum += __shfl_down_sync(0xffffffff, local_sum, offset);
 
-  // Lane 0 of each warp atomically adds its result
-  if ((thread_id & 31) == 0 && local_sum != T(0.0)) {
-    atomicAdd(&pairwise_sums[a * k + b], local_sum);
-    if (a != b) {
-      atomicAdd(&pairwise_sums[b * k + a], local_sum);
+  // Block reduction via shared memory
+  static __shared__ T warp_sums[32];
+  if ((thread_id & 31) == 0) warp_sums[thread_id >> 5] = local_sum;
+  __syncthreads();
+
+  if (thread_id < 32) {
+    T val = (thread_id < (block_size >> 5)) ? warp_sums[thread_id] : T(0.0);
+#pragma unroll
+    for (int offset = 16; offset > 0; offset >>= 1)
+      val += __shfl_down_sync(0xffffffff, val, offset);
+
+    if (thread_id == 0) {
+      atomicAdd(&pairwise_sums[a * k + b], val);
+      if (a != b) {
+        atomicAdd(&pairwise_sums[b * k + a], val);
+      }
     }
   }
 }
