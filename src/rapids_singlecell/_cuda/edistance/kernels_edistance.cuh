@@ -7,13 +7,12 @@
 // Uses shared memory tiling over cells and features
 
 template <typename T, int CELL_TILE, int FEAT_TILE>
-__global__ __launch_bounds__(1024, 1) void edistance_kernel(const T* __restrict__ embedding,
-                                                            const int* __restrict__ cat_offsets,
-                                                            const int* __restrict__ cell_indices,
-                                                            const int* __restrict__ pair_left,
-                                                            const int* __restrict__ pair_right,
-                                                            T* __restrict__ pairwise_sums, int k,
-                                                            int n_features, int blocks_per_pair) {
+__global__ void edistance_kernel(const T* __restrict__ embedding,
+                                 const int* __restrict__ cat_offsets,
+                                 const int* __restrict__ cell_indices,
+                                 const int* __restrict__ pair_left,
+                                 const int* __restrict__ pair_right, T* __restrict__ pairwise_sums,
+                                 int k, int n_features, int blocks_per_pair) {
   // Shared memory for B tile: [FEAT_TILE][CELL_TILE]
   extern __shared__ char smem_raw[];
   T* smem_b = reinterpret_cast<T*>(smem_raw);

@@ -1,5 +1,9 @@
 FROM quay.io/pypa/manylinux_2_28_aarch64
 
+# Install GCC 12 (CUDA 12.2 does not support GCC > 12)
+RUN yum -y install gcc-toolset-12-gcc gcc-toolset-12-gcc-c++ && \
+    yum clean all
+
 RUN yum -y install dnf-plugins-core && \
     dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/sbsa/cuda-rhel8.repo && \
     yum -y clean all && yum -y makecache && \
@@ -15,4 +19,4 @@ RUN yum -y install dnf-plugins-core && \
 
 ENV CUDA_HOME=/usr/local/cuda
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
-ENV PATH=/usr/local/cuda/bin:${PATH}
+ENV PATH=/opt/rh/gcc-toolset-12/root/usr/bin:/usr/local/cuda/bin:${PATH}

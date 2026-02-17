@@ -257,7 +257,7 @@ __global__ void occur_reduction_kernel_global(const int* __restrict__ result,
 // Templated CSR catpairs kernel with cell tile caching
 // CELL_TILE: number of B cells to cache in shared memory
 template <int CELL_TILE>
-__global__ __launch_bounds__(1024, 1) void occur_count_kernel_csr_catpairs_tiled(
+__global__ void occur_count_kernel_csr_catpairs_tiled(
     const float* __restrict__ spatial, const float* __restrict__ thresholds,
     const int* __restrict__ cat_offsets, const int* __restrict__ cell_indices,
     const int* __restrict__ pair_left, const int* __restrict__ pair_right, int* __restrict__ counts,
