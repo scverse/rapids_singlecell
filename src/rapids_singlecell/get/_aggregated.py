@@ -9,11 +9,7 @@ from scanpy._utils import _resolve_axis
 from scanpy.get._aggregated import _combine_categories
 
 from rapids_singlecell._compat import DaskArray, _meta_dense
-
-try:
-    from rapids_singlecell._cuda import _aggr_cuda
-except ImportError:
-    _aggr_cuda = None
+from rapids_singlecell._cuda import _aggr_cuda
 from rapids_singlecell.get import _check_mask
 from rapids_singlecell.preprocessing._utils import _check_gpu_X
 

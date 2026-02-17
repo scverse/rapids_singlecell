@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-try:
-    from rapids_singlecell._cuda import _pv_cuda as _pv
-except ImportError:
-    _pv = None
 import cupy as cp
 import numba as nb
 import numpy as np
+
+from rapids_singlecell._cuda import _pv_cuda as _pv
 
 
 def _rev_cummin64(x, n_rows, m):

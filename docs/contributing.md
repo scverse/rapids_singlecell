@@ -115,7 +115,15 @@ nanobind will reject arrays with the wrong memory layout at runtime.
    ```cmake
    add_nb_cuda_module(_your_module_cuda src/rapids_singlecell/_cuda/your_module/your_module.cu)
    ```
-5. Rebuild: `uv pip install -e .`
+5. Add the module name to the `__all__` list in `src/rapids_singlecell/_cuda/__init__.py`:
+   ```python
+   __all__ = [
+       ...,
+       "_your_module_cuda",
+   ]
+   ```
+   This registers the module for lazy loading — imports return `None` instead of raising `ImportError` when the compiled extension is unavailable (e.g., docs builds without a GPU).
+6. Rebuild: `uv pip install -e .`
 
 The `add_nb_cuda_module` helper automatically handles:
 - Stable ABI + LTO compilation
@@ -130,6 +138,17 @@ The `add_nb_cuda_module` helper automatically handles:
 - Use `nb::kw_only()` to separate data arguments from configuration arguments
 - Accept `std::uintptr_t stream` as the last parameter (default `0`) to support stream-based execution
 - Keep kernel logic in `.cuh` headers, bindings in `.cu` files
+- **Import `_cuda` modules via `rapids_singlecell._cuda`**. The `_cuda` package uses lazy loading with automatic `ImportError` handling — if the compiled extension is unavailable (e.g., docs builds without a GPU), the import returns `None` instead of raising an error:
+
+  ```python
+  from rapids_singlecell._cuda import _my_module_cuda as _my
+
+  def my_function(adata):
+      # _my is either the real module or None
+      _my.kernel(...)
+  ```
+
+  No `try/except` or lazy imports needed — the `_cuda.__init__.py` handles it for you.
 
 ## Testing
 
@@ -186,6 +205,12 @@ Tests have a default 120-second timeout configured in `pyproject.toml`.
 
 ```bash
 (uvx) hatch run docs:build
+```
+
+To build without compiling CUDA extensions (e.g., on a machine without a GPU):
+
+```bash
+CMAKE_ARGS="-DRSC_BUILD_EXTENSIONS=OFF" (uvx) hatch run docs:build
 ```
 
 The built docs are in `docs/_build/html/`.

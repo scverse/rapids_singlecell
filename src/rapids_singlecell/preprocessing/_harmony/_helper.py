@@ -5,27 +5,12 @@ from typing import TYPE_CHECKING
 import cupy as cp
 import numpy as np
 
-try:
-    from rapids_singlecell._cuda import (
-        _harmony_colsum_cuda as _hc_cs,
-    )
-    from rapids_singlecell._cuda import (
-        _harmony_kmeans_cuda as _hc_km,
-    )
-    from rapids_singlecell._cuda import (
-        _harmony_normalize_cuda as _hc_norm,
-    )
-    from rapids_singlecell._cuda import (
-        _harmony_outer_cuda as _hc_out,
-    )
-    from rapids_singlecell._cuda import (
-        _harmony_pen_cuda as _hc_pen,
-    )
-    from rapids_singlecell._cuda import (
-        _harmony_scatter_cuda as _hc_sc,
-    )
-except ImportError:
-    _hc_sc = _hc_out = _hc_cs = _hc_km = _hc_norm = _hc_pen = None
+from rapids_singlecell._cuda import _harmony_colsum_cuda as _hc_cs
+from rapids_singlecell._cuda import _harmony_kmeans_cuda as _hc_km
+from rapids_singlecell._cuda import _harmony_normalize_cuda as _hc_norm
+from rapids_singlecell._cuda import _harmony_outer_cuda as _hc_out
+from rapids_singlecell._cuda import _harmony_pen_cuda as _hc_pen
+from rapids_singlecell._cuda import _harmony_scatter_cuda as _hc_sc
 
 if TYPE_CHECKING:
     import pandas as pd

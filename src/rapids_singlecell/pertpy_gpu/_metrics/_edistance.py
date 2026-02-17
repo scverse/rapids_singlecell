@@ -9,11 +9,7 @@ import cupy as cp
 import numpy as np
 import pandas as pd
 
-try:
-    from rapids_singlecell._cuda import _edistance_cuda as _ed
-except ImportError:
-    _ed = None
-
+from rapids_singlecell._cuda import _edistance_cuda as _ed
 from rapids_singlecell._utils import (
     _calculate_blocks_per_pair,
     _create_category_index_mapping,

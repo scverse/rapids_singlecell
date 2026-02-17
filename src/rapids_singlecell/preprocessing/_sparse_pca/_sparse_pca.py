@@ -12,14 +12,10 @@ from rapids_singlecell._compat import (
     DaskArray,
     _meta_dense,
 )
+from rapids_singlecell._cuda import _spca_cuda as _spca
 from rapids_singlecell.preprocessing._utils import _get_mean_var
 
 from ._helper import _check_matrix_for_zero_genes, _compute_cov, _copy_gram
-
-try:
-    from rapids_singlecell._cuda import _spca_cuda as _spca
-except ImportError:
-    _spca = None
 
 
 class PCA_sparse:

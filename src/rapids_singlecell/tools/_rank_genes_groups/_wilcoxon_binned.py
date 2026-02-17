@@ -9,11 +9,7 @@ import cupyx.scipy.special as cupyx_special
 import numpy as np
 
 from rapids_singlecell._compat import DaskArray
-
-try:
-    from rapids_singlecell._cuda import _wilcoxon_binned_cuda as _wb
-except ImportError:
-    _wb = None
+from rapids_singlecell._cuda import _wilcoxon_binned_cuda as _wb
 
 if TYPE_CHECKING:
     from collections.abc import Generator

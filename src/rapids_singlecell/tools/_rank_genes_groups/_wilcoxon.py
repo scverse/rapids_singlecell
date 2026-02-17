@@ -8,10 +8,7 @@ import cupyx.scipy.special as cupyx_special
 import numpy as np
 import scipy.sparse as sp
 
-try:
-    from rapids_singlecell._cuda import _wilcoxon_cuda as _wc
-except ImportError:
-    _wc = None
+from rapids_singlecell._cuda import _wilcoxon_cuda as _wc
 from rapids_singlecell._utils._csr_to_csc import _fast_csr_to_csc
 
 from ._utils import _choose_chunk_size, _get_column_block

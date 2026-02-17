@@ -6,11 +6,7 @@ import cupy as cp
 import numpy as np
 from cuml.metrics import pairwise_distances
 
-try:
-    from rapids_singlecell._cuda import _cooc_cuda as _co
-except ImportError:
-    _co = None
-
+from rapids_singlecell._cuda import _cooc_cuda as _co
 from rapids_singlecell._utils import (
     _calculate_blocks_per_pair,
     _create_category_index_mapping,

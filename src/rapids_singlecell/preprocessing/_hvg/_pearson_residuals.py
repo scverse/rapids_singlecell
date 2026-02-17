@@ -9,16 +9,12 @@ import pandas as pd
 from cupyx.scipy.sparse import issparse
 from scanpy.get import _get_obs_rep
 
+from rapids_singlecell._cuda import _pr_cuda
 from rapids_singlecell.preprocessing._utils import (
     _check_gpu_X,
     _check_nonnegative_integers,
     _get_mean_var,
 )
-
-try:
-    from rapids_singlecell._cuda import _pr_cuda
-except ImportError:
-    _pr_cuda = None
 
 if TYPE_CHECKING:
     from anndata import AnnData

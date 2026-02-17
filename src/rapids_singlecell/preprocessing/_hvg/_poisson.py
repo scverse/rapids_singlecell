@@ -9,16 +9,12 @@ import pandas as pd
 from scanpy.get import _get_obs_rep
 
 from rapids_singlecell._compat import DaskArray
+from rapids_singlecell._cuda import _hvg_cuda as _hvg
 from rapids_singlecell.preprocessing._qc import _basic_qc
 from rapids_singlecell.preprocessing._utils import (
     _check_gpu_X,
     _check_nonnegative_integers,
 )
-
-try:
-    from rapids_singlecell._cuda import _hvg_cuda as _hvg
-except ImportError:
-    _hvg = None
 
 if TYPE_CHECKING:
     from anndata import AnnData

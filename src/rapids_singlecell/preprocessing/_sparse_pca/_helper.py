@@ -6,10 +6,7 @@ import cupy as cp
 
 if TYPE_CHECKING:
     from cupyx.scipy.sparse import spmatrix
-try:
-    from rapids_singlecell._cuda import _spca_cuda as _spca
-except ImportError:
-    _spca = None
+from rapids_singlecell._cuda import _spca_cuda as _spca
 
 
 def _copy_gram(gram_matrix: cp.ndarray, n_cols: int) -> cp.ndarray:
