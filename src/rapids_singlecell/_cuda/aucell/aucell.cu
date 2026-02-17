@@ -1,12 +1,7 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 __global__ void auc_kernel(const int* __restrict__ ranks, int R, int C,
                            const int* __restrict__ cnct, const int* __restrict__ starts,
@@ -46,9 +41,9 @@ static inline void launch_auc(const int* ranks, int R, int C, const int* cnct, c
 NB_MODULE(_aucell_cuda, m) {
   m.def(
       "auc",
-      [](cuda_array<const int> ranks, int R, int C, cuda_array<const int> cnct,
-         cuda_array<const int> starts, cuda_array<const int> lens, int n_sets, int n_up,
-         cuda_array<const float> max_aucs, cuda_array<float> es, std::uintptr_t stream) {
+      [](cuda_array_c<const int> ranks, int R, int C, cuda_array_c<const int> cnct,
+         cuda_array_c<const int> starts, cuda_array_c<const int> lens, int n_sets, int n_up,
+         cuda_array_c<const float> max_aucs, cuda_array_c<float> es, std::uintptr_t stream) {
         launch_auc(ranks.data(), R, C, cnct.data(), starts.data(), lens.data(), n_sets, n_up,
                    max_aucs.data(), es.data(), (cudaStream_t)stream);
       },

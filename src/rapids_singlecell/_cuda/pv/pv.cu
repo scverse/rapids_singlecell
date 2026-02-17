@@ -1,14 +1,9 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 
 #include "kernels_pv.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 static inline void launch_rev_cummin64(const double* x, double* y, int n_rows, int m,
                                        cudaStream_t stream) {
@@ -20,7 +15,7 @@ static inline void launch_rev_cummin64(const double* x, double* y, int n_rows, i
 NB_MODULE(_pv_cuda, m) {
   m.def(
       "rev_cummin64",
-      [](cuda_array<const double> x, cuda_array<double> out, int n_rows, int m,
+      [](cuda_array_c<const double> x, cuda_array_c<double> out, int n_rows, int m,
          std::uintptr_t stream) {
         launch_rev_cummin64(x.data(), out.data(), n_rows, m, (cudaStream_t)stream);
       },

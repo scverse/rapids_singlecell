@@ -1,14 +1,9 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 
 #include "kernels_wilcoxon.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda>;
 
 // Constants for kernel launch configuration
 constexpr int WARP_SIZE = 32;
@@ -41,7 +36,7 @@ NB_MODULE(_wilcoxon_cuda, m) {
   // Tie correction kernel
   m.def(
       "tie_correction",
-      [](cuda_array<const double> sorted_vals, cuda_array<double> correction, int n_rows,
+      [](cuda_array_f<const double> sorted_vals, cuda_array<double> correction, int n_rows,
          int n_cols, std::uintptr_t stream) {
         launch_tie_correction(sorted_vals.data(), correction.data(), n_rows, n_cols,
                               (cudaStream_t)stream);
@@ -51,8 +46,8 @@ NB_MODULE(_wilcoxon_cuda, m) {
   // Average rank kernel
   m.def(
       "average_rank",
-      [](cuda_array<const double> sorted_vals, cuda_array<const int> sorter,
-         cuda_array<double> ranks, int n_rows, int n_cols, std::uintptr_t stream) {
+      [](cuda_array_f<const double> sorted_vals, cuda_array_f<const int> sorter,
+         cuda_array_f<double> ranks, int n_rows, int n_cols, std::uintptr_t stream) {
         launch_average_rank(sorted_vals.data(), sorter.data(), ranks.data(), n_rows, n_cols,
                             (cudaStream_t)stream);
       },

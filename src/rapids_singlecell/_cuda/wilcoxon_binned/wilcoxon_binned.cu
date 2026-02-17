@@ -1,18 +1,9 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 
 #include "kernels_wilcoxon_binned.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
-
-// For Fortran-ordered dense arrays
-template <typename T>
-using cuda_array_f = nb::ndarray<T, nb::device::cuda, nb::f_contig>;
 
 template <typename T>
 static inline void launch_dense_hist(const T* X, const int* gcodes, unsigned int* hist, int n_cells,
@@ -52,9 +43,9 @@ NB_MODULE(_wilcoxon_binned_cuda, m) {
   // dense_hist - float32
   m.def(
       "dense_hist",
-      [](cuda_array_f<const float> X, cuda_array<const int> gcodes, cuda_array<unsigned int> hist,
-         int n_cells, int n_genes, int n_groups, int n_bins, double bin_low, double inv_bin_width,
-         std::uintptr_t stream) {
+      [](cuda_array_f<const float> X, cuda_array_c<const int> gcodes,
+         cuda_array_c<unsigned int> hist, int n_cells, int n_genes, int n_groups, int n_bins,
+         double bin_low, double inv_bin_width, std::uintptr_t stream) {
         launch_dense_hist<float>(X.data(), gcodes.data(), hist.data(), n_cells, n_genes, n_groups,
                                  n_bins, bin_low, inv_bin_width, (cudaStream_t)stream);
       },
@@ -64,9 +55,9 @@ NB_MODULE(_wilcoxon_binned_cuda, m) {
   // dense_hist - float64
   m.def(
       "dense_hist",
-      [](cuda_array_f<const double> X, cuda_array<const int> gcodes, cuda_array<unsigned int> hist,
-         int n_cells, int n_genes, int n_groups, int n_bins, double bin_low, double inv_bin_width,
-         std::uintptr_t stream) {
+      [](cuda_array_f<const double> X, cuda_array_c<const int> gcodes,
+         cuda_array_c<unsigned int> hist, int n_cells, int n_genes, int n_groups, int n_bins,
+         double bin_low, double inv_bin_width, std::uintptr_t stream) {
         launch_dense_hist<double>(X.data(), gcodes.data(), hist.data(), n_cells, n_genes, n_groups,
                                   n_bins, bin_low, inv_bin_width, (cudaStream_t)stream);
       },
@@ -76,10 +67,10 @@ NB_MODULE(_wilcoxon_binned_cuda, m) {
   // csr_hist - float32
   m.def(
       "csr_hist",
-      [](cuda_array<const float> data, cuda_array<const int> indices, cuda_array<const int> indptr,
-         cuda_array<const int> gcodes, cuda_array<unsigned int> hist, int n_cells, int n_genes,
-         int n_groups, int n_bins, double bin_low, double inv_bin_width, int gene_start,
-         std::uintptr_t stream) {
+      [](cuda_array_c<const float> data, cuda_array_c<const int> indices,
+         cuda_array_c<const int> indptr, cuda_array_c<const int> gcodes,
+         cuda_array_c<unsigned int> hist, int n_cells, int n_genes, int n_groups, int n_bins,
+         double bin_low, double inv_bin_width, int gene_start, std::uintptr_t stream) {
         launch_csr_hist<float>(data.data(), indices.data(), indptr.data(), gcodes.data(),
                                hist.data(), n_cells, n_genes, n_groups, n_bins, bin_low,
                                inv_bin_width, gene_start, (cudaStream_t)stream);
@@ -91,10 +82,10 @@ NB_MODULE(_wilcoxon_binned_cuda, m) {
   // csr_hist - float64
   m.def(
       "csr_hist",
-      [](cuda_array<const double> data, cuda_array<const int> indices, cuda_array<const int> indptr,
-         cuda_array<const int> gcodes, cuda_array<unsigned int> hist, int n_cells, int n_genes,
-         int n_groups, int n_bins, double bin_low, double inv_bin_width, int gene_start,
-         std::uintptr_t stream) {
+      [](cuda_array_c<const double> data, cuda_array_c<const int> indices,
+         cuda_array_c<const int> indptr, cuda_array_c<const int> gcodes,
+         cuda_array_c<unsigned int> hist, int n_cells, int n_genes, int n_groups, int n_bins,
+         double bin_low, double inv_bin_width, int gene_start, std::uintptr_t stream) {
         launch_csr_hist<double>(data.data(), indices.data(), indptr.data(), gcodes.data(),
                                 hist.data(), n_cells, n_genes, n_groups, n_bins, bin_low,
                                 inv_bin_width, gene_start, (cudaStream_t)stream);
@@ -106,10 +97,10 @@ NB_MODULE(_wilcoxon_binned_cuda, m) {
   // csc_hist - float32
   m.def(
       "csc_hist",
-      [](cuda_array<const float> data, cuda_array<const int> indices, cuda_array<const int> indptr,
-         cuda_array<const int> gcodes, cuda_array<unsigned int> hist, int n_cells, int n_genes,
-         int n_groups, int n_bins, double bin_low, double inv_bin_width, int gene_start,
-         std::uintptr_t stream) {
+      [](cuda_array_c<const float> data, cuda_array_c<const int> indices,
+         cuda_array_c<const int> indptr, cuda_array_c<const int> gcodes,
+         cuda_array_c<unsigned int> hist, int n_cells, int n_genes, int n_groups, int n_bins,
+         double bin_low, double inv_bin_width, int gene_start, std::uintptr_t stream) {
         launch_csc_hist<float>(data.data(), indices.data(), indptr.data(), gcodes.data(),
                                hist.data(), n_cells, n_genes, n_groups, n_bins, bin_low,
                                inv_bin_width, gene_start, (cudaStream_t)stream);
@@ -121,10 +112,10 @@ NB_MODULE(_wilcoxon_binned_cuda, m) {
   // csc_hist - float64
   m.def(
       "csc_hist",
-      [](cuda_array<const double> data, cuda_array<const int> indices, cuda_array<const int> indptr,
-         cuda_array<const int> gcodes, cuda_array<unsigned int> hist, int n_cells, int n_genes,
-         int n_groups, int n_bins, double bin_low, double inv_bin_width, int gene_start,
-         std::uintptr_t stream) {
+      [](cuda_array_c<const double> data, cuda_array_c<const int> indices,
+         cuda_array_c<const int> indptr, cuda_array_c<const int> gcodes,
+         cuda_array_c<unsigned int> hist, int n_cells, int n_genes, int n_groups, int n_bins,
+         double bin_low, double inv_bin_width, int gene_start, std::uintptr_t stream) {
         launch_csc_hist<double>(data.data(), indices.data(), indptr.data(), gcodes.data(),
                                 hist.data(), n_cells, n_genes, n_groups, n_bins, bin_low,
                                 inv_bin_width, gene_start, (cudaStream_t)stream);

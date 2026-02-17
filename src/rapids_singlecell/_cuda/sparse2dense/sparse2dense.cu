@@ -1,15 +1,9 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 
 #include "kernels_s2d.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-// Templated cuda_array over dtype and contiguity
-template <typename T, typename Contig>
-using cuda_array = nb::ndarray<T, nb::device::cuda, Contig>;
 
 // Fully templated kernel launch - no runtime branches
 template <typename T, bool C_ORDER>
@@ -52,9 +46,10 @@ template <typename T, typename OutContig>
 void def_sparse2dense(nb::module_& m) {
   m.def(
       "sparse2dense",
-      [](cuda_array<const int, nb::c_contig> indptr, cuda_array<const int, nb::c_contig> index,
-         cuda_array<const T, nb::c_contig> data, cuda_array<T, OutContig> out, long long major,
-         long long minor, bool c_switch, int max_nnz, std::uintptr_t stream) {
+      [](cuda_array_contig<const int, nb::c_contig> indptr,
+         cuda_array_contig<const int, nb::c_contig> index,
+         cuda_array_contig<const T, nb::c_contig> data, cuda_array_contig<T, OutContig> out,
+         long long major, long long minor, bool c_switch, int max_nnz, std::uintptr_t stream) {
         dispatch_sparse2dense<T>(indptr.data(), index.data(), data.data(), out.data(), major, minor,
                                  c_switch, max_nnz, (cudaStream_t)stream);
       },

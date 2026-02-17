@@ -1,15 +1,10 @@
 #include <cstddef>
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../../nb_types.h"
 
 #include "kernels_pen.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 template <typename T>
 static inline void launch_fused_pen_norm(const T* similarities, const T* penalty, const int* cats,
@@ -28,9 +23,10 @@ NB_MODULE(_harmony_pen_cuda, m) {
   // fused_pen_norm - float32
   m.def(
       "fused_pen_norm",
-      [](cuda_array<const float> similarities, cuda_array<const float> penalty,
-         cuda_array<const int> cats, cuda_array<const std::size_t> idx_in, cuda_array<float> R_out,
-         float term, std::size_t n_rows, std::size_t n_cols, std::uintptr_t stream) {
+      [](cuda_array_c<const float> similarities, cuda_array_c<const float> penalty,
+         cuda_array_c<const int> cats, cuda_array_c<const std::size_t> idx_in,
+         cuda_array_c<float> R_out, float term, std::size_t n_rows, std::size_t n_cols,
+         std::uintptr_t stream) {
         launch_fused_pen_norm<float>(similarities.data(), penalty.data(), cats.data(),
                                      idx_in.data(), R_out.data(), term, n_rows, n_cols,
                                      (cudaStream_t)stream);
@@ -41,9 +37,10 @@ NB_MODULE(_harmony_pen_cuda, m) {
   // fused_pen_norm - float64
   m.def(
       "fused_pen_norm",
-      [](cuda_array<const double> similarities, cuda_array<const double> penalty,
-         cuda_array<const int> cats, cuda_array<const std::size_t> idx_in, cuda_array<double> R_out,
-         double term, std::size_t n_rows, std::size_t n_cols, std::uintptr_t stream) {
+      [](cuda_array_c<const double> similarities, cuda_array_c<const double> penalty,
+         cuda_array_c<const int> cats, cuda_array_c<const std::size_t> idx_in,
+         cuda_array_c<double> R_out, double term, std::size_t n_rows, std::size_t n_cols,
+         std::uintptr_t stream) {
         launch_fused_pen_norm<double>(similarities.data(), penalty.data(), cats.data(),
                                       idx_in.data(), R_out.data(), term, n_rows, n_cols,
                                       (cudaStream_t)stream);

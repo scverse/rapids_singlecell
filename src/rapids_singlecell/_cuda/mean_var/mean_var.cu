@@ -1,14 +1,9 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 
 #include "kernels_mv.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 template <typename T>
 static inline void launch_mean_var_major(const int* indptr, const int* indices, const T* data,
@@ -32,9 +27,9 @@ NB_MODULE(_mean_var_cuda, m) {
   // Float32 major
   m.def(
       "mean_var_major",
-      [](cuda_array<const int> indptr, cuda_array<const int> indices, cuda_array<const float> data,
-         cuda_array<double> means, cuda_array<double> vars, int major, int minor,
-         std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> indices,
+         cuda_array_c<const float> data, cuda_array_c<double> means, cuda_array_c<double> vars,
+         int major, int minor, std::uintptr_t stream) {
         launch_mean_var_major<float>(indptr.data(), indices.data(), data.data(), means.data(),
                                      vars.data(), major, minor, (cudaStream_t)stream);
       },
@@ -44,9 +39,9 @@ NB_MODULE(_mean_var_cuda, m) {
   // Float64 major
   m.def(
       "mean_var_major",
-      [](cuda_array<const int> indptr, cuda_array<const int> indices, cuda_array<const double> data,
-         cuda_array<double> means, cuda_array<double> vars, int major, int minor,
-         std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> indices,
+         cuda_array_c<const double> data, cuda_array_c<double> means, cuda_array_c<double> vars,
+         int major, int minor, std::uintptr_t stream) {
         launch_mean_var_major<double>(indptr.data(), indices.data(), data.data(), means.data(),
                                       vars.data(), major, minor, (cudaStream_t)stream);
       },
@@ -56,8 +51,8 @@ NB_MODULE(_mean_var_cuda, m) {
   // Float32 minor
   m.def(
       "mean_var_minor",
-      [](cuda_array<const int> indices, cuda_array<const float> data, cuda_array<double> means,
-         cuda_array<double> vars, int nnz, std::uintptr_t stream) {
+      [](cuda_array_c<const int> indices, cuda_array_c<const float> data,
+         cuda_array_c<double> means, cuda_array_c<double> vars, int nnz, std::uintptr_t stream) {
         launch_mean_var_minor<float>(indices.data(), data.data(), means.data(), vars.data(), nnz,
                                      (cudaStream_t)stream);
       },
@@ -66,8 +61,8 @@ NB_MODULE(_mean_var_cuda, m) {
   // Float64 minor
   m.def(
       "mean_var_minor",
-      [](cuda_array<const int> indices, cuda_array<const double> data, cuda_array<double> means,
-         cuda_array<double> vars, int nnz, std::uintptr_t stream) {
+      [](cuda_array_c<const int> indices, cuda_array_c<const double> data,
+         cuda_array_c<double> means, cuda_array_c<double> vars, int nnz, std::uintptr_t stream) {
         launch_mean_var_minor<double>(indices.data(), data.data(), means.data(), vars.data(), nnz,
                                       (cudaStream_t)stream);
       },

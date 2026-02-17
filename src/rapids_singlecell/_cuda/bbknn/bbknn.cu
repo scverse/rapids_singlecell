@@ -1,14 +1,9 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 
 #include "kernels_bbknn.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 static inline void launch_find_top_k_per_row(const float* data, const int* indptr, int n_rows,
                                              int trim, float* vals, cudaStream_t stream) {
@@ -30,8 +25,8 @@ static inline void launch_cut_smaller(int* indptr, int* index, float* data, floa
 NB_MODULE(_bbknn_cuda, m) {
   m.def(
       "find_top_k_per_row",
-      [](cuda_array<const float> data, cuda_array<const int> indptr, int n_rows, int trim,
-         cuda_array<float> vals, std::uintptr_t stream) {
+      [](cuda_array_c<const float> data, cuda_array_c<const int> indptr, int n_rows, int trim,
+         cuda_array_c<float> vals, std::uintptr_t stream) {
         launch_find_top_k_per_row(data.data(), indptr.data(), n_rows, trim, vals.data(),
                                   (cudaStream_t)stream);
       },
@@ -39,8 +34,8 @@ NB_MODULE(_bbknn_cuda, m) {
 
   m.def(
       "cut_smaller",
-      [](cuda_array<int> indptr, cuda_array<int> index, cuda_array<float> data,
-         cuda_array<float> vals, int n_rows, std::uintptr_t stream) {
+      [](cuda_array_c<int> indptr, cuda_array_c<int> index, cuda_array_c<float> data,
+         cuda_array_c<float> vals, int n_rows, std::uintptr_t stream) {
         launch_cut_smaller(indptr.data(), index.data(), data.data(), vals.data(), n_rows,
                            (cudaStream_t)stream);
       },

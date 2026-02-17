@@ -1,14 +1,9 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../../nb_types.h"
 
 #include "kernels_outer.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 template <typename T>
 static inline void launch_outer(T* E, const T* Pr_b, const T* R_sum, long long n_cats,
@@ -43,7 +38,7 @@ NB_MODULE(_harmony_outer_cuda, m) {
   // outer - float32
   m.def(
       "outer",
-      [](cuda_array<float> E, cuda_array<const float> Pr_b, cuda_array<const float> R_sum,
+      [](cuda_array_c<float> E, cuda_array_c<const float> Pr_b, cuda_array_c<const float> R_sum,
          long long n_cats, long long n_pcs, long long switcher, std::uintptr_t stream) {
         launch_outer<float>(E.data(), Pr_b.data(), R_sum.data(), n_cats, n_pcs, switcher,
                             (cudaStream_t)stream);
@@ -54,7 +49,7 @@ NB_MODULE(_harmony_outer_cuda, m) {
   // outer - float64
   m.def(
       "outer",
-      [](cuda_array<double> E, cuda_array<const double> Pr_b, cuda_array<const double> R_sum,
+      [](cuda_array_c<double> E, cuda_array_c<const double> Pr_b, cuda_array_c<const double> R_sum,
          long long n_cats, long long n_pcs, long long switcher, std::uintptr_t stream) {
         launch_outer<double>(E.data(), Pr_b.data(), R_sum.data(), n_cats, n_pcs, switcher,
                              (cudaStream_t)stream);
@@ -65,8 +60,8 @@ NB_MODULE(_harmony_outer_cuda, m) {
   // harmony_corr - float32
   m.def(
       "harmony_corr",
-      [](cuda_array<float> Z, cuda_array<const float> W, cuda_array<const int> cats,
-         cuda_array<const float> R, long long n_cells, long long n_pcs, std::uintptr_t stream) {
+      [](cuda_array_c<float> Z, cuda_array_c<const float> W, cuda_array_c<const int> cats,
+         cuda_array_c<const float> R, long long n_cells, long long n_pcs, std::uintptr_t stream) {
         launch_harmony_corr<float>(Z.data(), W.data(), cats.data(), R.data(), n_cells, n_pcs,
                                    (cudaStream_t)stream);
       },
@@ -75,8 +70,8 @@ NB_MODULE(_harmony_outer_cuda, m) {
   // harmony_corr - float64
   m.def(
       "harmony_corr",
-      [](cuda_array<double> Z, cuda_array<const double> W, cuda_array<const int> cats,
-         cuda_array<const double> R, long long n_cells, long long n_pcs, std::uintptr_t stream) {
+      [](cuda_array_c<double> Z, cuda_array_c<const double> W, cuda_array_c<const int> cats,
+         cuda_array_c<const double> R, long long n_cells, long long n_pcs, std::uintptr_t stream) {
         launch_harmony_corr<double>(Z.data(), W.data(), cats.data(), R.data(), n_cells, n_pcs,
                                     (cudaStream_t)stream);
       },
@@ -85,8 +80,8 @@ NB_MODULE(_harmony_outer_cuda, m) {
   // batched_correction - float32
   m.def(
       "batched_correction",
-      [](cuda_array<float> Z, cuda_array<const float> W_all, cuda_array<const int> cats,
-         cuda_array<const float> R, int n_cells, int n_pcs, int n_clusters, int n_batches_p1,
+      [](cuda_array_c<float> Z, cuda_array_c<const float> W_all, cuda_array_c<const int> cats,
+         cuda_array_c<const float> R, int n_cells, int n_pcs, int n_clusters, int n_batches_p1,
          std::uintptr_t stream) {
         launch_batched_correction<float>(Z.data(), W_all.data(), cats.data(), R.data(), n_cells,
                                          n_pcs, n_clusters, n_batches_p1, (cudaStream_t)stream);
@@ -97,8 +92,8 @@ NB_MODULE(_harmony_outer_cuda, m) {
   // batched_correction - float64
   m.def(
       "batched_correction",
-      [](cuda_array<double> Z, cuda_array<const double> W_all, cuda_array<const int> cats,
-         cuda_array<const double> R, int n_cells, int n_pcs, int n_clusters, int n_batches_p1,
+      [](cuda_array_c<double> Z, cuda_array_c<const double> W_all, cuda_array_c<const int> cats,
+         cuda_array_c<const double> R, int n_cells, int n_pcs, int n_clusters, int n_batches_p1,
          std::uintptr_t stream) {
         launch_batched_correction<double>(Z.data(), W_all.data(), cats.data(), R.data(), n_cells,
                                           n_pcs, n_clusters, n_batches_p1, (cudaStream_t)stream);

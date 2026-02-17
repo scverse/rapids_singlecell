@@ -1,14 +1,9 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 
 #include "kernels_ligrec.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 template <typename T>
 static inline void launch_sum_count_dense(const T* data, const int* clusters, T* sum, int* count,
@@ -79,8 +74,8 @@ NB_MODULE(_ligrec_cuda, m) {
   // sum_count_dense - float32
   m.def(
       "sum_count_dense",
-      [](cuda_array<const float> data, cuda_array<const int> clusters, cuda_array<float> sum,
-         cuda_array<int> count, int rows, int cols, int ncls, std::uintptr_t stream) {
+      [](cuda_array_c<const float> data, cuda_array_c<const int> clusters, cuda_array_c<float> sum,
+         cuda_array_c<int> count, int rows, int cols, int ncls, std::uintptr_t stream) {
         launch_sum_count_dense<float>(data.data(), clusters.data(), sum.data(), count.data(), rows,
                                       cols, ncls, (cudaStream_t)stream);
       },
@@ -90,8 +85,9 @@ NB_MODULE(_ligrec_cuda, m) {
   // sum_count_dense - float64
   m.def(
       "sum_count_dense",
-      [](cuda_array<const double> data, cuda_array<const int> clusters, cuda_array<double> sum,
-         cuda_array<int> count, int rows, int cols, int ncls, std::uintptr_t stream) {
+      [](cuda_array_c<const double> data, cuda_array_c<const int> clusters,
+         cuda_array_c<double> sum, cuda_array_c<int> count, int rows, int cols, int ncls,
+         std::uintptr_t stream) {
         launch_sum_count_dense<double>(data.data(), clusters.data(), sum.data(), count.data(), rows,
                                        cols, ncls, (cudaStream_t)stream);
       },
@@ -101,9 +97,9 @@ NB_MODULE(_ligrec_cuda, m) {
   // sum_count_sparse - float32
   m.def(
       "sum_count_sparse",
-      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const float> data,
-         cuda_array<const int> clusters, cuda_array<float> sum, cuda_array<int> count, int rows,
-         int ncls, std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
+         cuda_array_c<const float> data, cuda_array_c<const int> clusters, cuda_array_c<float> sum,
+         cuda_array_c<int> count, int rows, int ncls, std::uintptr_t stream) {
         launch_sum_count_sparse<float>(indptr.data(), index.data(), data.data(), clusters.data(),
                                        sum.data(), count.data(), rows, ncls, (cudaStream_t)stream);
       },
@@ -113,9 +109,10 @@ NB_MODULE(_ligrec_cuda, m) {
   // sum_count_sparse - float64
   m.def(
       "sum_count_sparse",
-      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const double> data,
-         cuda_array<const int> clusters, cuda_array<double> sum, cuda_array<int> count, int rows,
-         int ncls, std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
+         cuda_array_c<const double> data, cuda_array_c<const int> clusters,
+         cuda_array_c<double> sum, cuda_array_c<int> count, int rows, int ncls,
+         std::uintptr_t stream) {
         launch_sum_count_sparse<double>(indptr.data(), index.data(), data.data(), clusters.data(),
                                         sum.data(), count.data(), rows, ncls, (cudaStream_t)stream);
       },
@@ -125,7 +122,7 @@ NB_MODULE(_ligrec_cuda, m) {
   // mean_dense - float32
   m.def(
       "mean_dense",
-      [](cuda_array<const float> data, cuda_array<const int> clusters, cuda_array<float> g,
+      [](cuda_array_c<const float> data, cuda_array_c<const int> clusters, cuda_array_c<float> g,
          int rows, int cols, int ncls, std::uintptr_t stream) {
         launch_mean_dense<float>(data.data(), clusters.data(), g.data(), rows, cols, ncls,
                                  (cudaStream_t)stream);
@@ -135,7 +132,7 @@ NB_MODULE(_ligrec_cuda, m) {
   // mean_dense - float64
   m.def(
       "mean_dense",
-      [](cuda_array<const double> data, cuda_array<const int> clusters, cuda_array<double> g,
+      [](cuda_array_c<const double> data, cuda_array_c<const int> clusters, cuda_array_c<double> g,
          int rows, int cols, int ncls, std::uintptr_t stream) {
         launch_mean_dense<double>(data.data(), clusters.data(), g.data(), rows, cols, ncls,
                                   (cudaStream_t)stream);
@@ -145,9 +142,9 @@ NB_MODULE(_ligrec_cuda, m) {
   // mean_sparse - float32
   m.def(
       "mean_sparse",
-      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const float> data,
-         cuda_array<const int> clusters, cuda_array<float> g, int rows, int ncls,
-         std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
+         cuda_array_c<const float> data, cuda_array_c<const int> clusters, cuda_array_c<float> g,
+         int rows, int ncls, std::uintptr_t stream) {
         launch_mean_sparse<float>(indptr.data(), index.data(), data.data(), clusters.data(),
                                   g.data(), rows, ncls, (cudaStream_t)stream);
       },
@@ -157,9 +154,9 @@ NB_MODULE(_ligrec_cuda, m) {
   // mean_sparse - float64
   m.def(
       "mean_sparse",
-      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const double> data,
-         cuda_array<const int> clusters, cuda_array<double> g, int rows, int ncls,
-         std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
+         cuda_array_c<const double> data, cuda_array_c<const int> clusters, cuda_array_c<double> g,
+         int rows, int ncls, std::uintptr_t stream) {
         launch_mean_sparse<double>(indptr.data(), index.data(), data.data(), clusters.data(),
                                    g.data(), rows, ncls, (cudaStream_t)stream);
       },
@@ -169,7 +166,7 @@ NB_MODULE(_ligrec_cuda, m) {
   // elementwise_diff - float32
   m.def(
       "elementwise_diff",
-      [](cuda_array<float> g, cuda_array<const float> total_counts, int n_genes, int n_clusters,
+      [](cuda_array_c<float> g, cuda_array_c<const float> total_counts, int n_genes, int n_clusters,
          std::uintptr_t stream) {
         launch_elementwise_diff<float>(g.data(), total_counts.data(), n_genes, n_clusters,
                                        (cudaStream_t)stream);
@@ -179,8 +176,8 @@ NB_MODULE(_ligrec_cuda, m) {
   // elementwise_diff - float64
   m.def(
       "elementwise_diff",
-      [](cuda_array<double> g, cuda_array<const double> total_counts, int n_genes, int n_clusters,
-         std::uintptr_t stream) {
+      [](cuda_array_c<double> g, cuda_array_c<const double> total_counts, int n_genes,
+         int n_clusters, std::uintptr_t stream) {
         launch_elementwise_diff<double>(g.data(), total_counts.data(), n_genes, n_clusters,
                                         (cudaStream_t)stream);
       },
@@ -189,9 +186,9 @@ NB_MODULE(_ligrec_cuda, m) {
   // interaction - float32
   m.def(
       "interaction",
-      [](cuda_array<const int> interactions, cuda_array<const int> interaction_clusters,
-         cuda_array<const float> mean, cuda_array<float> res, cuda_array<const bool> mask,
-         cuda_array<const float> g, int n_iter, int n_inter_clust, int ncls,
+      [](cuda_array_c<const int> interactions, cuda_array_c<const int> interaction_clusters,
+         cuda_array_c<const float> mean, cuda_array_c<float> res, cuda_array_c<const bool> mask,
+         cuda_array_c<const float> g, int n_iter, int n_inter_clust, int ncls,
          std::uintptr_t stream) {
         launch_interaction<float>(interactions.data(), interaction_clusters.data(), mean.data(),
                                   res.data(), mask.data(), g.data(), n_iter, n_inter_clust, ncls,
@@ -203,9 +200,9 @@ NB_MODULE(_ligrec_cuda, m) {
   // interaction - float64
   m.def(
       "interaction",
-      [](cuda_array<const int> interactions, cuda_array<const int> interaction_clusters,
-         cuda_array<const double> mean, cuda_array<double> res, cuda_array<const bool> mask,
-         cuda_array<const double> g, int n_iter, int n_inter_clust, int ncls,
+      [](cuda_array_c<const int> interactions, cuda_array_c<const int> interaction_clusters,
+         cuda_array_c<const double> mean, cuda_array_c<double> res, cuda_array_c<const bool> mask,
+         cuda_array_c<const double> g, int n_iter, int n_inter_clust, int ncls,
          std::uintptr_t stream) {
         launch_interaction<double>(interactions.data(), interaction_clusters.data(), mean.data(),
                                    res.data(), mask.data(), g.data(), n_iter, n_inter_clust, ncls,
@@ -217,9 +214,9 @@ NB_MODULE(_ligrec_cuda, m) {
   // res_mean - float32
   m.def(
       "res_mean",
-      [](cuda_array<const int> interactions, cuda_array<const int> interaction_clusters,
-         cuda_array<const float> mean, cuda_array<float> res_mean, int n_inter, int n_inter_clust,
-         int ncls, std::uintptr_t stream) {
+      [](cuda_array_c<const int> interactions, cuda_array_c<const int> interaction_clusters,
+         cuda_array_c<const float> mean, cuda_array_c<float> res_mean, int n_inter,
+         int n_inter_clust, int ncls, std::uintptr_t stream) {
         launch_res_mean<float>(interactions.data(), interaction_clusters.data(), mean.data(),
                                res_mean.data(), n_inter, n_inter_clust, ncls, (cudaStream_t)stream);
       },
@@ -229,9 +226,9 @@ NB_MODULE(_ligrec_cuda, m) {
   // res_mean - float64
   m.def(
       "res_mean",
-      [](cuda_array<const int> interactions, cuda_array<const int> interaction_clusters,
-         cuda_array<const double> mean, cuda_array<double> res_mean, int n_inter, int n_inter_clust,
-         int ncls, std::uintptr_t stream) {
+      [](cuda_array_c<const int> interactions, cuda_array_c<const int> interaction_clusters,
+         cuda_array_c<const double> mean, cuda_array_c<double> res_mean, int n_inter,
+         int n_inter_clust, int ncls, std::uintptr_t stream) {
         launch_res_mean<double>(interactions.data(), interaction_clusters.data(), mean.data(),
                                 res_mean.data(), n_inter, n_inter_clust, ncls,
                                 (cudaStream_t)stream);

@@ -1,14 +1,9 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 
 #include "kernels_scale.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 template <typename T>
 static inline void launch_csc_scale_diff(const int* indptr, T* data, const T* std, int ncols,
@@ -52,7 +47,7 @@ NB_MODULE(_scale_cuda, m) {
   // csc_scale_diff - float32
   m.def(
       "csc_scale_diff",
-      [](cuda_array<const int> indptr, cuda_array<float> data, cuda_array<const float> std,
+      [](cuda_array_c<const int> indptr, cuda_array_c<float> data, cuda_array_c<const float> std,
          int ncols, std::uintptr_t stream) {
         launch_csc_scale_diff<float>(indptr.data(), data.data(), std.data(), ncols,
                                      (cudaStream_t)stream);
@@ -62,7 +57,7 @@ NB_MODULE(_scale_cuda, m) {
   // csc_scale_diff - float64
   m.def(
       "csc_scale_diff",
-      [](cuda_array<const int> indptr, cuda_array<double> data, cuda_array<const double> std,
+      [](cuda_array_c<const int> indptr, cuda_array_c<double> data, cuda_array_c<const double> std,
          int ncols, std::uintptr_t stream) {
         launch_csc_scale_diff<double>(indptr.data(), data.data(), std.data(), ncols,
                                       (cudaStream_t)stream);
@@ -72,8 +67,8 @@ NB_MODULE(_scale_cuda, m) {
   // csr_scale_diff - float32
   m.def(
       "csr_scale_diff",
-      [](cuda_array<const int> indptr, cuda_array<const int> indices, cuda_array<float> data,
-         cuda_array<const float> std, cuda_array<const int> mask, float clipper, int nrows,
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> indices, cuda_array_c<float> data,
+         cuda_array_c<const float> std, cuda_array_c<const int> mask, float clipper, int nrows,
          std::uintptr_t stream) {
         launch_csr_scale_diff<float>(indptr.data(), indices.data(), data.data(), std.data(),
                                      mask.data(), clipper, nrows, (cudaStream_t)stream);
@@ -84,8 +79,8 @@ NB_MODULE(_scale_cuda, m) {
   // csr_scale_diff - float64
   m.def(
       "csr_scale_diff",
-      [](cuda_array<const int> indptr, cuda_array<const int> indices, cuda_array<double> data,
-         cuda_array<const double> std, cuda_array<const int> mask, double clipper, int nrows,
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> indices, cuda_array_c<double> data,
+         cuda_array_c<const double> std, cuda_array_c<const int> mask, double clipper, int nrows,
          std::uintptr_t stream) {
         launch_csr_scale_diff<double>(indptr.data(), indices.data(), data.data(), std.data(),
                                       mask.data(), clipper, nrows, (cudaStream_t)stream);
@@ -96,8 +91,8 @@ NB_MODULE(_scale_cuda, m) {
   // dense_scale_center_diff - float32
   m.def(
       "dense_scale_center_diff",
-      [](cuda_array<float> data, cuda_array<const float> mean, cuda_array<const float> std,
-         cuda_array<const int> mask, float clipper, long long nrows, long long ncols,
+      [](cuda_array_c<float> data, cuda_array_c<const float> mean, cuda_array_c<const float> std,
+         cuda_array_c<const int> mask, float clipper, long long nrows, long long ncols,
          std::uintptr_t stream) {
         launch_dense_scale_center_diff<float>(data.data(), mean.data(), std.data(), mask.data(),
                                               clipper, nrows, ncols, (cudaStream_t)stream);
@@ -108,8 +103,8 @@ NB_MODULE(_scale_cuda, m) {
   // dense_scale_center_diff - float64
   m.def(
       "dense_scale_center_diff",
-      [](cuda_array<double> data, cuda_array<const double> mean, cuda_array<const double> std,
-         cuda_array<const int> mask, double clipper, long long nrows, long long ncols,
+      [](cuda_array_c<double> data, cuda_array_c<const double> mean, cuda_array_c<const double> std,
+         cuda_array_c<const int> mask, double clipper, long long nrows, long long ncols,
          std::uintptr_t stream) {
         launch_dense_scale_center_diff<double>(data.data(), mean.data(), std.data(), mask.data(),
                                                clipper, nrows, ncols, (cudaStream_t)stream);
@@ -120,7 +115,7 @@ NB_MODULE(_scale_cuda, m) {
   // dense_scale_diff - float32
   m.def(
       "dense_scale_diff",
-      [](cuda_array<float> data, cuda_array<const float> std, cuda_array<const int> mask,
+      [](cuda_array_c<float> data, cuda_array_c<const float> std, cuda_array_c<const int> mask,
          float clipper, long long nrows, long long ncols, std::uintptr_t stream) {
         launch_dense_scale_diff<float>(data.data(), std.data(), mask.data(), clipper, nrows, ncols,
                                        (cudaStream_t)stream);
@@ -131,7 +126,7 @@ NB_MODULE(_scale_cuda, m) {
   // dense_scale_diff - float64
   m.def(
       "dense_scale_diff",
-      [](cuda_array<double> data, cuda_array<const double> std, cuda_array<const int> mask,
+      [](cuda_array_c<double> data, cuda_array_c<const double> std, cuda_array_c<const int> mask,
          double clipper, long long nrows, long long ncols, std::uintptr_t stream) {
         launch_dense_scale_diff<double>(data.data(), std.data(), mask.data(), clipper, nrows, ncols,
                                         (cudaStream_t)stream);

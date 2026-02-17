@@ -1,12 +1,7 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 template <typename T>
 __global__ void expected_zeros_kernel(const T* __restrict__ scaled_means,
@@ -37,8 +32,8 @@ static void launch_expected_zeros(const T* scaled_means, const T* total_counts, 
 NB_MODULE(_hvg_cuda, m) {
   m.def(
       "expected_zeros_f32",
-      [](cuda_array<const float> scaled_means, cuda_array<const float> total_counts,
-         cuda_array<float> expected, int n_genes, int n_cells, std::uintptr_t stream) {
+      [](cuda_array_c<const float> scaled_means, cuda_array_c<const float> total_counts,
+         cuda_array_c<float> expected, int n_genes, int n_cells, std::uintptr_t stream) {
         launch_expected_zeros<float>(scaled_means.data(), total_counts.data(), expected.data(),
                                      n_genes, n_cells, reinterpret_cast<cudaStream_t>(stream));
       },
@@ -46,8 +41,8 @@ NB_MODULE(_hvg_cuda, m) {
 
   m.def(
       "expected_zeros_f64",
-      [](cuda_array<const double> scaled_means, cuda_array<const double> total_counts,
-         cuda_array<double> expected, int n_genes, int n_cells, std::uintptr_t stream) {
+      [](cuda_array_c<const double> scaled_means, cuda_array_c<const double> total_counts,
+         cuda_array_c<double> expected, int n_genes, int n_cells, std::uintptr_t stream) {
         launch_expected_zeros<double>(scaled_means.data(), total_counts.data(), expected.data(),
                                       n_genes, n_cells, reinterpret_cast<cudaStream_t>(stream));
       },

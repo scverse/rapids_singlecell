@@ -1,16 +1,10 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 
 #include "kernels_pr.cuh"
 #include "kernels_pr_hvg.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-// Templated cuda_array over dtype and contiguity
-template <typename T, typename Contig = nb::c_contig>
-using cuda_array = nb::ndarray<T, nb::device::cuda, Contig>;
 
 template <typename T>
 static inline void launch_sparse_norm_res_csc(const int* indptr, const int* index, const T* data,
@@ -83,9 +77,10 @@ template <typename T>
 void def_sparse_norm_res_csc(nb::module_& m) {
   m.def(
       "sparse_norm_res_csc",
-      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const T> data,
-         cuda_array<const T> sums_cells, cuda_array<const T> sums_genes, cuda_array<T> residuals,
-         T inv_sum_total, T clip, T inv_theta, int n_cells, int n_genes, std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> index, cuda_array_c<const T> data,
+         cuda_array_c<const T> sums_cells, cuda_array_c<const T> sums_genes,
+         cuda_array_c<T> residuals, T inv_sum_total, T clip, T inv_theta, int n_cells, int n_genes,
+         std::uintptr_t stream) {
         launch_sparse_norm_res_csc<T>(indptr.data(), index.data(), data.data(), sums_cells.data(),
                                       sums_genes.data(), residuals.data(), inv_sum_total, clip,
                                       inv_theta, n_cells, n_genes, (cudaStream_t)stream);
@@ -99,9 +94,10 @@ template <typename T>
 void def_sparse_norm_res_csr(nb::module_& m) {
   m.def(
       "sparse_norm_res_csr",
-      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const T> data,
-         cuda_array<const T> sums_cells, cuda_array<const T> sums_genes, cuda_array<T> residuals,
-         T inv_sum_total, T clip, T inv_theta, int n_cells, int n_genes, std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> index, cuda_array_c<const T> data,
+         cuda_array_c<const T> sums_cells, cuda_array_c<const T> sums_genes,
+         cuda_array_c<T> residuals, T inv_sum_total, T clip, T inv_theta, int n_cells, int n_genes,
+         std::uintptr_t stream) {
         launch_sparse_norm_res_csr<T>(indptr.data(), index.data(), data.data(), sums_cells.data(),
                                       sums_genes.data(), residuals.data(), inv_sum_total, clip,
                                       inv_theta, n_cells, n_genes, (cudaStream_t)stream);
@@ -115,8 +111,8 @@ template <typename T>
 void def_dense_norm_res(nb::module_& m) {
   m.def(
       "dense_norm_res",
-      [](cuda_array<const T> X, cuda_array<T> residuals, cuda_array<const T> sums_cells,
-         cuda_array<const T> sums_genes, T inv_sum_total, T clip, T inv_theta, int n_cells,
+      [](cuda_array_c<const T> X, cuda_array_c<T> residuals, cuda_array_c<const T> sums_cells,
+         cuda_array_c<const T> sums_genes, T inv_sum_total, T clip, T inv_theta, int n_cells,
          int n_genes, std::uintptr_t stream) {
         launch_dense_norm_res<T>(X.data(), residuals.data(), sums_cells.data(), sums_genes.data(),
                                  inv_sum_total, clip, inv_theta, n_cells, n_genes,
@@ -131,8 +127,9 @@ template <typename T>
 void def_sparse_sum_csc(nb::module_& m) {
   m.def(
       "sparse_sum_csc",
-      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const T> data,
-         cuda_array<T> sums_genes, cuda_array<T> sums_cells, int n_genes, std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> index, cuda_array_c<const T> data,
+         cuda_array_c<T> sums_genes, cuda_array_c<T> sums_cells, int n_genes,
+         std::uintptr_t stream) {
         launch_sparse_sum_csc<T>(indptr.data(), index.data(), data.data(), sums_genes.data(),
                                  sums_cells.data(), n_genes, (cudaStream_t)stream);
       },
@@ -145,9 +142,10 @@ template <typename T>
 void def_csc_hvg_res(nb::module_& m) {
   m.def(
       "csc_hvg_res",
-      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const T> data,
-         cuda_array<const T> sums_genes, cuda_array<const T> sums_cells, cuda_array<T> residuals,
-         T inv_sum_total, T clip, T inv_theta, int n_genes, int n_cells, std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> index, cuda_array_c<const T> data,
+         cuda_array_c<const T> sums_genes, cuda_array_c<const T> sums_cells,
+         cuda_array_c<T> residuals, T inv_sum_total, T clip, T inv_theta, int n_genes, int n_cells,
+         std::uintptr_t stream) {
         launch_csc_hvg_res<T>(indptr.data(), index.data(), data.data(), sums_genes.data(),
                               sums_cells.data(), residuals.data(), inv_sum_total, clip, inv_theta,
                               n_genes, n_cells, (cudaStream_t)stream);
@@ -161,8 +159,8 @@ template <typename T>
 void def_dense_hvg_res(nb::module_& m) {
   m.def(
       "dense_hvg_res",
-      [](cuda_array<const T, nb::f_contig> data, cuda_array<const T> sums_genes,
-         cuda_array<const T> sums_cells, cuda_array<T> residuals, T inv_sum_total, T clip,
+      [](cuda_array_contig<const T, nb::f_contig> data, cuda_array_c<const T> sums_genes,
+         cuda_array_c<const T> sums_cells, cuda_array_c<T> residuals, T inv_sum_total, T clip,
          T inv_theta, int n_genes, int n_cells, std::uintptr_t stream) {
         launch_dense_hvg_res<T>(data.data(), sums_genes.data(), sums_cells.data(), residuals.data(),
                                 inv_sum_total, clip, inv_theta, n_genes, n_cells,

@@ -1,14 +1,9 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 
 #include "kernels_dist.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 static inline void launch_sqeuclidean(const float* data, float* out, const unsigned int* pairs,
                                       long long n_samples, long long n_features,
@@ -40,8 +35,9 @@ static inline void launch_inner(const float* data, float* out, const unsigned in
 NB_MODULE(_nn_descent_cuda, m) {
   m.def(
       "sqeuclidean",
-      [](cuda_array<const float> data, cuda_array<float> out, cuda_array<const unsigned int> pairs,
-         long long n_samples, long long n_features, long long n_neighbors, std::uintptr_t stream) {
+      [](cuda_array_c<const float> data, cuda_array_c<float> out,
+         cuda_array_c<const unsigned int> pairs, long long n_samples, long long n_features,
+         long long n_neighbors, std::uintptr_t stream) {
         launch_sqeuclidean(data.data(), out.data(), pairs.data(), n_samples, n_features,
                            n_neighbors, (cudaStream_t)stream);
       },
@@ -50,8 +46,9 @@ NB_MODULE(_nn_descent_cuda, m) {
 
   m.def(
       "cosine",
-      [](cuda_array<const float> data, cuda_array<float> out, cuda_array<const unsigned int> pairs,
-         long long n_samples, long long n_features, long long n_neighbors, std::uintptr_t stream) {
+      [](cuda_array_c<const float> data, cuda_array_c<float> out,
+         cuda_array_c<const unsigned int> pairs, long long n_samples, long long n_features,
+         long long n_neighbors, std::uintptr_t stream) {
         launch_cosine(data.data(), out.data(), pairs.data(), n_samples, n_features, n_neighbors,
                       (cudaStream_t)stream);
       },
@@ -60,8 +57,9 @@ NB_MODULE(_nn_descent_cuda, m) {
 
   m.def(
       "inner",
-      [](cuda_array<const float> data, cuda_array<float> out, cuda_array<const unsigned int> pairs,
-         long long n_samples, long long n_features, long long n_neighbors, std::uintptr_t stream) {
+      [](cuda_array_c<const float> data, cuda_array_c<float> out,
+         cuda_array_c<const unsigned int> pairs, long long n_samples, long long n_features,
+         long long n_neighbors, std::uintptr_t stream) {
         launch_inner(data.data(), out.data(), pairs.data(), n_samples, n_features, n_neighbors,
                      (cudaStream_t)stream);
       },

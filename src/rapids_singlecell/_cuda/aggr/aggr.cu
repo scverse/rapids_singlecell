@@ -1,14 +1,9 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 
 #include "kernels_aggr.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T, typename Contig = nb::c_contig>
-using cuda_array = nb::ndarray<T, nb::device::cuda, Contig>;
 
 template <typename T>
 static inline void launch_csr_aggr(const int* indptr, const int* index, const T* data, double* out,
@@ -73,8 +68,8 @@ template <typename T>
 void def_sparse_aggr(nb::module_& m) {
   m.def(
       "sparse_aggr",
-      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const T> data,
-         cuda_array<double> out, cuda_array<const int> cats, cuda_array<const bool> mask,
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> index, cuda_array_c<const T> data,
+         cuda_array_c<double> out, cuda_array_c<const int> cats, cuda_array_c<const bool> mask,
          std::size_t n_cells, std::size_t n_genes, std::size_t n_groups, bool is_csc,
          std::uintptr_t stream) {
         if (is_csc) {
@@ -93,9 +88,9 @@ template <typename T, typename DataContig>
 void def_dense_aggr(nb::module_& m) {
   m.def(
       "dense_aggr",
-      [](cuda_array<const T, DataContig> data, cuda_array<double> out, cuda_array<const int> cats,
-         cuda_array<const bool> mask, std::size_t n_cells, std::size_t n_genes,
-         std::size_t n_groups, bool is_fortran, std::uintptr_t stream) {
+      [](cuda_array_contig<const T, DataContig> data, cuda_array_c<double> out,
+         cuda_array_c<const int> cats, cuda_array_c<const bool> mask, std::size_t n_cells,
+         std::size_t n_genes, std::size_t n_groups, bool is_fortran, std::uintptr_t stream) {
         if constexpr (std::is_same_v<DataContig, nb::f_contig>) {
           launch_dense_aggr_F<T>(data.data(), out.data(), cats.data(), mask.data(), n_cells,
                                  n_genes, n_groups, (cudaStream_t)stream);
@@ -112,9 +107,9 @@ template <typename T>
 void def_csr_to_coo(nb::module_& m) {
   m.def(
       "csr_to_coo",
-      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const T> data,
-         cuda_array<int> out_row, cuda_array<int> out_col, cuda_array<double> out_data,
-         cuda_array<const int> cats, cuda_array<const bool> mask, int n_cells,
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> index, cuda_array_c<const T> data,
+         cuda_array_c<int> out_row, cuda_array_c<int> out_col, cuda_array_c<double> out_data,
+         cuda_array_c<const int> cats, cuda_array_c<const bool> mask, int n_cells,
          std::uintptr_t stream) {
         launch_csr_to_coo<T>(indptr.data(), index.data(), data.data(), out_row.data(),
                              out_col.data(), out_data.data(), cats.data(), mask.data(), n_cells,
@@ -139,8 +134,8 @@ NB_MODULE(_aggr_cuda, m) {
 
   m.def(
       "sparse_var",
-      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<double> data,
-         cuda_array<const double> means, cuda_array<double> n_cells, int dof, int n_groups,
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> index, cuda_array_c<double> data,
+         cuda_array_c<const double> means, cuda_array_c<double> n_cells, int dof, int n_groups,
          std::uintptr_t stream) {
         launch_sparse_var(indptr.data(), index.data(), data.data(), means.data(), n_cells.data(),
                           dof, n_groups, (cudaStream_t)stream);

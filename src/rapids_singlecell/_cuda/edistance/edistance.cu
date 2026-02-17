@@ -1,15 +1,10 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 #include <nanobind/stl/tuple.h>
 
 #include "kernels_edistance.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 // Tile sizes for feature dimension (CELL_TILE=16 or 32)
 static constexpr int TILE_SIZES[] = {32, 50, 64};
@@ -174,10 +169,10 @@ NB_MODULE(_edistance_cuda, m) {
   // IMPORTANT: f64 must be defined before f32 for proper overload dispatch
   m.def(
       "compute_distances",
-      [](cuda_array<const double> embedding, cuda_array<const int> cat_offsets,
-         cuda_array<const int> cell_indices, cuda_array<const int> pair_left,
-         cuda_array<const int> pair_right, cuda_array<double> pairwise_sums, int num_pairs, int k,
-         int n_features, int blocks_per_pair, int cell_tile, int feat_tile, int block_size,
+      [](cuda_array_c<const double> embedding, cuda_array_c<const int> cat_offsets,
+         cuda_array_c<const int> cell_indices, cuda_array_c<const int> pair_left,
+         cuda_array_c<const int> pair_right, cuda_array_c<double> pairwise_sums, int num_pairs,
+         int k, int n_features, int blocks_per_pair, int cell_tile, int feat_tile, int block_size,
          int shared_mem, std::uintptr_t stream) {
         dispatch_f64(embedding.data(), cat_offsets.data(), cell_indices.data(), pair_left.data(),
                      pair_right.data(), pairwise_sums.data(), num_pairs, k, n_features,
@@ -190,10 +185,10 @@ NB_MODULE(_edistance_cuda, m) {
 
   m.def(
       "compute_distances",
-      [](cuda_array<const float> embedding, cuda_array<const int> cat_offsets,
-         cuda_array<const int> cell_indices, cuda_array<const int> pair_left,
-         cuda_array<const int> pair_right, cuda_array<float> pairwise_sums, int num_pairs, int k,
-         int n_features, int blocks_per_pair, int cell_tile, int feat_tile, int block_size,
+      [](cuda_array_c<const float> embedding, cuda_array_c<const int> cat_offsets,
+         cuda_array_c<const int> cell_indices, cuda_array_c<const int> pair_left,
+         cuda_array_c<const int> pair_right, cuda_array_c<float> pairwise_sums, int num_pairs,
+         int k, int n_features, int blocks_per_pair, int cell_tile, int feat_tile, int block_size,
          int shared_mem, std::uintptr_t stream) {
         dispatch_f32(embedding.data(), cat_offsets.data(), cell_indices.data(), pair_left.data(),
                      pair_right.data(), pairwise_sums.data(), num_pairs, k, n_features,

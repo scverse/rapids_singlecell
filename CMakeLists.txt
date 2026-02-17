@@ -30,7 +30,30 @@ function(add_nb_cuda_module target src)
         CUDA_SEPARABLE_COMPILATION ON
     )
     install(TARGETS ${target} LIBRARY DESTINATION rapids_singlecell/_cuda)
-    # Also copy built module into source tree for editable installs
+    # Generate type stubs at install time (for wheel installs)
+    nanobind_add_stub(${target}_stub
+        MODULE ${target}
+        OUTPUT rapids_singlecell/_cuda/${target}.pyi
+        PYTHON_PATH $<TARGET_FILE_DIR:${target}>
+        DEPENDS ${target}
+        INSTALL_TIME
+        MARKER_FILE rapids_singlecell/_cuda/py.typed
+    )
+    # Generate type stubs at build time (for editable installs)
+    nanobind_add_stub(${target}_stub_dev
+        MODULE ${target}
+        OUTPUT ${target}.pyi
+        PYTHON_PATH $<TARGET_FILE_DIR:${target}>
+        DEPENDS ${target}
+    )
+    # Copy built module + stub into source tree for editable installs
+    add_custom_command(TARGET ${target}_stub_dev POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+            ${CMAKE_CURRENT_BINARY_DIR}/${target}.pyi
+            ${PROJECT_SOURCE_DIR}/src/rapids_singlecell/_cuda/${target}.pyi
+        COMMAND ${CMAKE_COMMAND} -E touch
+            ${PROJECT_SOURCE_DIR}/src/rapids_singlecell/_cuda/py.typed
+    )
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy
             $<TARGET_FILE:${target}>

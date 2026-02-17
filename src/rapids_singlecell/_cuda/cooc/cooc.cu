@@ -1,15 +1,10 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 #include <nanobind/stl/tuple.h>
 
 #include "kernels_cooc.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 // Size constants
 static constexpr int WARP_SIZE = 32;
@@ -222,11 +217,11 @@ NB_MODULE(_cooc_cuda, m) {
 
   m.def(
       "count_csr_catpairs",
-      [](cuda_array<const float> spatial, cuda_array<const float> thresholds,
-         cuda_array<const int> cat_offsets, cuda_array<const int> cell_indices,
-         cuda_array<const int> pair_left, cuda_array<const int> pair_right, cuda_array<int> counts,
-         int num_pairs, int k, int l_val, int blocks_per_pair, int cell_tile, int block_size,
-         int shared_mem, std::uintptr_t stream) {
+      [](cuda_array_c<const float> spatial, cuda_array_c<const float> thresholds,
+         cuda_array_c<const int> cat_offsets, cuda_array_c<const int> cell_indices,
+         cuda_array_c<const int> pair_left, cuda_array_c<const int> pair_right,
+         cuda_array_c<int> counts, int num_pairs, int k, int l_val, int blocks_per_pair,
+         int cell_tile, int block_size, int shared_mem, std::uintptr_t stream) {
         dispatch_csr_catpairs(spatial.data(), thresholds.data(), cat_offsets.data(),
                               cell_indices.data(), pair_left.data(), pair_right.data(),
                               counts.data(), num_pairs, k, l_val, blocks_per_pair, cell_tile,
@@ -239,8 +234,8 @@ NB_MODULE(_cooc_cuda, m) {
 
   m.def(
       "count_pairwise",
-      [](cuda_array<const float> spatial, cuda_array<const float> thresholds,
-         cuda_array<const int> labels, cuda_array<int> result, int n, int k, int l_val,
+      [](cuda_array_c<const float> spatial, cuda_array_c<const float> thresholds,
+         cuda_array_c<const int> labels, cuda_array_c<int> result, int n, int k, int l_val,
          std::uintptr_t stream) {
         launch_count_pairwise(spatial.data(), thresholds.data(), labels.data(), result.data(), n, k,
                               l_val, (cudaStream_t)stream);
@@ -250,7 +245,7 @@ NB_MODULE(_cooc_cuda, m) {
 
   m.def(
       "reduce_shared",
-      [](cuda_array<const int> result, cuda_array<float> out, int k, int l_val, int format,
+      [](cuda_array_c<const int> result, cuda_array_c<float> out, int k, int l_val, int format,
          std::uintptr_t stream) {
         return launch_reduce_shared(result.data(), out.data(), k, l_val, format,
                                     (cudaStream_t)stream);
@@ -259,8 +254,8 @@ NB_MODULE(_cooc_cuda, m) {
 
   m.def(
       "reduce_global",
-      [](cuda_array<const int> result, cuda_array<float> inter_out, cuda_array<float> out, int k,
-         int l_val, int format, std::uintptr_t stream) {
+      [](cuda_array_c<const int> result, cuda_array_c<float> inter_out, cuda_array_c<float> out,
+         int k, int l_val, int format, std::uintptr_t stream) {
         launch_reduce_global(result.data(), inter_out.data(), out.data(), k, l_val, format,
                              (cudaStream_t)stream);
       },

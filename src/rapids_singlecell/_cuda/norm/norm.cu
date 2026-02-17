@@ -1,14 +1,9 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 
 #include "kernels_norm.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 template <typename T>
 static inline void launch_dense_row_scale(T* data, int nrows, int ncols, T target_sum,
@@ -84,7 +79,7 @@ NB_MODULE(_norm_cuda, m) {
   // mul_dense - float32
   m.def(
       "mul_dense",
-      [](cuda_array<float> data, int nrows, int ncols, float target_sum, std::uintptr_t stream) {
+      [](cuda_array_c<float> data, int nrows, int ncols, float target_sum, std::uintptr_t stream) {
         launch_dense_row_scale<float>(data.data(), nrows, ncols, target_sum, (cudaStream_t)stream);
       },
       "data"_a, nb::kw_only(), "nrows"_a, "ncols"_a, "target_sum"_a, "stream"_a = 0);
@@ -92,7 +87,8 @@ NB_MODULE(_norm_cuda, m) {
   // mul_dense - float64
   m.def(
       "mul_dense",
-      [](cuda_array<double> data, int nrows, int ncols, double target_sum, std::uintptr_t stream) {
+      [](cuda_array_c<double> data, int nrows, int ncols, double target_sum,
+         std::uintptr_t stream) {
         launch_dense_row_scale<double>(data.data(), nrows, ncols, target_sum, (cudaStream_t)stream);
       },
       "data"_a, nb::kw_only(), "nrows"_a, "ncols"_a, "target_sum"_a, "stream"_a = 0);
@@ -100,7 +96,7 @@ NB_MODULE(_norm_cuda, m) {
   // mul_csr - float32
   m.def(
       "mul_csr",
-      [](cuda_array<const int> indptr, cuda_array<float> data, int nrows, float target_sum,
+      [](cuda_array_c<const int> indptr, cuda_array_c<float> data, int nrows, float target_sum,
          std::uintptr_t stream) {
         launch_csr_row_scale<float>(indptr.data(), data.data(), nrows, target_sum,
                                     (cudaStream_t)stream);
@@ -110,7 +106,7 @@ NB_MODULE(_norm_cuda, m) {
   // mul_csr - float64
   m.def(
       "mul_csr",
-      [](cuda_array<const int> indptr, cuda_array<double> data, int nrows, double target_sum,
+      [](cuda_array_c<const int> indptr, cuda_array_c<double> data, int nrows, double target_sum,
          std::uintptr_t stream) {
         launch_csr_row_scale<double>(indptr.data(), data.data(), nrows, target_sum,
                                      (cudaStream_t)stream);
@@ -120,7 +116,7 @@ NB_MODULE(_norm_cuda, m) {
   // sum_major - float32
   m.def(
       "sum_major",
-      [](cuda_array<const int> indptr, cuda_array<const float> data, cuda_array<float> sums,
+      [](cuda_array_c<const int> indptr, cuda_array_c<const float> data, cuda_array_c<float> sums,
          int major, std::uintptr_t stream) {
         launch_csr_sum_major<float>(indptr.data(), data.data(), sums.data(), major,
                                     (cudaStream_t)stream);
@@ -130,7 +126,7 @@ NB_MODULE(_norm_cuda, m) {
   // sum_major - float64
   m.def(
       "sum_major",
-      [](cuda_array<const int> indptr, cuda_array<const double> data, cuda_array<double> sums,
+      [](cuda_array_c<const int> indptr, cuda_array_c<const double> data, cuda_array_c<double> sums,
          int major, std::uintptr_t stream) {
         launch_csr_sum_major<double>(indptr.data(), data.data(), sums.data(), major,
                                      (cudaStream_t)stream);
@@ -140,8 +136,9 @@ NB_MODULE(_norm_cuda, m) {
   // find_hi_genes_csr - float32
   m.def(
       "find_hi_genes_csr",
-      [](cuda_array<const int> indptr, cuda_array<const int> indices, cuda_array<const float> data,
-         cuda_array<bool> gene_is_hi, float max_fraction, int nrows, std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> indices,
+         cuda_array_c<const float> data, cuda_array_c<bool> gene_is_hi, float max_fraction,
+         int nrows, std::uintptr_t stream) {
         launch_find_hi_genes_csr<float>(indptr.data(), indices.data(), data.data(),
                                         gene_is_hi.data(), max_fraction, nrows,
                                         (cudaStream_t)stream);
@@ -152,8 +149,9 @@ NB_MODULE(_norm_cuda, m) {
   // find_hi_genes_csr - float64
   m.def(
       "find_hi_genes_csr",
-      [](cuda_array<const int> indptr, cuda_array<const int> indices, cuda_array<const double> data,
-         cuda_array<bool> gene_is_hi, double max_fraction, int nrows, std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> indices,
+         cuda_array_c<const double> data, cuda_array_c<bool> gene_is_hi, double max_fraction,
+         int nrows, std::uintptr_t stream) {
         launch_find_hi_genes_csr<double>(indptr.data(), indices.data(), data.data(),
                                          gene_is_hi.data(), max_fraction, nrows,
                                          (cudaStream_t)stream);
@@ -164,8 +162,8 @@ NB_MODULE(_norm_cuda, m) {
   // masked_mul_csr - float32
   m.def(
       "masked_mul_csr",
-      [](cuda_array<const int> indptr, cuda_array<const int> indices, cuda_array<float> data,
-         cuda_array<const bool> gene_mask, int nrows, float tsum, std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> indices, cuda_array_c<float> data,
+         cuda_array_c<const bool> gene_mask, int nrows, float tsum, std::uintptr_t stream) {
         launch_masked_mul_csr<float>(indptr.data(), indices.data(), data.data(), gene_mask.data(),
                                      nrows, tsum, (cudaStream_t)stream);
       },
@@ -175,8 +173,8 @@ NB_MODULE(_norm_cuda, m) {
   // masked_mul_csr - float64
   m.def(
       "masked_mul_csr",
-      [](cuda_array<const int> indptr, cuda_array<const int> indices, cuda_array<double> data,
-         cuda_array<const bool> gene_mask, int nrows, double tsum, std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> indices, cuda_array_c<double> data,
+         cuda_array_c<const bool> gene_mask, int nrows, double tsum, std::uintptr_t stream) {
         launch_masked_mul_csr<double>(indptr.data(), indices.data(), data.data(), gene_mask.data(),
                                       nrows, tsum, (cudaStream_t)stream);
       },
@@ -186,9 +184,9 @@ NB_MODULE(_norm_cuda, m) {
   // masked_sum_major - float32
   m.def(
       "masked_sum_major",
-      [](cuda_array<const int> indptr, cuda_array<const int> indices, cuda_array<const float> data,
-         cuda_array<const bool> gene_mask, cuda_array<float> sums, int major,
-         std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> indices,
+         cuda_array_c<const float> data, cuda_array_c<const bool> gene_mask,
+         cuda_array_c<float> sums, int major, std::uintptr_t stream) {
         launch_masked_sum_major<float>(indptr.data(), indices.data(), data.data(), gene_mask.data(),
                                        sums.data(), major, (cudaStream_t)stream);
       },
@@ -198,9 +196,9 @@ NB_MODULE(_norm_cuda, m) {
   // masked_sum_major - float64
   m.def(
       "masked_sum_major",
-      [](cuda_array<const int> indptr, cuda_array<const int> indices, cuda_array<const double> data,
-         cuda_array<const bool> gene_mask, cuda_array<double> sums, int major,
-         std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> indices,
+         cuda_array_c<const double> data, cuda_array_c<const bool> gene_mask,
+         cuda_array_c<double> sums, int major, std::uintptr_t stream) {
         launch_masked_sum_major<double>(indptr.data(), indices.data(), data.data(),
                                         gene_mask.data(), sums.data(), major, (cudaStream_t)stream);
       },
@@ -210,7 +208,7 @@ NB_MODULE(_norm_cuda, m) {
   // prescaled_mul_csr - float32
   m.def(
       "prescaled_mul_csr",
-      [](cuda_array<const int> indptr, cuda_array<float> data, cuda_array<const float> scales,
+      [](cuda_array_c<const int> indptr, cuda_array_c<float> data, cuda_array_c<const float> scales,
          int nrows, std::uintptr_t stream) {
         launch_prescaled_mul_csr<float>(indptr.data(), data.data(), scales.data(), nrows,
                                         (cudaStream_t)stream);
@@ -220,8 +218,8 @@ NB_MODULE(_norm_cuda, m) {
   // prescaled_mul_csr - float64
   m.def(
       "prescaled_mul_csr",
-      [](cuda_array<const int> indptr, cuda_array<double> data, cuda_array<const double> scales,
-         int nrows, std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<double> data,
+         cuda_array_c<const double> scales, int nrows, std::uintptr_t stream) {
         launch_prescaled_mul_csr<double>(indptr.data(), data.data(), scales.data(), nrows,
                                          (cudaStream_t)stream);
       },
@@ -230,7 +228,7 @@ NB_MODULE(_norm_cuda, m) {
   // prescaled_mul_dense - float32
   m.def(
       "prescaled_mul_dense",
-      [](cuda_array<float> data, cuda_array<const float> scales, int nrows, int ncols,
+      [](cuda_array_c<float> data, cuda_array_c<const float> scales, int nrows, int ncols,
          std::uintptr_t stream) {
         launch_prescaled_mul_dense<float>(data.data(), scales.data(), nrows, ncols,
                                           (cudaStream_t)stream);
@@ -240,7 +238,7 @@ NB_MODULE(_norm_cuda, m) {
   // prescaled_mul_dense - float64
   m.def(
       "prescaled_mul_dense",
-      [](cuda_array<double> data, cuda_array<const double> scales, int nrows, int ncols,
+      [](cuda_array_c<double> data, cuda_array_c<const double> scales, int nrows, int ncols,
          std::uintptr_t stream) {
         launch_prescaled_mul_dense<double>(data.data(), scales.data(), nrows, ncols,
                                            (cudaStream_t)stream);

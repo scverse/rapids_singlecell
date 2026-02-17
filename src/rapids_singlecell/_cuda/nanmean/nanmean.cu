@@ -1,14 +1,9 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 
 #include "kernels_nanmean.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 template <typename T>
 static inline void launch_nan_mean_minor(const int* index, const T* data, double* means, int* nans,
@@ -32,8 +27,8 @@ NB_MODULE(_nanmean_cuda, m) {
   // nan_mean_minor - float32
   m.def(
       "nan_mean_minor",
-      [](cuda_array<const int> index, cuda_array<const float> data, cuda_array<double> means,
-         cuda_array<int> nans, cuda_array<const bool> mask, int nnz, std::uintptr_t stream) {
+      [](cuda_array_c<const int> index, cuda_array_c<const float> data, cuda_array_c<double> means,
+         cuda_array_c<int> nans, cuda_array_c<const bool> mask, int nnz, std::uintptr_t stream) {
         launch_nan_mean_minor<float>(index.data(), data.data(), means.data(), nans.data(),
                                      mask.data(), nnz, (cudaStream_t)stream);
       },
@@ -42,8 +37,8 @@ NB_MODULE(_nanmean_cuda, m) {
   // nan_mean_minor - float64
   m.def(
       "nan_mean_minor",
-      [](cuda_array<const int> index, cuda_array<const double> data, cuda_array<double> means,
-         cuda_array<int> nans, cuda_array<const bool> mask, int nnz, std::uintptr_t stream) {
+      [](cuda_array_c<const int> index, cuda_array_c<const double> data, cuda_array_c<double> means,
+         cuda_array_c<int> nans, cuda_array_c<const bool> mask, int nnz, std::uintptr_t stream) {
         launch_nan_mean_minor<double>(index.data(), data.data(), means.data(), nans.data(),
                                       mask.data(), nnz, (cudaStream_t)stream);
       },
@@ -52,9 +47,9 @@ NB_MODULE(_nanmean_cuda, m) {
   // nan_mean_major - float32
   m.def(
       "nan_mean_major",
-      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const float> data,
-         cuda_array<double> means, cuda_array<int> nans, cuda_array<const bool> mask, int major,
-         int minor, std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
+         cuda_array_c<const float> data, cuda_array_c<double> means, cuda_array_c<int> nans,
+         cuda_array_c<const bool> mask, int major, int minor, std::uintptr_t stream) {
         launch_nan_mean_major<float>(indptr.data(), index.data(), data.data(), means.data(),
                                      nans.data(), mask.data(), major, minor, (cudaStream_t)stream);
       },
@@ -64,9 +59,9 @@ NB_MODULE(_nanmean_cuda, m) {
   // nan_mean_major - float64
   m.def(
       "nan_mean_major",
-      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const double> data,
-         cuda_array<double> means, cuda_array<int> nans, cuda_array<const bool> mask, int major,
-         int minor, std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
+         cuda_array_c<const double> data, cuda_array_c<double> means, cuda_array_c<int> nans,
+         cuda_array_c<const bool> mask, int major, int minor, std::uintptr_t stream) {
         launch_nan_mean_major<double>(indptr.data(), index.data(), data.data(), means.data(),
                                       nans.data(), mask.data(), major, minor, (cudaStream_t)stream);
       },

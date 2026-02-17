@@ -1,14 +1,9 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 
 #include "kernels_spca.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 template <typename T>
 static inline void launch_gram_csr_upper(const int* indptr, const int* index, const T* data,
@@ -46,8 +41,9 @@ NB_MODULE(_spca_cuda, m) {
   // gram_csr_upper - float32
   m.def(
       "gram_csr_upper",
-      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const float> data,
-         int nrows, int ncols, cuda_array<float> out, std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
+         cuda_array_c<const float> data, int nrows, int ncols, cuda_array_c<float> out,
+         std::uintptr_t stream) {
         launch_gram_csr_upper<float>(indptr.data(), index.data(), data.data(), nrows, ncols,
                                      out.data(), (cudaStream_t)stream);
       },
@@ -57,8 +53,9 @@ NB_MODULE(_spca_cuda, m) {
   // gram_csr_upper - float64
   m.def(
       "gram_csr_upper",
-      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const double> data,
-         int nrows, int ncols, cuda_array<double> out, std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
+         cuda_array_c<const double> data, int nrows, int ncols, cuda_array_c<double> out,
+         std::uintptr_t stream) {
         launch_gram_csr_upper<double>(indptr.data(), index.data(), data.data(), nrows, ncols,
                                       out.data(), (cudaStream_t)stream);
       },
@@ -68,7 +65,7 @@ NB_MODULE(_spca_cuda, m) {
   // copy_upper_to_lower - float32
   m.def(
       "copy_upper_to_lower",
-      [](cuda_array<float> out, int ncols, std::uintptr_t stream) {
+      [](cuda_array_c<float> out, int ncols, std::uintptr_t stream) {
         launch_copy_upper_to_lower<float>(out.data(), ncols, (cudaStream_t)stream);
       },
       nb::kw_only(), "out"_a, "ncols"_a, "stream"_a = 0);
@@ -76,7 +73,7 @@ NB_MODULE(_spca_cuda, m) {
   // copy_upper_to_lower - float64
   m.def(
       "copy_upper_to_lower",
-      [](cuda_array<double> out, int ncols, std::uintptr_t stream) {
+      [](cuda_array_c<double> out, int ncols, std::uintptr_t stream) {
         launch_copy_upper_to_lower<double>(out.data(), ncols, (cudaStream_t)stream);
       },
       nb::kw_only(), "out"_a, "ncols"_a, "stream"_a = 0);
@@ -84,8 +81,9 @@ NB_MODULE(_spca_cuda, m) {
   // cov_from_gram - float32
   m.def(
       "cov_from_gram",
-      [](cuda_array<const float> gram, cuda_array<const float> meanx, cuda_array<const float> meany,
-         cuda_array<float> cov, int ncols, std::uintptr_t stream) {
+      [](cuda_array_c<const float> gram, cuda_array_c<const float> meanx,
+         cuda_array_c<const float> meany, cuda_array_c<float> cov, int ncols,
+         std::uintptr_t stream) {
         launch_cov_from_gram<float>(cov.data(), gram.data(), meanx.data(), meany.data(), ncols,
                                     (cudaStream_t)stream);
       },
@@ -94,8 +92,9 @@ NB_MODULE(_spca_cuda, m) {
   // cov_from_gram - float64
   m.def(
       "cov_from_gram",
-      [](cuda_array<const double> gram, cuda_array<const double> meanx,
-         cuda_array<const double> meany, cuda_array<double> cov, int ncols, std::uintptr_t stream) {
+      [](cuda_array_c<const double> gram, cuda_array_c<const double> meanx,
+         cuda_array_c<const double> meany, cuda_array_c<double> cov, int ncols,
+         std::uintptr_t stream) {
         launch_cov_from_gram<double>(cov.data(), gram.data(), meanx.data(), meany.data(), ncols,
                                      (cudaStream_t)stream);
       },
@@ -104,7 +103,7 @@ NB_MODULE(_spca_cuda, m) {
   // check_zero_genes
   m.def(
       "check_zero_genes",
-      [](cuda_array<const int> indices, cuda_array<int> out, int nnz, int num_genes,
+      [](cuda_array_c<const int> indices, cuda_array_c<int> out, int nnz, int num_genes,
          std::uintptr_t stream) {
         launch_check_zero_genes(indices.data(), out.data(), nnz, num_genes, (cudaStream_t)stream);
       },

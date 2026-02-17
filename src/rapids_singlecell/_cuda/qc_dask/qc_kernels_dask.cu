@@ -1,14 +1,9 @@
 #include <cuda_runtime.h>
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "../nb_types.h"
 
 #include "kernels_qcd.cuh"
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-template <typename T>
-using cuda_array = nb::ndarray<T, nb::device::cuda, nb::c_contig>;
 
 template <typename T>
 static inline void launch_qc_csr_cells(const int* indptr, const int* index, const T* data,
@@ -48,9 +43,9 @@ NB_MODULE(_qc_dask_cuda, m) {
   // sparse_qc_csr_cells - float32
   m.def(
       "sparse_qc_csr_cells",
-      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const float> data,
-         cuda_array<float> sums_cells, cuda_array<int> cell_ex, int n_cells,
-         std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
+         cuda_array_c<const float> data, cuda_array_c<float> sums_cells, cuda_array_c<int> cell_ex,
+         int n_cells, std::uintptr_t stream) {
         launch_qc_csr_cells<float>(indptr.data(), index.data(), data.data(), sums_cells.data(),
                                    cell_ex.data(), n_cells, (cudaStream_t)stream);
       },
@@ -60,9 +55,9 @@ NB_MODULE(_qc_dask_cuda, m) {
   // sparse_qc_csr_cells - float64
   m.def(
       "sparse_qc_csr_cells",
-      [](cuda_array<const int> indptr, cuda_array<const int> index, cuda_array<const double> data,
-         cuda_array<double> sums_cells, cuda_array<int> cell_ex, int n_cells,
-         std::uintptr_t stream) {
+      [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
+         cuda_array_c<const double> data, cuda_array_c<double> sums_cells,
+         cuda_array_c<int> cell_ex, int n_cells, std::uintptr_t stream) {
         launch_qc_csr_cells<double>(indptr.data(), index.data(), data.data(), sums_cells.data(),
                                     cell_ex.data(), n_cells, (cudaStream_t)stream);
       },
@@ -72,8 +67,9 @@ NB_MODULE(_qc_dask_cuda, m) {
   // sparse_qc_csr_genes - float32
   m.def(
       "sparse_qc_csr_genes",
-      [](cuda_array<const int> index, cuda_array<const float> data, cuda_array<float> sums_genes,
-         cuda_array<int> gene_ex, int nnz, std::uintptr_t stream) {
+      [](cuda_array_c<const int> index, cuda_array_c<const float> data,
+         cuda_array_c<float> sums_genes, cuda_array_c<int> gene_ex, int nnz,
+         std::uintptr_t stream) {
         launch_qc_csr_genes<float>(index.data(), data.data(), sums_genes.data(), gene_ex.data(),
                                    nnz, (cudaStream_t)stream);
       },
@@ -82,8 +78,9 @@ NB_MODULE(_qc_dask_cuda, m) {
   // sparse_qc_csr_genes - float64
   m.def(
       "sparse_qc_csr_genes",
-      [](cuda_array<const int> index, cuda_array<const double> data, cuda_array<double> sums_genes,
-         cuda_array<int> gene_ex, int nnz, std::uintptr_t stream) {
+      [](cuda_array_c<const int> index, cuda_array_c<const double> data,
+         cuda_array_c<double> sums_genes, cuda_array_c<int> gene_ex, int nnz,
+         std::uintptr_t stream) {
         launch_qc_csr_genes<double>(index.data(), data.data(), sums_genes.data(), gene_ex.data(),
                                     nnz, (cudaStream_t)stream);
       },
@@ -92,7 +89,7 @@ NB_MODULE(_qc_dask_cuda, m) {
   // sparse_qc_dense_cells - float32
   m.def(
       "sparse_qc_dense_cells",
-      [](cuda_array<const float> data, cuda_array<float> sums_cells, cuda_array<int> cell_ex,
+      [](cuda_array_c<const float> data, cuda_array_c<float> sums_cells, cuda_array_c<int> cell_ex,
          int n_cells, int n_genes, std::uintptr_t stream) {
         launch_qc_dense_cells<float>(data.data(), sums_cells.data(), cell_ex.data(), n_cells,
                                      n_genes, (cudaStream_t)stream);
@@ -103,8 +100,8 @@ NB_MODULE(_qc_dask_cuda, m) {
   // sparse_qc_dense_cells - float64
   m.def(
       "sparse_qc_dense_cells",
-      [](cuda_array<const double> data, cuda_array<double> sums_cells, cuda_array<int> cell_ex,
-         int n_cells, int n_genes, std::uintptr_t stream) {
+      [](cuda_array_c<const double> data, cuda_array_c<double> sums_cells,
+         cuda_array_c<int> cell_ex, int n_cells, int n_genes, std::uintptr_t stream) {
         launch_qc_dense_cells<double>(data.data(), sums_cells.data(), cell_ex.data(), n_cells,
                                       n_genes, (cudaStream_t)stream);
       },
@@ -114,7 +111,7 @@ NB_MODULE(_qc_dask_cuda, m) {
   // sparse_qc_dense_genes - float32
   m.def(
       "sparse_qc_dense_genes",
-      [](cuda_array<const float> data, cuda_array<float> sums_genes, cuda_array<int> gene_ex,
+      [](cuda_array_c<const float> data, cuda_array_c<float> sums_genes, cuda_array_c<int> gene_ex,
          int n_cells, int n_genes, std::uintptr_t stream) {
         launch_qc_dense_genes<float>(data.data(), sums_genes.data(), gene_ex.data(), n_cells,
                                      n_genes, (cudaStream_t)stream);
@@ -125,8 +122,8 @@ NB_MODULE(_qc_dask_cuda, m) {
   // sparse_qc_dense_genes - float64
   m.def(
       "sparse_qc_dense_genes",
-      [](cuda_array<const double> data, cuda_array<double> sums_genes, cuda_array<int> gene_ex,
-         int n_cells, int n_genes, std::uintptr_t stream) {
+      [](cuda_array_c<const double> data, cuda_array_c<double> sums_genes,
+         cuda_array_c<int> gene_ex, int n_cells, int n_genes, std::uintptr_t stream) {
         launch_qc_dense_genes<double>(data.data(), sums_genes.data(), gene_ex.data(), n_cells,
                                       n_genes, (cudaStream_t)stream);
       },
