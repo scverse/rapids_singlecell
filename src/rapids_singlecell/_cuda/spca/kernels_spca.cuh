@@ -18,7 +18,9 @@ __global__ void gram_csr_upper_kernel(const int* indptr, const int* index, const
     for (int idx2 = idx1 + col_offset; idx2 < end; idx2 += blockDim.x) {
       int index2 = index[idx2];
       T data2 = data[idx2];
-      atomicAdd(&out[(size_t)index1 * ncols + index2], data1 * data2);
+      size_t lo = min(index1, index2);
+      size_t hi = max(index1, index2);
+      atomicAdd(&out[(size_t)lo * ncols + hi], data1 * data2);
     }
   }
 }
