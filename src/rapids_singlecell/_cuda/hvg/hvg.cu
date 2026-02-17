@@ -31,20 +31,20 @@ static void launch_expected_zeros(const T* scaled_means, const T* total_counts, 
 
 NB_MODULE(_hvg_cuda, m) {
   m.def(
-      "expected_zeros_f32",
-      [](cuda_array_c<const float> scaled_means, cuda_array_c<const float> total_counts,
-         cuda_array_c<float> expected, int n_genes, int n_cells, std::uintptr_t stream) {
-        launch_expected_zeros<float>(scaled_means.data(), total_counts.data(), expected.data(),
-                                     n_genes, n_cells, reinterpret_cast<cudaStream_t>(stream));
-      },
-      "scaled_means"_a, "total_counts"_a, "expected"_a, "n_genes"_a, "n_cells"_a, "stream"_a = 0);
-
-  m.def(
-      "expected_zeros_f64",
+      "expected_zeros",
       [](cuda_array_c<const double> scaled_means, cuda_array_c<const double> total_counts,
          cuda_array_c<double> expected, int n_genes, int n_cells, std::uintptr_t stream) {
         launch_expected_zeros<double>(scaled_means.data(), total_counts.data(), expected.data(),
                                       n_genes, n_cells, reinterpret_cast<cudaStream_t>(stream));
+      },
+      "scaled_means"_a, "total_counts"_a, "expected"_a, "n_genes"_a, "n_cells"_a, "stream"_a = 0);
+
+  m.def(
+      "expected_zeros",
+      [](cuda_array_c<const float> scaled_means, cuda_array_c<const float> total_counts,
+         cuda_array_c<float> expected, int n_genes, int n_cells, std::uintptr_t stream) {
+        launch_expected_zeros<float>(scaled_means.data(), total_counts.data(), expected.data(),
+                                     n_genes, n_cells, reinterpret_cast<cudaStream_t>(stream));
       },
       "scaled_means"_a, "total_counts"_a, "expected"_a, "n_genes"_a, "n_cells"_a, "stream"_a = 0);
 }

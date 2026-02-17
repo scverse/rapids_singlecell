@@ -318,17 +318,6 @@ def _get_theta_array(
     return theta_array.ravel()
 
 
-def _dtype_code(dtype: cp.dtype) -> int:
-    if dtype == cp.float32:
-        return 0
-    elif dtype == cp.float64:
-        return 1
-    elif dtype == cp.int32:
-        return 2
-    else:
-        raise ValueError(f"Unsupported dtype: {dtype}")
-
-
 def _column_sum(X: cp.ndarray) -> cp.ndarray:
     """
     Sum each column of the 2D, C-contiguous float32 array A.

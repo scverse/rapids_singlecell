@@ -149,24 +149,14 @@ def _compute_expected_zeros_kernel(
     """
     expected = cp.zeros(n_genes, dtype=dtype)
 
-    if dtype == cp.float32 or dtype == np.float32:
-        _hvg.expected_zeros_f32(
-            scaled_means,
-            total_counts,
-            expected,
-            n_genes,
-            n_cells,
-            stream=cp.cuda.get_current_stream().ptr,
-        )
-    else:
-        _hvg.expected_zeros_f64(
-            scaled_means,
-            total_counts,
-            expected,
-            n_genes,
-            n_cells,
-            stream=cp.cuda.get_current_stream().ptr,
-        )
+    _hvg.expected_zeros(
+        scaled_means,
+        total_counts,
+        expected,
+        n_genes,
+        n_cells,
+        stream=cp.cuda.get_current_stream().ptr,
+    )
 
     return expected
 
