@@ -27,31 +27,66 @@ RAPIDS currently doesn't support `channel_priority: strict`; use `channel_priori
 ```
 
 ## PyPI
-*rapids-singlecell* is also on PyPI.
-```bash
-pip install rapids-singlecell
-```
-The default installer doesn't cover RAPIDS nor CuPy. Information on how to install RAPIDS & CuPy can be found [here](https://rapids.ai/start.html).
 
-If you want to use RAPIDS new PyPI packages, the whole library with all dependencies can be installed with:
+Starting with version 0.15.0, *rapids-singlecell* ships precompiled CUDA kernels via nanobind.
+Prebuilt wheels are available for **x86_64** and **aarch64** Linux for both CUDA 12 and CUDA 13.
+
+### Prebuilt wheels (recommended)
+
+Install the wheel matching your CUDA version:
 
 `````{tab-set}
 ````{tab-item} CUDA 13
 ```bash
-uv pip install 'rapids-singlecell[rapids13]' --extra-index-url=https://pypi.nvidia.com
+pip install rapids-singlecell-cu13
 ```
 ````
 ````{tab-item} CUDA 12
 ```bash
-uv pip install 'rapids-singlecell[rapids12]' --extra-index-url=https://pypi.nvidia.com
+pip install rapids-singlecell-cu12
 ```
 ````
 `````
 
-It is important to ensure that the CUDA environment is set up correctly so that RAPIDS and CuPy can locate the necessary libraries.
+This installs the precompiled CUDA kernels but **not** the RAPIDS stack (cupy, cuml, cudf, etc.).
+This is the recommended approach for **conda/mamba users** who already have RAPIDS installed in their environment.
+
+### Prebuilt wheels with RAPIDS dependencies
+
+To also install the RAPIDS stack via pip, use the `rapids` extra.
+This requires the `--extra-index-url` flag for the NVIDIA PyPI index:
+
+`````{tab-set}
+````{tab-item} CUDA 13
+```bash
+pip install 'rapids-singlecell-cu13[rapids]' --extra-index-url=https://pypi.nvidia.com
+```
+````
+````{tab-item} CUDA 12
+```bash
+pip install 'rapids-singlecell-cu12[rapids]' --extra-index-url=https://pypi.nvidia.com
+```
+````
+`````
+
+### Source distribution (self-compile)
+
+The `rapids-singlecell` package on PyPI contains the source distribution.
+Building from source requires a CUDA toolkit and a C++ compiler:
+
+```bash
+pip install rapids-singlecell
+```
+
+The CUDA kernels will be compiled during installation for your local GPU architecture.
+You can select RAPIDS dependencies with the `rapids-cu12` or `rapids-cu13` extras:
+
+```bash
+pip install 'rapids-singlecell[rapids-cu12]' --extra-index-url=https://pypi.nvidia.com
+```
 
 ```{note}
-If you are using `python=3.12` with `uv`, you might need to add the `--index-strategy=unsafe-best-match` flag to ensure compatibility.
+Building from source requires the CUDA toolkit (nvcc) and CMake >= 3.24 to be available in your environment.
 ```
 
 ## Docker

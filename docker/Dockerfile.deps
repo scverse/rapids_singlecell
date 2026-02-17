@@ -1,7 +1,7 @@
 ARG CUDA_VER=13.0.2
 ARG LINUX_VER=ubuntu24.04
 
-FROM nvidia/cuda:${CUDA_VER}-base-${LINUX_VER}
+FROM nvidia/cuda:${CUDA_VER}-devel-${LINUX_VER}
 
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 
@@ -41,9 +41,19 @@ mamba install -y -n base pytest -c conda-forge
 EOF
 
 RUN <<EOF
-# install rapids_singlecell dependencies
+# install rapids_singlecell pip dependencies (without building the package)
 set -x
-/opt/conda/bin/python -m pip install --no-cache-dir git+https://github.com/scverse/rapids_singlecell.git@${GIT_ID}
-/opt/conda/bin/python -m pip uninstall -y --no-cache-dir rapids-singlecell
-/opt/conda/bin/python -m pip cache purge
+cd /tmp
+git clone https://github.com/scverse/rapids_singlecell.git
+cd rapids_singlecell
+git checkout ${GIT_ID}
+/opt/conda/bin/python -c "
+import tomllib
+with open('pyproject.toml', 'rb') as f:
+    data = tomllib.load(f)
+with open('/tmp/deps.txt', 'w') as f:
+    f.write('\n'.join(data['project']['dependencies']))
+"
+/opt/conda/bin/python -m pip install --no-cache-dir -r /tmp/deps.txt
+rm -rf /tmp/rapids_singlecell /tmp/deps.txt
 EOF

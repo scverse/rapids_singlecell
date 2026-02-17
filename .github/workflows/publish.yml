@@ -48,10 +48,34 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set package name for CUDA ${{ matrix.cuda_major }}
+      - name: Set package name and extras for CUDA ${{ matrix.cuda_major }}
         run: |
-          sed -i 's/name = "rapids_singlecell"/name = "rapids_singlecell-cu${{ matrix.cuda_major }}"/' pyproject.toml
-          grep '^name' pyproject.toml
+          python3 - ${{ matrix.cuda_major }} <<'SCRIPT'
+          import sys, pathlib
+
+          cuda = sys.argv[1]
+          other = "13" if cuda == "12" else "12"
+          path = pathlib.Path("pyproject.toml")
+          text = path.read_text()
+
+          # Rename package
+          text = text.replace(
+              'name = "rapids_singlecell"',
+              f'name = "rapids_singlecell-cu{cuda}"',
+          )
+          # Rename matching extra to "rapids", remove the other
+          text = text.replace(f'rapids-cu{cuda} =', 'rapids =')
+          # Remove the other CUDA extra line entirely
+          lines = text.splitlines(keepends=True)
+          text = "".join(l for l in lines if f'rapids-cu{other}' not in l)
+
+          path.write_text(text)
+
+          # Verify
+          for line in path.read_text().splitlines():
+              if "name" in line or "rapids" in line.lower():
+                  print(line)
+          SCRIPT
 
       - name: Build CUDA manylinux image
         run: |
