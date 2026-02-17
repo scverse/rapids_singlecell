@@ -2,6 +2,9 @@
 
 #include <cuda_runtime.h>
 
+// All scale kernels assume std[col] > 0, guaranteed by the Python caller
+// (_scale.py clips std to a minimum value before invoking these kernels).
+
 template <typename T>
 __global__ void csc_scale_diff_kernel(const int* __restrict__ indptr, T* __restrict__ data,
                                       const T* __restrict__ std, int ncols) {

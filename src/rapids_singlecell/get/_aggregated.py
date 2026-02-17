@@ -278,6 +278,7 @@ class Aggregate:
                     n_cells=self.n_cells,
                     dof=int(dof),
                     n_groups=var.shape[0],
+                    stream=cp.cuda.get_current_stream().ptr,
                 )
                 results["var"] = var
         if "count_nonzero" in funcs:
