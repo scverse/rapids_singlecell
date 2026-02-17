@@ -6,13 +6,13 @@ RUN yum -y install dnf-plugins-core && \
     yum -y clean all && yum -y makecache && \
     # Install only what you actually link against
     yum -y install \
-      cuda-nvcc-12-9 \
-      cuda-cudart-12-9 \
-      cuda-cudart-devel-12-9 \
-      libcublas-12-9 \
-      libcublas-devel-12-9 \
-      libcusparse-12-9 \
-      libcusparse-devel-12-9 && \
+      cuda-nvcc-12-2 \
+      cuda-cudart-12-2 \
+      cuda-cudart-devel-12-2 \
+      libcublas-12-2 \
+      libcublas-devel-12-2 \
+      libcusparse-12-2 \
+      libcusparse-devel-12-2 && \
     yum clean all
 
 ENV CUDA_HOME=/usr/local/cuda

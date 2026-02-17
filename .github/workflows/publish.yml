@@ -18,20 +18,20 @@ jobs:
     strategy:
       matrix:
         include:
-          # CUDA 12 wheels
+          # CUDA 12 wheels (compiled with 12.2 for runtime 12.2+ compatibility)
           - os: linux-intel
             cuda_major: "12"
             runs-on: ubuntu-latest
-            cibw_image: "ghcr.io/scverse/rapids_singlecell:manylinux_2_28_x86_64_cuda12.9"
-            dockerfile: "docker/manylinux_2_28_x86_64_cuda12.9.Dockerfile"
-            cuda_archs: "75-real;80-real;86-real;89-real;90-real;100-real;120"
+            cibw_image: "ghcr.io/scverse/rapids_singlecell:manylinux_2_28_x86_64_cuda12.2"
+            dockerfile: "docker/manylinux_2_28_x86_64_cuda12.2.Dockerfile"
+            cuda_archs: "75-real;80-real;86-real;89-real;90"
           - os: linux-arm
             cuda_major: "12"
             runs-on: ubuntu-24.04-arm
-            cibw_image: "ghcr.io/scverse/rapids_singlecell:manylinux_2_28_aarch64_cuda12.9"
-            dockerfile: "docker/manylinux_2_28_aarch64_cuda12.9.Dockerfile"
-            cuda_archs: "75-real;80-real;86-real;89-real;90-real;100-real;120"
-          # CUDA 13 wheels
+            cibw_image: "ghcr.io/scverse/rapids_singlecell:manylinux_2_28_aarch64_cuda12.2"
+            dockerfile: "docker/manylinux_2_28_aarch64_cuda12.2.Dockerfile"
+            cuda_archs: "75-real;80-real;86-real;89-real;90"
+          # CUDA 13 wheels (native Blackwell support)
           - os: linux-intel
             cuda_major: "13"
             runs-on: ubuntu-latest

@@ -31,6 +31,19 @@ RAPIDS currently doesn't support `channel_priority: strict`; use `channel_priori
 Starting with version 0.15.0, *rapids-singlecell* ships precompiled CUDA kernels via nanobind.
 Prebuilt wheels are available for **x86_64** and **aarch64** Linux for both CUDA 12 and CUDA 13.
 
+### CUDA version compatibility
+
+The prebuilt wheels support the following CUDA runtime versions:
+
+| Wheel | Compiled with | Runtime support | GPU architectures |
+|---|---|---|---|
+| `rapids-singlecell-cu12` | CUDA 12.2 | CUDA 12.2–12.9+ | Turing through Hopper (native), Blackwell (via PTX JIT) |
+| `rapids-singlecell-cu13` | CUDA 13.0 | CUDA 13.0+ | Turing through Blackwell (all native) |
+
+The CUDA 12 wheels are compiled with CUDA 12.2 to match the [RAPIDS 26.02 support matrix](https://docs.rapids.ai/install/) (CUDA 12.2–12.9).
+Blackwell GPUs (CC 100, 120) are supported via PTX just-in-time compilation from the `sm_90` PTX included in the wheel.
+The CUDA 13 wheels include native Blackwell binaries, so no JIT is needed.
+
 ### Prebuilt wheels (recommended)
 
 Install the wheel matching your CUDA version:
@@ -87,6 +100,49 @@ pip install 'rapids-singlecell[rapids-cu12]' --extra-index-url=https://pypi.nvid
 
 ```{note}
 Building from source requires the CUDA toolkit (nvcc) and CMake >= 3.24 to be available in your environment.
+```
+
+### Install from GitHub
+
+To install the latest development version directly from GitHub:
+
+```bash
+pip install "rapids-singlecell @ git+https://github.com/scverse/rapids_singlecell.git"
+```
+
+Or from a specific branch or tag:
+
+```bash
+pip install "rapids-singlecell @ git+https://github.com/scverse/rapids_singlecell.git@main"
+```
+
+This compiles the CUDA kernels during installation. By default, kernels are compiled for your local GPU architecture only (`native`).
+To compile for different or multiple architectures, set the `SKBUILD_CMAKE_ARGS` environment variable:
+
+```bash
+# Compile for a specific architecture (e.g., Ampere)
+SKBUILD_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=80-real" pip install "rapids-singlecell @ git+https://github.com/scverse/rapids_singlecell.git"
+
+# Compile for multiple architectures
+SKBUILD_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=80-real;86-real;89-real;90-real" pip install "rapids-singlecell @ git+https://github.com/scverse/rapids_singlecell.git"
+```
+
+Common architecture codes:
+
+| Code | GPU Generation | Examples |
+|---|---|---|
+| `75` | Turing | T4, RTX 2080 |
+| `80` | Ampere | A100, A30 |
+| `86` | Ampere | A10, RTX 3090 |
+| `89` | Ada Lovelace | L4, L40, RTX 4090 |
+| `90` | Hopper | H100, H200 |
+| `100` | Blackwell | B200, GB200 |
+| `120` | Blackwell | B300, RTX PRO 6000 |
+
+```{tip}
+Use `native` (the default) for the fastest compilation when you only need to run on your local GPU.
+Use multiple architectures when building portable binaries (e.g., for a shared cluster with mixed GPU types).
+The `-real` suffix generates device code only (no PTX fallback), which reduces binary size.
 ```
 
 ## Docker
