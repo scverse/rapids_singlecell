@@ -157,21 +157,18 @@ To run the test suite against a specific matrix combination:
 
 # Run dev tests (upstream anndata/scanpy) with CUDA 13
 (uvx) hatch run hatch-test.dev-13:run
-
-# Run all test environments
-(uvx) hatch run hatch-test:run
 ```
 
 ### Running individual tests
 
-For quick iteration during development, you can run tests directly with pytest in your active environment:
+For quick iteration during development, you can pass specific test paths:
 
 ```bash
 # Run a specific test file
-python -m pytest tests/path/to/test.py -v
+(uvx) hatch run hatch-test.stable-13:run tests/path/to/test.py -v
 
 # Run a specific test
-python -m pytest tests/path/to/test.py::test_name -v
+(uvx) hatch run hatch-test.stable-13:run tests/path/to/test.py::test_name -v
 ```
 
 ```{important}
