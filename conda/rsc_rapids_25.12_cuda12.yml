@@ -18,4 +18,4 @@ dependencies:
     - omnipath
     - gdown
     - wget
-    - rapids-singlecell
+    - rapids-singlecell-cu12

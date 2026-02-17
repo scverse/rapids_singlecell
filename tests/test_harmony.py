@@ -184,18 +184,17 @@ def test_scatter_add_shared_vs_optimized(n_cells, n_pcs, n_batches, switcher):
     """
     Test that shared memory and non-shared scatter add kernels produce identical results.
 
-    Uses integer values for easy verification of correctness.
+    Uses small integer values (as float32) for exact verification of correctness.
     """
-    # Create test data with integer values for easy verification
     rng = np.random.default_rng(42)
-    X_np = rng.integers(1, 10, size=(n_cells, n_pcs), dtype=np.int32)
+    X_np = rng.integers(1, 10, size=(n_cells, n_pcs)).astype(np.float32)
     cats_np = rng.integers(0, n_batches, size=n_cells, dtype=np.int32)
 
     X = cp.asarray(X_np)
     cats = cp.asarray(cats_np)
 
     # Compute expected result using numpy
-    expected_np = np.zeros((n_batches, n_pcs), dtype=np.int32)
+    expected_np = np.zeros((n_batches, n_pcs), dtype=np.float32)
     for i in range(n_cells):
         cat = cats_np[i]
         if switcher == 1:
@@ -205,11 +204,11 @@ def test_scatter_add_shared_vs_optimized(n_cells, n_pcs, n_batches, switcher):
     expected = cp.asarray(expected_np)
 
     # Run optimized (non-shared) kernel via _scatter_add_cp
-    out_optimized = cp.zeros((n_batches, n_pcs), dtype=cp.int32)
+    out_optimized = cp.zeros((n_batches, n_pcs), dtype=cp.float32)
     _scatter_add_cp(X, out_optimized, cats, switcher, n_batches, use_shared=False)
 
     # Run shared memory kernel via _scatter_add_cp
-    out_shared = cp.zeros((n_batches, n_pcs), dtype=cp.int32)
+    out_shared = cp.zeros((n_batches, n_pcs), dtype=cp.float32)
     _scatter_add_cp(X, out_shared, cats, switcher, n_batches, use_shared=True)
 
     # Both kernels should produce identical results

@@ -6,6 +6,7 @@ import cupy as cp
 import numpy as np
 from cuml.metrics import pairwise_distances
 
+from rapids_singlecell._cuda import _cooc_cuda as _co
 from rapids_singlecell._utils import (
     _calculate_blocks_per_pair,
     _create_category_index_mapping,
@@ -14,12 +15,6 @@ from rapids_singlecell._utils import (
 )
 
 from ._utils import _assert_categorical_obs, _assert_spatial_basis
-from .kernels._co_oc import (
-    get_co_occurrence_kernel,
-    occur_count_kernel_pairwise,
-    occur_reduction_kernel_global,
-    occur_reduction_kernel_shared,
-)
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -156,8 +151,8 @@ def _co_occurrence_helper(
 
     if fast:
         # Early check: can we use the fast kernel with available shared memory?
-        kernel_result = get_co_occurrence_kernel(l_val, n, k, device_ids[0])
-        if kernel_result is None:
+        kernel_config = _co.get_kernel_config(l_val, n, k)
+        if kernel_config is None:
             # Shared memory insufficient, skip CSR prep and use pairwise kernel
             fast = False
 
@@ -175,11 +170,10 @@ def _co_occurrence_helper(
         pair_left = cp.asarray(pair_left, dtype=cp.int32)
         pair_right = cp.asarray(pair_right, dtype=cp.int32)
 
-        # Use single GPU for small workloads (< 100k cells), multi-GPU for larger
+        # Use single GPU for small workloads (< 100k cells)
         min_cells_for_multi_gpu = 100_000
         n_devices = len(device_ids)
         if n_devices > 1 and n < min_cells_for_multi_gpu:
-            # Small workload: use only first GPU even if multiple available
             device_ids = [device_ids[0]]
 
         counts, use_fast_kernel = _co_occurrence_gpu(
@@ -200,35 +194,39 @@ def _co_occurrence_helper(
     # Fallback to the standard kernel if fast=False or shared memory was insufficient
     if not use_fast_kernel:
         counts = cp.zeros((k, k, l_val * 2), dtype=cp.int32)
-        grid = (n,)
-        block = (32,)
-        occur_count_kernel_pairwise(
-            grid, block, (spatial, thresholds, labs, counts, n, k, l_val)
+        _co.count_pairwise(
+            spatial,
+            thresholds=thresholds,
+            labels=labs,
+            result=counts,
+            n=n,
+            k=k,
+            l_val=l_val,
+            stream=cp.cuda.get_current_stream().ptr,
         )
         reader = 0
 
     occ_prob = cp.empty((k, k, l_val), dtype=np.float32)
-    shared_mem_size = (k * k + k) * cp.dtype("float32").itemsize
-    props = cp.cuda.runtime.getDeviceProperties(0)
-    if fast and shared_mem_size < props["sharedMemPerBlock"]:
-        grid2 = (l_val,)
-        block2 = (32,)
-        occur_reduction_kernel_shared(
-            grid2,
-            block2,
-            (counts, occ_prob, k, l_val, reader),
-            shared_mem=shared_mem_size,
+    ok = False
+    if use_fast_kernel:
+        ok = _co.reduce_shared(
+            counts,
+            out=occ_prob,
+            k=k,
+            l_val=l_val,
+            format=reader,
+            stream=cp.cuda.get_current_stream().ptr,
         )
-    else:
-        shared_mem_size = (k) * cp.dtype("float32").itemsize
-        grid2 = (l_val,)
-        block2 = (32,)
+    if not ok:
         inter_out = cp.zeros((l_val, k, k), dtype=np.float32)
-        occur_reduction_kernel_global(
-            grid2,
-            block2,
-            (counts, inter_out, occ_prob, k, l_val, reader),
-            shared_mem=shared_mem_size,
+        _co.reduce_global(
+            counts,
+            inter_out=inter_out,
+            out=occ_prob,
+            k=k,
+            l_val=l_val,
+            format=reader,
+            stream=cp.cuda.get_current_stream().ptr,
         )
 
     return occ_prob
@@ -346,33 +344,32 @@ def _co_occurrence_gpu(
             # Wait for data transfer to complete on this device
             streams[device_id].synchronize()
 
-            # Get kernel for this device
-            kernel_result = get_co_occurrence_kernel(l_val, n_cells, k, device_id)
-            if kernel_result is None:
+            # Get kernel configuration for this device
+            kernel_config = _co.get_kernel_config(l_val, n_cells, k)
+            if kernel_config is None:
                 # Shared memory insufficient, fall back to pairwise kernel
-                return None, False
-            kernel, shared_mem, block_size, _, _ = kernel_result
+                return cp.zeros((k, k, l_val), dtype=cp.int32), False
 
+            cell_tile, _l_pad, block_size, shared_mem = kernel_config
             blocks_per_pair = _calculate_blocks_per_pair(data["n_pairs"])
-            grid = (data["n_pairs"], blocks_per_pair)
-            block = (block_size,)
 
-            kernel(
-                grid,
-                block,
-                (
-                    data["spatial"],
-                    data["thresholds"],
-                    data["cat_offsets"],
-                    data["cell_indices"],
-                    data["pair_left"],
-                    data["pair_right"],
-                    data["counts"],
-                    k,
-                    l_val,
-                    blocks_per_pair,
-                ),
+            # Launch kernel with computed configuration
+            _co.count_csr_catpairs(
+                data["spatial"],
+                thresholds=data["thresholds"],
+                cat_offsets=data["cat_offsets"],
+                cell_indices=data["cell_indices"],
+                pair_left=data["pair_left"],
+                pair_right=data["pair_right"],
+                counts=data["counts"],
+                num_pairs=data["n_pairs"],
+                k=k,
+                l_val=l_val,
+                blocks_per_pair=blocks_per_pair,
+                cell_tile=cell_tile,
+                block_size=block_size,
                 shared_mem=shared_mem,
+                stream=cp.cuda.get_current_stream().ptr,
             )
 
     # Phase 3: Synchronize all devices (wait for kernels to complete)

@@ -9,6 +9,7 @@ import cupy as cp
 import numpy as np
 import pandas as pd
 
+from rapids_singlecell._cuda import _edistance_cuda as _ed
 from rapids_singlecell._utils import (
     _calculate_blocks_per_pair,
     _create_category_index_mapping,
@@ -17,9 +18,6 @@ from rapids_singlecell._utils import (
 from rapids_singlecell.squidpy_gpu._utils import _assert_categorical_obs
 
 from ._base_metric import BaseMetric, parse_device_ids
-from ._kernels._edistance_kernel import (
-    get_compute_group_distances_kernel,
-)
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -606,28 +604,31 @@ class EDistanceMetric(BaseMetric):
                 streams[device_id].synchronize()
 
                 # Launch kernel (on default stream, async)
-                kernel, shared_mem, block_size = get_compute_group_distances_kernel(
-                    embedding.dtype, n_features
-                )
+                is_double = embedding.dtype == np.float64
+                config = _ed.get_kernel_config(n_features, is_double)
+                if config is None:
+                    raise RuntimeError(
+                        "Insufficient shared memory for edistance kernel"
+                    )
+                cell_tile, feat_tile, block_size, shared_mem = config
                 blocks_per_pair = _calculate_blocks_per_pair(data["n_pairs"])
-                grid = (data["n_pairs"], blocks_per_pair)
-                block = (block_size,)
 
-                kernel(
-                    grid,
-                    block,
-                    (
-                        data["emb"],
-                        data["off"],
-                        data["idx"],
-                        data["pair_left"],
-                        data["pair_right"],
-                        data["sums"],
-                        k,
-                        n_features,
-                        blocks_per_pair,
-                    ),
-                    shared_mem=shared_mem,
+                _ed.compute_distances(
+                    data["emb"],
+                    data["off"],
+                    data["idx"],
+                    data["pair_left"],
+                    data["pair_right"],
+                    data["sums"],
+                    data["n_pairs"],
+                    k,
+                    n_features,
+                    blocks_per_pair,
+                    cell_tile,
+                    feat_tile,
+                    block_size,
+                    shared_mem,
+                    cp.cuda.get_current_stream().ptr,
                 )
 
         # Phase 3: Synchronize all devices (wait for kernels to complete)
@@ -792,28 +793,31 @@ class EDistanceMetric(BaseMetric):
                 streams[device_id].synchronize()
 
                 # Launch kernel (on default stream, async)
-                kernel, shared_mem, block_size = get_compute_group_distances_kernel(
-                    embedding.dtype, n_features
-                )
+                is_double = embedding.dtype == np.float64
+                config = _ed.get_kernel_config(n_features, is_double)
+                if config is None:
+                    raise RuntimeError(
+                        "Insufficient shared memory for edistance kernel"
+                    )
+                cell_tile, feat_tile, block_size, shared_mem = config
                 blocks_per_pair = _calculate_blocks_per_pair(data["n_pairs"])
-                grid = (data["n_pairs"], blocks_per_pair)
-                block = (block_size,)
 
-                kernel(
-                    grid,
-                    block,
-                    (
-                        data["emb"],
-                        data["off"],
-                        data["idx"],
-                        data["pair_left"],
-                        data["pair_right"],
-                        data["sums"],
-                        k,
-                        n_features,
-                        blocks_per_pair,
-                    ),
-                    shared_mem=shared_mem,
+                _ed.compute_distances(
+                    data["emb"],
+                    data["off"],
+                    data["idx"],
+                    data["pair_left"],
+                    data["pair_right"],
+                    data["sums"],
+                    data["n_pairs"],
+                    k,
+                    n_features,
+                    blocks_per_pair,
+                    cell_tile,
+                    feat_tile,
+                    block_size,
+                    shared_mem,
+                    cp.cuda.get_current_stream().ptr,
                 )
 
         # Phase 3: Synchronize all devices (wait for kernels to complete)

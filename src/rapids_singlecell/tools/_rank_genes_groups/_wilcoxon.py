@@ -8,10 +8,10 @@ import cupyx.scipy.special as cupyx_special
 import numpy as np
 import scipy.sparse as sp
 
+from rapids_singlecell._cuda import _wilcoxon_cuda as _wc
 from rapids_singlecell._utils._csr_to_csc import _fast_csr_to_csc
 
-from ._kernels._wilcoxon import _rank_kernel, _tie_correction_kernel
-from ._utils import _choose_chunk_size, _get_column_block, _round_up_to_warp
+from ._utils import _choose_chunk_size, _get_column_block
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -51,13 +51,9 @@ def _average_ranks(
     sorted_vals = cp.asfortranarray(sorted_vals)
     sorter = cp.asfortranarray(sorter.astype(cp.int32))
 
-    # Launch kernel: one block per column, threads must be multiple of WARP_SIZE
-    threads_per_block = _round_up_to_warp(n_rows)
-    blocks = n_cols
-    _rank_kernel(
-        (blocks,),
-        (threads_per_block,),
-        (sorted_vals, sorter, matrix, n_rows, n_cols),
+    stream = cp.cuda.get_current_stream().ptr
+    _wc.average_rank(
+        sorted_vals, sorter, matrix, n_rows=n_rows, n_cols=n_cols, stream=stream
     )
 
     if return_sorted:
@@ -82,12 +78,9 @@ def _tie_correction(sorted_vals: cp.ndarray) -> cp.ndarray:
     # Ensure F-order
     sorted_vals = cp.asfortranarray(sorted_vals)
 
-    # Threads must be multiple of WARP_SIZE for correct warp reduction
-    threads_per_block = _round_up_to_warp(n_rows)
-    _tie_correction_kernel(
-        (n_cols,),
-        (threads_per_block,),
-        (sorted_vals, correction, n_rows, n_cols),
+    stream = cp.cuda.get_current_stream().ptr
+    _wc.tie_correction(
+        sorted_vals, correction, n_rows=n_rows, n_cols=n_cols, stream=stream
     )
 
     return correction
