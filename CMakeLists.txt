@@ -93,6 +93,8 @@ if (RSC_BUILD_EXTENSIONS)
   add_nb_cuda_module(_harmony_pen_cuda       src/rapids_singlecell/_cuda/harmony/pen/pen.cu)
   add_nb_cuda_module(_harmony_clustering_cuda src/rapids_singlecell/_cuda/harmony/clustering/clustering.cu)
   target_link_libraries(_harmony_clustering_cuda PRIVATE CUDA::cublas)
+  add_nb_cuda_module(_harmony_correction_cuda src/rapids_singlecell/_cuda/harmony/correction/correction_fast.cu)
+  target_link_libraries(_harmony_correction_cuda PRIVATE CUDA::cublas)
   # Wilcoxon binned histogram CUDA module
   add_nb_cuda_module(_wilcoxon_binned_cuda   src/rapids_singlecell/_cuda/wilcoxon_binned/wilcoxon_binned.cu)
 endif()

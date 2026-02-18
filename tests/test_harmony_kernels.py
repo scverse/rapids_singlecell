@@ -10,6 +10,9 @@ from rapids_singlecell._cuda import (
     _harmony_clustering_cuda as _cl,
 )
 from rapids_singlecell._cuda import (
+    _harmony_correction_cuda as _corr,
+)
+from rapids_singlecell._cuda import (
     _harmony_normalize_cuda as _norm,
 )
 from rapids_singlecell._cuda import (
@@ -278,3 +281,61 @@ def test_compute_objective(dtype, n_cells, n_clusters, n_batches):
     # atomicAdd reduction ordering causes slight non-determinism
     rtol = 1e-5 if dtype == np.float32 else 1e-10
     np.testing.assert_allclose(result, expected, rtol=rtol)
+
+
+# ---- compute_inv_mat: correctness against CuPy reference ----
+
+
+def _inv_mat_reference(O_col, ridge_lambda, dtype):
+    """Pure CuPy reference for the algebraic fast-inverse."""
+    n_batches = len(O_col)
+    nb1 = n_batches + 1
+    O_col = O_col.astype(dtype)
+
+    factor = dtype(1) / (O_col + dtype(ridge_lambda))
+    P_row0 = -factor * O_col
+    N_k = O_col.sum()
+    c = N_k - (factor * O_col * O_col).sum()
+    c_inv = dtype(1) / c
+
+    inv = cp.empty((nb1, nb1), dtype=dtype)
+    inv[0, 0] = c_inv
+    inv[0, 1:] = c_inv * P_row0
+    inv[1:, 0] = P_row0 * c_inv
+    inv[1:, 1:] = cp.outer(P_row0, P_row0) * c_inv + cp.diag(factor)
+    return inv
+
+
+@pytest.mark.parametrize("n_batches", [5, 50, 200])
+@pytest.mark.parametrize("n_clusters", [10, 50])
+@pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
+def test_compute_inv_mat(n_batches, n_clusters, dtype):
+    """Test that compute_inv_mat matches CuPy reference."""
+    rng = np.random.default_rng(42)
+    O = cp.array(rng.random((n_batches, n_clusters)) * 100, dtype=dtype)
+    ridge_lambda = 1.0
+    nb1 = n_batches + 1
+    stream = cp.cuda.get_current_stream().ptr
+
+    g_factor = cp.empty(n_batches, dtype=dtype)
+    g_P_row0 = cp.empty(n_batches, dtype=dtype)
+
+    for k in range(min(n_clusters, 3)):  # test a few clusters
+        inv_mat = cp.empty((nb1, nb1), dtype=dtype)
+
+        _corr.compute_inv_mat(
+            O,
+            ridge_lambda=ridge_lambda,
+            n_batches=n_batches,
+            n_clusters=n_clusters,
+            cluster_k=k,
+            inv_mat=inv_mat,
+            g_factor=g_factor,
+            g_P_row0=g_P_row0,
+            stream=stream,
+        )
+        cp.cuda.Device().synchronize()
+
+        expected = _inv_mat_reference(O[:, k], ridge_lambda, dtype)
+        atol = 1e-6 if dtype == cp.float32 else 1e-12
+        cp.testing.assert_allclose(inv_mat, expected, atol=atol, rtol=1e-5)

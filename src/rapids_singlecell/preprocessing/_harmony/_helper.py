@@ -222,25 +222,6 @@ def _get_batch_codes(batch_mat: pd.DataFrame, batch_key: str | list[str]) -> pd.
     return batch_vec.astype("category")
 
 
-def _one_hot_tensor_cp(X: pd.Series) -> cp.array:
-    """
-    One-hot encode a categorical series.
-
-    Parameters
-    ----------
-    X
-        Input categorical series.
-    Returns
-    -------
-    One-hot encoded array.
-    """
-    ids = cp.array(X.cat.codes.values.copy(), dtype=cp.int32).reshape(-1)
-    n_col = X.cat.categories.size
-    Phi = cp.eye(n_col)[ids]
-
-    return Phi
-
-
 def _scatter_add_cp_bias_csr(
     X: cp.ndarray,
     out: cp.ndarray,
@@ -369,25 +350,19 @@ def _gemm_colsum(X: cp.ndarray) -> cp.ndarray:
 def _choose_colsum_algo_heuristic(rows: int, cols: int, algo: str | None) -> callable:
     """
     Returns one of:
-    - _colsum_columns
-    - _colsum_atomics
+    - _column_sum
+    - _column_sum_atomic
     - _gemm_colsum
-    - cp.sum (with axis=0)
     """
     # first pick the strategy string
     if algo is None:
         cc = cp.cuda.Device().compute_capability
         algo = _colsum_heuristic(rows, cols, cc)
-    if algo == "cupy":
-        return lambda X: X.sum(axis=0)
     if algo == "columns":
         return _column_sum
     if algo == "atomics":
         return _column_sum_atomic
-    if algo == "gemm":
-        return _gemm_colsum
-    # fallback: global CuPy reduction
-    return lambda X: X.sum(axis=0)
+    return _gemm_colsum
 
 
 # TODO: Make this more robust
@@ -405,9 +380,7 @@ def _colsum_heuristic(rows: int, cols: int, compute_capability: str) -> str:
         return "atomics"
     if cols < 2000 and rows < 10000 and is_data_center:
         return "atomics"
-    if rows >= 5000:
-        return "gemm"
-    return "cupy"
+    return "gemm"
 
 
 # TODO: Make this more robust
@@ -431,7 +404,7 @@ def _benchmark_colsum_algorithms(
         Number of benchmark trials
     Returns
     -------
-    Name of the fastest algorithm: 'cupy', 'columns', 'atomics', or 'gemm'
+    Name of the fastest algorithm: 'columns', 'atomics', or 'gemm'
     """
     rows, cols = shape
 
@@ -443,7 +416,6 @@ def _benchmark_colsum_algorithms(
         X = cp.ascontiguousarray(X)
 
     algorithms = {
-        "cupy": lambda x: x.sum(axis=0),
         "columns": _column_sum,
         "atomics": _column_sum_atomic,
         "gemm": _gemm_colsum,

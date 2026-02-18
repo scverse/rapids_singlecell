@@ -22,6 +22,7 @@ __all__ = [
     "_edistance_cuda",
     "_harmony_clustering_cuda",
     "_harmony_colsum_cuda",
+    "_harmony_correction_cuda",
     "_harmony_kmeans_cuda",
     "_harmony_normalize_cuda",
     "_harmony_outer_cuda",
