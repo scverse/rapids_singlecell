@@ -28,7 +28,8 @@ __global__ void fused_pen_norm_kernel(const T* __restrict__ similarities,
     local_sum += val;
   }
 
-  // Phase 2: warp-level reduction
+// Phase 2: warp-level reduction
+#pragma unroll
   for (int offset = 16; offset > 0; offset >>= 1)
     local_sum += __shfl_down_sync(0xffffffff, local_sum, offset);
 
@@ -44,6 +45,7 @@ __global__ void fused_pen_norm_kernel(const T* __restrict__ similarities,
   if (threadIdx.x < 32) {
     int num_warps = (blockDim.x + 31) >> 5;
     if ((int)threadIdx.x < num_warps) row_sum = shared_sum[threadIdx.x];
+#pragma unroll
     for (int offset = 16; offset > 0; offset >>= 1)
       row_sum += __shfl_down_sync(0xffffffff, row_sum, offset);
   }

@@ -24,8 +24,11 @@ __global__ void normalize_kernel(T* X, long long rows, long long cols) {
     acc += (v < (T)0) ? -v : v;
   }
 
-  // Step 2: Warp-level reduction using shuffle
-  for (int offset = 16; offset > 0; offset >>= 1) acc += __shfl_down_sync(0xffffffff, acc, offset);
+// Step 2: Warp-level reduction using shuffle
+#pragma unroll
+  for (int offset = 16; offset > 0; offset >>= 1) {
+    acc += __shfl_down_sync(0xffffffff, acc, offset);
+  }
 
   // Lane 0 of each warp writes to shared memory
   if (lane == 0) warp_sums[warp_id] = acc;
@@ -34,6 +37,7 @@ __global__ void normalize_kernel(T* X, long long rows, long long cols) {
   // Step 3: First warp reduces all warp results
   if (tid < 32) {
     T val = (tid < num_warps) ? warp_sums[tid] : (T)0;
+#pragma unroll
     for (int offset = 16; offset > 0; offset >>= 1)
       val += __shfl_down_sync(0xffffffff, val, offset);
     if (tid == 0) {

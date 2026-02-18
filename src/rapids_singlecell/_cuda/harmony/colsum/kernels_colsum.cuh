@@ -11,6 +11,7 @@ __global__ void colsum_kernel(const T* __restrict__ A, T* __restrict__ out, size
     for (size_t i = tid; i < rows; i += blockDim.x) {
       acc += A[i * cols + col];
     }
+#pragma unroll
     for (int offset = 16; offset > 0; offset >>= 1)
       acc += __shfl_down_sync(0xffffffff, acc, offset);
     __shared__ T s[32];
@@ -18,6 +19,7 @@ __global__ void colsum_kernel(const T* __restrict__ A, T* __restrict__ out, size
     __syncthreads();
     if (threadIdx.x < 32) {
       T val = (threadIdx.x < (blockDim.x >> 5)) ? s[threadIdx.x] : (T)0;
+#pragma unroll
       for (int off = 16; off > 0; off >>= 1) val += __shfl_down_sync(0xffffffff, val, off);
       if (threadIdx.x == 0) out[col] = val;
     }
@@ -44,12 +46,14 @@ __global__ void colsum_atomic_kernel(const T* __restrict__ A, T* __restrict__ ou
   // Each thread accumulates multiple rows
   T acc = (T)0;
   if (col < cols) {
+#pragma unroll 4
     for (size_t row = start_row + threadIdx.x; row < end_row; row += 32) {
       acc += A[row * cols + col];
     }
   }
 
-  // Warp-level reduction across 32 threads (different rows)
+// Warp-level reduction across 32 threads (different rows)
+#pragma unroll
   for (int off = 16; off > 0; off >>= 1) acc += __shfl_down_sync(0xffffffff, acc, off);
 
   // Lane 0 of each warp accumulates into shared memory
