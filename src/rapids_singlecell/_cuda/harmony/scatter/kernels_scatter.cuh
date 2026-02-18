@@ -66,6 +66,7 @@ __global__ void scatter_add_kernel_with_bias_cat0(const T* __restrict__ v, int n
     if (has_pc1) acc1 += (T)vv.y * bb;
   }
 
+#pragma unroll
   for (int offset = 16; offset > 0; offset >>= 1) {
     acc0 += __shfl_down_sync(0xffffffff, acc0, offset);
     if (has_pc1) acc1 += __shfl_down_sync(0xffffffff, acc1, offset);
@@ -78,6 +79,7 @@ __global__ void scatter_add_kernel_with_bias_cat0(const T* __restrict__ v, int n
     __syncthreads();
     if (threadIdx.x < 32) {
       float2 val = (threadIdx.x < (blockDim.x >> 5)) ? s_f[threadIdx.x] : make_float2(0.f, 0.f);
+#pragma unroll
       for (int off = 16; off > 0; off >>= 1) {
         val.x += __shfl_down_sync(0xffffffff, val.x, off);
         val.y += __shfl_down_sync(0xffffffff, val.y, off);
@@ -93,6 +95,7 @@ __global__ void scatter_add_kernel_with_bias_cat0(const T* __restrict__ v, int n
     __syncthreads();
     if (threadIdx.x < 32) {
       double2 val = (threadIdx.x < (blockDim.x >> 5)) ? s_d[threadIdx.x] : make_double2(0.0, 0.0);
+#pragma unroll
       for (int off = 16; off > 0; off >>= 1) {
         val.x += __shfl_down_sync(0xffffffff, val.x, off);
         val.y += __shfl_down_sync(0xffffffff, val.y, off);
@@ -183,6 +186,7 @@ __global__ void scatter_add_kernel_with_bias_block(const T* __restrict__ v,
     if (has_pc1) acc1 += (T)vv.y * bb;
   }
 
+#pragma unroll
   for (int offset = 16; offset > 0; offset >>= 1) {
     acc0 += __shfl_down_sync(0xffffffff, acc0, offset);
     if (has_pc1) acc1 += __shfl_down_sync(0xffffffff, acc1, offset);
@@ -195,6 +199,7 @@ __global__ void scatter_add_kernel_with_bias_block(const T* __restrict__ v,
     __syncthreads();
     if (threadIdx.x < 32) {
       float2 val = (threadIdx.x < (blockDim.x >> 5)) ? s_f[threadIdx.x] : make_float2(0.f, 0.f);
+#pragma unroll
       for (int off = 16; off > 0; off >>= 1) {
         val.x += __shfl_down_sync(0xffffffff, val.x, off);
         val.y += __shfl_down_sync(0xffffffff, val.y, off);
@@ -210,6 +215,7 @@ __global__ void scatter_add_kernel_with_bias_block(const T* __restrict__ v,
     __syncthreads();
     if (threadIdx.x < 32) {
       double2 val = (threadIdx.x < (blockDim.x >> 5)) ? s_d[threadIdx.x] : make_double2(0.0, 0.0);
+#pragma unroll
       for (int off = 16; off > 0; off >>= 1) {
         val.x += __shfl_down_sync(0xffffffff, val.x, off);
         val.y += __shfl_down_sync(0xffffffff, val.y, off);

@@ -28,12 +28,14 @@ __global__ void kmeans_err_kernel(const T* __restrict__ r, const T* __restrict__
     i++;
   }
 
+#pragma unroll
   for (int offset = 16; offset > 0; offset >>= 1) acc += __shfl_down_sync(0xffffffff, acc, offset);
   __shared__ T s[32];
   if ((threadIdx.x & 31) == 0) s[threadIdx.x >> 5] = acc;
   __syncthreads();
   if (threadIdx.x < 32) {
     T val = (threadIdx.x < (blockDim.x >> 5)) ? s[threadIdx.x] : (T)0;
+#pragma unroll
     for (int offset = 16; offset > 0; offset >>= 1)
       val += __shfl_down_sync(0xffffffff, val, offset);
     if (threadIdx.x == 0) atomicAdd(out, val);

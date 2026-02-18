@@ -8,8 +8,13 @@ using namespace nb::literals;
 template <typename T>
 static inline void launch_kmeans_err(const T* r, const T* dot, size_t n, T* out,
                                      cudaStream_t stream) {
+  int device;
+  cudaGetDevice(&device);
+  cudaDeviceProp prop;
+  cudaGetDeviceProperties(&prop, device);
+
   int threads = 256;
-  int blocks = min((int)((n + threads - 1) / threads), (int)(8 * 128));
+  int blocks = std::min((int)((n + threads - 1) / threads), prop.multiProcessorCount * 8);
   kmeans_err_kernel<T><<<blocks, threads, 0, stream>>>(r, dot, n, out);
 }
 

@@ -7,7 +7,8 @@ using namespace nb::literals;
 
 template <typename T>
 static inline void launch_normalize(T* X, long long rows, long long cols, cudaStream_t stream) {
-  dim3 block(256);
+  unsigned block_dim = std::min(256u, std::max(32u, ((unsigned)cols + 31u) / 32u * 32u));
+  dim3 block(block_dim);
   dim3 grid(rows);
   normalize_kernel<T><<<grid, block, 0, stream>>>(X, rows, cols);
 }
