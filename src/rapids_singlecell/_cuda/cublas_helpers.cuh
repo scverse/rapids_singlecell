@@ -5,48 +5,58 @@
 // ---------- cublas_gemm ----------
 
 template <typename T>
-static inline cublasStatus_t cublas_gemm(cublasHandle_t handle, cublasOperation_t transa,
-                                         cublasOperation_t transb, int m, int n, int k,
-                                         const T* alpha, const T* A, int lda, const T* B, int ldb,
+static inline cublasStatus_t cublas_gemm(cublasHandle_t handle,
+                                         cublasOperation_t transa,
+                                         cublasOperation_t transb, int m, int n,
+                                         int k, const T* alpha, const T* A,
+                                         int lda, const T* B, int ldb,
                                          const T* beta, T* C, int ldc);
 
 template <>
-inline cublasStatus_t cublas_gemm<float>(cublasHandle_t handle, cublasOperation_t transa,
-                                         cublasOperation_t transb, int m, int n, int k,
-                                         const float* alpha, const float* A, int lda,
-                                         const float* B, int ldb, const float* beta, float* C,
-                                         int ldc) {
-  return cublasSgemm(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
+inline cublasStatus_t cublas_gemm<float>(
+    cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb,
+    int m, int n, int k, const float* alpha, const float* A, int lda,
+    const float* B, int ldb, const float* beta, float* C, int ldc) {
+    return cublasSgemm(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb,
+                       beta, C, ldc);
 }
 
 template <>
-inline cublasStatus_t cublas_gemm<double>(cublasHandle_t handle, cublasOperation_t transa,
-                                          cublasOperation_t transb, int m, int n, int k,
-                                          const double* alpha, const double* A, int lda,
-                                          const double* B, int ldb, const double* beta, double* C,
-                                          int ldc) {
-  return cublasDgemm(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
+inline cublasStatus_t cublas_gemm<double>(
+    cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb,
+    int m, int n, int k, const double* alpha, const double* A, int lda,
+    const double* B, int ldb, const double* beta, double* C, int ldc) {
+    return cublasDgemm(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb,
+                       beta, C, ldc);
 }
 
 // ---------- cublas_gemv ----------
 
 template <typename T>
-static inline cublasStatus_t cublas_gemv(cublasHandle_t handle, cublasOperation_t trans, int m,
-                                         int n, const T* alpha, const T* A, int lda, const T* x,
-                                         int incx, const T* beta, T* y, int incy);
+static inline cublasStatus_t cublas_gemv(cublasHandle_t handle,
+                                         cublasOperation_t trans, int m, int n,
+                                         const T* alpha, const T* A, int lda,
+                                         const T* x, int incx, const T* beta,
+                                         T* y, int incy);
 
 template <>
-inline cublasStatus_t cublas_gemv<float>(cublasHandle_t handle, cublasOperation_t trans, int m,
-                                         int n, const float* alpha, const float* A, int lda,
-                                         const float* x, int incx, const float* beta, float* y,
+inline cublasStatus_t cublas_gemv<float>(cublasHandle_t handle,
+                                         cublasOperation_t trans, int m, int n,
+                                         const float* alpha, const float* A,
+                                         int lda, const float* x, int incx,
+                                         const float* beta, float* y,
                                          int incy) {
-  return cublasSgemv(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy);
+    return cublasSgemv(handle, trans, m, n, alpha, A, lda, x, incx, beta, y,
+                       incy);
 }
 
 template <>
-inline cublasStatus_t cublas_gemv<double>(cublasHandle_t handle, cublasOperation_t trans, int m,
-                                          int n, const double* alpha, const double* A, int lda,
-                                          const double* x, int incx, const double* beta, double* y,
+inline cublasStatus_t cublas_gemv<double>(cublasHandle_t handle,
+                                          cublasOperation_t trans, int m, int n,
+                                          const double* alpha, const double* A,
+                                          int lda, const double* x, int incx,
+                                          const double* beta, double* y,
                                           int incy) {
-  return cublasDgemv(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy);
+    return cublasDgemv(handle, trans, m, n, alpha, A, lda, x, incx, beta, y,
+                       incy);
 }

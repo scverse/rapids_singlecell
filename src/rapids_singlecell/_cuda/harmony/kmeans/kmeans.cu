@@ -8,36 +8,39 @@ using namespace nb::literals;
 template <typename T>
 static inline void launch_kmeans_err(const T* r, const T* dot, size_t n, T* out,
                                      cudaStream_t stream) {
-  int device;
-  cudaGetDevice(&device);
-  cudaDeviceProp prop;
-  cudaGetDeviceProperties(&prop, device);
+    int device;
+    cudaGetDevice(&device);
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, device);
 
-  int threads = 256;
-  int blocks = std::min((int)((n + threads - 1) / threads), prop.multiProcessorCount * 8);
-  kmeans_err_kernel<T><<<blocks, threads, 0, stream>>>(r, dot, n, out);
+    int threads = 256;
+    int blocks = std::min((int)((n + threads - 1) / threads),
+                          prop.multiProcessorCount * 8);
+    kmeans_err_kernel<T><<<blocks, threads, 0, stream>>>(r, dot, n, out);
 }
 
 NB_MODULE(_harmony_kmeans_cuda, m) {
-  // -- Test-only bindings below --
-  // kmeans_err is used internally by compute_objective in the C++ clustering loop.
-  // The binding exists solely for unit testing.
+    // -- Test-only bindings below --
+    // kmeans_err is used internally by compute_objective in the C++ clustering
+    // loop. The binding exists solely for unit testing.
 
-  // kmeans_err - float32
-  m.def(
-      "kmeans_err",
-      [](cuda_array_c<const float> r, cuda_array_c<const float> dot, size_t n,
-         cuda_array_c<float> out, std::uintptr_t stream) {
-        launch_kmeans_err<float>(r.data(), dot.data(), n, out.data(), (cudaStream_t)stream);
-      },
-      "r"_a, nb::kw_only(), "dot"_a, "n"_a, "out"_a, "stream"_a = 0);
+    // kmeans_err - float32
+    m.def(
+        "kmeans_err",
+        [](cuda_array_c<const float> r, cuda_array_c<const float> dot, size_t n,
+           cuda_array_c<float> out, std::uintptr_t stream) {
+            launch_kmeans_err<float>(r.data(), dot.data(), n, out.data(),
+                                     (cudaStream_t)stream);
+        },
+        "r"_a, nb::kw_only(), "dot"_a, "n"_a, "out"_a, "stream"_a = 0);
 
-  // kmeans_err - float64
-  m.def(
-      "kmeans_err",
-      [](cuda_array_c<const double> r, cuda_array_c<const double> dot, size_t n,
-         cuda_array_c<double> out, std::uintptr_t stream) {
-        launch_kmeans_err<double>(r.data(), dot.data(), n, out.data(), (cudaStream_t)stream);
-      },
-      "r"_a, nb::kw_only(), "dot"_a, "n"_a, "out"_a, "stream"_a = 0);
+    // kmeans_err - float64
+    m.def(
+        "kmeans_err",
+        [](cuda_array_c<const double> r, cuda_array_c<const double> dot,
+           size_t n, cuda_array_c<double> out, std::uintptr_t stream) {
+            launch_kmeans_err<double>(r.data(), dot.data(), n, out.data(),
+                                      (cudaStream_t)stream);
+        },
+        "r"_a, nb::kw_only(), "dot"_a, "n"_a, "out"_a, "stream"_a = 0);
 }
