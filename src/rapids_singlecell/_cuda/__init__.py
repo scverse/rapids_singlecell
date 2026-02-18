@@ -20,6 +20,7 @@ __all__ = [
     "_bbknn_cuda",
     "_cooc_cuda",
     "_edistance_cuda",
+    "_harmony_clustering_cuda",
     "_harmony_colsum_cuda",
     "_harmony_kmeans_cuda",
     "_harmony_normalize_cuda",

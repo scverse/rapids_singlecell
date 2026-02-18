@@ -53,6 +53,25 @@ static inline void launch_scatter_add_block(const T* v, const int* cat_offsets,
       v, cat_offsets, cell_indices, n_cells, n_pcs, n_batches, a, bias);
 }
 
+template <typename T>
+static inline void launch_gather_rows(const T* src, const int* idx, T* dst, int n_rows, int n_cols,
+                                      cudaStream_t stream) {
+  int n = n_rows * n_cols;
+  gather_rows_kernel<T><<<(n + 255) / 256, 256, 0, stream>>>(src, idx, dst, n_rows, n_cols);
+}
+
+template <typename T>
+static inline void launch_scatter_rows(const T* src, const int* idx, T* dst, int n_rows, int n_cols,
+                                       cudaStream_t stream) {
+  int n = n_rows * n_cols;
+  scatter_rows_kernel<T><<<(n + 255) / 256, 256, 0, stream>>>(src, idx, dst, n_rows, n_cols);
+}
+
+static inline void launch_gather_int(const int* src, const int* idx, int* dst, int n,
+                                     cudaStream_t stream) {
+  gather_int_kernel<<<(n + 255) / 256, 256, 0, stream>>>(src, idx, dst, n);
+}
+
 NB_MODULE(_harmony_scatter_cuda, m) {
   // scatter_add - float32
   m.def(
@@ -161,4 +180,53 @@ NB_MODULE(_harmony_scatter_cuda, m) {
       },
       "v"_a, nb::kw_only(), "cat_offsets"_a, "cell_indices"_a, "n_cells"_a, "n_pcs"_a,
       "n_batches"_a, "a"_a, "bias"_a, "stream"_a = 0);
+
+  // gather_rows - float32
+  m.def(
+      "gather_rows",
+      [](cuda_array_c<const float> src, cuda_array_c<const int> idx, cuda_array_c<float> dst,
+         int n_rows, int n_cols, std::uintptr_t stream) {
+        launch_gather_rows<float>(src.data(), idx.data(), dst.data(), n_rows, n_cols,
+                                  (cudaStream_t)stream);
+      },
+      "src"_a, nb::kw_only(), "idx"_a, "dst"_a, "n_rows"_a, "n_cols"_a, "stream"_a = 0);
+
+  // gather_rows - float64
+  m.def(
+      "gather_rows",
+      [](cuda_array_c<const double> src, cuda_array_c<const int> idx, cuda_array_c<double> dst,
+         int n_rows, int n_cols, std::uintptr_t stream) {
+        launch_gather_rows<double>(src.data(), idx.data(), dst.data(), n_rows, n_cols,
+                                   (cudaStream_t)stream);
+      },
+      "src"_a, nb::kw_only(), "idx"_a, "dst"_a, "n_rows"_a, "n_cols"_a, "stream"_a = 0);
+
+  // scatter_rows - float32
+  m.def(
+      "scatter_rows",
+      [](cuda_array_c<const float> src, cuda_array_c<const int> idx, cuda_array_c<float> dst,
+         int n_rows, int n_cols, std::uintptr_t stream) {
+        launch_scatter_rows<float>(src.data(), idx.data(), dst.data(), n_rows, n_cols,
+                                   (cudaStream_t)stream);
+      },
+      "src"_a, nb::kw_only(), "idx"_a, "dst"_a, "n_rows"_a, "n_cols"_a, "stream"_a = 0);
+
+  // scatter_rows - float64
+  m.def(
+      "scatter_rows",
+      [](cuda_array_c<const double> src, cuda_array_c<const int> idx, cuda_array_c<double> dst,
+         int n_rows, int n_cols, std::uintptr_t stream) {
+        launch_scatter_rows<double>(src.data(), idx.data(), dst.data(), n_rows, n_cols,
+                                    (cudaStream_t)stream);
+      },
+      "src"_a, nb::kw_only(), "idx"_a, "dst"_a, "n_rows"_a, "n_cols"_a, "stream"_a = 0);
+
+  // gather_int
+  m.def(
+      "gather_int",
+      [](cuda_array_c<const int> src, cuda_array_c<const int> idx, cuda_array_c<int> dst, int n,
+         std::uintptr_t stream) {
+        launch_gather_int(src.data(), idx.data(), dst.data(), n, (cudaStream_t)stream);
+      },
+      "src"_a, nb::kw_only(), "idx"_a, "dst"_a, "n"_a, "stream"_a = 0);
 }

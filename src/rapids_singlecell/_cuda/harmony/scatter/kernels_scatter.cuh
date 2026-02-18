@@ -228,3 +228,34 @@ __global__ void scatter_add_kernel_with_bias_block(const T* __restrict__ v,
     }
   }
 }
+
+// ---- Gather rows: dst[i,:] = src[idx[i],:] ----
+template <typename T>
+__global__ void gather_rows_kernel(const T* __restrict__ src, const int* __restrict__ idx,
+                                   T* __restrict__ dst, int n_rows, int n_cols) {
+  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n_rows * n_cols;
+       i += blockDim.x * gridDim.x) {
+    int row = i / n_cols;
+    int col = i % n_cols;
+    dst[i] = src[(size_t)idx[row] * n_cols + col];
+  }
+}
+
+// ---- Scatter rows: dst[idx[i],:] = src[i,:] ----
+template <typename T>
+__global__ void scatter_rows_kernel(const T* __restrict__ src, const int* __restrict__ idx,
+                                    T* __restrict__ dst, int n_rows, int n_cols) {
+  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n_rows * n_cols;
+       i += blockDim.x * gridDim.x) {
+    int row = i / n_cols;
+    int col = i % n_cols;
+    dst[(size_t)idx[row] * n_cols + col] = src[i];
+  }
+}
+
+// ---- Gather int: dst[i] = src[idx[i]] ----
+__global__ void gather_int_kernel(const int* __restrict__ src, const int* __restrict__ idx,
+                                  int* __restrict__ dst, int n) {
+  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x)
+    dst[i] = src[idx[i]];
+}

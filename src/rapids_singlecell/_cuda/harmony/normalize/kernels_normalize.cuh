@@ -1,7 +1,61 @@
 #pragma once
 
 #include <cuda_runtime.h>
+#include <type_traits>
 
+// ---- L2 row normalize ----
+// One block per row. Writes to separate output buffer.
+template <typename T>
+__global__ void l2_row_normalize_kernel(const T* __restrict__ src, T* __restrict__ dst, int n_rows,
+                                        int n_cols) {
+  int row = blockIdx.x;
+  if (row >= n_rows) return;
+
+  const T* src_row = src + (size_t)row * n_cols;
+  T* dst_row = dst + (size_t)row * n_cols;
+
+  // Phase 1: sum of squares
+  T acc = T(0);
+  for (int col = threadIdx.x; col < n_cols; col += blockDim.x) {
+    T v = src_row[col];
+    acc += v * v;
+  }
+
+// Phase 2: warp reduction
+#pragma unroll
+  for (int offset = 16; offset > 0; offset >>= 1) acc += __shfl_down_sync(0xffffffff, acc, offset);
+
+  // Phase 3: block reduction
+  __shared__ T warp_sums[32];
+  int warp_id = threadIdx.x >> 5;
+  int lane = threadIdx.x & 31;
+  int num_warps = (blockDim.x + 31) >> 5;
+
+  if (lane == 0) warp_sums[warp_id] = acc;
+  __syncthreads();
+
+  if (threadIdx.x < 32) {
+    T val = (threadIdx.x < num_warps) ? warp_sums[threadIdx.x] : T(0);
+#pragma unroll
+    for (int offset = 16; offset > 0; offset >>= 1)
+      val += __shfl_down_sync(0xffffffff, val, offset);
+    if (threadIdx.x == 0) {
+      T norm = val;
+      if constexpr (std::is_same<T, float>::value)
+        norm = sqrtf(norm);
+      else
+        norm = sqrt(norm);
+      if (norm < T(1e-12)) norm = T(1e-12);
+      warp_sums[0] = T(1) / norm;
+    }
+  }
+  __syncthreads();
+
+  T scale = warp_sums[0];
+  for (int col = threadIdx.x; col < n_cols; col += blockDim.x) dst_row[col] = src_row[col] * scale;
+}
+
+// ---- L1 row normalize (in-place) ----
 // One block per row. Warp-shuffle + cross-warp reduction for L1 normalization.
 template <typename T>
 __global__ void normalize_kernel(T* X, long long rows, long long cols) {

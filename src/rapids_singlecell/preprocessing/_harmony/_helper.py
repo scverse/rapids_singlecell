@@ -175,7 +175,17 @@ def _normalize_cp(X: cp.ndarray, p: int = 2) -> cp.ndarray:
     Analogous to `torch.nn.functional.normalize` for `axis = 1`, `p` in numpy is known as `ord`.
     """
     if p == 2:
-        return X / cp.linalg.norm(X, ord=2, axis=1, keepdims=True).clip(min=1e-12)
+        X = cp.ascontiguousarray(X)
+        dst = cp.empty_like(X)
+        rows, cols = X.shape
+        _hc_norm.l2_row_normalize(
+            X,
+            dst=dst,
+            n_rows=rows,
+            n_cols=cols,
+            stream=cp.cuda.get_current_stream().ptr,
+        )
+        return dst
 
     else:
         return _normalize_cp_p1(X)

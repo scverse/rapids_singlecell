@@ -7,6 +7,7 @@ import cupy as cp
 import numpy as np
 from cuml import KMeans as CumlKMeans
 
+from rapids_singlecell._cuda import _harmony_clustering_cuda as _hc_cl
 from rapids_singlecell._utils import _create_category_index_mapping
 
 from ._fuses import (
@@ -20,8 +21,11 @@ from ._helper import (
     _apply_batched_correction,
     _choose_colsum_algo_benchmark,
     _choose_colsum_algo_heuristic,
+    _column_sum,
+    _column_sum_atomic,
     _compute_inv_mats_batched,
     _fused_calc_pen_norm,
+    _gemm_colsum,
     _get_aggregated_matrix,
     _get_batch_codes,
     _get_theta_array,
@@ -186,6 +190,18 @@ def harmonize(
         colsum_func=colsum_func_big,
     )
 
+    # Pre-allocate C++ workspace buffers (reused across harmony iterations)
+    cpp_workspace = None
+    if Phi is None and _hc_cl is not None:
+        cpp_workspace = _allocate_clustering_workspace(
+            n_cells,
+            n_pcs=Z.shape[1],
+            n_clusters=n_clusters,
+            n_batches=n_batches,
+            block_size=int(n_cells * block_proportion),
+            dtype=Z_norm.dtype,
+        )
+
     # Main harmony iterations
     is_converged = False
 
@@ -207,6 +223,8 @@ def harmonize(
             block_proportion=block_proportion,
             colsum_func=colsum_func_small,
             n_batches=n_batches,
+            random_state=random_state + i * 1000003,
+            cpp_workspace=cpp_workspace,
         )
         # Correction step
         Z_hat = _correction(
@@ -304,6 +322,45 @@ def _initialize_centroids(
     return R, E, O, objectives_harmony
 
 
+def _allocate_clustering_workspace(
+    n_cells: int,
+    *,
+    n_pcs: int,
+    n_clusters: int,
+    n_batches: int,
+    block_size: int,
+    dtype: cp.dtype,
+) -> dict:
+    """Pre-allocate workspace buffers for the C++ clustering loop."""
+    cub_temp_bytes = _hc_cl.get_cub_sort_temp_bytes(n_cells=n_cells)
+    return {
+        "Y": cp.empty((n_clusters, n_pcs), dtype=dtype),
+        "Y_norm": cp.empty((n_clusters, n_pcs), dtype=dtype),
+        "similarities": cp.empty((n_cells, n_clusters), dtype=dtype),
+        "idx_list": cp.empty(n_cells, dtype=cp.int32),
+        "idx_list_alt": cp.empty(n_cells, dtype=cp.int32),
+        "sort_keys": cp.empty(n_cells, dtype=cp.uint32),
+        "sort_keys_alt": cp.empty(n_cells, dtype=cp.uint32),
+        "cub_temp": cp.empty(cub_temp_bytes, dtype=cp.uint8),
+        "R_out_buffer": cp.empty((block_size, n_clusters), dtype=dtype),
+        "cats_in": cp.empty(block_size, dtype=cp.int32),
+        "R_in_sum": cp.empty(n_clusters, dtype=dtype),
+        "R_out_sum": cp.empty(n_clusters, dtype=dtype),
+        "penalty": cp.empty((n_batches, n_clusters), dtype=dtype),
+        "obj_scalar": cp.empty(1, dtype=dtype),
+        "ones_vec": cp.ones(block_size, dtype=dtype),
+        "last_obj": cp.zeros(1, dtype=dtype),
+    }
+
+
+# Map colsum function to C++ enum: 0=columns, 1=atomics, 2=gemm
+_COLSUM_MAP = {
+    _column_sum: 0,
+    _column_sum_atomic: 1,
+    _gemm_colsum: 2,
+}
+
+
 def _clustering(
     Z_norm: cp.ndarray,
     *,
@@ -321,6 +378,8 @@ def _clustering(
     block_proportion: float,
     colsum_func: callable = None,
     n_batches: int | None = None,
+    random_state: int = 0,
+    cpp_workspace: dict | None = None,
 ) -> None:
     """
     Perform iterative clustering updates on normalized input data, adjusting
@@ -331,9 +390,41 @@ def _clustering(
     and penalty-related matrices (O and E).
     """
     n_cells = Z_norm.shape[0]
+    n_pcs = Z_norm.shape[1]
     n_clusters = R.shape[1]
-    objectives_clustering = []
     block_size = int(n_cells * block_proportion)
+
+    # C++ fast path: use_gemm=False (Phi is None) and compiled module available
+    if cpp_workspace is not None:
+        ws = cpp_workspace
+        colsum_algo_int = _COLSUM_MAP.get(colsum_func, 2)
+
+        _hc_cl.clustering_loop(
+            Z_norm,
+            R=R,
+            E=E,
+            O=O,
+            Pr_b=cp.ascontiguousarray(Pr_b.ravel()),
+            cats=cats,
+            theta=cp.ascontiguousarray(theta.ravel()),
+            **ws,
+            n_cells=n_cells,
+            n_pcs=n_pcs,
+            n_clusters=n_clusters,
+            n_batches=n_batches,
+            block_size=block_size,
+            colsum_algo=colsum_algo_int,
+            sigma=float(sigma),
+            tol=float(tol),
+            max_iter=max_iter,
+            seed=random_state & 0xFFFFFFFF,
+            stream=cp.cuda.get_current_stream().ptr,
+        )
+        objectives_harmony.append(float(ws["last_obj"][0]))
+        return
+
+    # Python fallback (use_gemm=True path or no compiled module)
+    objectives_clustering = []
     term = cp.float64(-2 / sigma).astype(Z_norm.dtype)
 
     # Pre-allocate buffer for fused kernel (avoids allocation in loop)
