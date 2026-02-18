@@ -8,14 +8,12 @@ import numpy as np
 from cuml import KMeans as CumlKMeans
 
 from rapids_singlecell._cuda import _harmony_clustering_cuda as _hc_cl
+from rapids_singlecell._cuda import _harmony_pen_cuda as _hc_pen
 from rapids_singlecell._utils import _create_category_index_mapping
 
 from ._fuses import (
     _calc_R,
-    _entropy_kernel,
     _get_factor,
-    _get_pen,
-    _log_div_OE,
 )
 from ._helper import (
     _apply_batched_correction,
@@ -29,7 +27,6 @@ from ._helper import (
     _get_aggregated_matrix,
     _get_batch_codes,
     _get_theta_array,
-    _kmeans_error,
     _normalize_cp,
     _one_hot_tensor_cp,
     _outer_cp,
@@ -60,7 +57,7 @@ def harmonize(
     block_proportion: float = 0.05,
     theta: float | int | list[float] | np.ndarray | cp.ndarray = 2.0,
     tau: int = 0,
-    correction_method: str = "batched",
+    correction_method: str | None = None,
     use_gemm: bool = False,
     colsum_algo: COLSUM_ALGO | None = None,
     random_state: int = 0,
@@ -111,7 +108,7 @@ def harmonize(
         Discounting factor on ``theta``. By default, there is no discounting.
 
     correction_method
-        Choose which method for the correction step: ``original`` for original method, ``fast`` for improved method, ``batched`` for batched processing of all clusters simultaneously (default, fastest).
+        Choose which method for the correction step: ``original`` for original method, ``fast`` for improved method, ``batched`` for batched processing of all clusters simultaneously (fastest but needs more memory). If ``None`` (default), automatically selects ``batched`` unless the workspace would exceed 1 GB, in which case ``fast`` is used.
 
     use_gemm
         If True, use a One-Hot-Encoding Matrix and GEMM to compute Harmony. If False use a label vector. A label vector is more memory efficient and faster for large datasets with a large number of batches.
@@ -166,12 +163,23 @@ def harmonize(
     theta_array = _get_theta_array(theta, n_batches, Z.dtype)
     if tau > 0:
         theta_array = theta_array * (1 - cp.exp(-N_b / (n_clusters * tau)) ** 2)
-    theta_array = theta_array.reshape(1, -1)
+    theta_array = cp.ascontiguousarray(theta_array.ravel())
 
     # Validate parameters
     assert block_proportion > 0 and block_proportion <= 1
-    if correction_method not in {"fast", "original", "batched"}:
+    if correction_method is not None and correction_method not in {
+        "fast",
+        "original",
+        "batched",
+    }:
         raise ValueError("correction_method must be 'fast', 'original', or 'batched'.")
+
+    # Auto-select correction method: "batched" unless inv_mats would exceed 1 GB
+    if correction_method is None:
+        ONE_GB = 1 << 30
+        nb1 = n_batches + 1
+        inv_mats_bytes = n_clusters * nb1 * nb1 * Z.dtype.itemsize
+        correction_method = "batched" if inv_mats_bytes <= ONE_GB else "fast"
 
     # Set random seed
     cp.random.seed(random_state)
@@ -291,8 +299,9 @@ def _initialize_centroids(
     Y_norm = _normalize_cp(Y, p=2)
 
     # Initialize cluster assignment matrix R
-    term = cp.float64(-2 / sigma).astype(Z_norm.dtype)
-    R = _calc_R(term, cp.dot(Z_norm, Y_norm.T))
+    term = float(-2 / sigma)
+    similarities = cp.dot(Z_norm, Y_norm.T)
+    R = _calc_R(term, similarities)
     R = _normalize_cp(R, p=1)
 
     # Initialize E (expected) and O (observed) matrices
@@ -309,8 +318,7 @@ def _initialize_centroids(
     # Initialize objectives list
     objectives_harmony = []
     _compute_objective(
-        Y_norm,
-        Z_norm,
+        similarities,
         R=R,
         theta=theta,
         sigma=sigma,
@@ -404,9 +412,9 @@ def _clustering(
             R=R,
             E=E,
             O=O,
-            Pr_b=cp.ascontiguousarray(Pr_b.ravel()),
+            Pr_b=Pr_b.ravel(),
             cats=cats,
-            theta=cp.ascontiguousarray(theta.ravel()),
+            theta=theta,
             **ws,
             n_cells=n_cells,
             n_pcs=n_pcs,
@@ -425,10 +433,14 @@ def _clustering(
 
     # Python fallback (use_gemm=True path or no compiled module)
     objectives_clustering = []
-    term = cp.float64(-2 / sigma).astype(Z_norm.dtype)
+    term = float(-2 / sigma)
 
-    # Pre-allocate buffer for fused kernel (avoids allocation in loop)
+    # Pre-allocate buffers (avoids allocation in loop)
     R_out_buffer = cp.zeros((block_size, n_clusters), dtype=Z_norm.dtype)
+    penalty_buffer = cp.empty((n_batches, n_clusters), dtype=Z_norm.dtype)
+    theta_flat = theta
+    stream_ptr = cp.cuda.get_current_stream().ptr
+    idx_list = cp.arange(n_cells)
 
     for _ in range(max_iter):
         # Compute cluster centroids
@@ -438,7 +450,6 @@ def _clustering(
         # Precompute full similarity matrix (one large GEMM is faster than many small ones)
         similarities = Z_norm @ Y_norm.T
 
-        idx_list = cp.arange(n_cells)
         cp.random.shuffle(idx_list)
 
         pos = 0
@@ -466,13 +477,20 @@ def _clustering(
             _outer_cp(E, Pr_b, R_in_sum, 0)
 
             # Apply penalty term to cluster assignments
-            penalty_term = _get_pen(E, O, theta.T)
+            _hc_pen.penalty(
+                E,
+                O=O,
+                theta=theta_flat,
+                penalty=penalty_buffer,
+                n_batches=n_batches,
+                n_clusters=n_clusters,
+                stream=stream_ptr,
+            )
 
             # Fused kernel: _calc_R + _penalty_term + _normalize_cp in one pass
-            # ~10x faster than separate operations, ~1.8x faster full iteration
             R_out = R_out_buffer[:current_block_size]
             _fused_calc_pen_norm(
-                similarities, penalty_term, cats_in, idx_in, R_out, term=term
+                similarities, penalty_buffer, cats_in, idx_in, R_out, term=term
             )
 
             R[idx_in] = R_out
@@ -493,8 +511,7 @@ def _clustering(
 
         # Compute objective function for current iteration
         _compute_objective(
-            Y_norm,
-            Z_norm,
+            similarities,
             R=R,
             theta=theta,
             sigma=sigma,
@@ -505,8 +522,9 @@ def _clustering(
 
         # Check for convergence
         if _is_convergent_clustering(objectives_clustering, tol):
-            objectives_harmony.append(objectives_clustering[-1])
             break
+
+    objectives_harmony.append(objectives_clustering[-1])
 
 
 def _correction(
@@ -604,7 +622,6 @@ def _correction_original(
         if Phi is not None:
             Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
             inv_mat = cp.linalg.inv(cp.dot(Phi_t_diag_R, Phi_1) + Lambda)
-            Phi_t_diag_R = Phi_1.T * R[:, k].reshape(1, -1)
             Phi_t_diag_R_X = cp.dot(Phi_t_diag_R, X)
         else:
             R_col = R[:, k].copy()
@@ -751,8 +768,7 @@ def _correction_batched(
 
 
 def _compute_objective(
-    Y_norm: cp.ndarray,
-    Z_norm: cp.ndarray,
+    similarities: cp.ndarray,
     *,
     R: cp.ndarray,
     theta: cp.ndarray,
@@ -764,18 +780,27 @@ def _compute_objective(
     """
     Compute the objective function value for Harmony.
 
-    The objective function consists of:
-    1. K-means error term
-    2. Entropy regularization term
-    3. Diversity penalty term
+    Uses a fused C++ implementation that computes all three terms
+    (kmeans error, entropy, diversity) in a single pass with internal
+    row-normalization of R.
     """
-    kmeans_error = _kmeans_error(R, cp.dot(Z_norm, Y_norm.T))
-    R_normalized = R / R.sum(axis=1, keepdims=True)
-    entropy = _entropy_kernel(R_normalized)
-    entropy_term = sigma * entropy
-    diversity_penalty = sigma * cp.sum(cp.dot(theta, _log_div_OE(O, E)))
-    objective = kmeans_error + entropy_term + diversity_penalty
-    objective_arr.append(objective)
+    n_cells, n_clusters = R.shape
+    n_batches = O.shape[0]
+    obj_scalar = cp.zeros(1, dtype=R.dtype)
+    obj = _hc_cl.compute_objective(
+        R,
+        similarities=similarities,
+        O=O,
+        E=E,
+        theta=theta,
+        sigma=float(sigma),
+        obj_scalar=obj_scalar,
+        n_cells=n_cells,
+        n_clusters=n_clusters,
+        n_batches=n_batches,
+        stream=cp.cuda.get_current_stream().ptr,
+    )
+    objective_arr.append(obj)
 
 
 def _is_convergent_harmony(objectives_harmony: list, tol: float) -> bool:

@@ -136,6 +136,45 @@ struct ClusteringArgs {
   cudaStream_t stream;
 };
 
+// ---------- Standalone objective computation ----------
+
+template <typename T>
+static T compute_objective_impl(const T* R, const T* similarities, const T* O, const T* E,
+                                const T* theta, T sigma, T* obj_scalar, int n_cells, int n_clusters,
+                                int n_batches, cudaStream_t stream) {
+  int device;
+  cudaGetDevice(&device);
+  cudaDeviceProp prop;
+  cudaGetDeviceProperties(&prop, device);
+  int n_sm = prop.multiProcessorCount;
+
+  cudaMemsetAsync(obj_scalar, 0, sizeof(T), stream);
+
+  // K-means error: sum(R[i] * 2 * (1 - sim[i]))
+  {
+    size_t n = (size_t)n_cells * n_clusters;
+    kmeans_err_kernel<T><<<grid_1d((int)n, n_sm), 256, 0, stream>>>(R, similarities, n, obj_scalar);
+  }
+
+  // Entropy: sigma * sum(x_norm * log(x_norm + eps)), row-normalized internally
+  entropy_kernel<T><<<n_cells, warp_aligned_bdim(n_clusters), 0, stream>>>(R, sigma, n_cells,
+                                                                           n_clusters, obj_scalar);
+
+  // Diversity: sigma * sum(theta[b] * O[b,k] * log((O[b,k]+1)/(E[b,k]+1)))
+  {
+    int ob_total = n_batches * n_clusters;
+    int threads = (int)warp_aligned_bdim(ob_total);
+    int blocks = std::max(1, std::min(n_sm, (ob_total + threads - 1) / threads));
+    diversity_kernel<T>
+        <<<blocks, threads, 0, stream>>>(O, E, theta, sigma, n_batches, n_clusters, obj_scalar);
+  }
+
+  T host_obj;
+  cudaMemcpyAsync(&host_obj, obj_scalar, sizeof(T), cudaMemcpyDeviceToHost, stream);
+  cudaStreamSynchronize(stream);
+  return host_obj;
+}
+
 // ---------- Main clustering loop ----------
 
 template <typename T>
@@ -207,7 +246,7 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
       // Compute penalty and fused softmax -> R_out_buffer
       penalty_kernel<T><<<(ob_total + 255) / 256, 256, 0, a.stream>>>(a.E, a.O, a.theta, a.penalty,
                                                                       a.n_batches, a.n_clusters);
-      fused_pen_norm_kernel_int<T><<<bs, warp_aligned_bdim(a.n_clusters), 0, a.stream>>>(
+      fused_pen_norm_kernel<T, int><<<bs, warp_aligned_bdim(a.n_clusters), 0, a.stream>>>(
           a.similarities, a.penalty, a.cats_in, block_idx, a.R_out_buffer, term, bs, a.n_clusters);
 
       // Write back and add new contribution: O += scatter(R_out), E += Pr_b @ R_out_sum
@@ -222,25 +261,8 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
     }
 
     // ---- Objective function (reuses similarities buffer) ----
-    cudaMemsetAsync(a.obj_scalar, 0, sizeof(T), a.stream);
-
-    {
-      size_t n = (size_t)a.n_cells * a.n_clusters;
-      kmeans_err_kernel<T>
-          <<<grid_1d((int)n, n_sm), 256, 0, a.stream>>>(a.R, a.similarities, n, a.obj_scalar);
-    }
-    entropy_kernel<T><<<a.n_cells, warp_aligned_bdim(a.n_clusters), 0, a.stream>>>(
-        a.R, a.sigma, a.n_cells, a.n_clusters, a.obj_scalar);
-    {
-      int threads = (int)warp_aligned_bdim(ob_total);
-      int blocks = std::max(1, std::min(n_sm, (ob_total + threads - 1) / threads));
-      diversity_kernel<T><<<blocks, threads, 0, a.stream>>>(a.O, a.E, a.theta, a.sigma, a.n_batches,
-                                                            a.n_clusters, a.obj_scalar);
-    }
-
-    // ---- Convergence check (1 sync per iteration) ----
-    cudaMemcpyAsync(&host_obj, a.obj_scalar, sizeof(T), cudaMemcpyDeviceToHost, a.stream);
-    cudaStreamSynchronize(a.stream);
+    host_obj = compute_objective_impl(a.R, a.similarities, a.O, a.E, a.theta, a.sigma, a.obj_scalar,
+                                      a.n_cells, a.n_clusters, a.n_batches, a.stream);
     objectives.push_back(host_obj);
 
     if (static_cast<int>(objectives.size()) >= WINDOW_SIZE + 1) {
@@ -273,7 +295,7 @@ static void register_clustering_loop(nb::module_& m) {
          cuda_array_c<T> R_in_sum, cuda_array_c<T> R_out_sum, cuda_array_c<T> penalty_buf,
          cuda_array_c<T> obj_scalar, cuda_array_c<const T> ones_vec, cuda_array_c<T> last_obj,
          int n_cells, int n_pcs, int n_clusters, int n_batches, int block_size, int colsum_algo,
-         T sigma, T tol, int max_iter, unsigned int seed, std::uintptr_t stream) {
+         double sigma, double tol, int max_iter, unsigned int seed, std::uintptr_t stream) {
         ClusteringArgs<T> a{
             Z_norm.data(),
             R.data(),
@@ -304,8 +326,8 @@ static void register_clustering_loop(nb::module_& m) {
             n_batches,
             block_size,
             colsum_algo,
-            sigma,
-            tol,
+            static_cast<T>(sigma),
+            static_cast<T>(tol),
             max_iter,
             seed,
             (cudaStream_t)stream,
@@ -320,6 +342,22 @@ static void register_clustering_loop(nb::module_& m) {
       "max_iter"_a, "seed"_a, "stream"_a = 0);
 }
 
+template <typename T>
+static void register_compute_objective(nb::module_& m) {
+  m.def(
+      "compute_objective",
+      [](cuda_array_c<const T> R, cuda_array_c<const T> similarities, cuda_array_c<const T> O,
+         cuda_array_c<const T> E, cuda_array_c<const T> theta, double sigma,
+         cuda_array_c<T> obj_scalar, int n_cells, int n_clusters, int n_batches,
+         std::uintptr_t stream) {
+        return compute_objective_impl<T>(R.data(), similarities.data(), O.data(), E.data(),
+                                         theta.data(), static_cast<T>(sigma), obj_scalar.data(),
+                                         n_cells, n_clusters, n_batches, (cudaStream_t)stream);
+      },
+      "R"_a, nb::kw_only(), "similarities"_a, "O"_a, "E"_a, "theta"_a, "sigma"_a, "obj_scalar"_a,
+      "n_cells"_a, "n_clusters"_a, "n_batches"_a, "stream"_a = 0);
+}
+
 NB_MODULE(_harmony_clustering_cuda, m) {
   m.def(
       "get_cub_sort_temp_bytes", [](int n_cells) { return get_cub_sort_temp_bytes(n_cells); },
@@ -327,4 +365,6 @@ NB_MODULE(_harmony_clustering_cuda, m) {
 
   register_clustering_loop<float>(m);
   register_clustering_loop<double>(m);
+  register_compute_objective<float>(m);
+  register_compute_objective<double>(m);
 }

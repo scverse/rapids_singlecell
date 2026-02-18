@@ -19,6 +19,10 @@ static inline void launch_kmeans_err(const T* r, const T* dot, size_t n, T* out,
 }
 
 NB_MODULE(_harmony_kmeans_cuda, m) {
+  // -- Test-only bindings below --
+  // kmeans_err is used internally by compute_objective in the C++ clustering loop.
+  // The binding exists solely for unit testing.
+
   // kmeans_err - float32
   m.def(
       "kmeans_err",

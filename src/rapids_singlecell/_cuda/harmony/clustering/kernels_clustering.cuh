@@ -71,7 +71,9 @@ __global__ void diversity_kernel(const T* __restrict__ O, const T* __restrict__ 
                                  int n_clusters, T* __restrict__ obj_out) {
   T acc = T(0);
   int total = n_batches * n_clusters;
-  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < total; i += blockDim.x * gridDim.x) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int stride = blockDim.x * gridDim.x;
+  for (int i = idx; i < total; i += stride) {
     int batch = i / n_clusters;
     T ratio = (O[i] + T(1)) / (E[i] + T(1));
     T log_val;
@@ -103,7 +105,9 @@ __global__ void diversity_kernel(const T* __restrict__ O, const T* __restrict__ 
 
 // ---- PCG hash for random shuffle keys ----
 __global__ void pcg_hash_kernel(unsigned int* __restrict__ out, int n, unsigned int seed) {
-  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int stride = blockDim.x * gridDim.x;
+  for (int i = idx; i < n; i += stride) {
     unsigned int state = static_cast<unsigned int>(i) ^ seed;
     state = state * 747796405u + 2891336453u;
     unsigned int word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
@@ -113,6 +117,9 @@ __global__ void pcg_hash_kernel(unsigned int* __restrict__ out, int n, unsigned 
 
 // ---- Iota: out[i] = i ----
 __global__ void iota_kernel(int* __restrict__ out, int n) {
-  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x)
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int stride = blockDim.x * gridDim.x;
+  for (int i = idx; i < n; i += stride) {
     out[i] = i;
+  }
 }

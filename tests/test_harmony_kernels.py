@@ -1,4 +1,4 @@
-"""Unit tests and benchmarks for new harmony CUDA kernels against CuPy references."""
+"""Unit tests for harmony CUDA kernels against CuPy references."""
 
 from __future__ import annotations
 
@@ -6,6 +6,9 @@ import cupy as cp
 import numpy as np
 import pytest
 
+from rapids_singlecell._cuda import (
+    _harmony_clustering_cuda as _cl,
+)
 from rapids_singlecell._cuda import (
     _harmony_normalize_cuda as _norm,
 )
@@ -219,3 +222,59 @@ def test_gather_int(n):
 
     expected = src[idx]
     cp.testing.assert_array_equal(dst, expected)
+
+
+# ---------- compute_objective ----------
+
+
+def _compute_objective_reference(R, similarities, *, O, E, theta, sigma):
+    """Pure CuPy reference for the three-term harmony objective."""
+    # K-means error: sum(R[i] * 2 * (1 - sim[i]))
+    kmeans_err = float(cp.sum(R * 2 * (1 - similarities)))
+
+    # Entropy: sigma * sum(x_norm * log(x_norm + eps))
+    R_norm = R / R.sum(axis=1, keepdims=True)
+    entropy = float(sigma * cp.sum(R_norm * cp.log(R_norm + 1e-12)))
+
+    # Diversity: sigma * sum(theta[b] * O[b,k] * log((O[b,k]+1)/(E[b,k]+1)))
+    diversity = float(sigma * cp.sum(theta[:, None] * O * cp.log((O + 1) / (E + 1))))
+
+    return kmeans_err + entropy + diversity
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+@pytest.mark.parametrize(
+    "n_cells,n_clusters,n_batches", [(500, 20, 3), (1000, 100, 10), (200, 5, 2)]
+)
+def test_compute_objective(dtype, n_cells, n_clusters, n_batches):
+    rng = cp.random.default_rng(42)
+
+    # R must be non-negative (cluster assignments)
+    R = rng.random((n_cells, n_clusters), dtype=dtype) + 0.01
+    similarities = rng.random((n_cells, n_clusters), dtype=dtype)
+    O = rng.random((n_batches, n_clusters), dtype=dtype) * 10 + 0.1
+    E = rng.random((n_batches, n_clusters), dtype=dtype) * 10 + 0.1
+    theta = rng.random(n_batches, dtype=dtype) * 2
+    sigma = 0.1
+
+    obj_scalar = cp.zeros(1, dtype=dtype)
+    result = _cl.compute_objective(
+        R,
+        similarities=similarities,
+        O=O,
+        E=E,
+        theta=theta,
+        sigma=float(sigma),
+        obj_scalar=obj_scalar,
+        n_cells=n_cells,
+        n_clusters=n_clusters,
+        n_batches=n_batches,
+    )
+
+    expected = _compute_objective_reference(
+        R, similarities, O=O, E=E, theta=theta, sigma=sigma
+    )
+
+    # atomicAdd reduction ordering causes slight non-determinism
+    rtol = 1e-5 if dtype == np.float32 else 1e-10
+    np.testing.assert_allclose(result, expected, rtol=rtol)

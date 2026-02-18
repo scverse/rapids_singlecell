@@ -6,7 +6,6 @@ import cupy as cp
 import numpy as np
 
 from rapids_singlecell._cuda import _harmony_colsum_cuda as _hc_cs
-from rapids_singlecell._cuda import _harmony_kmeans_cuda as _hc_km
 from rapids_singlecell._cuda import _harmony_normalize_cuda as _hc_norm
 from rapids_singlecell._cuda import _harmony_outer_cuda as _hc_out
 from rapids_singlecell._cuda import _harmony_pen_cuda as _hc_pen
@@ -278,21 +277,6 @@ def _scatter_add_cp_bias_csr(
         bias=bias,
         stream=cp.cuda.get_current_stream().ptr,
     )
-
-
-def _kmeans_error(R: cp.ndarray, dot: cp.ndarray) -> float:
-    """Optimized raw CUDA implementation of kmeans error calculation"""
-    assert R.size == dot.size and R.dtype == dot.dtype
-
-    out = cp.zeros(1, dtype=R.dtype)
-    _hc_km.kmeans_err(
-        R.ravel(),
-        dot=dot.ravel(),
-        n=R.size,
-        out=out,
-        stream=cp.cuda.get_current_stream().ptr,
-    )
-    return out[0]
 
 
 def _get_theta_array(
@@ -624,13 +608,11 @@ def _compute_inv_mats_batched(
 
     inv_mats[:, 1:, 0] = P_row0 * c_inv[:, None]
 
-    diag_indices = cp.arange(1, n_batches_p1)
-    inv_mats[:, diag_indices, diag_indices] = P_row0**2 * c_inv[:, None] + factor
-
     outer = P_row0[:, :, None] * c_inv[:, None, None] * P_row0[:, None, :]
-    inv_mats[:, 1:, 1:] += outer
+    inv_mats[:, 1:, 1:] = outer
 
-    inv_mats[:, diag_indices, diag_indices] -= P_row0**2 * c_inv[:, None]
+    diag_indices = cp.arange(1, n_batches_p1)
+    inv_mats[:, diag_indices, diag_indices] += factor
 
     return inv_mats
 
