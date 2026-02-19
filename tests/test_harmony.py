@@ -64,14 +64,11 @@ def test_harmony_integrate(correction_method, dtype):
     and makes sure it has the same dimensions as the original PCA table.
     """
     adata = sc.datasets.pbmc68k_reduced()
-    # batched requires use_gemm=False
-    use_gemm = correction_method != "batched"
     rsc.pp.harmony_integrate(
         adata,
         "bulk_labels",
         correction_method=correction_method,
         dtype=dtype,
-        use_gemm=use_gemm,
     )
     assert adata.obsm["X_pca_harmony"].shape == adata.obsm["X_pca"].shape
 
@@ -124,9 +121,7 @@ def test_choose_colsum_algo(compute_capability):
     for rows in np.arange(1000, 300000, 1000):
         for columns in np.arange(10, 5000, 50):
             algo = _colsum_heuristic(rows, columns, compute_capability)
-            assert algo in ["columns", "atomics", "gemm", "cupy"]
-            if columns < 1024 or rows >= 5000:
-                assert algo != "cupy"
+            assert algo in ["columns", "atomics", "gemm"]
 
 
 @pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
@@ -139,11 +134,10 @@ def test_benchmark_colsum_algorithms(dtype):
 
 
 @pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
-@pytest.mark.parametrize("use_gemm", [True, False])
-@pytest.mark.parametrize("column", ["gemm", "columns", "atomics", "cupy"])
+@pytest.mark.parametrize("column", ["gemm", "columns", "atomics"])
 @pytest.mark.parametrize("correction_method", ["fast", "original", "batched"])
 def test_harmony_integrate_reference(
-    adata_reference, *, dtype, use_gemm, column, correction_method
+    adata_reference, *, dtype, column, correction_method
 ):
     """
     Test that Harmony integrate works.
@@ -152,7 +146,6 @@ def test_harmony_integrate_reference(
         adata_reference,
         "donor",
         correction_method=correction_method,
-        use_gemm=use_gemm,
         dtype=dtype,
         colsum_algo=column,
         max_iter_harmony=20,

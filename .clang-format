@@ -10,8 +10,8 @@ BinPackParameters: true
 BinPackArguments: true
 
 # Typical CUDA/C++ ergonomics
-IndentWidth: 2
-ColumnLimit: 100
+IndentWidth: 4
+ColumnLimit: 80
 PointerAlignment: Left
 DerivePointerAlignment: false
 

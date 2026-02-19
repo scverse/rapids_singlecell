@@ -6,7 +6,6 @@ import cupy as cp
 import numpy as np
 
 from rapids_singlecell._cuda import _harmony_colsum_cuda as _hc_cs
-from rapids_singlecell._cuda import _harmony_kmeans_cuda as _hc_km
 from rapids_singlecell._cuda import _harmony_normalize_cuda as _hc_norm
 from rapids_singlecell._cuda import _harmony_outer_cuda as _hc_out
 from rapids_singlecell._cuda import _harmony_pen_cuda as _hc_pen
@@ -175,7 +174,17 @@ def _normalize_cp(X: cp.ndarray, p: int = 2) -> cp.ndarray:
     Analogous to `torch.nn.functional.normalize` for `axis = 1`, `p` in numpy is known as `ord`.
     """
     if p == 2:
-        return X / cp.linalg.norm(X, ord=2, axis=1, keepdims=True).clip(min=1e-12)
+        X = cp.ascontiguousarray(X)
+        dst = cp.empty_like(X)
+        rows, cols = X.shape
+        _hc_norm.l2_row_normalize(
+            X,
+            dst=dst,
+            n_rows=rows,
+            n_cols=cols,
+            stream=cp.cuda.get_current_stream().ptr,
+        )
+        return dst
 
     else:
         return _normalize_cp_p1(X)
@@ -211,25 +220,6 @@ def _get_batch_codes(batch_mat: pd.DataFrame, batch_key: str | list[str]) -> pd.
         batch_vec = df.apply(lambda row: ",".join(row), axis=1)
 
     return batch_vec.astype("category")
-
-
-def _one_hot_tensor_cp(X: pd.Series) -> cp.array:
-    """
-    One-hot encode a categorical series.
-
-    Parameters
-    ----------
-    X
-        Input categorical series.
-    Returns
-    -------
-    One-hot encoded array.
-    """
-    ids = cp.array(X.cat.codes.values.copy(), dtype=cp.int32).reshape(-1)
-    n_col = X.cat.categories.size
-    Phi = cp.eye(n_col)[ids]
-
-    return Phi
 
 
 def _scatter_add_cp_bias_csr(
@@ -268,21 +258,6 @@ def _scatter_add_cp_bias_csr(
         bias=bias,
         stream=cp.cuda.get_current_stream().ptr,
     )
-
-
-def _kmeans_error(R: cp.ndarray, dot: cp.ndarray) -> float:
-    """Optimized raw CUDA implementation of kmeans error calculation"""
-    assert R.size == dot.size and R.dtype == dot.dtype
-
-    out = cp.zeros(1, dtype=R.dtype)
-    _hc_km.kmeans_err(
-        R.ravel(),
-        dot=dot.ravel(),
-        n=R.size,
-        out=out,
-        stream=cp.cuda.get_current_stream().ptr,
-    )
-    return out[0]
 
 
 def _get_theta_array(
@@ -375,25 +350,19 @@ def _gemm_colsum(X: cp.ndarray) -> cp.ndarray:
 def _choose_colsum_algo_heuristic(rows: int, cols: int, algo: str | None) -> callable:
     """
     Returns one of:
-    - _colsum_columns
-    - _colsum_atomics
+    - _column_sum
+    - _column_sum_atomic
     - _gemm_colsum
-    - cp.sum (with axis=0)
     """
     # first pick the strategy string
     if algo is None:
         cc = cp.cuda.Device().compute_capability
         algo = _colsum_heuristic(rows, cols, cc)
-    if algo == "cupy":
-        return lambda X: X.sum(axis=0)
     if algo == "columns":
         return _column_sum
     if algo == "atomics":
         return _column_sum_atomic
-    if algo == "gemm":
-        return _gemm_colsum
-    # fallback: global CuPy reduction
-    return lambda X: X.sum(axis=0)
+    return _gemm_colsum
 
 
 # TODO: Make this more robust
@@ -411,9 +380,7 @@ def _colsum_heuristic(rows: int, cols: int, compute_capability: str) -> str:
         return "atomics"
     if cols < 2000 and rows < 10000 and is_data_center:
         return "atomics"
-    if rows >= 5000:
-        return "gemm"
-    return "cupy"
+    return "gemm"
 
 
 # TODO: Make this more robust
@@ -437,7 +404,7 @@ def _benchmark_colsum_algorithms(
         Number of benchmark trials
     Returns
     -------
-    Name of the fastest algorithm: 'cupy', 'columns', 'atomics', or 'gemm'
+    Name of the fastest algorithm: 'columns', 'atomics', or 'gemm'
     """
     rows, cols = shape
 
@@ -449,7 +416,6 @@ def _benchmark_colsum_algorithms(
         X = cp.ascontiguousarray(X)
 
     algorithms = {
-        "cupy": lambda x: x.sum(axis=0),
         "columns": _column_sum,
         "atomics": _column_sum_atomic,
         "gemm": _gemm_colsum,
@@ -614,13 +580,11 @@ def _compute_inv_mats_batched(
 
     inv_mats[:, 1:, 0] = P_row0 * c_inv[:, None]
 
-    diag_indices = cp.arange(1, n_batches_p1)
-    inv_mats[:, diag_indices, diag_indices] = P_row0**2 * c_inv[:, None] + factor
-
     outer = P_row0[:, :, None] * c_inv[:, None, None] * P_row0[:, None, :]
-    inv_mats[:, 1:, 1:] += outer
+    inv_mats[:, 1:, 1:] = outer
 
-    inv_mats[:, diag_indices, diag_indices] -= P_row0**2 * c_inv[:, None]
+    diag_indices = cp.arange(1, n_batches_p1)
+    inv_mats[:, diag_indices, diag_indices] += factor
 
     return inv_mats
 

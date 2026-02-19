@@ -18,8 +18,7 @@ def harmony_integrate(
     basis: str = "X_pca",
     adjusted_basis: str = "X_pca_harmony",
     dtype: type = np.float64,
-    correction_method: Literal["fast", "original"] = "original",
-    use_gemm: bool = False,
+    correction_method: Literal["fast", "original", "batched"] | None = None,
     colsum_algo: COLSUM_ALGO | None = None,
     **kwargs,
 ) -> None:
@@ -49,9 +48,7 @@ def harmony_integrate(
             The data type to use for the Harmony. If you use 32-bit you may experience
             numerical instability.
         correction_method
-            Choose which method for the correction step: ``original`` for original method, ``fast`` for improved method.
-        use_gemm
-            If True, use a One-Hot-Encoding Matrix and GEMM to compute Harmony. If False use a label vector. A label vector is more memory efficient and faster for large datasets with a large number of batches.
+            Choose which method for the correction step: ``original`` for original method, ``fast`` for improved method, ``batched`` for batched processing of all clusters simultaneously (fastest but needs more memory). If ``None`` (default), automatically selects ``batched`` unless the workspace would exceed 1 GB, in which case ``fast`` is used.
         colsum_algo
             Choose which algorithm to use for column sums. If `None`, choose the algorithm based on the number of rows and columns. If `'benchmark'`, benchmark all algorithms and choose the best one.
         kwargs
@@ -116,7 +113,6 @@ def harmony_integrate(
         adata.obs,
         key,
         correction_method=correction_method,
-        use_gemm=use_gemm,
         colsum_algo=colsum_algo,
         **kwargs,
     )
