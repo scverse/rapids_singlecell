@@ -5,7 +5,8 @@ ARG GIT_ID=main
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 
 ENV PATH=/opt/conda/bin:$PATH
-ENV SKBUILD_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=75-real;80-real;86-real;89-real;90-real;100-real;120"
+ARG CUDA_ARCHS="75-real;80-real;86-real;89-real;90-real;100-real;120"
+ENV SKBUILD_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS}"
 
 RUN <<EOF
 # install rapids_singlecell from source (compiled for all supported GPU architectures)

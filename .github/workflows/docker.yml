@@ -66,24 +66,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set pending status on PR
-        if: github.event_name == 'issue_comment'
-        run: |
-          gh api repos/${{ github.repository }}/statuses/${{ steps.get-sha.outputs.sha }} \
-            -f state=pending \
-            -f context="Docker Build" \
-            -f description="Docker build running..." \
-            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   build_docker_images:
     needs: check
     strategy:
       matrix:
         RAPIDS_VER:
           - "26.02"
-    name: Build Docker images
+        CUDA_SUFFIX:
+          - { ver: "12.8.0", label: "cuda12", pkg: "cu12" }
+          - { ver: "13.0.2", label: "cuda13", pkg: "cu13" }
+    name: Build Docker images (${{ matrix.CUDA_SUFFIX.label }})
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -96,10 +88,11 @@ jobs:
         run: |
           echo "=== Disk space before cleanup ==="
           df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf /opt/hostedtoolcache
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
+          sudo rm -rf /usr/local/share/boost /usr/share/swift /usr/local/.ghcup
+          sudo rm -rf /usr/local/lib/node_modules /usr/share/miniconda
           sudo docker image prune --all --force
+          sudo apt-get clean
           echo "=== Disk space after cleanup ==="
           df -h /
         shell: bash
@@ -108,6 +101,17 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'issue_comment' && format('refs/pull/{0}/head', github.event.issue.number) || '' }}
+
+      - name: Set pending status on PR
+        if: github.event_name == 'issue_comment'
+        run: |
+          gh api repos/${{ github.repository }}/statuses/${{ needs.check.outputs.head-sha }} \
+            -f state=pending \
+            -f context="Docker Build (${{ matrix.CUDA_SUFFIX.label }})" \
+            -f description="Docker build running..." \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to the Container registry
         uses: docker/login-action@v3
@@ -121,11 +125,11 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ghcr.io/${{ github.repository }}-deps
+            ghcr.io/scverse/rapids-singlecell-deps-${{ matrix.CUDA_SUFFIX.pkg }}
 
       - name: create yaml file for conda environment
         run: |
-          grep -v -- '- rapids-singlecell' conda/rsc_rapids_${{ matrix.RAPIDS_VER }}_cuda13.yml > docker/rsc_rapids.yml
+          grep -v -- '- rapids-singlecell' conda/rsc_rapids_${{ matrix.RAPIDS_VER }}_${{ matrix.CUDA_SUFFIX.label }}.yml > docker/rsc_rapids.yml
         shell: bash
 
       - name: Build and push Docker base images
@@ -137,13 +141,15 @@ jobs:
           push: ${{ github.event_name == 'release' }}
           tags: ${{ steps.meta-base.outputs.tags }}
           labels: ${{ steps.meta-base.outputs.labels }}
+          build-args: |
+            CUDA_VER=${{ matrix.CUDA_SUFFIX.ver }}
           #cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-deps
 
       - name: Generate artifact attestation for base image
         if: github.event_name == 'release'
         uses: actions/attest-build-provenance@v1
         with:
-          subject-name: ghcr.io/${{ github.repository }}-deps
+          subject-name: ghcr.io/scverse/rapids-singlecell-deps-${{ matrix.CUDA_SUFFIX.pkg }}
           subject-digest: ${{ steps.push-base.outputs.digest }}
           push-to-registry: true
 
@@ -152,7 +158,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ghcr.io/${{ github.repository }}
+            ghcr.io/scverse/rapids-singlecell-${{ matrix.CUDA_SUFFIX.pkg }}
 
       - name: Build and push main Docker images
         id: push
@@ -163,6 +169,8 @@ jobs:
           push: ${{ github.event_name == 'release' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            CUDA_ARCHS=${{ matrix.CUDA_SUFFIX.label == 'cuda12' && '75-real;80-real;86-real;89-real;90' || '75-real;80-real;86-real;89-real;90-real;100-real;120' }}
           #cache-from: type=registry,ref=ghcr.io/${{ github.repository }}
           build-contexts: |
             rapids-singlecell-deps=docker-image://${{ fromJSON(steps.meta-base.outputs.json).tags[0] }}
@@ -171,7 +179,7 @@ jobs:
         if: github.event_name == 'release'
         uses: actions/attest-build-provenance@v1
         with:
-          subject-name: ghcr.io/${{ github.repository }}
+          subject-name: ghcr.io/scverse/rapids-singlecell-${{ matrix.CUDA_SUFFIX.pkg }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
@@ -185,7 +193,7 @@ jobs:
         run: |
           gh api repos/${{ github.repository }}/statuses/${{ needs.check.outputs.head-sha }} \
             -f state=success \
-            -f context="Docker Build" \
+            -f context="Docker Build (${{ matrix.CUDA_SUFFIX.label }})" \
             -f description="Docker build passed" \
             -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         env:
@@ -196,7 +204,7 @@ jobs:
         run: |
           gh api repos/${{ github.repository }}/statuses/${{ needs.check.outputs.head-sha }} \
             -f state=failure \
-            -f context="Docker Build" \
+            -f context="Docker Build (${{ matrix.CUDA_SUFFIX.label }})" \
             -f description="Docker build failed" \
             -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         env:
