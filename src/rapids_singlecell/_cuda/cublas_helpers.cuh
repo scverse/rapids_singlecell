@@ -60,3 +60,34 @@ inline cublasStatus_t cublas_gemv<double>(cublasHandle_t handle,
     return cublasDgemv(handle, trans, m, n, alpha, A, lda, x, incx, beta, y,
                        incy);
 }
+
+// ---------- cublas_gemm_strided_batched ----------
+
+template <typename T>
+static inline cublasStatus_t cublas_gemm_strided_batched(
+    cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb,
+    int m, int n, int k, const T* alpha, const T* A, int lda, long long strideA,
+    const T* B, int ldb, long long strideB, const T* beta, T* C, int ldc,
+    long long strideC, int batchCount);
+
+template <>
+inline cublasStatus_t cublas_gemm_strided_batched<float>(
+    cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb,
+    int m, int n, int k, const float* alpha, const float* A, int lda,
+    long long strideA, const float* B, int ldb, long long strideB,
+    const float* beta, float* C, int ldc, long long strideC, int batchCount) {
+    return cublasSgemmStridedBatched(handle, transa, transb, m, n, k, alpha, A,
+                                     lda, strideA, B, ldb, strideB, beta, C,
+                                     ldc, strideC, batchCount);
+}
+
+template <>
+inline cublasStatus_t cublas_gemm_strided_batched<double>(
+    cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb,
+    int m, int n, int k, const double* alpha, const double* A, int lda,
+    long long strideA, const double* B, int ldb, long long strideB,
+    const double* beta, double* C, int ldc, long long strideC, int batchCount) {
+    return cublasDgemmStridedBatched(handle, transa, transb, m, n, k, alpha, A,
+                                     lda, strideA, B, ldb, strideB, beta, C,
+                                     ldc, strideC, batchCount);
+}

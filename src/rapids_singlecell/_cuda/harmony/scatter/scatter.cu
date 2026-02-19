@@ -66,18 +66,18 @@ template <typename T>
 static inline void launch_gather_rows(const T* src, const int* idx, T* dst,
                                       int n_rows, int n_cols,
                                       cudaStream_t stream) {
-    int n = n_rows * n_cols;
-    gather_rows_kernel<T>
-        <<<(n + 255) / 256, 256, 0, stream>>>(src, idx, dst, n_rows, n_cols);
+    size_t n = (size_t)n_rows * n_cols;
+    gather_rows_kernel<T><<<(int)((n + 255) / 256), 256, 0, stream>>>(
+        src, idx, dst, n_rows, n_cols);
 }
 
 template <typename T>
 static inline void launch_scatter_rows(const T* src, const int* idx, T* dst,
                                        int n_rows, int n_cols,
                                        cudaStream_t stream) {
-    int n = n_rows * n_cols;
-    scatter_rows_kernel<T>
-        <<<(n + 255) / 256, 256, 0, stream>>>(src, idx, dst, n_rows, n_cols);
+    size_t n = (size_t)n_rows * n_cols;
+    scatter_rows_kernel<T><<<(int)((n + 255) / 256), 256, 0, stream>>>(
+        src, idx, dst, n_rows, n_cols);
 }
 
 static inline void launch_gather_int(const int* src, const int* idx, int* dst,

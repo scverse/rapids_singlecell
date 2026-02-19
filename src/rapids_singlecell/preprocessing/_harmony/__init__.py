@@ -8,6 +8,7 @@ import numpy as np
 from cuml import KMeans as CumlKMeans
 
 from rapids_singlecell._cuda import _harmony_clustering_cuda as _hc_cl
+from rapids_singlecell._cuda import _harmony_correction_batched_cuda as _hc_corr_b
 from rapids_singlecell._cuda import _harmony_correction_cuda as _hc_corr
 from rapids_singlecell._utils import _create_category_index_mapping
 
@@ -15,19 +16,16 @@ from ._fuses import (
     _calc_R,
 )
 from ._helper import (
-    _apply_batched_correction,
     _choose_colsum_algo_benchmark,
     _choose_colsum_algo_heuristic,
     _column_sum,
     _column_sum_atomic,
-    _compute_inv_mats_batched,
     _gemm_colsum,
     _get_aggregated_matrix,
     _get_batch_codes,
     _get_theta_array,
     _normalize_cp,
     _outer_cp,
-    _scatter_add_bias_batched,
     _scatter_add_cp,
     _scatter_add_cp_bias_csr,
     _Z_correction,
@@ -558,39 +556,46 @@ def _correction_batched(
     """
     Batched correction method - process all clusters simultaneously.
 
-    This method processes all clusters at once instead of looping:
-    1. Computes all inverse matrices at once (vectorized)
-    2. Computes all Phi_t_diag_R_X at once (batched GEMMs)
-    3. Computes all W matrices at once (batched matmul)
-    4. Applies all corrections at once (fused kernel)
-
-    Uses label vector representation for batch categories.
+    Single C++ call that fuses all steps: inv_mats computation, Phi_t_diag_R_X
+    via cuBLAS GEMMs, W_all via strided batched GEMM, and correction kernel.
     """
-    # Step 1: Compute all inv_mat matrices at once
-    inv_mats = _compute_inv_mats_batched(O, ridge_lambda, X.dtype)
-    # Shape: (n_clusters, n_batches+1, n_batches+1)
+    n_cells, n_pcs = X.shape
+    n_clusters = R.shape[1]
+    nb1 = n_batches + 1
+    dtype = X.dtype
 
-    # Step 2: Compute all Phi_t_diag_R_X at once
-    Phi_t_diag_R_X_all = _scatter_add_bias_batched(
+    # Allocate workspace
+    Z = cp.empty_like(X)
+    inv_mats = cp.empty((n_clusters, nb1, nb1), dtype=dtype)
+    Phi_t_diag_R_X_all = cp.empty((n_clusters, nb1, n_pcs), dtype=dtype)
+    W_all = cp.empty((n_clusters, nb1, n_pcs), dtype=dtype)
+    g_factor = cp.empty((n_clusters, n_batches), dtype=dtype)
+    g_P_row0 = cp.empty((n_clusters, n_batches), dtype=dtype)
+    X_sorted = cp.empty((n_cells, n_pcs), dtype=dtype)
+    R_sorted = cp.empty((n_cells, n_clusters), dtype=dtype)
+
+    _hc_corr_b.correction_batched(
         X,
-        R,
+        R=R,
+        O=O,
+        cats=cats,
         cat_offsets=cat_offsets,
         cell_indices=cell_indices,
+        ridge_lambda=float(ridge_lambda),
+        n_cells=n_cells,
+        n_pcs=n_pcs,
+        n_clusters=n_clusters,
         n_batches=n_batches,
+        Z=Z,
+        inv_mats=inv_mats,
+        Phi_t_diag_R_X_all=Phi_t_diag_R_X_all,
+        W_all=W_all,
+        g_factor=g_factor,
+        g_P_row0=g_P_row0,
+        X_sorted=X_sorted,
+        R_sorted=R_sorted,
+        stream=cp.cuda.get_current_stream().ptr,
     )
-    # Shape: (n_clusters, n_batches+1, n_pcs)
-
-    # Step 3: Compute all W matrices: W[k] = inv_mat[k] @ Phi_t_diag_R_X[k]
-    W_all = cp.matmul(inv_mats, Phi_t_diag_R_X_all)
-    # Shape: (n_clusters, n_batches+1, n_pcs)
-
-    # Zero out row 0 of each W (no correction for bias term)
-    W_all[:, 0, :] = 0
-
-    # Step 4: Apply all corrections at once using fused kernel
-    Z = X.copy()
-    _apply_batched_correction(Z, W_all, cats, R)
-
     return Z
 
 

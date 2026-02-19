@@ -256,10 +256,11 @@ __global__ void gather_rows_kernel(const T* __restrict__ src,
                                    const int* __restrict__ idx,
                                    T* __restrict__ dst, int n_rows,
                                    int n_cols) {
-    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n_rows * n_cols;
-         i += blockDim.x * gridDim.x) {
-        int row = i / n_cols;
-        int col = i % n_cols;
+    size_t N = (size_t)n_rows * n_cols;
+    for (size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x; i < N;
+         i += (size_t)blockDim.x * gridDim.x) {
+        int row = (int)(i / n_cols);
+        int col = (int)(i % n_cols);
         dst[i] = src[(size_t)idx[row] * n_cols + col];
     }
 }
@@ -270,10 +271,11 @@ __global__ void scatter_rows_kernel(const T* __restrict__ src,
                                     const int* __restrict__ idx,
                                     T* __restrict__ dst, int n_rows,
                                     int n_cols) {
-    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n_rows * n_cols;
-         i += blockDim.x * gridDim.x) {
-        int row = i / n_cols;
-        int col = i % n_cols;
+    size_t N = (size_t)n_rows * n_cols;
+    for (size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x; i < N;
+         i += (size_t)blockDim.x * gridDim.x) {
+        int row = (int)(i / n_cols);
+        int col = (int)(i % n_cols);
         dst[(size_t)idx[row] * n_cols + col] = src[i];
     }
 }

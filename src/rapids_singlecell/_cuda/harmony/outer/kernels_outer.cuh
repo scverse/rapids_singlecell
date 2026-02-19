@@ -42,18 +42,18 @@ __global__ void batched_correction_kernel(T* __restrict__ Z,
                                           const T* __restrict__ R, int n_cells,
                                           int n_pcs, int n_clusters,
                                           int n_batches_p1) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n_cells * n_pcs) return;
+    size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= (size_t)n_cells * n_pcs) return;
 
-    int cell = idx / n_pcs;
-    int pc = idx % n_pcs;
+    int cell = (int)(idx / n_pcs);
+    int pc = (int)(idx % n_pcs);
     int cat = cats[cell];
 
     T total_correction = T(0);
     for (int k = 0; k < n_clusters; k++) {
         T w_val =
-            W_all[(long long)k * n_batches_p1 * n_pcs + (cat + 1) * n_pcs + pc];
-        T r_val = R[cell * n_clusters + k];
+            W_all[(size_t)k * n_batches_p1 * n_pcs + (cat + 1) * n_pcs + pc];
+        T r_val = R[(size_t)cell * n_clusters + k];
         total_correction += w_val * r_val;
     }
 

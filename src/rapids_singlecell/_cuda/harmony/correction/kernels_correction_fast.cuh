@@ -15,11 +15,10 @@
 //   inv[i,j] = P_row0[i-1]*c_inv*P_row0[j-1] + factor[i-1]*delta(i,j)  (i,j >
 //   0)
 //
-// Uses global memory workspace for factor/P_row0 arrays.
-// g_factor/g_P_row0: (n_batches,) each when cluster_k >= 0.
 // When cluster_k >= 0, computes only that cluster (launch with 1 block).
-// When cluster_k < 0, computes all clusters (launch with n_clusters blocks),
-// using (n_clusters, n_batches) workspaces.
+//   g_factor/g_P_row0 are flat (n_batches,) workspace.
+// When cluster_k < 0, computes all clusters (launch with n_clusters blocks).
+//   g_factor/g_P_row0 are (n_clusters, n_batches) workspace.
 template <typename T>
 __global__ void compute_inv_mats_kernel(const T* __restrict__ O, T ridge_lambda,
                                         T* __restrict__ inv_mats,
@@ -31,10 +30,17 @@ __global__ void compute_inv_mats_kernel(const T* __restrict__ O, T ridge_lambda,
 
     int nb1 = n_batches + 1;
     T* inv = (cluster_k >= 0) ? inv_mats : inv_mats + (size_t)k * nb1 * nb1;
-    T* my_factor =
-        (cluster_k >= 0) ? g_factor : g_factor + (size_t)k * n_batches;
-    T* my_P_row0 =
-        (cluster_k >= 0) ? g_P_row0 : g_P_row0 + (size_t)k * n_batches;
+
+    // Choose workspace: single-cluster or batched global memory
+    T* my_factor;
+    T* my_P_row0;
+    if (cluster_k >= 0) {
+        my_factor = g_factor;
+        my_P_row0 = g_P_row0;
+    } else {
+        my_factor = g_factor + (size_t)k * n_batches;
+        my_P_row0 = g_P_row0 + (size_t)k * n_batches;
+    }
 
     // Phase 1: compute factor, P_row0, and reduce for N_k and c
     T local_Nk = T(0);

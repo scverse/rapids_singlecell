@@ -1,9 +1,9 @@
-#include <cublas_v2.h>
 #include <cuda_runtime.h>
 #include "../../nb_types.h"
 
 #include "../outer/kernels_outer.cuh"
 #include "../scatter/kernels_scatter.cuh"
+#include "../../cublas_helpers.cuh"
 #include "kernels_correction_fast.cuh"
 
 using namespace nb::literals;
@@ -57,13 +57,8 @@ static void correction_fast_impl(
                 X, n_cells, n_pcs, Phi_t_diag_R_X, R_col);
         } else {
             // cuBLAS GEMV: Phi_t_diag_R_X[0,:] = X^T @ R_col
-            if constexpr (std::is_same_v<T, float>) {
-                cublasSgemv(handle, CUBLAS_OP_N, n_pcs, n_cells, &one, X, n_pcs,
-                            R_col, 1, &zero, Phi_t_diag_R_X, 1);
-            } else {
-                cublasDgemv(handle, CUBLAS_OP_N, n_pcs, n_cells, &one, X, n_pcs,
-                            R_col, 1, &zero, Phi_t_diag_R_X, 1);
-            }
+            cublas_gemv(handle, CUBLAS_OP_N, n_pcs, n_cells, &one, X, n_pcs,
+                        R_col, 1, &zero, Phi_t_diag_R_X, 1);
         }
 
         // Rows 1..n_batches: per-batch biased scatter-add
@@ -79,17 +74,8 @@ static void correction_fast_impl(
         // Row-major: C(nb1,n_pcs) = A(nb1,nb1) @ B(nb1,n_pcs)
         // cuBLAS col-major trick: C_cm(n_pcs,nb1) = B_cm(n_pcs,nb1) @
         // A_cm(nb1,nb1)
-        {
-            if constexpr (std::is_same_v<T, float>) {
-                cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, n_pcs, nb1, nb1,
-                            &one, Phi_t_diag_R_X, n_pcs, inv_mat, nb1, &zero, W,
-                            n_pcs);
-            } else {
-                cublasDgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, n_pcs, nb1, nb1,
-                            &one, Phi_t_diag_R_X, n_pcs, inv_mat, nb1, &zero, W,
-                            n_pcs);
-            }
-        }
+        cublas_gemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, n_pcs, nb1, nb1, &one,
+                    Phi_t_diag_R_X, n_pcs, inv_mat, nb1, &zero, W, n_pcs);
 
         // W[0, :] = 0
         cudaMemsetAsync(W, 0, n_pcs * sizeof(T), stream);
