@@ -277,7 +277,7 @@ def _initialize_centroids(
     Y_norm = _normalize_cp(Y, p=2)
 
     # Initialize cluster assignment matrix R
-    term = float(-2 / sigma)
+    term = Z_norm.dtype.type(-2 / sigma)
     similarities = cp.dot(Z_norm, Y_norm.T)
     R = _calc_R(term, similarities)
     R = _normalize_cp(R, p=1)
