@@ -147,29 +147,57 @@ The `-real` suffix generates device code only (no PTX fallback), which reduces b
 
 ## Docker
 
-We also offer a Docker container for `rapids-singlecell`. This container includes all the necessary dependencies, making it even easier to get started with `rapids-singlecell`.
+We also offer Docker containers for `rapids-singlecell`. These containers include all the necessary dependencies, making it even easier to get started with `rapids-singlecell`.
 
 To use the Docker container, first, ensure that you have Docker installed on your system and that Docker supports the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/index.html).
-Then, you can pull our Docker image using the following command:
+Then, pull the Docker image matching your CUDA version:
 
+`````{tab-set}
+````{tab-item} CUDA 13
+```bash
+docker pull ghcr.io/scverse/rapids-singlecell-cu13:latest
 ```
-docker pull ghcr.io/scverse/rapids_singlecell:latest
+````
+````{tab-item} CUDA 12
+```bash
+docker pull ghcr.io/scverse/rapids-singlecell-cu12:latest
 ```
+````
+`````
 
 To run the Docker container, use the following command:
 
+`````{tab-set}
+````{tab-item} CUDA 13
+```bash
+docker run --rm --gpus all ghcr.io/scverse/rapids-singlecell-cu13:latest
 ```
-docker run --rm --gpus all ghcr.io/scverse/rapids_singlecell:latest
+````
+````{tab-item} CUDA 12
+```bash
+docker run --rm --gpus all ghcr.io/scverse/rapids-singlecell-cu12:latest
 ```
+````
+`````
 
 The docker containers also work with apptainer (or singularity) on an HPC system.
 
 First pull the container and wrap it in a `.sif` file:
+`````{tab-set}
+````{tab-item} CUDA 13
+```bash
+apptainer pull rsc.sif docker://ghcr.io/scverse/rapids-singlecell-cu13:latest
 ```
-apptainer pull rsc.sif ghcr.io/scverse/rapids_singlecell:latest
+````
+````{tab-item} CUDA 12
+```bash
+apptainer pull rsc.sif docker://ghcr.io/scverse/rapids-singlecell-cu12:latest
 ```
+````
+`````
+
 Then run the following command to execute the container:
-```
+```bash
 apptainer run --nv rsc.sif
 ```
 
