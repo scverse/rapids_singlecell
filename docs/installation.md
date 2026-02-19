@@ -26,6 +26,11 @@ mamba env create -f conda/rsc_rapids_26.02_cuda12.yml
 RAPIDS currently doesn't support `channel_priority: strict`; use `channel_priority: flexible` instead
 ```
 
+```{warning}
+The conda environment files on the `main` branch reference the new `rapids-singlecell-cu12`/`-cu13` wheel names, which are currently only available as pre-release.
+Until 0.15.0 is released, use the environment files from the [v0.14.1 tag](https://github.com/scverse/rapids_singlecell/tree/v0.14.1/conda) instead, or add `--pre` to the pip line manually.
+```
+
 ## PyPI
 
 ```{note}
