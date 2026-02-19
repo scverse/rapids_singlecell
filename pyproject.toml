@@ -141,8 +141,8 @@ cmake.build-type = "Release"
 ninja.version = ">=1.10"
 experimental = false
 # Default: use native arch for source builds (auto-detect user's GPU)
-# CI overrides this via SKBUILD_CMAKE_ARGS for precompiled wheels
-cmake.args = [ "-DCMAKE_CUDA_ARCHITECTURES=native" ]
+# CI overrides via SKBUILD_CMAKE_DEFINE_CMAKE_CUDA_ARCHITECTURES env var
+cmake.define.CMAKE_CUDA_ARCHITECTURES = "native"
 build-dir = "build"
 metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
 sdist.include = [ "src/rapids_singlecell/_version.py" ]
