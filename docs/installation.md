@@ -37,6 +37,7 @@ The prebuilt wheels support the following CUDA runtime versions:
 
 | Wheel | Compiled with | Runtime support | GPU architectures |
 |---|---|---|---|
+| `rapids-singlecell` | Source distribution | Any supported CUDA | Compiles for your local GPU architecture |
 | `rapids-singlecell-cu12` | CUDA 12.2 | CUDA 12.2–12.9+ | Turing through Hopper (native), Blackwell (via PTX JIT) |
 | `rapids-singlecell-cu13` | CUDA 13.0 | CUDA 13.0+ | Turing through Blackwell (all native) |
 
