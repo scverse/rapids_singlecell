@@ -56,6 +56,7 @@ Find a bug? Interested in improving rapids-singlecell? Checkout our GitHub for t
 
 ## News
 
+* 19.02.26 **v0.15.0 pre-release available!** This release ships precompiled CUDA kernels via [nanobind](https://github.com/wjakob/nanobind) — no CUDA toolkit needed at install time. Prebuilt wheels for x86_64 and aarch64 support CUDA 12 and 13, covering Turing through Blackwell GPUs. Install with `pip install --pre rapids-singlecell-cu13` (or `-cu12`) and help us test! See the [installation guide](installation.md) for details.
 * 01.07.25 *rapids-singlecell* is now an [scverse® core package](https://scverse.org/blog/2025-core-expansion/)
 * 12.06.25 *rapids-singlecell* was highlighted in an other NVIDIA [technical blog post](https://developer.nvidia.com/blog/driving-toward-billion-cell-analysis-and-biological-breakthroughs-with-rapids-singlecell/)
 * 07.08.23 *rapids-singlecell* is now part of scverse® ecosystem.
