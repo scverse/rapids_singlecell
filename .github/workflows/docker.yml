@@ -73,7 +73,7 @@ jobs:
         RAPIDS_VER:
           - "26.02"
         CUDA_SUFFIX:
-          - { ver: "12.9.0", label: "cuda12" }
+          - { ver: "12.8.0", label: "cuda12" }
           - { ver: "13.0.2", label: "cuda13" }
     name: Build Docker images (${{ matrix.CUDA_SUFFIX.label }})
     runs-on: ubuntu-latest
@@ -173,7 +173,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            CUDA_ARCHS=${{ matrix.CUDA_SUFFIX.label == 'cuda12' && '75-real;80-real;86-real;89-real;90-real' || '75-real;80-real;86-real;89-real;90-real;100-real;120' }}
+            CUDA_ARCHS=${{ matrix.CUDA_SUFFIX.label == 'cuda12' && '75-real;80-real;86-real;89-real;90' || '75-real;80-real;86-real;89-real;90-real;100-real;120' }}
           #cache-from: type=registry,ref=ghcr.io/${{ github.repository }}
           build-contexts: |
             rapids-singlecell-deps=docker-image://${{ fromJSON(steps.meta-base.outputs.json).tags[0] }}
