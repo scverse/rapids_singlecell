@@ -117,14 +117,14 @@ pip install "rapids-singlecell @ git+https://github.com/scverse/rapids_singlecel
 ```
 
 This compiles the CUDA kernels during installation. By default, kernels are compiled for your local GPU architecture only (`native`).
-To compile for different or multiple architectures, set the `SKBUILD_CMAKE_ARGS` environment variable:
+To compile for different or multiple architectures, pass a config setting to override the CUDA architectures:
 
 ```bash
 # Compile for a specific architecture (e.g., Ampere)
-SKBUILD_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=80-real" pip install "rapids-singlecell @ git+https://github.com/scverse/rapids_singlecell.git"
+pip install -C cmake.define.CMAKE_CUDA_ARCHITECTURES="80-real" "rapids-singlecell @ git+https://github.com/scverse/rapids_singlecell.git"
 
 # Compile for multiple architectures
-SKBUILD_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=80-real;86-real;89-real;90-real" pip install "rapids-singlecell @ git+https://github.com/scverse/rapids_singlecell.git"
+pip install -C cmake.define.CMAKE_CUDA_ARCHITECTURES="80-real;86-real;89-real;90-real" "rapids-singlecell @ git+https://github.com/scverse/rapids_singlecell.git"
 ```
 
 Common architecture codes:
