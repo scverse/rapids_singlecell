@@ -150,7 +150,7 @@ sdist.include = [ "src/rapids_singlecell/_version.py" ]
 # Use abi3audit to catch issues with Limited API wheels
 [tool.cibuildwheel.linux]
 repair-wheel-command = [
-    "auditwheel repair -w {dest_dir} {wheel}",
+    "auditwheel repair --exclude libcublas.so.12 --exclude libcublas.so.13 --exclude libcublasLt.so.12 --exclude libcublasLt.so.13 --exclude libcudart.so.12 --exclude libcudart.so.13 -w {dest_dir} {wheel}",
     "pipx run abi3audit --strict --report {wheel}",
 ]
 [tool.cibuildwheel.macos]

@@ -47,6 +47,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Get version from setuptools-scm
+        id: version
+        run: |
+          pip install setuptools-scm
+          VERSION=$(python -m setuptools_scm)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Detected version: $VERSION"
 
       - name: Set package name and extras for CUDA ${{ matrix.cuda_major }}
         run: |
@@ -92,12 +102,13 @@ jobs:
             LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
             PATH=/usr/local/cuda/bin:$PATH
             SKBUILD_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${{ matrix.cuda_archs }}"
+            SETUPTOOLS_SCM_PRETEND_VERSION=${{ steps.version.outputs.version }}
           CIBW_BEFORE_BUILD: >
             python -m pip install -U pip
             scikit-build-core cmake ninja nanobind
           CIBW_TEST_SKIP: "*"
           CIBW_TEST_COMMAND: ""
-          CIBW_REPAIR_WHEEL_COMMAND: "auditwheel repair -w {dest_dir} {wheel}"
+          CIBW_REPAIR_WHEEL_COMMAND: "auditwheel repair --exclude libcublas.so.${{ matrix.cuda_major }} --exclude libcublasLt.so.${{ matrix.cuda_major }} --exclude libcudart.so.${{ matrix.cuda_major }} -w {dest_dir} {wheel}"
           CIBW_BUILD_VERBOSITY: "1"
 
       - uses: actions/upload-artifact@v4
