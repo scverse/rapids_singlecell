@@ -186,7 +186,7 @@ def _wilcoxon_vs_rest(
         std = cp.sqrt(variance)
         z = (rank_sums - expected) / std
         cp.nan_to_num(z, copy=False)
-        p_values = 2.0 * (1.0 - cupyx_special.ndtr(cp.abs(z)))
+        p_values = cupyx_special.erfc(cp.abs(z) * cp.float64(cp.sqrt(0.5)))
 
         z_host = z.get()
         p_host = p_values.get()
@@ -291,7 +291,7 @@ def _wilcoxon_with_reference(
             std = cp.sqrt(variance)
             z = (rank_sums - expected) / std
             cp.nan_to_num(z, copy=False)
-            p_values = 2.0 * (1.0 - cupyx_special.ndtr(cp.abs(z)))
+            p_values = cupyx_special.erfc(cp.abs(z) * cp.float64(cp.sqrt(0.5)))
 
             # Fill pre-allocated arrays
             scores[start:stop] = z.get()

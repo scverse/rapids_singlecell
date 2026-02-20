@@ -360,7 +360,7 @@ def _compute_stats(
 
     z_scores = (rank_sums - expected) / cp.sqrt(variance)
     cp.nan_to_num(z_scores, copy=False)
-    pvals = 2.0 * (1.0 - cupyx_special.ndtr(cp.abs(z_scores)))
+    pvals = cupyx_special.erfc(cp.abs(z_scores) * cp.float64(cp.sqrt(0.5)))
 
     return z_scores, pvals
 
@@ -399,7 +399,7 @@ def _compute_stats_vs_ref(
 
     z_scores = (rank_sums - expected) / cp.sqrt(variance)
     cp.nan_to_num(z_scores, copy=False)
-    pvals = 2.0 * (1.0 - cupyx_special.ndtr(cp.abs(z_scores)))
+    pvals = cupyx_special.erfc(cp.abs(z_scores) * cp.float64(cp.sqrt(0.5)))
 
     return z_scores, pvals
 
