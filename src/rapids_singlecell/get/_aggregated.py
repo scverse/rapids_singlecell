@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 Array = Union[cp.ndarray, cp_sparse.csc_matrix, cp_sparse.csr_matrix]  # noqa: UP007
-AggType = Literal["count_nonzero", "mean", "sum", "var"]
+AggType = Literal["count_nonzero", "mean", "sum", "var", "sq_sum"]
 
 
 class Aggregate:
@@ -64,6 +64,29 @@ class Aggregate:
             return cp.array(self.mask)
         else:
             return cp.ones(self.data.shape[0], dtype=bool)
+
+    def _build_result(self, sums, counts, sq_sums, dof):
+        """Compute derived statistics from raw kernel accumulators."""
+        counts = counts.astype(cp.int32)
+        means = sums / self.n_cells
+        var = sq_sums / self.n_cells - means**2
+        var *= self.n_cells / (self.n_cells - dof)
+        return {
+            "sum": sums,
+            "sq_sum": sq_sums,
+            "count_nonzero": counts,
+            "mean": means,
+            "var": var,
+        }
+
+    def count_mean_var(self, dof: int = 1, split_every: int = 2):
+        """Dispatch to the appropriate count_mean_var method based on data type."""
+        if isinstance(self.data, DaskArray):
+            return self.count_mean_var_dask(dof, split_every=split_every)
+        elif cp_sparse.issparse(self.data):
+            return self.count_mean_var_sparse(dof)
+        else:
+            return self.count_mean_var_dense(dof)
 
     def count_mean_var_dask(self, dof: int = 1, split_every: int = 2):
         """
@@ -139,14 +162,7 @@ class Aggregate:
         # Compute final aggregated results
         out = out.sum(axis=0, split_every=split_every).compute()
         sums, counts, sq_sums = out[0], out[1], out[2]
-
-        # Calculate statistics
-        counts = counts.astype(cp.int32)
-        means = sums / self.n_cells
-        var = sq_sums / self.n_cells - cp.power(means, 2)
-        var *= self.n_cells / (self.n_cells - dof)
-
-        return {"mean": means, "var": var, "sum": sums, "count_nonzero": counts}
+        return self._build_result(sums, counts, sq_sums, dof)
 
     def count_mean_var_sparse(self, dof: int = 1):
         """
@@ -173,16 +189,11 @@ class Aggregate:
             is_csc=self.data.format == "csc",
         )
         sums, counts, sq_sums = out[0, :], out[1, :], out[2, :]
-        sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])
-        sq_sums = sq_sums.reshape(self.n_cells.shape[0], self.data.shape[1])
-        counts = counts.reshape(self.n_cells.shape[0], self.data.shape[1])
-        counts = counts.astype(cp.int32)
-        means = sums / self.n_cells
-        var = sq_sums / self.n_cells - means**2
-        var *= self.n_cells / (self.n_cells - dof)
-
-        results = {"sum": sums, "count_nonzero": counts, "mean": means, "var": var}
-        return results
+        n_groups, n_genes = self.n_cells.shape[0], self.data.shape[1]
+        sums = sums.reshape(n_groups, n_genes)
+        sq_sums = sq_sums.reshape(n_groups, n_genes)
+        counts = counts.reshape(n_groups, n_genes)
+        return self._build_result(sums, counts, sq_sums, dof)
 
     def count_mean_var_sparse_sparse(self, funcs, dof: int = 1):
         """
@@ -313,17 +324,11 @@ class Aggregate:
             is_fortran=self.data.flags.f_contiguous,
         )
         sums, counts, sq_sums = out[0], out[1], out[2]
-        sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])
-        counts = counts.reshape(self.n_cells.shape[0], self.data.shape[1])
-        sq_sums = sq_sums.reshape(self.n_cells.shape[0], self.data.shape[1])
-        counts = counts.astype(cp.int32)
-        means = sums / self.n_cells
-        var = sq_sums / self.n_cells - cp.power(means, 2)
-        var *= self.n_cells / (self.n_cells - dof)
-
-        results = {"sum": sums, "count_nonzero": counts, "mean": means, "var": var}
-
-        return results
+        n_groups, n_genes = self.n_cells.shape[0], self.data.shape[1]
+        sums = sums.reshape(n_groups, n_genes)
+        sq_sums = sq_sums.reshape(n_groups, n_genes)
+        counts = counts.reshape(n_groups, n_genes)
+        return self._build_result(sums, counts, sq_sums, dof)
 
 
 def aggregate(
@@ -442,22 +447,13 @@ def aggregate(
     if unknown := funcs - set(get_args(AggType)):
         raise ValueError(f"func {unknown} is not one of {get_args(AggType)}")
 
-    if isinstance(data, cp.ndarray):
-        result = groupby.count_mean_var_dense(dof)
-    elif isinstance(data, DaskArray):
-        if "split_every" in kwargs:
-            assert isinstance(kwargs["split_every"], int)
-            assert kwargs["split_every"] > 0
-            split_every = kwargs["split_every"]
-        else:
-            split_every = 2
-        result = groupby.count_mean_var_dask(dof, split_every=split_every)
-
+    if return_sparse and cp_sparse.issparse(data):
+        result = groupby.count_mean_var_sparse_sparse(funcs, dof)
     else:
-        if return_sparse:
-            result = groupby.count_mean_var_sparse_sparse(funcs, dof)
-        else:
-            result = groupby.count_mean_var_sparse(dof)
+        split_every = kwargs.pop("split_every", 2)
+        if kwargs:
+            raise TypeError(f"Unexpected keyword arguments: {set(kwargs)}")
+        result = groupby.count_mean_var(dof, split_every=split_every)
     layers = {}
 
     if "sum" in funcs:
@@ -468,6 +464,8 @@ def aggregate(
         layers["count_nonzero"] = result["count_nonzero"]
     if "var" in funcs:
         layers["var"] = result["var"]
+    if "sq_sum" in funcs:
+        layers["sq_sum"] = result["sq_sum"]
 
     result = AnnData(
         layers=layers,

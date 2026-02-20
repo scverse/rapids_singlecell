@@ -57,7 +57,7 @@ def test_rank_genes_groups_ttest_matches_scanpy(reference, method, sparse):
             gpu_values = np.asarray(gpu_field[group], dtype=float)
             cpu_values = np.asarray(cpu_field[group], dtype=float)
             np.testing.assert_allclose(
-                gpu_values, cpu_values, rtol=1e-5, atol=1e-6, equal_nan=True
+                gpu_values, cpu_values, rtol=1e-13, atol=1e-15, equal_nan=True
             )
 
     params = gpu_result["params"]
@@ -317,13 +317,14 @@ def test_rank_genes_groups_ttest_direct_scipy():
     scipy_scores, _ = stats.ttest_ind(X_group1, X_group2, equal_var=False)
 
     # Compare scores for each gene
+    # Scores are stored as float32 in the structured array, so rtol ~ float32 eps
     for i in range(n_genes):
         gene = adata.var_names[i]
         np.testing.assert_allclose(
             rsc_score_map[gene],
             scipy_scores[i],
-            rtol=1e-5,
-            atol=1e-6,
+            rtol=1e-7,
+            atol=1e-15,
             err_msg=f"Score mismatch for gene {gene}",
         )
 
@@ -383,12 +384,13 @@ def test_rank_genes_groups_ttest_matches_scipy():
         rsc_score_map = dict(zip(rsc_names, rsc_scores))
 
         # Compare scores for each gene
+        # Gap is from GPU vs CPU mean/var computation (~float32 intermediates)
         for i, gene in enumerate(var_names):
             np.testing.assert_allclose(
                 rsc_score_map[gene],
                 scipy_scores[i],
-                rtol=1e-5,
-                atol=1e-6,
+                rtol=1e-6,
+                atol=1e-15,
                 err_msg=f"Score mismatch for gene {gene} in group {group}",
             )
 

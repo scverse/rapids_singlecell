@@ -36,6 +36,7 @@ def rank_genes_groups(
     method: _Method | None = None,
     corr_method: _CorrMethod = "benjamini-hochberg",
     tie_correct: bool = False,
+    use_continuity: bool = False,
     layer: str | None = None,
     chunk_size: int | None = None,
     pre_load: bool = False,
@@ -91,10 +92,15 @@ def rank_genes_groups(
         p-value correction method. Used only for `'t-test'`,
         `'t-test_overestim_var'`, `'wilcoxon'`, and `'wilcoxon_binned'`.
     tie_correct
-        Use tie correction for `'wilcoxon'` scores. Not applicable to
-        `'wilcoxon_binned'` — binning already discretizes values into shared
-        bins, so ties are artifacts of the approximation rather than true
-        ties in the data.
+        Use tie correction for `'wilcoxon'` and `'wilcoxon_binned'` scores.
+        Adjusts the variance of the rank-sum statistic for tied values.
+        For `'wilcoxon_binned'`, each histogram bin acts as a tie group
+        and the correction is derived from the bin counts.
+    use_continuity
+        Apply continuity correction to `'wilcoxon'` and `'wilcoxon_binned'`
+        z-scores. Subtracts 0.5 from ``|R - E[R]|`` before dividing by the
+        standard deviation, matching :func:`scipy.stats.mannwhitneyu`
+        default behavior.
     layer
         Key from `adata.layers` whose value will be used to perform tests on.
     chunk_size
@@ -204,6 +210,7 @@ def rank_genes_groups(
         n_genes_user=n_genes_user,
         rankby_abs=rankby_abs,
         tie_correct=tie_correct,
+        use_continuity=use_continuity,
         chunk_size=chunk_size,
         n_bins=n_bins,
         bin_range=bin_range,

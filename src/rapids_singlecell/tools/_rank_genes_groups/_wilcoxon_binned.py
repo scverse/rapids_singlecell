@@ -65,6 +65,8 @@ def _data_range(X) -> tuple[float, float]:
 def wilcoxon_binned(
     rg: _RankGenes,
     *,
+    tie_correct: bool = False,
+    use_continuity: bool = False,
     n_bins: int | None = None,
     chunk_size: int | None = None,
     bin_range: Literal["log1p", "auto"] | None = None,
@@ -84,6 +86,10 @@ def wilcoxon_binned(
     ----------
     rg
         The _RankGenes instance.
+    tie_correct
+        Adjust the variance for ties. In the binned approach each bin
+        acts as a tie group, so the correction uses the bin counts
+        directly.
     n_bins
         Number of histogram bins. Higher = better approximation.
         Default is 1000 for in-memory arrays and 200 for Dask arrays.
@@ -221,6 +227,8 @@ def wilcoxon_binned(
         "n_cells_total": n_cells,
         "n_cells_per_group_hist": n_cells_per_group_hist_gpu,
         "total_counts_from_all": has_unselected,
+        "tie_correct": tie_correct,
+        "use_continuity": use_continuity,
         "ireference": ireference,
     }
 
@@ -264,6 +272,8 @@ def process_gene_batch(
     n_cells_total: int,
     n_cells_per_group_hist: cp.ndarray,
     total_counts_from_all: bool,
+    tie_correct: bool = False,
+    use_continuity: bool = False,
     ireference: int | None = None,
 ) -> tuple[cp.ndarray, cp.ndarray]:
     """Process one gene batch, dispatching on Dask vs in-memory."""
@@ -331,8 +341,21 @@ def process_gene_batch(
         hist = hist[:, :n_groups, :]
 
     if ireference is not None:
-        return _compute_stats_vs_ref(hist, ireference, n_cells_per_group)
-    return _compute_stats(hist, n_cells_per_group, n_cells_total, total_counts=tc)
+        return _compute_stats_vs_ref(
+            hist,
+            ireference,
+            n_cells_per_group,
+            tie_correct=tie_correct,
+            use_continuity=use_continuity,
+        )
+    return _compute_stats(
+        hist,
+        n_cells_per_group,
+        n_cells_total,
+        total_counts=tc,
+        tie_correct=tie_correct,
+        use_continuity=use_continuity,
+    )
 
 
 def _compute_stats(
@@ -341,6 +364,8 @@ def _compute_stats(
     n_cells_total: int,
     *,
     total_counts: cp.ndarray | None = None,
+    tie_correct: bool = False,
+    use_continuity: bool = False,
 ) -> tuple[cp.ndarray, cp.ndarray]:
     """Compute Wilcoxon z-scores from histograms."""
     n = cp.int64(n_cells_total)
@@ -358,7 +383,17 @@ def _compute_stats(
     expected = n_g * (n + 1) / 2.0
     variance = n_g * n_rest * (n + 1) / 12.0
 
-    z_scores = (rank_sums - expected) / cp.sqrt(variance)
+    if tie_correct:
+        # Each bin is a tie group; t = total_counts per bin per gene
+        t = total_counts.astype(cp.float64)
+        tie_term = (t * t * t - t).sum(axis=1)  # (n_genes,)
+        tc = 1.0 - tie_term / (float(n) ** 3 - float(n))
+        variance = variance * tc[None, :]
+
+    diff = rank_sums - expected
+    if use_continuity:
+        diff = cp.sign(diff) * cp.maximum(cp.abs(diff) - 0.5, 0.0)
+    z_scores = diff / cp.sqrt(variance)
     cp.nan_to_num(z_scores, copy=False)
     pvals = cupyx_special.erfc(cp.abs(z_scores) * cp.float64(cp.sqrt(0.5)))
 
@@ -369,6 +404,9 @@ def _compute_stats_vs_ref(
     hist: cp.ndarray,
     ireference: int,
     n_cells_per_group: cp.ndarray,
+    *,
+    tie_correct: bool = False,
+    use_continuity: bool = False,
 ) -> tuple[cp.ndarray, cp.ndarray]:
     """Compute Wilcoxon z-scores for each group vs a specific reference.
 
@@ -397,7 +435,17 @@ def _compute_stats_vs_ref(
     expected = n_g * (n_combined + 1) / 2.0
     variance = n_g * n_r * (n_combined + 1) / 12.0
 
-    z_scores = (rank_sums - expected) / cp.sqrt(variance)
+    if tie_correct:
+        # Each bin is a tie group; t = pair_total per bin
+        t = pair_total.astype(cp.float64)
+        tie_term = (t * t * t - t).sum(axis=2)  # (n_genes, n_groups)
+        tc = 1.0 - tie_term.T / (n_combined**3 - n_combined)  # (n_groups, n_genes)
+        variance = variance * tc
+
+    diff = rank_sums - expected
+    if use_continuity:
+        diff = cp.sign(diff) * cp.maximum(cp.abs(diff) - 0.5, 0.0)
+    z_scores = diff / cp.sqrt(variance)
     cp.nan_to_num(z_scores, copy=False)
     pvals = cupyx_special.erfc(cp.abs(z_scores) * cp.float64(cp.sqrt(0.5)))
 

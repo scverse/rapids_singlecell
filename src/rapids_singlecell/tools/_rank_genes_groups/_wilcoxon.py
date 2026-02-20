@@ -87,7 +87,11 @@ def _tie_correction(sorted_vals: cp.ndarray) -> cp.ndarray:
 
 
 def wilcoxon(
-    rg: _RankGenes, *, tie_correct: bool, chunk_size: int | None = None
+    rg: _RankGenes,
+    *,
+    tie_correct: bool,
+    use_continuity: bool = False,
+    chunk_size: int | None = None,
 ) -> Generator[tuple[int, NDArray, NDArray], None, None]:
     """Compute Wilcoxon rank-sum test statistics."""
     # Compute basic stats - uses Aggregate if on GPU, else defers to chunks
@@ -104,6 +108,7 @@ def wilcoxon(
             n_total_genes,
             group_sizes,
             tie_correct=tie_correct,
+            use_continuity=use_continuity,
             chunk_size=chunk_size,
         )
     else:
@@ -115,6 +120,7 @@ def wilcoxon(
             n_total_genes,
             group_sizes,
             tie_correct=tie_correct,
+            use_continuity=use_continuity,
             chunk_size=chunk_size,
         )
 
@@ -127,6 +133,7 @@ def _wilcoxon_vs_rest(
     group_sizes: NDArray,
     *,
     tie_correct: bool,
+    use_continuity: bool,
     chunk_size: int | None,
 ) -> Generator[tuple[int, NDArray, NDArray], None, None]:
     """Wilcoxon test: each group vs rest of cells."""
@@ -184,7 +191,10 @@ def _wilcoxon_vs_rest(
         variance = tie_corr[None, :] * group_sizes_dev[:, None] * rest_sizes[:, None]
         variance *= (n_cells + 1) / 12.0
         std = cp.sqrt(variance)
-        z = (rank_sums - expected) / std
+        diff = rank_sums - expected
+        if use_continuity:
+            diff = cp.sign(diff) * cp.maximum(cp.abs(diff) - 0.5, 0.0)
+        z = diff / std
         cp.nan_to_num(z, copy=False)
         p_values = cupyx_special.erfc(cp.abs(z) * cp.float64(cp.sqrt(0.5)))
 
@@ -209,6 +219,7 @@ def _wilcoxon_with_reference(
     group_sizes: NDArray,
     *,
     tie_correct: bool,
+    use_continuity: bool,
     chunk_size: int | None,
 ) -> Generator[tuple[int, NDArray, NDArray], None, None]:
     """Wilcoxon test: each group vs a specific reference group."""
@@ -289,7 +300,10 @@ def _wilcoxon_with_reference(
             expected = n_group * (n_combined + 1) / 2.0
             variance = tie_corr * n_group * n_ref * (n_combined + 1) / 12.0
             std = cp.sqrt(variance)
-            z = (rank_sums - expected) / std
+            diff = rank_sums - expected
+            if use_continuity:
+                diff = cp.sign(diff) * cp.maximum(cp.abs(diff) - 0.5, 0.0)
+            z = diff / std
             cp.nan_to_num(z, copy=False)
             p_values = cupyx_special.erfc(cp.abs(z) * cp.float64(cp.sqrt(0.5)))
 
