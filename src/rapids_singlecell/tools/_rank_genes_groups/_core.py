@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal, assert_never
 
 import cupy as cp
-import cupyx.scipy.sparse as cpsp
 import numpy as np
 import pandas as pd
 from statsmodels.stats.multitest import multipletests
@@ -16,7 +15,7 @@ from rapids_singlecell.preprocessing._utils import _check_gpu_X
 from ._utils import EPS, _select_groups, _select_top_n
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterable
+    from collections.abc import Iterable
 
     from anndata import AnnData
     from numpy.typing import NDArray
@@ -162,7 +161,6 @@ class _RankGenes:
         Otherwise, sets flag for chunk-based computation during the wilcoxon loop.
         """
         n_genes = self.X.shape[1]
-        n_groups = len(self.groups_order)
 
         # Check if data is already on GPU
         try:
@@ -182,90 +180,53 @@ class _RankGenes:
         self._compute_stats_in_chunks = False
 
         agg = Aggregate(groupby=self.labels.cat, data=self.X)
+        result = agg.count_mean_var(dof=1)
 
-        if isinstance(self.X, DaskArray):
-            result = agg.count_mean_var_dask(dof=1)
-        elif cpsp.issparse(self.X):
-            result = agg.count_mean_var_sparse(dof=1)
-        else:
-            result = agg.count_mean_var_dense(dof=1)
-
-        # Map results to selected groups order
+        # Map Aggregate category order → selected groups order
         cat_names = list(self.labels.cat.categories)
+        cat_to_idx = {str(name): i for i, name in enumerate(cat_names)}
+        order = [cat_to_idx[str(name)] for name in self.groups_order]
 
-        means = np.zeros((n_groups, n_genes), dtype=np.float64)
-        vars_ = np.zeros((n_groups, n_genes), dtype=np.float64)
-        pts = np.zeros((n_groups, n_genes), dtype=np.float64) if self.comp_pts else None
+        n = cp.array([mask.sum() for mask in self.groups_masks_obs], dtype=cp.float64)[
+            :, None
+        ]
+        sums = result["sum"][order]
+        sq_sums = result["sq_sum"][order]
 
-        for idx, group_name in enumerate(self.groups_order):
-            group_name_str = str(group_name)
-            if group_name_str in cat_names:
-                cat_idx = cat_names.index(group_name_str)
-                means[idx] = cp.asnumpy(result["mean"][cat_idx])
-                vars_[idx] = cp.asnumpy(result["var"][cat_idx])
-                if self.comp_pts:
-                    n_cells = self.groups_masks_obs[idx].sum()
-                    pts[idx] = cp.asnumpy(result["count_nonzero"][cat_idx]) / n_cells
+        # Compute means and variances from raw sums (all on GPU)
+        means = sums / n
+        group_ss = sq_sums - n * means**2
+        vars_ = cp.maximum(group_ss / cp.maximum(n - 1, 1), 0)
 
-        self.means = means
-        # Clip tiny negative variances to 0 (floating-point precision artifacts)
-        self.vars = np.maximum(vars_, 0)
-        self.pts = pts
+        if self.comp_pts:
+            pts = result["count_nonzero"][order].astype(cp.float64) / n
+        else:
+            pts = None
 
         # Compute rest statistics if reference='rest'
         if self.ireference is None:
-            self.means_rest = np.zeros((n_groups, n_genes), dtype=np.float64)
-            self.vars_rest = np.zeros((n_groups, n_genes), dtype=np.float64)
-            self.pts_rest = (
-                np.zeros((n_groups, n_genes), dtype=np.float64)
-                if self.comp_pts
-                else None
-            )
+            n_rest = n.sum() - n
+            means_rest = (sums.sum(axis=0) - sums) / n_rest
+            rest_ss = (sq_sums.sum(axis=0) - sq_sums) - n_rest * means_rest**2
+            vars_rest = cp.maximum(rest_ss / cp.maximum(n_rest - 1, 1), 0)
 
-            n_cells_per_group = np.array([mask.sum() for mask in self.groups_masks_obs])
-            total_sum = self.means * n_cells_per_group[:, None]
-            total_sum_all = total_sum.sum(axis=0)
-
-            # Compute total sum of squares for variance calculation
-            total_sq_sum = (
-                self.vars * (n_cells_per_group[:, None] - 1)
-                + self.means**2 * n_cells_per_group[:, None]
-            ).sum(axis=0)
+            self.means_rest = cp.asnumpy(means_rest)
+            self.vars_rest = cp.asnumpy(vars_rest)
 
             if self.comp_pts:
-                total_count = (self.pts * n_cells_per_group[:, None]).sum(axis=0)
-
-            total_n = n_cells_per_group.sum()
-
-            for idx in range(n_groups):
-                n_group = n_cells_per_group[idx]
-                n_rest = total_n - n_group
-
-                if n_rest > 0:
-                    rest_sum = total_sum_all - total_sum[idx]
-                    self.means_rest[idx] = rest_sum / n_rest
-
-                    group_sq_sum = (
-                        self.vars[idx] * (n_group - 1) + self.means[idx] ** 2 * n_group
-                    )
-                    rest_sq_sum = total_sq_sum - group_sq_sum
-
-                    rest_mean_sq = self.means_rest[idx] ** 2
-                    if n_rest > 1:
-                        self.vars_rest[idx] = np.maximum(
-                            (rest_sq_sum / n_rest - rest_mean_sq)
-                            * n_rest
-                            / (n_rest - 1),
-                            0,
-                        )
-
-                    if self.comp_pts:
-                        rest_count = total_count - self.pts[idx] * n_group
-                        self.pts_rest[idx] = rest_count / n_rest
+                total_count = (pts * n).sum(axis=0)
+                self.pts_rest = cp.asnumpy((total_count - pts * n) / n_rest)
+            else:
+                self.pts_rest = None
         else:
             self.means_rest = None
             self.vars_rest = None
             self.pts_rest = None
+
+        # Transfer to CPU
+        self.means = cp.asnumpy(means)
+        self.vars = cp.asnumpy(vars_)
+        self.pts = cp.asnumpy(pts) if pts is not None else None
 
     def _accumulate_chunk_stats_vs_rest(
         self,
@@ -365,42 +326,6 @@ class _RankGenes:
                 ref_nnz = (ref_data != 0).sum(axis=0)
                 self.pts[self.ireference, start:stop] = cp.asnumpy(ref_nnz / n_ref)
 
-    def t_test(
-        self, method: Literal["t-test", "t-test_overestim_var"]
-    ) -> Generator[tuple[int, NDArray, NDArray], None, None]:
-        """Compute t-test statistics using Welch's t-test."""
-        from ._ttest import t_test
-
-        return t_test(self, method)
-
-    def wilcoxon(
-        self, *, tie_correct: bool, chunk_size: int | None = None
-    ) -> Generator[tuple[int, NDArray, NDArray], None, None]:
-        """Compute Wilcoxon rank-sum test statistics."""
-        from ._wilcoxon import wilcoxon
-
-        return wilcoxon(self, tie_correct=tie_correct, chunk_size=chunk_size)
-
-    def wilcoxon_binned(
-        self,
-        *,
-        n_bins: int | None = None,
-        chunk_size: int | None = None,
-        bin_range: Literal["log1p", "auto"] | None = None,
-    ) -> Generator[tuple[int, NDArray, NDArray], None, None]:
-        """Histogram-based approximate Wilcoxon rank-sum test (one-vs-rest)."""
-        from ._wilcoxon_binned import wilcoxon_binned
-
-        return wilcoxon_binned(
-            self, n_bins=n_bins, chunk_size=chunk_size, bin_range=bin_range
-        )
-
-    def logreg(self, **kwds) -> Generator[tuple[int, NDArray, None], None, None]:
-        """Compute logistic regression scores."""
-        from ._logreg import logreg
-
-        return logreg(self, **kwds)
-
     def compute_statistics(
         self,
         method: _Method,
@@ -409,6 +334,7 @@ class _RankGenes:
         n_genes_user: int | None = None,
         rankby_abs: bool = False,
         tie_correct: bool = False,
+        use_continuity: bool = False,
         chunk_size: int | None = None,
         n_bins: int | None = None,
         bin_range: Literal["log1p", "auto"] | None = None,
@@ -421,21 +347,38 @@ class _RankGenes:
             "wilcoxon_binned",
         }:
             self.X = X_to_GPU(self.X)
+
         if method in {"t-test", "t-test_overestim_var"}:
-            generate_test_results = self.t_test(method)
+            from ._ttest import t_test
+
+            generate_test_results = t_test(self, method)
         elif method == "wilcoxon":
+            from ._wilcoxon import wilcoxon
+
             if isinstance(self.X, DaskArray):
                 msg = "Wilcoxon test is not supported for Dask arrays. Please convert your data to CuPy arrays."
                 raise ValueError(msg)
-            generate_test_results = self.wilcoxon(
-                tie_correct=tie_correct, chunk_size=chunk_size
+            generate_test_results = wilcoxon(
+                self,
+                tie_correct=tie_correct,
+                use_continuity=use_continuity,
+                chunk_size=chunk_size,
             )
         elif method == "wilcoxon_binned":
-            generate_test_results = self.wilcoxon_binned(
-                n_bins=n_bins, chunk_size=chunk_size, bin_range=bin_range
+            from ._wilcoxon_binned import wilcoxon_binned
+
+            generate_test_results = wilcoxon_binned(
+                self,
+                tie_correct=tie_correct,
+                use_continuity=use_continuity,
+                n_bins=n_bins,
+                chunk_size=chunk_size,
+                bin_range=bin_range,
             )
         elif method == "logreg":
-            generate_test_results = self.logreg(**kwds)
+            from ._logreg import logreg
+
+            generate_test_results = logreg(self, **kwds)
         else:
             assert_never(method)
 

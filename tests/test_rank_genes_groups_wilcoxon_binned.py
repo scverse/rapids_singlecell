@@ -439,3 +439,34 @@ class TestWilcoxonBinnedEdgeCases:
             )
             corr = np.corrcoef(scores_auto, scores_log1p)[0, 1]
             assert corr > 0.99, f"Group {group}: auto vs log1p correlation {corr:.4f}"
+
+
+def test_top_genes_match_scipy(adata_blobs):
+    """Top DE genes by p-value should match scipy mannwhitneyu ranking."""
+    from scipy.stats import mannwhitneyu
+
+    adata = adata_blobs.copy()
+    rsc.get.anndata_to_GPU(adata)
+    rsc.tl.rank_genes_groups(
+        adata, "blobs", method="wilcoxon_binned", use_raw=False, tie_correct=True
+    )
+
+    X = adata_blobs.X.astype(np.float64)
+    groups = adata_blobs.obs["blobs"]
+    n_top = 5
+    for group in adata.uns["rank_genes_groups"]["names"].dtype.names:
+        # Sort binned results by p-value (direction-agnostic)
+        pvals_binned = adata.uns["rank_genes_groups"]["pvals"][group]
+        binned_order = np.argsort(pvals_binned)
+        binned_top = set(
+            adata.uns["rank_genes_groups"]["names"][group][binned_order[:n_top]]
+        )
+
+        mask_g = (groups == group).values
+        pvals = [
+            mannwhitneyu(X[mask_g, i], X[~mask_g, i], alternative="two-sided").pvalue
+            for i in range(X.shape[1])
+        ]
+        scipy_top = set(adata_blobs.var_names[np.argsort(pvals)[:n_top]])
+        overlap = len(binned_top & scipy_top)
+        assert overlap >= n_top - 1, f"Group {group}: {overlap}/{n_top} overlap"

@@ -10,7 +10,6 @@ import pandas as pd
 from anndata import AnnData
 from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
 from cupyx.scipy.sparse import issparse as cp_issparse
-from cupyx.scipy.special import betainc
 from scanpy.get import _get_obs_rep
 from scipy.sparse import csr_matrix, issparse
 from tqdm.auto import tqdm
@@ -34,12 +33,6 @@ getnnz_0 = cp.ElementwiseKernel(
     """,
     "get_nnz_0",
 )
-
-
-def __stdtr(df, t):
-    x = df / (t**2 + df)
-    tail = betainc(df / 2, 0.5, x) / 2
-    return cp.where(t < 0, tail, 1 - tail)
 
 
 def _validate_mat(

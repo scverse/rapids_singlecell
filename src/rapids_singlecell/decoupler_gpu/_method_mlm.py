@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import cupy as cp
 import numpy as np
+from cupyx.scipy.special import betainc
 
-from rapids_singlecell.decoupler_gpu._helper._data import __stdtr
 from rapids_singlecell.decoupler_gpu._helper._docs import docs
 from rapids_singlecell.decoupler_gpu._helper._log import _log
 from rapids_singlecell.decoupler_gpu._helper._Method import Method, MethodMeta
@@ -102,8 +102,9 @@ def _func_mlm(
 
     # Compute tval
     coef, t = _fit(adj, mat.T, inv, df)
-    # Compute pval
-    pv = 2 * (1 - __stdtr(df, cp.abs(t)))
+    # Compute two-sided p-value via regularized incomplete beta function
+    # betainc(df/2, 0.5, df/(t²+df)) = 2·sf(|t|, df) avoids 1-CDF cancellation
+    pv = betainc(df / 2, 0.5, df / (t**2 + df))
     # Return coef or tval
     if tval:
         es = t
