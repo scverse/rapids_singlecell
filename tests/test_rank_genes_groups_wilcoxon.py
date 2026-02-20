@@ -325,7 +325,8 @@ def _make_perturbation_adata(
 
 def _scipy_mannwhitneyu_pvals(adata, *, group, reference, groupby="group"):
     """Per-gene two-sided Mann-Whitney U p-values via scipy (ground truth)."""
-    X = adata.X.toarray() if sp.issparse(adata.X) else adata.X
+    X = adata.X.toarray() if sp.issparse(adata.X) else np.array(adata.X)
+    X = X.astype(np.float64)
     mask_g = (adata.obs[groupby] == group).values
     mask_r = (adata.obs[groupby] == reference).values
     return np.array(
