@@ -212,8 +212,8 @@ def test_rank_genes_groups_wilcoxon_with_unsorted_groups(reference):
         np.testing.assert_allclose(
             np.asarray(adata.uns["rank_genes_groups"][field][test_group], dtype=float),
             np.asarray(bdata.uns["rank_genes_groups"][field][test_group], dtype=float),
-            rtol=1e-5,
-            atol=1e-6,
+            rtol=1e-13,
+            atol=1e-15,
             equal_nan=True,
         )
 
@@ -267,7 +267,7 @@ def test_rank_genes_groups_wilcoxon_pts(reference, pre_load):
 
     for col in gpu_pts.columns:
         np.testing.assert_allclose(
-            gpu_pts[col].values, cpu_pts[col].values, rtol=1e-5, atol=1e-6
+            gpu_pts[col].values, cpu_pts[col].values, rtol=1e-13, atol=1e-15
         )
 
     # pts_rest only exists when reference='rest'
@@ -280,7 +280,10 @@ def test_rank_genes_groups_wilcoxon_pts(reference, pre_load):
 
         for col in gpu_pts_rest.columns:
             np.testing.assert_allclose(
-                gpu_pts_rest[col].values, cpu_pts_rest[col].values, rtol=1e-5, atol=1e-6
+                gpu_pts_rest[col].values,
+                cpu_pts_rest[col].values,
+                rtol=1e-13,
+                atol=1e-15,
             )
 
 
