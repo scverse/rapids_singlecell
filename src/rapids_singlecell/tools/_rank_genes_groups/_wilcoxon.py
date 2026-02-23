@@ -21,69 +21,69 @@ if TYPE_CHECKING:
     from ._core import _RankGenes
 
 
-def _average_ranks(
-    matrix: cp.ndarray, *, return_sorted: bool = False
-) -> cp.ndarray | tuple[cp.ndarray, cp.ndarray]:
+def _alloc_sort_workspace(n_rows: int, n_cols: int) -> dict[str, cp.ndarray]:
     """
-    Compute average ranks for each column using GPU kernel.
+    Pre-allocate CuPy buffers for CUB segmented sort.
 
-    Uses scipy.stats.rankdata 'average' method: ties get the average
-    of the ranks they would span.
+    All allocations go through CuPy's memory pool (RMM-compatible).
+    Buffers can be reused across chunks with the same or smaller dimensions.
+    """
+    cub_temp_bytes = _wc.get_sort_temp_bytes(n_rows=n_rows, n_cols=n_cols)
+    return {
+        "sorted_vals": cp.empty((n_rows, n_cols), dtype=cp.float64, order="F"),
+        "sorter": cp.empty((n_rows, n_cols), dtype=cp.int32, order="F"),
+        "iota": cp.empty((n_rows, n_cols), dtype=cp.int32, order="F"),
+        "offsets": cp.empty(n_cols + 1, dtype=cp.int32),
+        "cub_temp": cp.empty(cub_temp_bytes, dtype=cp.uint8),
+    }
+
+
+def _average_ranks(
+    matrix: cp.ndarray,
+    workspace: dict[str, cp.ndarray] | None = None,
+) -> tuple[cp.ndarray, cp.ndarray]:
+    """
+    Compute average ranks and tie correction for each column.
+
+    Uses a fused CUB segmented radix sort + CUDA kernel pipeline:
+
+    1. CUB DeviceSegmentedRadixSort sorts each column independently
+    2. Binary-search kernel assigns average ranks to original positions
+    3. Tie correction kernel computes ``1 - sum(t^3 - t) / (n^3 - n)``
 
     Parameters
     ----------
     matrix
-        Input matrix (n_rows, n_cols)
-    return_sorted
-        If True, also return sorted values (useful for tie correction)
+        Input matrix (n_rows, n_cols), F-order float64.
+        Overwritten in-place with average ranks.
+    workspace
+        Pre-allocated buffers from :func:`_alloc_sort_workspace`.
+        If ``None``, a fresh workspace is allocated (convenient for tests).
 
     Returns
     -------
-    ranks or (ranks, sorted_vals)
+    ranks, correction
+        ranks is the input matrix (now containing average ranks).
+        correction is the tie correction factor per column.
     """
     n_rows, n_cols = matrix.shape
-
-    # Sort each column
-    sorter = cp.argsort(matrix, axis=0)
-    sorted_vals = cp.take_along_axis(matrix, sorter, axis=0)
-
-    # Ensure F-order for kernel (columns contiguous in memory)
-    sorted_vals = cp.asfortranarray(sorted_vals)
-    sorter = cp.asfortranarray(sorter.astype(cp.int32))
-
+    if workspace is None:
+        workspace = _alloc_sort_workspace(n_rows, n_cols)
+    correction = cp.empty(n_cols, dtype=cp.float64)
     stream = cp.cuda.get_current_stream().ptr
-    _wc.average_rank(
-        sorted_vals, sorter, matrix, n_rows=n_rows, n_cols=n_cols, stream=stream
+    _wc.compute_ranks(
+        matrix,
+        correction,
+        workspace["sorted_vals"],
+        workspace["sorter"],
+        workspace["iota"],
+        workspace["offsets"],
+        workspace["cub_temp"],
+        n_rows=n_rows,
+        n_cols=n_cols,
+        stream=stream,
     )
-
-    if return_sorted:
-        return matrix, sorted_vals
-    return matrix
-
-
-def _tie_correction(sorted_vals: cp.ndarray) -> cp.ndarray:
-    """
-    Compute tie correction factor for Wilcoxon test.
-
-    Takes pre-sorted values (column-wise) to avoid re-sorting.
-    Formula: tc = 1 - sum(t^3 - t) / (n^3 - n)
-    where t is the count of tied values.
-    """
-    n_rows, n_cols = sorted_vals.shape
-    correction = cp.ones(n_cols, dtype=cp.float64)
-
-    if n_rows < 2:
-        return correction
-
-    # Ensure F-order
-    sorted_vals = cp.asfortranarray(sorted_vals)
-
-    stream = cp.cuda.get_current_stream().ptr
-    _wc.tie_correction(
-        sorted_vals, correction, n_rows=n_rows, n_cols=n_cols, stream=stream
-    )
-
-    return correction
+    return matrix, correction
 
 
 def wilcoxon(
@@ -163,6 +163,9 @@ def _wilcoxon_vs_rest(
     if isinstance(X, sp.spmatrix | sp.sparray):
         X = _fast_csr_to_csc(X) if X.format == "csr" else X.tocsc()
 
+    # Pre-allocate sort workspace (reused across all gene chunks)
+    workspace = _alloc_sort_workspace(n_cells, chunk_width)
+
     for start in range(0, n_total_genes, chunk_width):
         stop = min(start + chunk_width, n_total_genes)
 
@@ -179,11 +182,8 @@ def _wilcoxon_vs_rest(
             n_cells=n_cells,
         )
 
-        if tie_correct:
-            ranks, sorted_vals = _average_ranks(block, return_sorted=True)
-            tie_corr = _tie_correction(sorted_vals)
-        else:
-            ranks = _average_ranks(block)
+        ranks, tie_corr = _average_ranks(block, workspace)
+        if not tie_correct:
             tie_corr = cp.ones(ranks.shape[1], dtype=cp.float64)
 
         rank_sums = group_matrix.T @ ranks
@@ -264,9 +264,10 @@ def _wilcoxon_with_reference(
 
         chunk_width = _choose_chunk_size(chunk_size)
 
-        # Pre-allocate output arrays
+        # Pre-allocate output arrays and sort workspace for this group pair
         scores = np.empty(n_total_genes, dtype=np.float64)
         pvals = np.empty(n_total_genes, dtype=np.float64)
+        workspace = _alloc_sort_workspace(n_combined, chunk_width)
 
         for start in range(0, n_total_genes, chunk_width):
             stop = min(start + chunk_width, n_total_genes)
@@ -286,11 +287,8 @@ def _wilcoxon_with_reference(
             )
 
             # Ranks for combined group+reference cells
-            if tie_correct:
-                ranks, sorted_vals = _average_ranks(block, return_sorted=True)
-                tie_corr = _tie_correction(sorted_vals)
-            else:
-                ranks = _average_ranks(block)
+            ranks, tie_corr = _average_ranks(block, workspace)
+            if not tie_correct:
                 tie_corr = cp.ones(ranks.shape[1], dtype=cp.float64)
 
             # Rank sum for the group

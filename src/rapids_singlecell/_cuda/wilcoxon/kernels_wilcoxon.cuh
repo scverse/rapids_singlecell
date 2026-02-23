@@ -3,6 +3,31 @@
 #include <cuda_runtime.h>
 
 /**
+ * Initialize per-segment iota values: each column gets [0, 1, ..., n_rows-1].
+ * Uses 2D grid: x-dim over rows, y-dim over columns. F-order layout.
+ */
+__global__ void iota_segments_kernel(int* __restrict__ values, const int n_rows,
+                                     const int n_cols) {
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+    int col = blockIdx.y;
+    if (row < n_rows && col < n_cols) {
+        values[(size_t)col * n_rows + row] = row;
+    }
+}
+
+/**
+ * Fill uniform segment offsets: offsets[i] = i * n_rows.
+ * Requires n_segments + 1 elements.
+ */
+__global__ void fill_offsets_kernel(int* __restrict__ offsets, const int n_rows,
+                                    const int n_segments) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx <= n_segments) {
+        offsets[idx] = idx * n_rows;
+    }
+}
+
+/**
  * Kernel to compute tie correction factor for Wilcoxon test.
  * Formula: tc = 1 - sum(t^3 - t) / (n^3 - n) where t is the count of tied
  * values.
