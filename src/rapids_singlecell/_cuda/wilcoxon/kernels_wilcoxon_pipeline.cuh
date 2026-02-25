@@ -231,8 +231,8 @@ template <typename T>
 __global__ void csc_slice_to_dense_filtered_kernel(
     const T* __restrict__ csc_data, const int* __restrict__ csc_indices,
     const int* __restrict__ csc_indptr,  // already offset to col_start
-    const int* __restrict__ row_map,  // (n_total_rows,) maps old → new or -1
-    double* __restrict__ dense,       // F-order (n_filtered, n_cols)
+    const int* __restrict__ row_map,     // (n_total_rows,) maps old → new or -1
+    double* __restrict__ dense,          // F-order (n_filtered, n_cols)
     const int n_filtered, const int n_cols) {
     int col = blockIdx.x;
     if (col >= n_cols) return;
