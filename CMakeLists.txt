@@ -14,6 +14,39 @@ if (RSC_BUILD_EXTENSIONS)
   find_package(Python REQUIRED COMPONENTS Interpreter Development.Module ${SKBUILD_SABI_COMPONENT})
   find_package(nanobind CONFIG REQUIRED)
   find_package(CUDAToolkit REQUIRED)
+
+  # Discover RAPIDS cmake configs from Python site-packages (librmm, rapids_logger)
+  if(DEFINED ENV{CONDA_PREFIX})
+    file(GLOB _site_packages_dirs "$ENV{CONDA_PREFIX}/lib/python*/site-packages")
+  else()
+    execute_process(
+      COMMAND "${Python_EXECUTABLE}" -c "import sysconfig; print(sysconfig.get_path('purelib'))"
+      OUTPUT_VARIABLE _site_packages_dirs
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+    )
+  endif()
+  if(_site_packages_dirs)
+    list(GET _site_packages_dirs 0 _site_packages)
+    # Set _DIR hints for each package so find_package can locate them
+    set(_rmm_cmake "${_site_packages}/librmm/lib64/cmake/rmm")
+    if(EXISTS "${_rmm_cmake}/rmm-config.cmake")
+      set(rmm_DIR "${_rmm_cmake}")
+      message(STATUS "Found rmm_DIR: ${rmm_DIR}")
+    endif()
+    set(_rl_cmake "${_site_packages}/rapids_logger/lib64/cmake/rapids_logger")
+    if(EXISTS "${_rl_cmake}/rapids_logger-config.cmake")
+      set(rapids_logger_DIR "${_rl_cmake}")
+      message(STATUS "Found rapids_logger_DIR: ${rapids_logger_DIR}")
+    endif()
+    # nvtx3 ships with librmm
+    set(_nvtx3_cmake "${_site_packages}/librmm/lib64/cmake/nvtx3")
+    if(EXISTS "${_nvtx3_cmake}/nvtx3-config.cmake")
+      set(nvtx3_DIR "${_nvtx3_cmake}")
+    endif()
+  endif()
+  find_package(rmm REQUIRED)
+
   message(STATUS "Building for CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 else()
   message(STATUS "RSC_BUILD_EXTENSIONS=OFF -> skipping compiled extensions for docs")
@@ -84,6 +117,7 @@ if (RSC_BUILD_EXTENSIONS)
   add_nb_cuda_module(_edistance_cuda    src/rapids_singlecell/_cuda/edistance/edistance.cu)
   add_nb_cuda_module(_hvg_cuda          src/rapids_singlecell/_cuda/hvg/hvg.cu)
   add_nb_cuda_module(_wilcoxon_cuda     src/rapids_singlecell/_cuda/wilcoxon/wilcoxon.cu)
+  target_link_libraries(_wilcoxon_cuda PRIVATE rmm::rmm)
   # Harmony CUDA modules
   add_nb_cuda_module(_harmony_scatter_cuda   src/rapids_singlecell/_cuda/harmony/scatter/scatter.cu)
   add_nb_cuda_module(_harmony_outer_cuda     src/rapids_singlecell/_cuda/harmony/outer/outer.cu)

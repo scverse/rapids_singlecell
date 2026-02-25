@@ -338,6 +338,7 @@ class _RankGenes:
         chunk_size: int | None = None,
         n_bins: int | None = None,
         bin_range: Literal["log1p", "auto"] | None = None,
+        multi_gpu: bool | list[int] | str | None = False,
         **kwds,
     ) -> None:
         """Compute statistics for all groups."""
@@ -363,6 +364,7 @@ class _RankGenes:
                 tie_correct=tie_correct,
                 use_continuity=use_continuity,
                 chunk_size=chunk_size,
+                multi_gpu=multi_gpu,
             )
         elif method == "wilcoxon_binned":
             from ._wilcoxon_binned import wilcoxon_binned

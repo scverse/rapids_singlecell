@@ -604,3 +604,130 @@ class TestTieCorrectionKernel:
 
         expected = tiecorrect(rankdata(values))
         np.testing.assert_allclose(result.get()[0], expected, rtol=1e-10)
+
+
+# ============================================================================
+# Multi-GPU tests
+# ============================================================================
+
+
+@pytest.mark.skipif(
+    cp.cuda.runtime.getDeviceCount() < 2,
+    reason="Requires at least 2 GPUs",
+)
+class TestMultiGPU:
+    """Verify multi-GPU wilcoxon gives identical results to single-GPU."""
+
+    @pytest.mark.parametrize("tie_correct", [True, False])
+    @pytest.mark.parametrize("sparse", [True, False])
+    def test_multi_gpu_vs_single_gpu(self, tie_correct, sparse):
+        """Multi-GPU results must be bit-identical to single-GPU."""
+        np.random.seed(42)
+        adata_single = sc.datasets.blobs(
+            n_variables=20, n_centers=3, n_observations=200
+        )
+        adata_single.obs["blobs"] = adata_single.obs["blobs"].astype("category")
+        if sparse:
+            adata_single.X = sp.csr_matrix(adata_single.X)
+        adata_multi = adata_single.copy()
+
+        rsc.tl.rank_genes_groups(
+            adata_single,
+            "blobs",
+            method="wilcoxon",
+            use_raw=False,
+            tie_correct=tie_correct,
+            multi_gpu=False,
+        )
+        rsc.tl.rank_genes_groups(
+            adata_multi,
+            "blobs",
+            method="wilcoxon",
+            use_raw=False,
+            tie_correct=tie_correct,
+            multi_gpu=True,
+        )
+
+        single = adata_single.uns["rank_genes_groups"]
+        multi = adata_multi.uns["rank_genes_groups"]
+
+        for field in ("scores", "logfoldchanges", "pvals", "pvals_adj"):
+            for group in single[field].dtype.names:
+                np.testing.assert_array_equal(
+                    np.asarray(single[field][group], dtype=float),
+                    np.asarray(multi[field][group], dtype=float),
+                    err_msg=f"Mismatch in {field} for group {group}",
+                )
+
+    def test_multi_gpu_matches_scanpy(self):
+        """Multi-GPU wilcoxon matches scanpy output."""
+        np.random.seed(42)
+        adata_gpu = sc.datasets.blobs(n_variables=6, n_centers=3, n_observations=200)
+        adata_gpu.obs["blobs"] = adata_gpu.obs["blobs"].astype("category")
+        adata_cpu = adata_gpu.copy()
+
+        rsc.tl.rank_genes_groups(
+            adata_gpu,
+            "blobs",
+            method="wilcoxon",
+            use_raw=False,
+            n_genes=3,
+            tie_correct=True,
+            multi_gpu=True,
+        )
+        sc.tl.rank_genes_groups(
+            adata_cpu,
+            "blobs",
+            method="wilcoxon",
+            use_raw=False,
+            n_genes=3,
+            tie_correct=True,
+        )
+
+        gpu_result = adata_gpu.uns["rank_genes_groups"]
+        cpu_result = adata_cpu.uns["rank_genes_groups"]
+
+        for group in gpu_result["names"].dtype.names:
+            assert list(gpu_result["names"][group]) == list(cpu_result["names"][group])
+
+        for field in ("scores", "pvals", "pvals_adj"):
+            for group in gpu_result[field].dtype.names:
+                np.testing.assert_allclose(
+                    np.asarray(gpu_result[field][group], dtype=float),
+                    np.asarray(cpu_result[field][group], dtype=float),
+                    rtol=1e-13,
+                    atol=1e-15,
+                )
+
+    def test_multi_gpu_specific_devices(self):
+        """Test with explicit device list."""
+        np.random.seed(42)
+        adata = sc.datasets.blobs(n_variables=10, n_centers=3, n_observations=150)
+        adata.obs["blobs"] = adata.obs["blobs"].astype("category")
+        adata_ref = adata.copy()
+
+        rsc.tl.rank_genes_groups(
+            adata_ref,
+            "blobs",
+            method="wilcoxon",
+            use_raw=False,
+            multi_gpu=False,
+        )
+        rsc.tl.rank_genes_groups(
+            adata,
+            "blobs",
+            method="wilcoxon",
+            use_raw=False,
+            multi_gpu=[0, 1],
+        )
+
+        for field in ("scores", "pvals"):
+            for group in adata.uns["rank_genes_groups"][field].dtype.names:
+                np.testing.assert_array_equal(
+                    np.asarray(
+                        adata_ref.uns["rank_genes_groups"][field][group], dtype=float
+                    ),
+                    np.asarray(
+                        adata.uns["rank_genes_groups"][field][group], dtype=float
+                    ),
+                )
