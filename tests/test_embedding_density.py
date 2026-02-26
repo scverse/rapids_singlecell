@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+import scanpy as sc
 from anndata import AnnData
 
 import rapids_singlecell as rsc
@@ -153,3 +154,29 @@ def test_fa_alias():
 
     rsc.tl.embedding_density(adata, "fa")
     assert "draw_graph_fa_density" in adata.obs.columns
+
+
+@pytest.fixture
+def pbmc68k():
+    return sc.datasets.pbmc68k_reduced()
+
+
+@pytest.mark.parametrize("groupby", [None, "louvain"])
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_matches_scanpy(pbmc68k, groupby, dtype):
+    """GPU density matches scanpy on pbmc68k_reduced."""
+    adata_sc = pbmc68k.copy()
+    adata_sc.obsm["X_umap"] = adata_sc.obsm["X_umap"].astype(dtype)
+    sc.tl.embedding_density(adata_sc, "umap", groupby=groupby)
+
+    adata_gpu = pbmc68k.copy()
+    adata_gpu.obsm["X_umap"] = adata_gpu.obsm["X_umap"].astype(dtype)
+    rsc.tl.embedding_density(adata_gpu, "umap", groupby=groupby)
+
+    key = "umap_density" if groupby is None else f"umap_density_{groupby}"
+    atol = 1e-6 if dtype == np.float32 else 1e-12
+    np.testing.assert_allclose(
+        adata_gpu.obs[key].values,
+        adata_sc.obs[key].values,
+        atol=atol,
+    )
