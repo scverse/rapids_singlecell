@@ -19,7 +19,7 @@ __device__ __forceinline__ double neg_infinity<double>() {
 template <typename T>
 __global__ void gaussian_kde_2d_kernel(const T* __restrict__ xy,
                                        T* __restrict__ out, const int n,
-                                       const T neg_inv_2h2) {
+                                       const T a, const T b, const T c) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
 
@@ -32,7 +32,7 @@ __global__ void gaussian_kde_2d_kernel(const T* __restrict__ xy,
     for (int j = 0; j < n; j++) {
         const T dx = xi - xy[2 * j];
         const T dy = yi - xy[2 * j + 1];
-        const T log_k = neg_inv_2h2 * (dx * dx + dy * dy);
+        const T log_k = a * dx * dx + b * dx * dy + c * dy * dy;
 
         if (log_k > running_max) {
             running_sum = running_sum * exp(running_max - log_k) + T(1);

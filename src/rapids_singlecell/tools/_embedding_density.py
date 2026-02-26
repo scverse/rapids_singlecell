@@ -136,6 +136,8 @@ def _calc_density(x: cp.ndarray, y: cp.ndarray) -> np.ndarray:
     """\
     Calculates the density of points in 2 dimensions using a Gaussian KDE kernel.
 
+    Uses a covariance-aware bandwidth (Scott's rule) matching
+    :class:`scipy.stats.gaussian_kde`, and min-max scales the PDF.
     Each GPU thread computes the log-density for one query point via an
     in-thread streaming logsumexp over all training points.  No intermediate
     distance matrix is ever materialised.
@@ -146,9 +148,15 @@ def _calc_density(x: cp.ndarray, y: cp.ndarray) -> np.ndarray:
     n = xy.shape[0]
     dtype = xy.dtype
 
-    # Scott's rule bandwidth for d=2
-    h = n ** (-1.0 / 6.0)
-    neg_inv_2h2 = dtype.type(-1.0 / (2.0 * h * h))
+    # Covariance-aware bandwidth matching scipy.stats.gaussian_kde
+    scotts_factor = n ** (-1.0 / 6.0)
+    data_cov = cp.cov(xy.T)  # (2, 2)
+    inv_cov = cp.linalg.inv(scotts_factor**2 * data_cov)
+
+    # Pre-multiply so the kernel just computes a·dx² + b·dx·dy + c·dy²
+    a = -0.5 * float(inv_cov[0, 0])
+    b = -float(inv_cov[0, 1])
+    c = -0.5 * float(inv_cov[1, 1])
 
     z = cp.empty(n, dtype=dtype)
 
@@ -156,12 +164,15 @@ def _calc_density(x: cp.ndarray, y: cp.ndarray) -> np.ndarray:
         xy,
         out=z,
         n=n,
-        neg_inv_2h2=neg_inv_2h2,
+        a=a,
+        b=b,
+        c=c,
         stream=cp.cuda.get_current_stream().ptr,
     )
 
-    # Scale between 0 and 1
-    min_z = z.min()
-    scaled_z = (z - min_z) / (z.max() - min_z)
+    # Min-max scale PDF (not log-PDF) to match scipy/scanpy
+    pdf = cp.exp(z)
+    min_pdf = pdf.min()
+    scaled = (pdf - min_pdf) / (pdf.max() - min_pdf)
 
-    return scaled_z.get()
+    return scaled.get()
