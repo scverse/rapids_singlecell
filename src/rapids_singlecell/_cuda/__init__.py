@@ -30,6 +30,7 @@ __all__ = [
     "_harmony_pen_cuda",
     "_harmony_scatter_cuda",
     "_hvg_cuda",
+    "_kde_cuda",
     "_ligrec_cuda",
     "_mean_var_cuda",
     "_nanmean_cuda",
