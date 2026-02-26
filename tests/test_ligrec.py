@@ -65,8 +65,8 @@ class TestInvalidBehavior:
     def test_raw_has_different_n_obs(
         self, adata: AnnData, interactions: Interactions_t
     ):
-        adata.raw = sc.datasets.blobs(n_observations=adata.n_obs + 1)
         with pytest.raises(ValueError):
+            adata.raw = sc.datasets.blobs(n_observations=adata.n_obs + 1)
             ligrec(adata, _CK, interactions=interactions)
 
     def test_invalid_cluster_key(self, adata: AnnData, interactions: Interactions_t):
