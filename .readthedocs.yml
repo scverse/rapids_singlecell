@@ -17,5 +17,5 @@ build:
     build:
       html:
         # pin virtualenv<21 to work around https://github.com/pypa/hatch/issues/2193
-        - CMAKE_ARGS="-DRSC_BUILD_EXTENSIONS=OFF" uvx --with 'virtualenv<21' hatch run docs:build
+        - CMAKE_ARGS="-DRSC_BUILD_EXTENSIONS=OFF" uvx --with "virtualenv<21" hatch run docs:build
         - mv docs/_build $READTHEDOCS_OUTPUT
