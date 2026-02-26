@@ -77,7 +77,6 @@ Other than `tools`, preprocessing steps usually don’t return an easily interpr
     tl.tsne
     tl.diffmap
     tl.draw_graph
-    tl.mde
     tl.embedding_density
 ```
 

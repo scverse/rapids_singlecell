@@ -95,9 +95,6 @@ def embedding_density(
         components += 1
 
     if groupby is not None:
-        if groupby not in adata.obs:
-            raise ValueError(f"Could not find {groupby!r} `.obs` column.")
-
         if adata.obs[groupby].dtype.name != "category":
             raise ValueError(f"{groupby!r} column does not contain categorical data")
 
