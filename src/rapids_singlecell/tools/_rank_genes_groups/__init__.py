@@ -42,6 +42,7 @@ def rank_genes_groups(
     pre_load: bool = False,
     n_bins: int | None = None,
     bin_range: Literal["log1p", "auto"] | None = None,
+    multi_gpu: bool | list[int] | str | None = False,
     **kwds,
 ) -> None:
     """
@@ -121,6 +122,12 @@ def rank_genes_groups(
         ``'log1p'`` uses a fixed [0, 15] range suitable for most log1p-normalized data.
         ``'auto'`` computes the actual data range. Use this for z-scored
         or unnormalized data.
+    multi_gpu
+        GPU selection for `'wilcoxon'` vs-rest mode:
+        - ``False`` (default): Use only GPU 0
+        - ``None`` or ``True``: Use all available GPUs
+        - ``list[int]``: Use specific GPU IDs (e.g., ``[0, 2]``)
+        - ``str``: Comma-separated GPU IDs (e.g., ``"0,2"``)
     **kwds
         Additional arguments passed to the method. For `'logreg'`, these are
         passed to :class:`cuml.linear_model.LogisticRegression`.
@@ -214,6 +221,7 @@ def rank_genes_groups(
         chunk_size=chunk_size,
         n_bins=n_bins,
         bin_range=bin_range,
+        multi_gpu=multi_gpu,
         **kwds,
     )
 

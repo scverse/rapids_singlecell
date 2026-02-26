@@ -469,48 +469,48 @@ class TestRankingKernel:
     def test_basic_ranking(self, average_ranks):
         """Test basic average ranking on simple data."""
         values = [3.0, 1.0, 2.0]
-        result = average_ranks(self._to_gpu(values))
+        result, _ = average_ranks(self._to_gpu(values))
         expected = rankdata(values, method="average")
         np.testing.assert_allclose(result.get().flatten(), expected)
 
     def test_all_ties(self, average_ranks):
         """All identical values should get the average rank."""
         values = [5.0, 5.0, 5.0, 5.0]
-        result = average_ranks(self._to_gpu(values))
+        result, _ = average_ranks(self._to_gpu(values))
         expected = rankdata(values, method="average")
         np.testing.assert_allclose(result.get().flatten(), expected)
 
     def test_no_ties(self, average_ranks):
         """All unique values should get sequential ranks."""
         values = [1.0, 2.0, 3.0, 4.0, 5.0]
-        result = average_ranks(self._to_gpu(values))
+        result, _ = average_ranks(self._to_gpu(values))
         expected = rankdata(values, method="average")
         np.testing.assert_allclose(result.get().flatten(), expected)
 
     def test_mixed_ties(self, average_ranks):
         """Mix of ties and unique values."""
         values = [1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0]
-        result = average_ranks(self._to_gpu(values))
+        result, _ = average_ranks(self._to_gpu(values))
         expected = rankdata(values, method="average")
         np.testing.assert_allclose(result.get().flatten(), expected)
 
     def test_negative_values(self, average_ranks):
         """Test with negative values."""
         values = [-3.0, -1.0, -2.0, 0.0, 1.0]
-        result = average_ranks(self._to_gpu(values))
+        result, _ = average_ranks(self._to_gpu(values))
         expected = rankdata(values, method="average")
         np.testing.assert_allclose(result.get().flatten(), expected)
 
     def test_single_element(self, average_ranks):
         """Single element should have rank 1."""
         values = [42.0]
-        result = average_ranks(self._to_gpu(values))
+        result, _ = average_ranks(self._to_gpu(values))
         np.testing.assert_allclose(result.get().flatten(), [1.0])
 
     def test_two_elements_tied(self, average_ranks):
         """Two tied elements should both have rank 1.5."""
         values = [7.0, 7.0]
-        result = average_ranks(self._to_gpu(values))
+        result, _ = average_ranks(self._to_gpu(values))
         np.testing.assert_allclose(result.get().flatten(), [1.5, 1.5])
 
     def test_multiple_columns(self, average_ranks):
@@ -518,24 +518,23 @@ class TestRankingKernel:
         col0 = [3.0, 1.0, 2.0]
         col1 = [1.0, 1.0, 2.0]
         data = np.column_stack([col0, col1]).astype(np.float64)
-        result = average_ranks(cp.asarray(data, order="F"))
+        result, _ = average_ranks(cp.asarray(data, order="F"))
 
         np.testing.assert_allclose(result.get()[:, 0], rankdata(col0, method="average"))
         np.testing.assert_allclose(result.get()[:, 1], rankdata(col1, method="average"))
 
 
 class TestTieCorrectionKernel:
-    """Tests for _tie_correction based on scipy.stats.tiecorrect edge cases."""
+    """Tests for tie correction based on scipy.stats.tiecorrect edge cases."""
 
     @pytest.fixture
-    def tie_correction(self):
-        """Import the tie correction function and ranking function."""
+    def average_ranks(self):
+        """Import the ranking function (tie correction is now fused)."""
         from rapids_singlecell.tools._rank_genes_groups._wilcoxon import (
             _average_ranks,
-            _tie_correction,
         )
 
-        return _tie_correction, _average_ranks
+        return _average_ranks
 
     @staticmethod
     def _to_gpu(values):
@@ -543,70 +542,52 @@ class TestTieCorrectionKernel:
         arr = np.asarray(values, dtype=np.float64).reshape(-1, 1)
         return cp.asarray(arr, order="F")
 
-    def test_no_ties(self, tie_correction):
+    def test_no_ties(self, average_ranks):
         """No ties should give correction factor 1.0."""
-        _tie_correction, _average_ranks = tie_correction
-
         values = [1.0, 2.0, 3.0, 4.0, 5.0]
-        _, sorted_vals = _average_ranks(self._to_gpu(values), return_sorted=True)
-        result = _tie_correction(sorted_vals)
+        _, result = average_ranks(self._to_gpu(values))
 
         expected = tiecorrect(rankdata(values))
         np.testing.assert_allclose(result.get()[0], expected, rtol=1e-10)
 
-    def test_all_ties(self, tie_correction):
+    def test_all_ties(self, average_ranks):
         """All tied values should give correction factor 0.0."""
-        _tie_correction, _average_ranks = tie_correction
-
         values = [5.0, 5.0, 5.0, 5.0]
-        _, sorted_vals = _average_ranks(self._to_gpu(values), return_sorted=True)
-        result = _tie_correction(sorted_vals)
+        _, result = average_ranks(self._to_gpu(values))
 
         expected = tiecorrect(rankdata(values))
         np.testing.assert_allclose(result.get()[0], expected, rtol=1e-10)
 
-    def test_mixed_ties(self, tie_correction):
+    def test_mixed_ties(self, average_ranks):
         """Mix of ties should give intermediate correction factor."""
-        _tie_correction, _average_ranks = tie_correction
-
         values = [1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0]
-        _, sorted_vals = _average_ranks(self._to_gpu(values), return_sorted=True)
-        result = _tie_correction(sorted_vals)
+        _, result = average_ranks(self._to_gpu(values))
 
         expected = tiecorrect(rankdata(values))
         np.testing.assert_allclose(result.get()[0], expected, rtol=1e-10)
 
-    def test_two_elements_tied(self, tie_correction):
+    def test_two_elements_tied(self, average_ranks):
         """Two tied elements."""
-        _tie_correction, _average_ranks = tie_correction
-
         values = [7.0, 7.0]
-        _, sorted_vals = _average_ranks(self._to_gpu(values), return_sorted=True)
-        result = _tie_correction(sorted_vals)
+        _, result = average_ranks(self._to_gpu(values))
 
         expected = tiecorrect(rankdata(values))
         np.testing.assert_allclose(result.get()[0], expected, rtol=1e-10)
 
-    def test_single_element(self, tie_correction):
+    def test_single_element(self, average_ranks):
         """Single element should give correction factor 1.0."""
-        _tie_correction, _average_ranks = tie_correction
-
         values = [42.0]
-        _, sorted_vals = _average_ranks(self._to_gpu(values), return_sorted=True)
-        result = _tie_correction(sorted_vals)
+        _, result = average_ranks(self._to_gpu(values))
 
         # Single element: n^3 - n = 0, so formula gives 1.0
         np.testing.assert_allclose(result.get()[0], 1.0, rtol=1e-10)
 
-    def test_multiple_columns(self, tie_correction):
+    def test_multiple_columns(self, average_ranks):
         """Test tie correction across multiple columns independently."""
-        _tie_correction, _average_ranks = tie_correction
-
         col0 = [1.0, 2.0, 3.0]  # No ties
         col1 = [5.0, 5.0, 5.0]  # All ties
         data = np.column_stack([col0, col1]).astype(np.float64)
-        _, sorted_vals = _average_ranks(cp.asarray(data, order="F"), return_sorted=True)
-        result = _tie_correction(sorted_vals)
+        _, result = average_ranks(cp.asarray(data, order="F"))
 
         np.testing.assert_allclose(
             result.get()[0], tiecorrect(rankdata(col0)), rtol=1e-10
@@ -615,14 +596,138 @@ class TestTieCorrectionKernel:
             result.get()[1], tiecorrect(rankdata(col1)), rtol=1e-10
         )
 
-    def test_large_tie_groups(self, tie_correction):
+    def test_large_tie_groups(self, average_ranks):
         """Test with large tie groups."""
-        _tie_correction, _average_ranks = tie_correction
-
         # 50 values of 1, 50 values of 2 (non-multiple of 32 to test warp handling)
         values = [1.0] * 50 + [2.0] * 50
-        _, sorted_vals = _average_ranks(self._to_gpu(values), return_sorted=True)
-        result = _tie_correction(sorted_vals)
+        _, result = average_ranks(self._to_gpu(values))
 
         expected = tiecorrect(rankdata(values))
         np.testing.assert_allclose(result.get()[0], expected, rtol=1e-10)
+
+
+# ============================================================================
+# Multi-GPU tests
+# ============================================================================
+
+
+@pytest.mark.skipif(
+    cp.cuda.runtime.getDeviceCount() < 2,
+    reason="Requires at least 2 GPUs",
+)
+class TestMultiGPU:
+    """Verify multi-GPU wilcoxon gives identical results to single-GPU."""
+
+    @pytest.mark.parametrize("tie_correct", [True, False])
+    @pytest.mark.parametrize("sparse", [True, False])
+    def test_multi_gpu_vs_single_gpu(self, tie_correct, sparse):
+        """Multi-GPU results must be bit-identical to single-GPU."""
+        np.random.seed(42)
+        adata_single = sc.datasets.blobs(
+            n_variables=20, n_centers=3, n_observations=200
+        )
+        adata_single.obs["blobs"] = adata_single.obs["blobs"].astype("category")
+        if sparse:
+            adata_single.X = sp.csr_matrix(adata_single.X)
+        adata_multi = adata_single.copy()
+
+        rsc.tl.rank_genes_groups(
+            adata_single,
+            "blobs",
+            method="wilcoxon",
+            use_raw=False,
+            tie_correct=tie_correct,
+            multi_gpu=False,
+        )
+        rsc.tl.rank_genes_groups(
+            adata_multi,
+            "blobs",
+            method="wilcoxon",
+            use_raw=False,
+            tie_correct=tie_correct,
+            multi_gpu=True,
+        )
+
+        single = adata_single.uns["rank_genes_groups"]
+        multi = adata_multi.uns["rank_genes_groups"]
+
+        for field in ("scores", "logfoldchanges", "pvals", "pvals_adj"):
+            for group in single[field].dtype.names:
+                np.testing.assert_array_equal(
+                    np.asarray(single[field][group], dtype=float),
+                    np.asarray(multi[field][group], dtype=float),
+                    err_msg=f"Mismatch in {field} for group {group}",
+                )
+
+    def test_multi_gpu_matches_scanpy(self):
+        """Multi-GPU wilcoxon matches scanpy output."""
+        np.random.seed(42)
+        adata_gpu = sc.datasets.blobs(n_variables=6, n_centers=3, n_observations=200)
+        adata_gpu.obs["blobs"] = adata_gpu.obs["blobs"].astype("category")
+        adata_cpu = adata_gpu.copy()
+
+        rsc.tl.rank_genes_groups(
+            adata_gpu,
+            "blobs",
+            method="wilcoxon",
+            use_raw=False,
+            n_genes=3,
+            tie_correct=True,
+            multi_gpu=True,
+        )
+        sc.tl.rank_genes_groups(
+            adata_cpu,
+            "blobs",
+            method="wilcoxon",
+            use_raw=False,
+            n_genes=3,
+            tie_correct=True,
+        )
+
+        gpu_result = adata_gpu.uns["rank_genes_groups"]
+        cpu_result = adata_cpu.uns["rank_genes_groups"]
+
+        for group in gpu_result["names"].dtype.names:
+            assert list(gpu_result["names"][group]) == list(cpu_result["names"][group])
+
+        for field in ("scores", "pvals", "pvals_adj"):
+            for group in gpu_result[field].dtype.names:
+                np.testing.assert_allclose(
+                    np.asarray(gpu_result[field][group], dtype=float),
+                    np.asarray(cpu_result[field][group], dtype=float),
+                    rtol=1e-13,
+                    atol=1e-15,
+                )
+
+    def test_multi_gpu_specific_devices(self):
+        """Test with explicit device list."""
+        np.random.seed(42)
+        adata = sc.datasets.blobs(n_variables=10, n_centers=3, n_observations=150)
+        adata.obs["blobs"] = adata.obs["blobs"].astype("category")
+        adata_ref = adata.copy()
+
+        rsc.tl.rank_genes_groups(
+            adata_ref,
+            "blobs",
+            method="wilcoxon",
+            use_raw=False,
+            multi_gpu=False,
+        )
+        rsc.tl.rank_genes_groups(
+            adata,
+            "blobs",
+            method="wilcoxon",
+            use_raw=False,
+            multi_gpu=[0, 1],
+        )
+
+        for field in ("scores", "pvals"):
+            for group in adata.uns["rank_genes_groups"][field].dtype.names:
+                np.testing.assert_array_equal(
+                    np.asarray(
+                        adata_ref.uns["rank_genes_groups"][field][group], dtype=float
+                    ),
+                    np.asarray(
+                        adata.uns["rank_genes_groups"][field][group], dtype=float
+                    ),
+                )

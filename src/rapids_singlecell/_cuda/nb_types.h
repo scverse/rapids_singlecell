@@ -21,3 +21,7 @@ using cuda_array = nb::ndarray<T, nb::device::cuda>;
 // Parameterized contiguity (for kernels that handle both C and F order)
 template <typename T, typename Contig>
 using cuda_array_contig = nb::ndarray<T, nb::device::cuda, Contig>;
+
+// Host (NumPy) array aliases for host-streaming kernels
+template <typename T>
+using host_array = nb::ndarray<T, nb::numpy, nb::ndim<1>>;
