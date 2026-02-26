@@ -4,6 +4,7 @@ __pycache__/
 /*cache/
 .ipynb_checkpoints/
 /data/
+test-data/
 .vscode/
 
 # Distribution / packaging
