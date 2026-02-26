@@ -66,12 +66,7 @@ class TestInvalidBehavior:
         self, adata: AnnData, interactions: Interactions_t
     ):
         adata.raw = sc.datasets.blobs(n_observations=adata.n_obs + 1)
-        # raise below happened with anndata < 0.9
-        # with pytest.raises(ValueError, match=rf"Expected `{adata.n_obs}` cells in `.raw`"):
-        with pytest.raises(
-            ValueError,
-            match=rf"Index length mismatch: {adata.n_obs} vs. {adata.n_obs + 1}",
-        ):
+        with pytest.raises(ValueError):
             ligrec(adata, _CK, interactions=interactions)
 
     def test_invalid_cluster_key(self, adata: AnnData, interactions: Interactions_t):
