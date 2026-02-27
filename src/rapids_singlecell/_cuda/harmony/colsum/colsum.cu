@@ -42,12 +42,13 @@ static inline void launch_colsum_atomic(const T* A, T* out, size_t rows,
         <<<grid, threads, 0, stream>>>(A, out, rows, cols, rows_per_tile);
 }
 
-NB_MODULE(_harmony_colsum_cuda, m) {
+template <typename Device>
+void register_bindings(nb::module_& m) {
     // colsum - float32
     m.def(
         "colsum",
-        [](cuda_array_c<const float> A, cuda_array_c<float> out, size_t rows,
-           size_t cols, std::uintptr_t stream) {
+        [](gpu_array_c<const float, Device> A, gpu_array_c<float, Device> out,
+           size_t rows, size_t cols, std::uintptr_t stream) {
             launch_colsum<float>(A.data(), out.data(), rows, cols,
                                  (cudaStream_t)stream);
         },
@@ -56,8 +57,8 @@ NB_MODULE(_harmony_colsum_cuda, m) {
     // colsum - float64
     m.def(
         "colsum",
-        [](cuda_array_c<const double> A, cuda_array_c<double> out, size_t rows,
-           size_t cols, std::uintptr_t stream) {
+        [](gpu_array_c<const double, Device> A, gpu_array_c<double, Device> out,
+           size_t rows, size_t cols, std::uintptr_t stream) {
             launch_colsum<double>(A.data(), out.data(), rows, cols,
                                   (cudaStream_t)stream);
         },
@@ -66,8 +67,8 @@ NB_MODULE(_harmony_colsum_cuda, m) {
     // colsum - int32
     m.def(
         "colsum",
-        [](cuda_array_c<const int> A, cuda_array_c<int> out, size_t rows,
-           size_t cols, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> A, gpu_array_c<int, Device> out,
+           size_t rows, size_t cols, std::uintptr_t stream) {
             launch_colsum<int>(A.data(), out.data(), rows, cols,
                                (cudaStream_t)stream);
         },
@@ -76,8 +77,8 @@ NB_MODULE(_harmony_colsum_cuda, m) {
     // colsum_atomic - float32
     m.def(
         "colsum_atomic",
-        [](cuda_array_c<const float> A, cuda_array_c<float> out, size_t rows,
-           size_t cols, std::uintptr_t stream) {
+        [](gpu_array_c<const float, Device> A, gpu_array_c<float, Device> out,
+           size_t rows, size_t cols, std::uintptr_t stream) {
             launch_colsum_atomic<float>(A.data(), out.data(), rows, cols,
                                         (cudaStream_t)stream);
         },
@@ -86,8 +87,8 @@ NB_MODULE(_harmony_colsum_cuda, m) {
     // colsum_atomic - float64
     m.def(
         "colsum_atomic",
-        [](cuda_array_c<const double> A, cuda_array_c<double> out, size_t rows,
-           size_t cols, std::uintptr_t stream) {
+        [](gpu_array_c<const double, Device> A, gpu_array_c<double, Device> out,
+           size_t rows, size_t cols, std::uintptr_t stream) {
             launch_colsum_atomic<double>(A.data(), out.data(), rows, cols,
                                          (cudaStream_t)stream);
         },
@@ -96,10 +97,14 @@ NB_MODULE(_harmony_colsum_cuda, m) {
     // colsum_atomic - int32
     m.def(
         "colsum_atomic",
-        [](cuda_array_c<const int> A, cuda_array_c<int> out, size_t rows,
-           size_t cols, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> A, gpu_array_c<int, Device> out,
+           size_t rows, size_t cols, std::uintptr_t stream) {
             launch_colsum_atomic<int>(A.data(), out.data(), rows, cols,
                                       (cudaStream_t)stream);
         },
         "A"_a, nb::kw_only(), "out"_a, "rows"_a, "cols"_a, "stream"_a = 0);
+}
+
+NB_MODULE(_harmony_colsum_cuda, m) {
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

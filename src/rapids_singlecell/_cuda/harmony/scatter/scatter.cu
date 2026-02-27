@@ -85,12 +85,14 @@ static inline void launch_gather_int(const int* src, const int* idx, int* dst,
     gather_int_kernel<<<(n + 255) / 256, 256, 0, stream>>>(src, idx, dst, n);
 }
 
-NB_MODULE(_harmony_scatter_cuda, m) {
+template <typename Device>
+void register_bindings(nb::module_& m) {
     // scatter_add - float32
     m.def(
         "scatter_add",
-        [](cuda_array_c<const float> v, cuda_array_c<const int> cats,
-           size_t n_cells, size_t n_pcs, size_t switcher, cuda_array_c<float> a,
+        [](gpu_array_c<const float, Device> v,
+           gpu_array_c<const int, Device> cats, size_t n_cells, size_t n_pcs,
+           size_t switcher, gpu_array_c<float, Device> a,
            std::uintptr_t stream) {
             launch_scatter_add<float>(v.data(), cats.data(), n_cells, n_pcs,
                                       switcher, a.data(), (cudaStream_t)stream);
@@ -101,9 +103,10 @@ NB_MODULE(_harmony_scatter_cuda, m) {
     // scatter_add - float64
     m.def(
         "scatter_add",
-        [](cuda_array_c<const double> v, cuda_array_c<const int> cats,
-           size_t n_cells, size_t n_pcs, size_t switcher,
-           cuda_array_c<double> a, std::uintptr_t stream) {
+        [](gpu_array_c<const double, Device> v,
+           gpu_array_c<const int, Device> cats, size_t n_cells, size_t n_pcs,
+           size_t switcher, gpu_array_c<double, Device> a,
+           std::uintptr_t stream) {
             launch_scatter_add<double>(v.data(), cats.data(), n_cells, n_pcs,
                                        switcher, a.data(),
                                        (cudaStream_t)stream);
@@ -114,8 +117,9 @@ NB_MODULE(_harmony_scatter_cuda, m) {
     // aggregated_matrix - float32
     m.def(
         "aggregated_matrix",
-        [](cuda_array_c<float> aggregated_matrix, cuda_array_c<const float> sum,
-           float top_corner, int n_batches, std::uintptr_t stream) {
+        [](gpu_array_c<float, Device> aggregated_matrix,
+           gpu_array_c<const float, Device> sum, float top_corner,
+           int n_batches, std::uintptr_t stream) {
             launch_aggregated_matrix<float>(aggregated_matrix.data(),
                                             sum.data(), top_corner, n_batches,
                                             (cudaStream_t)stream);
@@ -126,9 +130,9 @@ NB_MODULE(_harmony_scatter_cuda, m) {
     // aggregated_matrix - float64
     m.def(
         "aggregated_matrix",
-        [](cuda_array_c<double> aggregated_matrix,
-           cuda_array_c<const double> sum, double top_corner, int n_batches,
-           std::uintptr_t stream) {
+        [](gpu_array_c<double, Device> aggregated_matrix,
+           gpu_array_c<const double, Device> sum, double top_corner,
+           int n_batches, std::uintptr_t stream) {
             launch_aggregated_matrix<double>(aggregated_matrix.data(),
                                              sum.data(), top_corner, n_batches,
                                              (cudaStream_t)stream);
@@ -139,9 +143,10 @@ NB_MODULE(_harmony_scatter_cuda, m) {
     // scatter_add_shared - float32
     m.def(
         "scatter_add_shared",
-        [](cuda_array_c<const float> v, cuda_array_c<const int> cats,
-           int n_cells, int n_pcs, int n_batches, int switcher,
-           cuda_array_c<float> a, int n_blocks, std::uintptr_t stream) {
+        [](gpu_array_c<const float, Device> v,
+           gpu_array_c<const int, Device> cats, int n_cells, int n_pcs,
+           int n_batches, int switcher, gpu_array_c<float, Device> a,
+           int n_blocks, std::uintptr_t stream) {
             launch_scatter_add_shared<float>(
                 v.data(), cats.data(), n_cells, n_pcs, n_batches, switcher,
                 a.data(), n_blocks, (cudaStream_t)stream);
@@ -152,9 +157,10 @@ NB_MODULE(_harmony_scatter_cuda, m) {
     // scatter_add_shared - float64
     m.def(
         "scatter_add_shared",
-        [](cuda_array_c<const double> v, cuda_array_c<const int> cats,
-           int n_cells, int n_pcs, int n_batches, int switcher,
-           cuda_array_c<double> a, int n_blocks, std::uintptr_t stream) {
+        [](gpu_array_c<const double, Device> v,
+           gpu_array_c<const int, Device> cats, int n_cells, int n_pcs,
+           int n_batches, int switcher, gpu_array_c<double, Device> a,
+           int n_blocks, std::uintptr_t stream) {
             launch_scatter_add_shared<double>(
                 v.data(), cats.data(), n_cells, n_pcs, n_batches, switcher,
                 a.data(), n_blocks, (cudaStream_t)stream);
@@ -165,8 +171,8 @@ NB_MODULE(_harmony_scatter_cuda, m) {
     // scatter_add_cat0 - float32
     m.def(
         "scatter_add_cat0",
-        [](cuda_array_c<const float> v, int n_cells, int n_pcs,
-           cuda_array_c<float> a, cuda_array_c<const float> bias,
+        [](gpu_array_c<const float, Device> v, int n_cells, int n_pcs,
+           gpu_array_c<float, Device> a, gpu_array_c<const float, Device> bias,
            std::uintptr_t stream) {
             launch_scatter_add_cat0<float>(v.data(), n_cells, n_pcs, a.data(),
                                            bias.data(), (cudaStream_t)stream);
@@ -177,9 +183,9 @@ NB_MODULE(_harmony_scatter_cuda, m) {
     // scatter_add_cat0 - float64
     m.def(
         "scatter_add_cat0",
-        [](cuda_array_c<const double> v, int n_cells, int n_pcs,
-           cuda_array_c<double> a, cuda_array_c<const double> bias,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const double, Device> v, int n_cells, int n_pcs,
+           gpu_array_c<double, Device> a,
+           gpu_array_c<const double, Device> bias, std::uintptr_t stream) {
             launch_scatter_add_cat0<double>(v.data(), n_cells, n_pcs, a.data(),
                                             bias.data(), (cudaStream_t)stream);
         },
@@ -189,10 +195,11 @@ NB_MODULE(_harmony_scatter_cuda, m) {
     // scatter_add_block - float32
     m.def(
         "scatter_add_block",
-        [](cuda_array_c<const float> v, cuda_array_c<const int> cat_offsets,
-           cuda_array_c<const int> cell_indices, int n_cells, int n_pcs,
-           int n_batches, cuda_array_c<float> a, cuda_array_c<const float> bias,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const float, Device> v,
+           gpu_array_c<const int, Device> cat_offsets,
+           gpu_array_c<const int, Device> cell_indices, int n_cells, int n_pcs,
+           int n_batches, gpu_array_c<float, Device> a,
+           gpu_array_c<const float, Device> bias, std::uintptr_t stream) {
             launch_scatter_add_block<float>(
                 v.data(), cat_offsets.data(), cell_indices.data(), n_cells,
                 n_pcs, n_batches, a.data(), bias.data(), (cudaStream_t)stream);
@@ -203,10 +210,11 @@ NB_MODULE(_harmony_scatter_cuda, m) {
     // scatter_add_block - float64
     m.def(
         "scatter_add_block",
-        [](cuda_array_c<const double> v, cuda_array_c<const int> cat_offsets,
-           cuda_array_c<const int> cell_indices, int n_cells, int n_pcs,
-           int n_batches, cuda_array_c<double> a,
-           cuda_array_c<const double> bias, std::uintptr_t stream) {
+        [](gpu_array_c<const double, Device> v,
+           gpu_array_c<const int, Device> cat_offsets,
+           gpu_array_c<const int, Device> cell_indices, int n_cells, int n_pcs,
+           int n_batches, gpu_array_c<double, Device> a,
+           gpu_array_c<const double, Device> bias, std::uintptr_t stream) {
             launch_scatter_add_block<double>(
                 v.data(), cat_offsets.data(), cell_indices.data(), n_cells,
                 n_pcs, n_batches, a.data(), bias.data(), (cudaStream_t)stream);
@@ -217,9 +225,9 @@ NB_MODULE(_harmony_scatter_cuda, m) {
     // gather_rows - float32
     m.def(
         "gather_rows",
-        [](cuda_array_c<const float> src, cuda_array_c<const int> idx,
-           cuda_array_c<float> dst, int n_rows, int n_cols,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const float, Device> src,
+           gpu_array_c<const int, Device> idx, gpu_array_c<float, Device> dst,
+           int n_rows, int n_cols, std::uintptr_t stream) {
             launch_gather_rows<float>(src.data(), idx.data(), dst.data(),
                                       n_rows, n_cols, (cudaStream_t)stream);
         },
@@ -229,9 +237,9 @@ NB_MODULE(_harmony_scatter_cuda, m) {
     // gather_rows - float64
     m.def(
         "gather_rows",
-        [](cuda_array_c<const double> src, cuda_array_c<const int> idx,
-           cuda_array_c<double> dst, int n_rows, int n_cols,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const double, Device> src,
+           gpu_array_c<const int, Device> idx, gpu_array_c<double, Device> dst,
+           int n_rows, int n_cols, std::uintptr_t stream) {
             launch_gather_rows<double>(src.data(), idx.data(), dst.data(),
                                        n_rows, n_cols, (cudaStream_t)stream);
         },
@@ -241,9 +249,9 @@ NB_MODULE(_harmony_scatter_cuda, m) {
     // scatter_rows - float32
     m.def(
         "scatter_rows",
-        [](cuda_array_c<const float> src, cuda_array_c<const int> idx,
-           cuda_array_c<float> dst, int n_rows, int n_cols,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const float, Device> src,
+           gpu_array_c<const int, Device> idx, gpu_array_c<float, Device> dst,
+           int n_rows, int n_cols, std::uintptr_t stream) {
             launch_scatter_rows<float>(src.data(), idx.data(), dst.data(),
                                        n_rows, n_cols, (cudaStream_t)stream);
         },
@@ -253,9 +261,9 @@ NB_MODULE(_harmony_scatter_cuda, m) {
     // scatter_rows - float64
     m.def(
         "scatter_rows",
-        [](cuda_array_c<const double> src, cuda_array_c<const int> idx,
-           cuda_array_c<double> dst, int n_rows, int n_cols,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const double, Device> src,
+           gpu_array_c<const int, Device> idx, gpu_array_c<double, Device> dst,
+           int n_rows, int n_cols, std::uintptr_t stream) {
             launch_scatter_rows<double>(src.data(), idx.data(), dst.data(),
                                         n_rows, n_cols, (cudaStream_t)stream);
         },
@@ -265,10 +273,15 @@ NB_MODULE(_harmony_scatter_cuda, m) {
     // gather_int
     m.def(
         "gather_int",
-        [](cuda_array_c<const int> src, cuda_array_c<const int> idx,
-           cuda_array_c<int> dst, int n, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> src,
+           gpu_array_c<const int, Device> idx, gpu_array_c<int, Device> dst,
+           int n, std::uintptr_t stream) {
             launch_gather_int(src.data(), idx.data(), dst.data(), n,
                               (cudaStream_t)stream);
         },
         "src"_a, nb::kw_only(), "idx"_a, "dst"_a, "n"_a, "stream"_a = 0);
+}
+
+NB_MODULE(_harmony_scatter_cuda, m) {
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

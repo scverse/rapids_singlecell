@@ -26,14 +26,16 @@ static inline void launch_mean_var_minor(const int* indices, const T* data,
         <<<grid, block, 0, stream>>>(indices, data, means, vars, nnz);
 }
 
-NB_MODULE(_mean_var_cuda, m) {
+template <typename Device>
+void register_bindings(nb::module_& m) {
     // Float32 major
     m.def(
         "mean_var_major",
-        [](cuda_array_c<const int> indptr, cuda_array_c<const int> indices,
-           cuda_array_c<const float> data, cuda_array_c<double> means,
-           cuda_array_c<double> vars, int major, int minor,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> indices,
+           gpu_array_c<const float, Device> data,
+           gpu_array_c<double, Device> means, gpu_array_c<double, Device> vars,
+           int major, int minor, std::uintptr_t stream) {
             launch_mean_var_major<float>(indptr.data(), indices.data(),
                                          data.data(), means.data(), vars.data(),
                                          major, minor, (cudaStream_t)stream);
@@ -44,10 +46,11 @@ NB_MODULE(_mean_var_cuda, m) {
     // Float64 major
     m.def(
         "mean_var_major",
-        [](cuda_array_c<const int> indptr, cuda_array_c<const int> indices,
-           cuda_array_c<const double> data, cuda_array_c<double> means,
-           cuda_array_c<double> vars, int major, int minor,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> indices,
+           gpu_array_c<const double, Device> data,
+           gpu_array_c<double, Device> means, gpu_array_c<double, Device> vars,
+           int major, int minor, std::uintptr_t stream) {
             launch_mean_var_major<double>(
                 indptr.data(), indices.data(), data.data(), means.data(),
                 vars.data(), major, minor, (cudaStream_t)stream);
@@ -58,9 +61,10 @@ NB_MODULE(_mean_var_cuda, m) {
     // Float32 minor
     m.def(
         "mean_var_minor",
-        [](cuda_array_c<const int> indices, cuda_array_c<const float> data,
-           cuda_array_c<double> means, cuda_array_c<double> vars, int nnz,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> indices,
+           gpu_array_c<const float, Device> data,
+           gpu_array_c<double, Device> means, gpu_array_c<double, Device> vars,
+           int nnz, std::uintptr_t stream) {
             launch_mean_var_minor<float>(indices.data(), data.data(),
                                          means.data(), vars.data(), nnz,
                                          (cudaStream_t)stream);
@@ -71,13 +75,18 @@ NB_MODULE(_mean_var_cuda, m) {
     // Float64 minor
     m.def(
         "mean_var_minor",
-        [](cuda_array_c<const int> indices, cuda_array_c<const double> data,
-           cuda_array_c<double> means, cuda_array_c<double> vars, int nnz,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> indices,
+           gpu_array_c<const double, Device> data,
+           gpu_array_c<double, Device> means, gpu_array_c<double, Device> vars,
+           int nnz, std::uintptr_t stream) {
             launch_mean_var_minor<double>(indices.data(), data.data(),
                                           means.data(), vars.data(), nnz,
                                           (cudaStream_t)stream);
         },
         "indices"_a, "data"_a, "means"_a, "vars"_a, nb::kw_only(), "nnz"_a,
         "stream"_a = 0);
+}
+
+NB_MODULE(_mean_var_cuda, m) {
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

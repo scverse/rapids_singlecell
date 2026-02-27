@@ -86,13 +86,15 @@ static inline void launch_res_mean(const int* interactions,
                                      res_mean, n_inter, n_inter_clust, ncls);
 }
 
-NB_MODULE(_ligrec_cuda, m) {
+template <typename Device>
+void register_bindings(nb::module_& m) {
     // sum_count_dense - float32
     m.def(
         "sum_count_dense",
-        [](cuda_array_c<const float> data, cuda_array_c<const int> clusters,
-           cuda_array_c<float> sum, cuda_array_c<int> count, int rows, int cols,
-           int ncls, std::uintptr_t stream) {
+        [](gpu_array_c<const float, Device> data,
+           gpu_array_c<const int, Device> clusters,
+           gpu_array_c<float, Device> sum, gpu_array_c<int, Device> count,
+           int rows, int cols, int ncls, std::uintptr_t stream) {
             launch_sum_count_dense<float>(data.data(), clusters.data(),
                                           sum.data(), count.data(), rows, cols,
                                           ncls, (cudaStream_t)stream);
@@ -103,9 +105,10 @@ NB_MODULE(_ligrec_cuda, m) {
     // sum_count_dense - float64
     m.def(
         "sum_count_dense",
-        [](cuda_array_c<const double> data, cuda_array_c<const int> clusters,
-           cuda_array_c<double> sum, cuda_array_c<int> count, int rows,
-           int cols, int ncls, std::uintptr_t stream) {
+        [](gpu_array_c<const double, Device> data,
+           gpu_array_c<const int, Device> clusters,
+           gpu_array_c<double, Device> sum, gpu_array_c<int, Device> count,
+           int rows, int cols, int ncls, std::uintptr_t stream) {
             launch_sum_count_dense<double>(data.data(), clusters.data(),
                                            sum.data(), count.data(), rows, cols,
                                            ncls, (cudaStream_t)stream);
@@ -116,10 +119,12 @@ NB_MODULE(_ligrec_cuda, m) {
     // sum_count_sparse - float32
     m.def(
         "sum_count_sparse",
-        [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
-           cuda_array_c<const float> data, cuda_array_c<const int> clusters,
-           cuda_array_c<float> sum, cuda_array_c<int> count, int rows, int ncls,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> index,
+           gpu_array_c<const float, Device> data,
+           gpu_array_c<const int, Device> clusters,
+           gpu_array_c<float, Device> sum, gpu_array_c<int, Device> count,
+           int rows, int ncls, std::uintptr_t stream) {
             launch_sum_count_sparse<float>(
                 indptr.data(), index.data(), data.data(), clusters.data(),
                 sum.data(), count.data(), rows, ncls, (cudaStream_t)stream);
@@ -130,10 +135,12 @@ NB_MODULE(_ligrec_cuda, m) {
     // sum_count_sparse - float64
     m.def(
         "sum_count_sparse",
-        [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
-           cuda_array_c<const double> data, cuda_array_c<const int> clusters,
-           cuda_array_c<double> sum, cuda_array_c<int> count, int rows,
-           int ncls, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> index,
+           gpu_array_c<const double, Device> data,
+           gpu_array_c<const int, Device> clusters,
+           gpu_array_c<double, Device> sum, gpu_array_c<int, Device> count,
+           int rows, int ncls, std::uintptr_t stream) {
             launch_sum_count_sparse<double>(
                 indptr.data(), index.data(), data.data(), clusters.data(),
                 sum.data(), count.data(), rows, ncls, (cudaStream_t)stream);
@@ -144,8 +151,9 @@ NB_MODULE(_ligrec_cuda, m) {
     // mean_dense - float32
     m.def(
         "mean_dense",
-        [](cuda_array_c<const float> data, cuda_array_c<const int> clusters,
-           cuda_array_c<float> g, int rows, int cols, int ncls,
+        [](gpu_array_c<const float, Device> data,
+           gpu_array_c<const int, Device> clusters,
+           gpu_array_c<float, Device> g, int rows, int cols, int ncls,
            std::uintptr_t stream) {
             launch_mean_dense<float>(data.data(), clusters.data(), g.data(),
                                      rows, cols, ncls, (cudaStream_t)stream);
@@ -156,8 +164,9 @@ NB_MODULE(_ligrec_cuda, m) {
     // mean_dense - float64
     m.def(
         "mean_dense",
-        [](cuda_array_c<const double> data, cuda_array_c<const int> clusters,
-           cuda_array_c<double> g, int rows, int cols, int ncls,
+        [](gpu_array_c<const double, Device> data,
+           gpu_array_c<const int, Device> clusters,
+           gpu_array_c<double, Device> g, int rows, int cols, int ncls,
            std::uintptr_t stream) {
             launch_mean_dense<double>(data.data(), clusters.data(), g.data(),
                                       rows, cols, ncls, (cudaStream_t)stream);
@@ -168,9 +177,12 @@ NB_MODULE(_ligrec_cuda, m) {
     // mean_sparse - float32
     m.def(
         "mean_sparse",
-        [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
-           cuda_array_c<const float> data, cuda_array_c<const int> clusters,
-           cuda_array_c<float> g, int rows, int ncls, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> index,
+           gpu_array_c<const float, Device> data,
+           gpu_array_c<const int, Device> clusters,
+           gpu_array_c<float, Device> g, int rows, int ncls,
+           std::uintptr_t stream) {
             launch_mean_sparse<float>(indptr.data(), index.data(), data.data(),
                                       clusters.data(), g.data(), rows, ncls,
                                       (cudaStream_t)stream);
@@ -181,9 +193,12 @@ NB_MODULE(_ligrec_cuda, m) {
     // mean_sparse - float64
     m.def(
         "mean_sparse",
-        [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
-           cuda_array_c<const double> data, cuda_array_c<const int> clusters,
-           cuda_array_c<double> g, int rows, int ncls, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> index,
+           gpu_array_c<const double, Device> data,
+           gpu_array_c<const int, Device> clusters,
+           gpu_array_c<double, Device> g, int rows, int ncls,
+           std::uintptr_t stream) {
             launch_mean_sparse<double>(indptr.data(), index.data(), data.data(),
                                        clusters.data(), g.data(), rows, ncls,
                                        (cudaStream_t)stream);
@@ -194,8 +209,9 @@ NB_MODULE(_ligrec_cuda, m) {
     // elementwise_diff - float32
     m.def(
         "elementwise_diff",
-        [](cuda_array_c<float> g, cuda_array_c<const float> total_counts,
-           int n_genes, int n_clusters, std::uintptr_t stream) {
+        [](gpu_array_c<float, Device> g,
+           gpu_array_c<const float, Device> total_counts, int n_genes,
+           int n_clusters, std::uintptr_t stream) {
             launch_elementwise_diff<float>(g.data(), total_counts.data(),
                                            n_genes, n_clusters,
                                            (cudaStream_t)stream);
@@ -206,8 +222,9 @@ NB_MODULE(_ligrec_cuda, m) {
     // elementwise_diff - float64
     m.def(
         "elementwise_diff",
-        [](cuda_array_c<double> g, cuda_array_c<const double> total_counts,
-           int n_genes, int n_clusters, std::uintptr_t stream) {
+        [](gpu_array_c<double, Device> g,
+           gpu_array_c<const double, Device> total_counts, int n_genes,
+           int n_clusters, std::uintptr_t stream) {
             launch_elementwise_diff<double>(g.data(), total_counts.data(),
                                             n_genes, n_clusters,
                                             (cudaStream_t)stream);
@@ -218,11 +235,12 @@ NB_MODULE(_ligrec_cuda, m) {
     // interaction - float32
     m.def(
         "interaction",
-        [](cuda_array_c<const int> interactions,
-           cuda_array_c<const int> interaction_clusters,
-           cuda_array_c<const float> mean, cuda_array_c<float> res,
-           cuda_array_c<const bool> mask, cuda_array_c<const float> g,
-           int n_iter, int n_inter_clust, int ncls, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> interactions,
+           gpu_array_c<const int, Device> interaction_clusters,
+           gpu_array_c<const float, Device> mean,
+           gpu_array_c<float, Device> res, gpu_array_c<const bool, Device> mask,
+           gpu_array_c<const float, Device> g, int n_iter, int n_inter_clust,
+           int ncls, std::uintptr_t stream) {
             launch_interaction<float>(
                 interactions.data(), interaction_clusters.data(), mean.data(),
                 res.data(), mask.data(), g.data(), n_iter, n_inter_clust, ncls,
@@ -235,11 +253,13 @@ NB_MODULE(_ligrec_cuda, m) {
     // interaction - float64
     m.def(
         "interaction",
-        [](cuda_array_c<const int> interactions,
-           cuda_array_c<const int> interaction_clusters,
-           cuda_array_c<const double> mean, cuda_array_c<double> res,
-           cuda_array_c<const bool> mask, cuda_array_c<const double> g,
-           int n_iter, int n_inter_clust, int ncls, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> interactions,
+           gpu_array_c<const int, Device> interaction_clusters,
+           gpu_array_c<const double, Device> mean,
+           gpu_array_c<double, Device> res,
+           gpu_array_c<const bool, Device> mask,
+           gpu_array_c<const double, Device> g, int n_iter, int n_inter_clust,
+           int ncls, std::uintptr_t stream) {
             launch_interaction<double>(
                 interactions.data(), interaction_clusters.data(), mean.data(),
                 res.data(), mask.data(), g.data(), n_iter, n_inter_clust, ncls,
@@ -252,10 +272,11 @@ NB_MODULE(_ligrec_cuda, m) {
     // res_mean - float32
     m.def(
         "res_mean",
-        [](cuda_array_c<const int> interactions,
-           cuda_array_c<const int> interaction_clusters,
-           cuda_array_c<const float> mean, cuda_array_c<float> res_mean,
-           int n_inter, int n_inter_clust, int ncls, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> interactions,
+           gpu_array_c<const int, Device> interaction_clusters,
+           gpu_array_c<const float, Device> mean,
+           gpu_array_c<float, Device> res_mean, int n_inter, int n_inter_clust,
+           int ncls, std::uintptr_t stream) {
             launch_res_mean<float>(interactions.data(),
                                    interaction_clusters.data(), mean.data(),
                                    res_mean.data(), n_inter, n_inter_clust,
@@ -267,10 +288,11 @@ NB_MODULE(_ligrec_cuda, m) {
     // res_mean - float64
     m.def(
         "res_mean",
-        [](cuda_array_c<const int> interactions,
-           cuda_array_c<const int> interaction_clusters,
-           cuda_array_c<const double> mean, cuda_array_c<double> res_mean,
-           int n_inter, int n_inter_clust, int ncls, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> interactions,
+           gpu_array_c<const int, Device> interaction_clusters,
+           gpu_array_c<const double, Device> mean,
+           gpu_array_c<double, Device> res_mean, int n_inter, int n_inter_clust,
+           int ncls, std::uintptr_t stream) {
             launch_res_mean<double>(interactions.data(),
                                     interaction_clusters.data(), mean.data(),
                                     res_mean.data(), n_inter, n_inter_clust,
@@ -278,4 +300,8 @@ NB_MODULE(_ligrec_cuda, m) {
         },
         "interactions"_a, nb::kw_only(), "interaction_clusters"_a, "mean"_a,
         "res_mean"_a, "n_inter"_a, "n_inter_clust"_a, "ncls"_a, "stream"_a = 0);
+}
+
+NB_MODULE(_ligrec_cuda, m) {
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

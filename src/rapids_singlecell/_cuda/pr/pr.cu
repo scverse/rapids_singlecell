@@ -83,15 +83,17 @@ static inline void launch_dense_hvg_res(const T* data, const T* sums_genes,
 }
 
 // Helper to define sparse_norm_res_csc for a given dtype
-template <typename T>
+template <typename T, typename Device>
 void def_sparse_norm_res_csc(nb::module_& m) {
     m.def(
         "sparse_norm_res_csc",
-        [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
-           cuda_array_c<const T> data, cuda_array_c<const T> sums_cells,
-           cuda_array_c<const T> sums_genes, cuda_array_c<T> residuals,
-           T inv_sum_total, T clip, T inv_theta, int n_cells, int n_genes,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> index,
+           gpu_array_c<const T, Device> data,
+           gpu_array_c<const T, Device> sums_cells,
+           gpu_array_c<const T, Device> sums_genes,
+           gpu_array_c<T, Device> residuals, T inv_sum_total, T clip,
+           T inv_theta, int n_cells, int n_genes, std::uintptr_t stream) {
             launch_sparse_norm_res_csc<T>(
                 indptr.data(), index.data(), data.data(), sums_cells.data(),
                 sums_genes.data(), residuals.data(), inv_sum_total, clip,
@@ -103,15 +105,17 @@ void def_sparse_norm_res_csc(nb::module_& m) {
 }
 
 // Helper to define sparse_norm_res_csr for a given dtype
-template <typename T>
+template <typename T, typename Device>
 void def_sparse_norm_res_csr(nb::module_& m) {
     m.def(
         "sparse_norm_res_csr",
-        [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
-           cuda_array_c<const T> data, cuda_array_c<const T> sums_cells,
-           cuda_array_c<const T> sums_genes, cuda_array_c<T> residuals,
-           T inv_sum_total, T clip, T inv_theta, int n_cells, int n_genes,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> index,
+           gpu_array_c<const T, Device> data,
+           gpu_array_c<const T, Device> sums_cells,
+           gpu_array_c<const T, Device> sums_genes,
+           gpu_array_c<T, Device> residuals, T inv_sum_total, T clip,
+           T inv_theta, int n_cells, int n_genes, std::uintptr_t stream) {
             launch_sparse_norm_res_csr<T>(
                 indptr.data(), index.data(), data.data(), sums_cells.data(),
                 sums_genes.data(), residuals.data(), inv_sum_total, clip,
@@ -123,14 +127,14 @@ void def_sparse_norm_res_csr(nb::module_& m) {
 }
 
 // Helper to define dense_norm_res for a given dtype
-template <typename T>
+template <typename T, typename Device>
 void def_dense_norm_res(nb::module_& m) {
     m.def(
         "dense_norm_res",
-        [](cuda_array_c<const T> X, cuda_array_c<T> residuals,
-           cuda_array_c<const T> sums_cells, cuda_array_c<const T> sums_genes,
-           T inv_sum_total, T clip, T inv_theta, int n_cells, int n_genes,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const T, Device> X, gpu_array_c<T, Device> residuals,
+           gpu_array_c<const T, Device> sums_cells,
+           gpu_array_c<const T, Device> sums_genes, T inv_sum_total, T clip,
+           T inv_theta, int n_cells, int n_genes, std::uintptr_t stream) {
             launch_dense_norm_res<T>(X.data(), residuals.data(),
                                      sums_cells.data(), sums_genes.data(),
                                      inv_sum_total, clip, inv_theta, n_cells,
@@ -142,13 +146,15 @@ void def_dense_norm_res(nb::module_& m) {
 }
 
 // Helper to define sparse_sum_csc for a given dtype
-template <typename T>
+template <typename T, typename Device>
 void def_sparse_sum_csc(nb::module_& m) {
     m.def(
         "sparse_sum_csc",
-        [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
-           cuda_array_c<const T> data, cuda_array_c<T> sums_genes,
-           cuda_array_c<T> sums_cells, int n_genes, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> index,
+           gpu_array_c<const T, Device> data, gpu_array_c<T, Device> sums_genes,
+           gpu_array_c<T, Device> sums_cells, int n_genes,
+           std::uintptr_t stream) {
             launch_sparse_sum_csc<T>(indptr.data(), index.data(), data.data(),
                                      sums_genes.data(), sums_cells.data(),
                                      n_genes, (cudaStream_t)stream);
@@ -158,15 +164,17 @@ void def_sparse_sum_csc(nb::module_& m) {
 }
 
 // Helper to define csc_hvg_res for a given dtype
-template <typename T>
+template <typename T, typename Device>
 void def_csc_hvg_res(nb::module_& m) {
     m.def(
         "csc_hvg_res",
-        [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
-           cuda_array_c<const T> data, cuda_array_c<const T> sums_genes,
-           cuda_array_c<const T> sums_cells, cuda_array_c<T> residuals,
-           T inv_sum_total, T clip, T inv_theta, int n_genes, int n_cells,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> index,
+           gpu_array_c<const T, Device> data,
+           gpu_array_c<const T, Device> sums_genes,
+           gpu_array_c<const T, Device> sums_cells,
+           gpu_array_c<T, Device> residuals, T inv_sum_total, T clip,
+           T inv_theta, int n_genes, int n_cells, std::uintptr_t stream) {
             launch_csc_hvg_res<T>(
                 indptr.data(), index.data(), data.data(), sums_genes.data(),
                 sums_cells.data(), residuals.data(), inv_sum_total, clip,
@@ -178,14 +186,15 @@ void def_csc_hvg_res(nb::module_& m) {
 }
 
 // Helper to define dense_hvg_res for a given dtype (always F-contiguous input)
-template <typename T>
+template <typename T, typename Device>
 void def_dense_hvg_res(nb::module_& m) {
     m.def(
         "dense_hvg_res",
-        [](cuda_array_contig<const T, nb::f_contig> data,
-           cuda_array_c<const T> sums_genes, cuda_array_c<const T> sums_cells,
-           cuda_array_c<T> residuals, T inv_sum_total, T clip, T inv_theta,
-           int n_genes, int n_cells, std::uintptr_t stream) {
+        [](gpu_array_contig<const T, Device, nb::f_contig> data,
+           gpu_array_c<const T, Device> sums_genes,
+           gpu_array_c<const T, Device> sums_cells,
+           gpu_array_c<T, Device> residuals, T inv_sum_total, T clip,
+           T inv_theta, int n_genes, int n_cells, std::uintptr_t stream) {
             launch_dense_hvg_res<T>(data.data(), sums_genes.data(),
                                     sums_cells.data(), residuals.data(),
                                     inv_sum_total, clip, inv_theta, n_genes,
@@ -196,28 +205,33 @@ void def_dense_hvg_res(nb::module_& m) {
         "stream"_a = 0);
 }
 
-NB_MODULE(_pr_cuda, m) {
+template <typename Device>
+void register_bindings(nb::module_& m) {
     // sparse_norm_res_csc
-    def_sparse_norm_res_csc<float>(m);
-    def_sparse_norm_res_csc<double>(m);
+    def_sparse_norm_res_csc<float, Device>(m);
+    def_sparse_norm_res_csc<double, Device>(m);
 
     // sparse_norm_res_csr
-    def_sparse_norm_res_csr<float>(m);
-    def_sparse_norm_res_csr<double>(m);
+    def_sparse_norm_res_csr<float, Device>(m);
+    def_sparse_norm_res_csr<double, Device>(m);
 
     // dense_norm_res
-    def_dense_norm_res<float>(m);
-    def_dense_norm_res<double>(m);
+    def_dense_norm_res<float, Device>(m);
+    def_dense_norm_res<double, Device>(m);
 
     // sparse_sum_csc
-    def_sparse_sum_csc<float>(m);
-    def_sparse_sum_csc<double>(m);
+    def_sparse_sum_csc<float, Device>(m);
+    def_sparse_sum_csc<double, Device>(m);
 
     // csc_hvg_res
-    def_csc_hvg_res<float>(m);
-    def_csc_hvg_res<double>(m);
+    def_csc_hvg_res<float, Device>(m);
+    def_csc_hvg_res<double, Device>(m);
 
     // dense_hvg_res - always F-contiguous (Python calls cp.asfortranarray)
-    def_dense_hvg_res<float>(m);
-    def_dense_hvg_res<double>(m);
+    def_dense_hvg_res<float, Device>(m);
+    def_dense_hvg_res<double, Device>(m);
+}
+
+NB_MODULE(_pr_cuda, m) {
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

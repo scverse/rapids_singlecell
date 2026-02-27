@@ -320,24 +320,30 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
 
 // ---------- Nanobind bindings ----------
 
-template <typename T>
+template <typename T, typename Device>
 static void register_clustering_loop(nb::module_& m) {
     m.def(
         "clustering_loop",
-        [](cuda_array_c<const T> Z_norm, cuda_array_c<T> R, cuda_array_c<T> E,
-           cuda_array_c<T> O, cuda_array_c<const T> Pr_b,
-           cuda_array_c<const int> cats, cuda_array_c<const T> theta,
-           cuda_array_c<T> Y, cuda_array_c<T> Y_norm,
-           cuda_array_c<T> similarities, cuda_array_c<int> idx_list,
-           cuda_array_c<int> idx_list_alt, cuda_array_c<unsigned int> sort_keys,
-           cuda_array_c<unsigned int> sort_keys_alt,
-           cuda_array_c<uint8_t> cub_temp, cuda_array_c<T> R_out_buffer,
-           cuda_array_c<int> cats_in, cuda_array_c<T> R_in_sum,
-           cuda_array_c<T> R_out_sum, cuda_array_c<T> penalty_buf,
-           cuda_array_c<T> obj_scalar, cuda_array_c<const T> ones_vec,
-           cuda_array_c<T> last_obj, int n_cells, int n_pcs, int n_clusters,
-           int n_batches, int block_size, int colsum_algo, double sigma,
-           double tol, int max_iter, unsigned int seed, std::uintptr_t stream) {
+        [](gpu_array_c<const T, Device> Z_norm, gpu_array_c<T, Device> R,
+           gpu_array_c<T, Device> E, gpu_array_c<T, Device> O,
+           gpu_array_c<const T, Device> Pr_b,
+           gpu_array_c<const int, Device> cats,
+           gpu_array_c<const T, Device> theta, gpu_array_c<T, Device> Y,
+           gpu_array_c<T, Device> Y_norm, gpu_array_c<T, Device> similarities,
+           gpu_array_c<int, Device> idx_list,
+           gpu_array_c<int, Device> idx_list_alt,
+           gpu_array_c<unsigned int, Device> sort_keys,
+           gpu_array_c<unsigned int, Device> sort_keys_alt,
+           gpu_array_c<uint8_t, Device> cub_temp,
+           gpu_array_c<T, Device> R_out_buffer,
+           gpu_array_c<int, Device> cats_in, gpu_array_c<T, Device> R_in_sum,
+           gpu_array_c<T, Device> R_out_sum, gpu_array_c<T, Device> penalty_buf,
+           gpu_array_c<T, Device> obj_scalar,
+           gpu_array_c<const T, Device> ones_vec,
+           gpu_array_c<T, Device> last_obj, int n_cells, int n_pcs,
+           int n_clusters, int n_batches, int block_size, int colsum_algo,
+           double sigma, double tol, int max_iter, unsigned int seed,
+           std::uintptr_t stream) {
             ClusteringArgs<T> a{
                 Z_norm.data(),
                 R.data(),
@@ -385,14 +391,15 @@ static void register_clustering_loop(nb::module_& m) {
         "sigma"_a, "tol"_a, "max_iter"_a, "seed"_a, "stream"_a = 0);
 }
 
-template <typename T>
+template <typename T, typename Device>
 static void register_compute_objective(nb::module_& m) {
     m.def(
         "compute_objective",
-        [](cuda_array_c<const T> R, cuda_array_c<const T> similarities,
-           cuda_array_c<const T> O, cuda_array_c<const T> E,
-           cuda_array_c<const T> theta, double sigma,
-           cuda_array_c<T> obj_scalar, int n_cells, int n_clusters,
+        [](gpu_array_c<const T, Device> R,
+           gpu_array_c<const T, Device> similarities,
+           gpu_array_c<const T, Device> O, gpu_array_c<const T, Device> E,
+           gpu_array_c<const T, Device> theta, double sigma,
+           gpu_array_c<T, Device> obj_scalar, int n_cells, int n_clusters,
            int n_batches, std::uintptr_t stream) {
             return compute_objective_impl<T>(
                 R.data(), similarities.data(), O.data(), E.data(), theta.data(),
@@ -404,14 +411,19 @@ static void register_compute_objective(nb::module_& m) {
         "stream"_a = 0);
 }
 
-NB_MODULE(_harmony_clustering_cuda, m) {
+template <typename Device>
+void register_bindings(nb::module_& m) {
     m.def(
         "get_cub_sort_temp_bytes",
         [](int n_cells) { return get_cub_sort_temp_bytes(n_cells); },
         nb::kw_only(), "n_cells"_a);
 
-    register_clustering_loop<float>(m);
-    register_clustering_loop<double>(m);
-    register_compute_objective<float>(m);
-    register_compute_objective<double>(m);
+    register_clustering_loop<float, Device>(m);
+    register_clustering_loop<double, Device>(m);
+    register_compute_objective<float, Device>(m);
+    register_compute_objective<double, Device>(m);
+}
+
+NB_MODULE(_harmony_clustering_cuda, m) {
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

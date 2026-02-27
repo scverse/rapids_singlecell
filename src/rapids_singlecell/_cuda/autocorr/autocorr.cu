@@ -67,15 +67,17 @@ static inline void launch_pre_den_sparse(const int* data_col_ind,
         data_col_ind, data_values, nnz, mean_array, den, counter);
 }
 
-NB_MODULE(_autocorr_cuda, m) {
+template <typename Device>
+void register_bindings(nb::module_& m) {
     // morans_dense - float32
     m.def(
         "morans_dense",
-        [](cuda_array_c<const float> data_centered,
-           cuda_array_c<const int> adj_row_ptr,
-           cuda_array_c<const int> adj_col_ind,
-           cuda_array_c<const float> adj_data, cuda_array_c<float> num,
-           int n_samples, int n_features, std::uintptr_t stream) {
+        [](gpu_array_c<const float, Device> data_centered,
+           gpu_array_c<const int, Device> adj_row_ptr,
+           gpu_array_c<const int, Device> adj_col_ind,
+           gpu_array_c<const float, Device> adj_data,
+           gpu_array_c<float, Device> num, int n_samples, int n_features,
+           std::uintptr_t stream) {
             launch_morans_dense(data_centered.data(), adj_row_ptr.data(),
                                 adj_col_ind.data(), adj_data.data(), num.data(),
                                 n_samples, n_features, (cudaStream_t)stream);
@@ -85,11 +87,12 @@ NB_MODULE(_autocorr_cuda, m) {
     // morans_dense - float64
     m.def(
         "morans_dense",
-        [](cuda_array_c<const double> data_centered,
-           cuda_array_c<const int> adj_row_ptr,
-           cuda_array_c<const int> adj_col_ind,
-           cuda_array_c<const double> adj_data, cuda_array_c<double> num,
-           int n_samples, int n_features, std::uintptr_t stream) {
+        [](gpu_array_c<const double, Device> data_centered,
+           gpu_array_c<const int, Device> adj_row_ptr,
+           gpu_array_c<const int, Device> adj_col_ind,
+           gpu_array_c<const double, Device> adj_data,
+           gpu_array_c<double, Device> num, int n_samples, int n_features,
+           std::uintptr_t stream) {
             launch_morans_dense(data_centered.data(), adj_row_ptr.data(),
                                 adj_col_ind.data(), adj_data.data(), num.data(),
                                 n_samples, n_features, (cudaStream_t)stream);
@@ -100,14 +103,14 @@ NB_MODULE(_autocorr_cuda, m) {
     // morans_sparse - float32
     m.def(
         "morans_sparse",
-        [](cuda_array_c<const int> adj_row_ptr,
-           cuda_array_c<const int> adj_col_ind,
-           cuda_array_c<const float> adj_data,
-           cuda_array_c<const int> data_row_ptr,
-           cuda_array_c<const int> data_col_ind,
-           cuda_array_c<const float> data_values, int n_samples, int n_features,
-           cuda_array_c<const float> mean_array, cuda_array_c<float> num,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> adj_row_ptr,
+           gpu_array_c<const int, Device> adj_col_ind,
+           gpu_array_c<const float, Device> adj_data,
+           gpu_array_c<const int, Device> data_row_ptr,
+           gpu_array_c<const int, Device> data_col_ind,
+           gpu_array_c<const float, Device> data_values, int n_samples,
+           int n_features, gpu_array_c<const float, Device> mean_array,
+           gpu_array_c<float, Device> num, std::uintptr_t stream) {
             launch_morans_sparse(adj_row_ptr.data(), adj_col_ind.data(),
                                  adj_data.data(), data_row_ptr.data(),
                                  data_col_ind.data(), data_values.data(),
@@ -120,14 +123,14 @@ NB_MODULE(_autocorr_cuda, m) {
     // morans_sparse - float64
     m.def(
         "morans_sparse",
-        [](cuda_array_c<const int> adj_row_ptr,
-           cuda_array_c<const int> adj_col_ind,
-           cuda_array_c<const double> adj_data,
-           cuda_array_c<const int> data_row_ptr,
-           cuda_array_c<const int> data_col_ind,
-           cuda_array_c<const double> data_values, int n_samples,
-           int n_features, cuda_array_c<const double> mean_array,
-           cuda_array_c<double> num, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> adj_row_ptr,
+           gpu_array_c<const int, Device> adj_col_ind,
+           gpu_array_c<const double, Device> adj_data,
+           gpu_array_c<const int, Device> data_row_ptr,
+           gpu_array_c<const int, Device> data_col_ind,
+           gpu_array_c<const double, Device> data_values, int n_samples,
+           int n_features, gpu_array_c<const double, Device> mean_array,
+           gpu_array_c<double, Device> num, std::uintptr_t stream) {
             launch_morans_sparse(adj_row_ptr.data(), adj_col_ind.data(),
                                  adj_data.data(), data_row_ptr.data(),
                                  data_col_ind.data(), data_values.data(),
@@ -141,10 +144,12 @@ NB_MODULE(_autocorr_cuda, m) {
     // gearys_dense - float32
     m.def(
         "gearys_dense",
-        [](cuda_array_c<const float> data, cuda_array_c<const int> adj_row_ptr,
-           cuda_array_c<const int> adj_col_ind,
-           cuda_array_c<const float> adj_data, cuda_array_c<float> num,
-           int n_samples, int n_features, std::uintptr_t stream) {
+        [](gpu_array_c<const float, Device> data,
+           gpu_array_c<const int, Device> adj_row_ptr,
+           gpu_array_c<const int, Device> adj_col_ind,
+           gpu_array_c<const float, Device> adj_data,
+           gpu_array_c<float, Device> num, int n_samples, int n_features,
+           std::uintptr_t stream) {
             launch_gearys_dense(data.data(), adj_row_ptr.data(),
                                 adj_col_ind.data(), adj_data.data(), num.data(),
                                 n_samples, n_features, (cudaStream_t)stream);
@@ -154,10 +159,12 @@ NB_MODULE(_autocorr_cuda, m) {
     // gearys_dense - float64
     m.def(
         "gearys_dense",
-        [](cuda_array_c<const double> data, cuda_array_c<const int> adj_row_ptr,
-           cuda_array_c<const int> adj_col_ind,
-           cuda_array_c<const double> adj_data, cuda_array_c<double> num,
-           int n_samples, int n_features, std::uintptr_t stream) {
+        [](gpu_array_c<const double, Device> data,
+           gpu_array_c<const int, Device> adj_row_ptr,
+           gpu_array_c<const int, Device> adj_col_ind,
+           gpu_array_c<const double, Device> adj_data,
+           gpu_array_c<double, Device> num, int n_samples, int n_features,
+           std::uintptr_t stream) {
             launch_gearys_dense(data.data(), adj_row_ptr.data(),
                                 adj_col_ind.data(), adj_data.data(), num.data(),
                                 n_samples, n_features, (cudaStream_t)stream);
@@ -168,13 +175,14 @@ NB_MODULE(_autocorr_cuda, m) {
     // gearys_sparse - float32
     m.def(
         "gearys_sparse",
-        [](cuda_array_c<const int> adj_row_ptr,
-           cuda_array_c<const int> adj_col_ind,
-           cuda_array_c<const float> adj_data,
-           cuda_array_c<const int> data_row_ptr,
-           cuda_array_c<const int> data_col_ind,
-           cuda_array_c<const float> data_values, int n_samples, int n_features,
-           cuda_array_c<float> num, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> adj_row_ptr,
+           gpu_array_c<const int, Device> adj_col_ind,
+           gpu_array_c<const float, Device> adj_data,
+           gpu_array_c<const int, Device> data_row_ptr,
+           gpu_array_c<const int, Device> data_col_ind,
+           gpu_array_c<const float, Device> data_values, int n_samples,
+           int n_features, gpu_array_c<float, Device> num,
+           std::uintptr_t stream) {
             launch_gearys_sparse(
                 adj_row_ptr.data(), adj_col_ind.data(), adj_data.data(),
                 data_row_ptr.data(), data_col_ind.data(), data_values.data(),
@@ -186,13 +194,14 @@ NB_MODULE(_autocorr_cuda, m) {
     // gearys_sparse - float64
     m.def(
         "gearys_sparse",
-        [](cuda_array_c<const int> adj_row_ptr,
-           cuda_array_c<const int> adj_col_ind,
-           cuda_array_c<const double> adj_data,
-           cuda_array_c<const int> data_row_ptr,
-           cuda_array_c<const int> data_col_ind,
-           cuda_array_c<const double> data_values, int n_samples,
-           int n_features, cuda_array_c<double> num, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> adj_row_ptr,
+           gpu_array_c<const int, Device> adj_col_ind,
+           gpu_array_c<const double, Device> adj_data,
+           gpu_array_c<const int, Device> data_row_ptr,
+           gpu_array_c<const int, Device> data_col_ind,
+           gpu_array_c<const double, Device> data_values, int n_samples,
+           int n_features, gpu_array_c<double, Device> num,
+           std::uintptr_t stream) {
             launch_gearys_sparse(
                 adj_row_ptr.data(), adj_col_ind.data(), adj_data.data(),
                 data_row_ptr.data(), data_col_ind.data(), data_values.data(),
@@ -205,10 +214,11 @@ NB_MODULE(_autocorr_cuda, m) {
     // pre_den_sparse - float32
     m.def(
         "pre_den_sparse",
-        [](cuda_array_c<const int> data_col_ind,
-           cuda_array_c<const float> data_values, int nnz,
-           cuda_array_c<const float> mean_array, cuda_array_c<float> den,
-           cuda_array_c<int> counter, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> data_col_ind,
+           gpu_array_c<const float, Device> data_values, int nnz,
+           gpu_array_c<const float, Device> mean_array,
+           gpu_array_c<float, Device> den, gpu_array_c<int, Device> counter,
+           std::uintptr_t stream) {
             launch_pre_den_sparse(data_col_ind.data(), data_values.data(), nnz,
                                   mean_array.data(), den.data(), counter.data(),
                                   (cudaStream_t)stream);
@@ -218,14 +228,19 @@ NB_MODULE(_autocorr_cuda, m) {
     // pre_den_sparse - float64
     m.def(
         "pre_den_sparse",
-        [](cuda_array_c<const int> data_col_ind,
-           cuda_array_c<const double> data_values, int nnz,
-           cuda_array_c<const double> mean_array, cuda_array_c<double> den,
-           cuda_array_c<int> counter, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> data_col_ind,
+           gpu_array_c<const double, Device> data_values, int nnz,
+           gpu_array_c<const double, Device> mean_array,
+           gpu_array_c<double, Device> den, gpu_array_c<int, Device> counter,
+           std::uintptr_t stream) {
             launch_pre_den_sparse(data_col_ind.data(), data_values.data(), nnz,
                                   mean_array.data(), den.data(), counter.data(),
                                   (cudaStream_t)stream);
         },
         "data_col_ind"_a, "data_values"_a, nb::kw_only(), "nnz"_a,
         "mean_array"_a, "den"_a, "counter"_a, "stream"_a = 0);
+}
+
+NB_MODULE(_autocorr_cuda, m) {
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

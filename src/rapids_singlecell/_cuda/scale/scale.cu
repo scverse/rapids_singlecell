@@ -51,12 +51,15 @@ static inline void launch_dense_scale_diff(T* data, const T* std,
         <<<grid, block, 0, stream>>>(data, std, mask, clipper, nrows, ncols);
 }
 
-NB_MODULE(_scale_cuda, m) {
+template <typename Device>
+void register_bindings(nb::module_& m) {
     // csc_scale_diff - float32
     m.def(
         "csc_scale_diff",
-        [](cuda_array_c<const int> indptr, cuda_array_c<float> data,
-           cuda_array_c<const float> std, int ncols, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> indptr,
+           gpu_array_c<float, Device> data,
+           gpu_array_c<const float, Device> std, int ncols,
+           std::uintptr_t stream) {
             launch_csc_scale_diff<float>(indptr.data(), data.data(), std.data(),
                                          ncols, (cudaStream_t)stream);
         },
@@ -66,8 +69,10 @@ NB_MODULE(_scale_cuda, m) {
     // csc_scale_diff - float64
     m.def(
         "csc_scale_diff",
-        [](cuda_array_c<const int> indptr, cuda_array_c<double> data,
-           cuda_array_c<const double> std, int ncols, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> indptr,
+           gpu_array_c<double, Device> data,
+           gpu_array_c<const double, Device> std, int ncols,
+           std::uintptr_t stream) {
             launch_csc_scale_diff<double>(indptr.data(), data.data(),
                                           std.data(), ncols,
                                           (cudaStream_t)stream);
@@ -78,9 +83,11 @@ NB_MODULE(_scale_cuda, m) {
     // csr_scale_diff - float32
     m.def(
         "csr_scale_diff",
-        [](cuda_array_c<const int> indptr, cuda_array_c<const int> indices,
-           cuda_array_c<float> data, cuda_array_c<const float> std,
-           cuda_array_c<const int> mask, float clipper, int nrows,
+        [](gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> indices,
+           gpu_array_c<float, Device> data,
+           gpu_array_c<const float, Device> std,
+           gpu_array_c<const int, Device> mask, float clipper, int nrows,
            std::uintptr_t stream) {
             launch_csr_scale_diff<float>(indptr.data(), indices.data(),
                                          data.data(), std.data(), mask.data(),
@@ -92,9 +99,11 @@ NB_MODULE(_scale_cuda, m) {
     // csr_scale_diff - float64
     m.def(
         "csr_scale_diff",
-        [](cuda_array_c<const int> indptr, cuda_array_c<const int> indices,
-           cuda_array_c<double> data, cuda_array_c<const double> std,
-           cuda_array_c<const int> mask, double clipper, int nrows,
+        [](gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> indices,
+           gpu_array_c<double, Device> data,
+           gpu_array_c<const double, Device> std,
+           gpu_array_c<const int, Device> mask, double clipper, int nrows,
            std::uintptr_t stream) {
             launch_csr_scale_diff<double>(indptr.data(), indices.data(),
                                           data.data(), std.data(), mask.data(),
@@ -106,10 +115,11 @@ NB_MODULE(_scale_cuda, m) {
     // dense_scale_center_diff - float32
     m.def(
         "dense_scale_center_diff",
-        [](cuda_array_c<float> data, cuda_array_c<const float> mean,
-           cuda_array_c<const float> std, cuda_array_c<const int> mask,
-           float clipper, long long nrows, long long ncols,
-           std::uintptr_t stream) {
+        [](gpu_array_c<float, Device> data,
+           gpu_array_c<const float, Device> mean,
+           gpu_array_c<const float, Device> std,
+           gpu_array_c<const int, Device> mask, float clipper, long long nrows,
+           long long ncols, std::uintptr_t stream) {
             launch_dense_scale_center_diff<float>(
                 data.data(), mean.data(), std.data(), mask.data(), clipper,
                 nrows, ncols, (cudaStream_t)stream);
@@ -120,10 +130,11 @@ NB_MODULE(_scale_cuda, m) {
     // dense_scale_center_diff - float64
     m.def(
         "dense_scale_center_diff",
-        [](cuda_array_c<double> data, cuda_array_c<const double> mean,
-           cuda_array_c<const double> std, cuda_array_c<const int> mask,
-           double clipper, long long nrows, long long ncols,
-           std::uintptr_t stream) {
+        [](gpu_array_c<double, Device> data,
+           gpu_array_c<const double, Device> mean,
+           gpu_array_c<const double, Device> std,
+           gpu_array_c<const int, Device> mask, double clipper, long long nrows,
+           long long ncols, std::uintptr_t stream) {
             launch_dense_scale_center_diff<double>(
                 data.data(), mean.data(), std.data(), mask.data(), clipper,
                 nrows, ncols, (cudaStream_t)stream);
@@ -134,8 +145,9 @@ NB_MODULE(_scale_cuda, m) {
     // dense_scale_diff - float32
     m.def(
         "dense_scale_diff",
-        [](cuda_array_c<float> data, cuda_array_c<const float> std,
-           cuda_array_c<const int> mask, float clipper, long long nrows,
+        [](gpu_array_c<float, Device> data,
+           gpu_array_c<const float, Device> std,
+           gpu_array_c<const int, Device> mask, float clipper, long long nrows,
            long long ncols, std::uintptr_t stream) {
             launch_dense_scale_diff<float>(data.data(), std.data(), mask.data(),
                                            clipper, nrows, ncols,
@@ -147,8 +159,9 @@ NB_MODULE(_scale_cuda, m) {
     // dense_scale_diff - float64
     m.def(
         "dense_scale_diff",
-        [](cuda_array_c<double> data, cuda_array_c<const double> std,
-           cuda_array_c<const int> mask, double clipper, long long nrows,
+        [](gpu_array_c<double, Device> data,
+           gpu_array_c<const double, Device> std,
+           gpu_array_c<const int, Device> mask, double clipper, long long nrows,
            long long ncols, std::uintptr_t stream) {
             launch_dense_scale_diff<double>(data.data(), std.data(),
                                             mask.data(), clipper, nrows, ncols,
@@ -156,4 +169,8 @@ NB_MODULE(_scale_cuda, m) {
         },
         "data"_a, "std"_a, "mask"_a, nb::kw_only(), "clipper"_a, "nrows"_a,
         "ncols"_a, "stream"_a = 0);
+}
+
+NB_MODULE(_scale_cuda, m) {
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }
