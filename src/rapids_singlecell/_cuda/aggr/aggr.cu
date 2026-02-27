@@ -73,15 +73,16 @@ static inline void launch_sparse_var(const int* indptr, const int* index,
         indptr, index, data, mean_data, n_cells, dof, n_groups);
 }
 
-template <typename T>
+template <typename T, typename Device>
 void def_sparse_aggr(nb::module_& m) {
     m.def(
         "sparse_aggr",
-        [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
-           cuda_array_c<const T> data, cuda_array_c<double> out,
-           cuda_array_c<const int> cats, cuda_array_c<const bool> mask,
-           size_t n_cells, size_t n_genes, size_t n_groups, bool is_csc,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> index,
+           gpu_array_c<const T, Device> data, gpu_array_c<double, Device> out,
+           gpu_array_c<const int, Device> cats,
+           gpu_array_c<const bool, Device> mask, size_t n_cells, size_t n_genes,
+           size_t n_groups, bool is_csc, std::uintptr_t stream) {
             if (is_csc) {
                 launch_csc_aggr<T>(indptr.data(), index.data(), data.data(),
                                    out.data(), cats.data(), mask.data(),
@@ -99,13 +100,13 @@ void def_sparse_aggr(nb::module_& m) {
         "stream"_a = 0);
 }
 
-template <typename T, typename DataContig>
+template <typename T, typename DataContig, typename Device>
 void def_dense_aggr(nb::module_& m) {
     m.def(
         "dense_aggr",
-        [](cuda_array_contig<const T, DataContig> data,
-           cuda_array_c<double> out, cuda_array_c<const int> cats,
-           cuda_array_c<const bool> mask, size_t n_cells, size_t n_genes,
+        [](gpu_array_contig<const T, Device, DataContig> data,
+           gpu_array_c<double, Device> out, gpu_array_c<const int, Device> cats,
+           gpu_array_c<const bool, Device> mask, size_t n_cells, size_t n_genes,
            size_t n_groups, bool is_fortran, std::uintptr_t stream) {
             if constexpr (std::is_same_v<DataContig, nb::f_contig>) {
                 launch_dense_aggr_F<T>(data.data(), out.data(), cats.data(),
@@ -121,15 +122,18 @@ void def_dense_aggr(nb::module_& m) {
         "n_genes"_a, "n_groups"_a, "is_fortran"_a, "stream"_a = 0);
 }
 
-template <typename T>
+template <typename T, typename Device>
 void def_csr_to_coo(nb::module_& m) {
     m.def(
         "csr_to_coo",
-        [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
-           cuda_array_c<const T> data, cuda_array_c<int> out_row,
-           cuda_array_c<int> out_col, cuda_array_c<double> out_data,
-           cuda_array_c<const int> cats, cuda_array_c<const bool> mask,
-           int n_cells, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> index,
+           gpu_array_c<const T, Device> data, gpu_array_c<int, Device> out_row,
+           gpu_array_c<int, Device> out_col,
+           gpu_array_c<double, Device> out_data,
+           gpu_array_c<const int, Device> cats,
+           gpu_array_c<const bool, Device> mask, int n_cells,
+           std::uintptr_t stream) {
             launch_csr_to_coo<T>(indptr.data(), index.data(), data.data(),
                                  out_row.data(), out_col.data(),
                                  out_data.data(), cats.data(), mask.data(),
@@ -140,24 +144,27 @@ void def_csr_to_coo(nb::module_& m) {
         "stream"_a = 0);
 }
 
-NB_MODULE(_aggr_cuda, m) {
-    def_sparse_aggr<float>(m);
-    def_sparse_aggr<double>(m);
+template <typename Device>
+void register_bindings(nb::module_& m) {
+    def_sparse_aggr<float, Device>(m);
+    def_sparse_aggr<double, Device>(m);
 
     // F-order must come before C-order for proper dispatch
-    def_dense_aggr<float, nb::f_contig>(m);
-    def_dense_aggr<float, nb::c_contig>(m);
-    def_dense_aggr<double, nb::f_contig>(m);
-    def_dense_aggr<double, nb::c_contig>(m);
+    def_dense_aggr<float, nb::f_contig, Device>(m);
+    def_dense_aggr<float, nb::c_contig, Device>(m);
+    def_dense_aggr<double, nb::f_contig, Device>(m);
+    def_dense_aggr<double, nb::c_contig, Device>(m);
 
-    def_csr_to_coo<float>(m);
-    def_csr_to_coo<double>(m);
+    def_csr_to_coo<float, Device>(m);
+    def_csr_to_coo<double, Device>(m);
 
     m.def(
         "sparse_var",
-        [](cuda_array_c<const int> indptr, cuda_array_c<const int> index,
-           cuda_array_c<double> data, cuda_array_c<const double> means,
-           cuda_array_c<double> n_cells, int dof, int n_groups,
+        [](gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> index,
+           gpu_array_c<double, Device> data,
+           gpu_array_c<const double, Device> means,
+           gpu_array_c<double, Device> n_cells, int dof, int n_groups,
            std::uintptr_t stream) {
             launch_sparse_var(indptr.data(), index.data(), data.data(),
                               means.data(), n_cells.data(), dof, n_groups,
@@ -165,4 +172,8 @@ NB_MODULE(_aggr_cuda, m) {
         },
         "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "means"_a, "n_cells"_a,
         "dof"_a, "n_groups"_a, "stream"_a = 0);
+}
+
+NB_MODULE(_aggr_cuda, m) {
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

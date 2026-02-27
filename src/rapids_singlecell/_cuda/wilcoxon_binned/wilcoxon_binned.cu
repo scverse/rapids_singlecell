@@ -46,12 +46,14 @@ static inline void launch_csc_hist(const T* data, const int* indices,
         bin_low, inv_bin_width, gene_start);
 }
 
-NB_MODULE(_wilcoxon_binned_cuda, m) {
+template <typename Device>
+void register_bindings(nb::module_& m) {
     // dense_hist - float32
     m.def(
         "dense_hist",
-        [](cuda_array_f<const float> X, cuda_array_c<const int> gcodes,
-           cuda_array_c<unsigned int> hist, int n_cells, int n_genes,
+        [](gpu_array_f<const float, Device> X,
+           gpu_array_c<const int, Device> gcodes,
+           gpu_array_c<unsigned int, Device> hist, int n_cells, int n_genes,
            int n_groups, int n_bins, double bin_low, double inv_bin_width,
            std::uintptr_t stream) {
             launch_dense_hist<float>(
@@ -65,8 +67,9 @@ NB_MODULE(_wilcoxon_binned_cuda, m) {
     // dense_hist - float64
     m.def(
         "dense_hist",
-        [](cuda_array_f<const double> X, cuda_array_c<const int> gcodes,
-           cuda_array_c<unsigned int> hist, int n_cells, int n_genes,
+        [](gpu_array_f<const double, Device> X,
+           gpu_array_c<const int, Device> gcodes,
+           gpu_array_c<unsigned int, Device> hist, int n_cells, int n_genes,
            int n_groups, int n_bins, double bin_low, double inv_bin_width,
            std::uintptr_t stream) {
             launch_dense_hist<double>(
@@ -80,9 +83,11 @@ NB_MODULE(_wilcoxon_binned_cuda, m) {
     // csr_hist - float32
     m.def(
         "csr_hist",
-        [](cuda_array_c<const float> data, cuda_array_c<const int> indices,
-           cuda_array_c<const int> indptr, cuda_array_c<const int> gcodes,
-           cuda_array_c<unsigned int> hist, int n_cells, int n_genes,
+        [](gpu_array_c<const float, Device> data,
+           gpu_array_c<const int, Device> indices,
+           gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> gcodes,
+           gpu_array_c<unsigned int, Device> hist, int n_cells, int n_genes,
            int n_groups, int n_bins, double bin_low, double inv_bin_width,
            int gene_start, std::uintptr_t stream) {
             launch_csr_hist<float>(data.data(), indices.data(), indptr.data(),
@@ -97,9 +102,11 @@ NB_MODULE(_wilcoxon_binned_cuda, m) {
     // csr_hist - float64
     m.def(
         "csr_hist",
-        [](cuda_array_c<const double> data, cuda_array_c<const int> indices,
-           cuda_array_c<const int> indptr, cuda_array_c<const int> gcodes,
-           cuda_array_c<unsigned int> hist, int n_cells, int n_genes,
+        [](gpu_array_c<const double, Device> data,
+           gpu_array_c<const int, Device> indices,
+           gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> gcodes,
+           gpu_array_c<unsigned int, Device> hist, int n_cells, int n_genes,
            int n_groups, int n_bins, double bin_low, double inv_bin_width,
            int gene_start, std::uintptr_t stream) {
             launch_csr_hist<double>(
@@ -114,9 +121,11 @@ NB_MODULE(_wilcoxon_binned_cuda, m) {
     // csc_hist - float32
     m.def(
         "csc_hist",
-        [](cuda_array_c<const float> data, cuda_array_c<const int> indices,
-           cuda_array_c<const int> indptr, cuda_array_c<const int> gcodes,
-           cuda_array_c<unsigned int> hist, int n_cells, int n_genes,
+        [](gpu_array_c<const float, Device> data,
+           gpu_array_c<const int, Device> indices,
+           gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> gcodes,
+           gpu_array_c<unsigned int, Device> hist, int n_cells, int n_genes,
            int n_groups, int n_bins, double bin_low, double inv_bin_width,
            int gene_start, std::uintptr_t stream) {
             launch_csc_hist<float>(data.data(), indices.data(), indptr.data(),
@@ -131,9 +140,11 @@ NB_MODULE(_wilcoxon_binned_cuda, m) {
     // csc_hist - float64
     m.def(
         "csc_hist",
-        [](cuda_array_c<const double> data, cuda_array_c<const int> indices,
-           cuda_array_c<const int> indptr, cuda_array_c<const int> gcodes,
-           cuda_array_c<unsigned int> hist, int n_cells, int n_genes,
+        [](gpu_array_c<const double, Device> data,
+           gpu_array_c<const int, Device> indices,
+           gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> gcodes,
+           gpu_array_c<unsigned int, Device> hist, int n_cells, int n_genes,
            int n_groups, int n_bins, double bin_low, double inv_bin_width,
            int gene_start, std::uintptr_t stream) {
             launch_csc_hist<double>(
@@ -144,4 +155,8 @@ NB_MODULE(_wilcoxon_binned_cuda, m) {
         "data"_a, "indices"_a, "indptr"_a, "gcodes"_a, "hist"_a, nb::kw_only(),
         "n_cells"_a, "n_genes"_a, "n_groups"_a, "n_bins"_a, "bin_low"_a,
         "inv_bin_width"_a, "gene_start"_a, "stream"_a = 0);
+}
+
+NB_MODULE(_wilcoxon_binned_cuda, m) {
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

@@ -26,13 +26,15 @@ static inline void launch_penalty(const T* E, const T* O, const T* theta,
         E, O, theta, penalty, n_batches, n_clusters);
 }
 
-template <typename T>
+template <typename T, typename Device>
 static void register_fused_pen_norm(nb::module_& m) {
     m.def(
         "fused_pen_norm",
-        [](cuda_array_c<const T> similarities, cuda_array_c<const T> penalty,
-           cuda_array_c<const int> cats, cuda_array_c<const size_t> idx_in,
-           cuda_array_c<T> R_out, double term, int n_rows, int n_cols,
+        [](gpu_array_c<const T, Device> similarities,
+           gpu_array_c<const T, Device> penalty,
+           gpu_array_c<const int, Device> cats,
+           gpu_array_c<const size_t, Device> idx_in,
+           gpu_array_c<T, Device> R_out, double term, int n_rows, int n_cols,
            std::uintptr_t stream) {
             launch_fused_pen_norm<T, size_t>(
                 similarities.data(), penalty.data(), cats.data(), idx_in.data(),
@@ -43,13 +45,13 @@ static void register_fused_pen_norm(nb::module_& m) {
         "R_out"_a, "term"_a, "n_rows"_a, "n_cols"_a, "stream"_a = 0);
 }
 
-template <typename T>
+template <typename T, typename Device>
 static void register_penalty(nb::module_& m) {
     m.def(
         "penalty",
-        [](cuda_array_c<const T> E, cuda_array_c<const T> O,
-           cuda_array_c<const T> theta, cuda_array_c<T> penalty, int n_batches,
-           int n_clusters, std::uintptr_t stream) {
+        [](gpu_array_c<const T, Device> E, gpu_array_c<const T, Device> O,
+           gpu_array_c<const T, Device> theta, gpu_array_c<T, Device> penalty,
+           int n_batches, int n_clusters, std::uintptr_t stream) {
             launch_penalty<T>(E.data(), O.data(), theta.data(), penalty.data(),
                               n_batches, n_clusters, (cudaStream_t)stream);
         },
@@ -57,14 +59,15 @@ static void register_penalty(nb::module_& m) {
         "n_clusters"_a, "stream"_a = 0);
 }
 
-template <typename T>
+template <typename T, typename Device>
 static void register_fused_pen_norm_int(nb::module_& m) {
     m.def(
         "fused_pen_norm_int",
-        [](cuda_array_c<const T> similarities, cuda_array_c<const T> penalty,
-           cuda_array_c<const int> cats, cuda_array_c<const int> idx_in,
-           cuda_array_c<T> R_out, double term, int n_rows, int n_cols,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const T, Device> similarities,
+           gpu_array_c<const T, Device> penalty,
+           gpu_array_c<const int, Device> cats,
+           gpu_array_c<const int, Device> idx_in, gpu_array_c<T, Device> R_out,
+           double term, int n_rows, int n_cols, std::uintptr_t stream) {
             launch_fused_pen_norm<T, int>(similarities.data(), penalty.data(),
                                           cats.data(), idx_in.data(),
                                           R_out.data(), static_cast<T>(term),
@@ -74,15 +77,20 @@ static void register_fused_pen_norm_int(nb::module_& m) {
         "R_out"_a, "term"_a, "n_rows"_a, "n_cols"_a, "stream"_a = 0);
 }
 
-NB_MODULE(_harmony_pen_cuda, m) {
-    register_fused_pen_norm<float>(m);
-    register_fused_pen_norm<double>(m);
-    register_penalty<float>(m);
-    register_penalty<double>(m);
+template <typename Device>
+void register_bindings(nb::module_& m) {
+    register_fused_pen_norm<float, Device>(m);
+    register_fused_pen_norm<double, Device>(m);
+    register_penalty<float, Device>(m);
+    register_penalty<double, Device>(m);
 
     // -- Test-only bindings below --
     // fused_pen_norm_int uses int32 indices (used internally by the C++
     // clustering loop). The binding exists solely for unit testing.
-    register_fused_pen_norm_int<float>(m);
-    register_fused_pen_norm_int<double>(m);
+    register_fused_pen_norm_int<float, Device>(m);
+    register_fused_pen_norm_int<double, Device>(m);
+}
+
+NB_MODULE(_harmony_pen_cuda, m) {
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

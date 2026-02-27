@@ -227,23 +227,19 @@ static inline void launch_reduce_global(const int* result, float* inter_out,
         result, inter_out, out, k, l_val, format);
 }
 
-NB_MODULE(_cooc_cuda, m) {
-    m.def("get_kernel_config", &get_kernel_config, "l_val"_a, "n_cells"_a,
-          "k"_a,
-          "Get kernel configuration (cell_tile, l_pad, block_size, shared_mem) "
-          "for given "
-          "parameters. Returns None if insufficient shared memory.");
-
+template <typename Device>
+void register_bindings(nb::module_& m) {
     m.def(
         "count_csr_catpairs",
-        [](cuda_array_c<const float> spatial,
-           cuda_array_c<const float> thresholds,
-           cuda_array_c<const int> cat_offsets,
-           cuda_array_c<const int> cell_indices,
-           cuda_array_c<const int> pair_left,
-           cuda_array_c<const int> pair_right, cuda_array_c<int> counts,
-           int num_pairs, int k, int l_val, int blocks_per_pair, int cell_tile,
-           int block_size, int shared_mem, std::uintptr_t stream) {
+        [](gpu_array_c<const float, Device> spatial,
+           gpu_array_c<const float, Device> thresholds,
+           gpu_array_c<const int, Device> cat_offsets,
+           gpu_array_c<const int, Device> cell_indices,
+           gpu_array_c<const int, Device> pair_left,
+           gpu_array_c<const int, Device> pair_right,
+           gpu_array_c<int, Device> counts, int num_pairs, int k, int l_val,
+           int blocks_per_pair, int cell_tile, int block_size, int shared_mem,
+           std::uintptr_t stream) {
             dispatch_csr_catpairs(
                 spatial.data(), thresholds.data(), cat_offsets.data(),
                 cell_indices.data(), pair_left.data(), pair_right.data(),
@@ -258,9 +254,10 @@ NB_MODULE(_cooc_cuda, m) {
 
     m.def(
         "count_pairwise",
-        [](cuda_array_c<const float> spatial,
-           cuda_array_c<const float> thresholds, cuda_array_c<const int> labels,
-           cuda_array_c<int> result, int n, int k, int l_val,
+        [](gpu_array_c<const float, Device> spatial,
+           gpu_array_c<const float, Device> thresholds,
+           gpu_array_c<const int, Device> labels,
+           gpu_array_c<int, Device> result, int n, int k, int l_val,
            std::uintptr_t stream) {
             launch_count_pairwise(spatial.data(), thresholds.data(),
                                   labels.data(), result.data(), n, k, l_val,
@@ -271,8 +268,9 @@ NB_MODULE(_cooc_cuda, m) {
 
     m.def(
         "reduce_shared",
-        [](cuda_array_c<const int> result, cuda_array_c<float> out, int k,
-           int l_val, int format, std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> result,
+           gpu_array_c<float, Device> out, int k, int l_val, int format,
+           std::uintptr_t stream) {
             return launch_reduce_shared(result.data(), out.data(), k, l_val,
                                         format, (cudaStream_t)stream);
         },
@@ -281,12 +279,22 @@ NB_MODULE(_cooc_cuda, m) {
 
     m.def(
         "reduce_global",
-        [](cuda_array_c<const int> result, cuda_array_c<float> inter_out,
-           cuda_array_c<float> out, int k, int l_val, int format,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> result,
+           gpu_array_c<float, Device> inter_out, gpu_array_c<float, Device> out,
+           int k, int l_val, int format, std::uintptr_t stream) {
             launch_reduce_global(result.data(), inter_out.data(), out.data(), k,
                                  l_val, format, (cudaStream_t)stream);
         },
         "result"_a, nb::kw_only(), "inter_out"_a, "out"_a, "k"_a, "l_val"_a,
         "format"_a, "stream"_a = 0);
+}
+
+NB_MODULE(_cooc_cuda, m) {
+    m.def("get_kernel_config", &get_kernel_config, "l_val"_a, "n_cells"_a,
+          "k"_a,
+          "Get kernel configuration (cell_tile, l_pad, block_size, shared_mem) "
+          "for given "
+          "parameters. Returns None if insufficient shared memory.");
+
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

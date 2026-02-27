@@ -26,12 +26,13 @@ static inline void launch_cut_smaller(int* indptr, int* index, float* data,
                                                    n_rows);
 }
 
-NB_MODULE(_bbknn_cuda, m) {
+template <typename Device>
+void register_bindings(nb::module_& m) {
     m.def(
         "find_top_k_per_row",
-        [](cuda_array_c<const float> data, cuda_array_c<const int> indptr,
-           int n_rows, int trim, cuda_array_c<float> vals,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const float, Device> data,
+           gpu_array_c<const int, Device> indptr, int n_rows, int trim,
+           gpu_array_c<float, Device> vals, std::uintptr_t stream) {
             launch_find_top_k_per_row(data.data(), indptr.data(), n_rows, trim,
                                       vals.data(), (cudaStream_t)stream);
         },
@@ -40,12 +41,16 @@ NB_MODULE(_bbknn_cuda, m) {
 
     m.def(
         "cut_smaller",
-        [](cuda_array_c<int> indptr, cuda_array_c<int> index,
-           cuda_array_c<float> data, cuda_array_c<float> vals, int n_rows,
-           std::uintptr_t stream) {
+        [](gpu_array_c<int, Device> indptr, gpu_array_c<int, Device> index,
+           gpu_array_c<float, Device> data, gpu_array_c<float, Device> vals,
+           int n_rows, std::uintptr_t stream) {
             launch_cut_smaller(indptr.data(), index.data(), data.data(),
                                vals.data(), n_rows, (cudaStream_t)stream);
         },
         "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "vals"_a, "n_rows"_a,
         "stream"_a = 0);
+}
+
+NB_MODULE(_bbknn_cuda, m) {
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

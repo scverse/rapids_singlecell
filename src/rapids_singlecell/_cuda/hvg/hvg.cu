@@ -31,12 +31,13 @@ static void launch_expected_zeros(const T* scaled_means, const T* total_counts,
         scaled_means, total_counts, expected, n_genes, n_cells);
 }
 
-NB_MODULE(_hvg_cuda, m) {
+template <typename Device>
+void register_bindings(nb::module_& m) {
     m.def(
         "expected_zeros",
-        [](cuda_array_c<const double> scaled_means,
-           cuda_array_c<const double> total_counts,
-           cuda_array_c<double> expected, int n_genes, int n_cells,
+        [](gpu_array_c<const double, Device> scaled_means,
+           gpu_array_c<const double, Device> total_counts,
+           gpu_array_c<double, Device> expected, int n_genes, int n_cells,
            std::uintptr_t stream) {
             launch_expected_zeros<double>(
                 scaled_means.data(), total_counts.data(), expected.data(),
@@ -47,13 +48,18 @@ NB_MODULE(_hvg_cuda, m) {
 
     m.def(
         "expected_zeros",
-        [](cuda_array_c<const float> scaled_means,
-           cuda_array_c<const float> total_counts, cuda_array_c<float> expected,
-           int n_genes, int n_cells, std::uintptr_t stream) {
+        [](gpu_array_c<const float, Device> scaled_means,
+           gpu_array_c<const float, Device> total_counts,
+           gpu_array_c<float, Device> expected, int n_genes, int n_cells,
+           std::uintptr_t stream) {
             launch_expected_zeros<float>(
                 scaled_means.data(), total_counts.data(), expected.data(),
                 n_genes, n_cells, reinterpret_cast<cudaStream_t>(stream));
         },
         "scaled_means"_a, "total_counts"_a, "expected"_a, "n_genes"_a,
         "n_cells"_a, "stream"_a = 0);
+}
+
+NB_MODULE(_hvg_cuda, m) {
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

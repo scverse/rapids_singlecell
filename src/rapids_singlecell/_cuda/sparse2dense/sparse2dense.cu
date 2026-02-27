@@ -47,14 +47,14 @@ static inline void dispatch_sparse2dense(const int* indptr, const int* index,
 }
 
 // Helper to define sparse2dense for a given dtype and output contiguity
-template <typename T, typename OutContig>
+template <typename T, typename OutContig, typename Device>
 void def_sparse2dense(nb::module_& m) {
     m.def(
         "sparse2dense",
-        [](cuda_array_contig<const int, nb::c_contig> indptr,
-           cuda_array_contig<const int, nb::c_contig> index,
-           cuda_array_contig<const T, nb::c_contig> data,
-           cuda_array_contig<T, OutContig> out, long long major,
+        [](gpu_array_contig<const int, Device, nb::c_contig> indptr,
+           gpu_array_contig<const int, Device, nb::c_contig> index,
+           gpu_array_contig<const T, Device, nb::c_contig> data,
+           gpu_array_contig<T, Device, OutContig> out, long long major,
            long long minor, bool c_switch, int max_nnz, std::uintptr_t stream) {
             dispatch_sparse2dense<T>(indptr.data(), index.data(), data.data(),
                                      out.data(), major, minor, c_switch,
@@ -64,10 +64,15 @@ void def_sparse2dense(nb::module_& m) {
         "minor"_a, "c_switch"_a, "max_nnz"_a, "stream"_a = 0);
 }
 
-NB_MODULE(_sparse2dense_cuda, m) {
+template <typename Device>
+void register_bindings(nb::module_& m) {
     // F-order output must come before C-order for proper dispatch
-    def_sparse2dense<float, nb::f_contig>(m);
-    def_sparse2dense<float, nb::c_contig>(m);
-    def_sparse2dense<double, nb::f_contig>(m);
-    def_sparse2dense<double, nb::c_contig>(m);
+    def_sparse2dense<float, nb::f_contig, Device>(m);
+    def_sparse2dense<float, nb::c_contig, Device>(m);
+    def_sparse2dense<double, nb::f_contig, Device>(m);
+    def_sparse2dense<double, nb::c_contig, Device>(m);
+}
+
+NB_MODULE(_sparse2dense_cuda, m) {
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

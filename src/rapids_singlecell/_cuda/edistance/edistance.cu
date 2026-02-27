@@ -185,24 +185,19 @@ static void dispatch_f64(const double* embedding, const int* cat_offsets,
     }
 }
 
-NB_MODULE(_edistance_cuda, m) {
-    m.def("get_kernel_config", &get_kernel_config, "n_features"_a,
-          "is_double"_a,
-          "Get kernel configuration (cell_tile, feat_tile, block_size, "
-          "shared_mem) for given "
-          "parameters. Returns None if insufficient shared memory.");
-
+template <typename Device>
+void register_bindings(nb::module_& m) {
     // Single compute_distances function with overloading for f32/f64
     // Nanobind will dispatch based on the dtype of the embedding array
     // IMPORTANT: f64 must be defined before f32 for proper overload dispatch
     m.def(
         "compute_distances",
-        [](cuda_array_c<const double> embedding,
-           cuda_array_c<const int> cat_offsets,
-           cuda_array_c<const int> cell_indices,
-           cuda_array_c<const int> pair_left,
-           cuda_array_c<const int> pair_right,
-           cuda_array_c<double> pairwise_sums, int num_pairs, int k,
+        [](gpu_array_c<const double, Device> embedding,
+           gpu_array_c<const int, Device> cat_offsets,
+           gpu_array_c<const int, Device> cell_indices,
+           gpu_array_c<const int, Device> pair_left,
+           gpu_array_c<const int, Device> pair_right,
+           gpu_array_c<double, Device> pairwise_sums, int num_pairs, int k,
            int n_features, int blocks_per_pair, int cell_tile, int feat_tile,
            int block_size, int shared_mem, std::uintptr_t stream) {
             dispatch_f64(embedding.data(), cat_offsets.data(),
@@ -219,12 +214,12 @@ NB_MODULE(_edistance_cuda, m) {
 
     m.def(
         "compute_distances",
-        [](cuda_array_c<const float> embedding,
-           cuda_array_c<const int> cat_offsets,
-           cuda_array_c<const int> cell_indices,
-           cuda_array_c<const int> pair_left,
-           cuda_array_c<const int> pair_right,
-           cuda_array_c<float> pairwise_sums, int num_pairs, int k,
+        [](gpu_array_c<const float, Device> embedding,
+           gpu_array_c<const int, Device> cat_offsets,
+           gpu_array_c<const int, Device> cell_indices,
+           gpu_array_c<const int, Device> pair_left,
+           gpu_array_c<const int, Device> pair_right,
+           gpu_array_c<float, Device> pairwise_sums, int num_pairs, int k,
            int n_features, int blocks_per_pair, int cell_tile, int feat_tile,
            int block_size, int shared_mem, std::uintptr_t stream) {
             dispatch_f32(embedding.data(), cat_offsets.data(),
@@ -238,4 +233,14 @@ NB_MODULE(_edistance_cuda, m) {
         "pair_right"_a, "pairwise_sums"_a, "num_pairs"_a, "k"_a, "n_features"_a,
         "blocks_per_pair"_a, "cell_tile"_a, "feat_tile"_a, "block_size"_a,
         "shared_mem"_a, "stream"_a = 0);
+}
+
+NB_MODULE(_edistance_cuda, m) {
+    m.def("get_kernel_config", &get_kernel_config, "n_features"_a,
+          "is_double"_a,
+          "Get kernel configuration (cell_tile, feat_tile, block_size, "
+          "shared_mem) for given "
+          "parameters. Returns None if insufficient shared memory.");
+
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

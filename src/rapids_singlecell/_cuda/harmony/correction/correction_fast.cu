@@ -93,20 +93,21 @@ static void correction_fast_impl(
 
 // ---- nanobind registration ----
 
-template <typename T>
+template <typename T, typename Device>
 static void register_correction_fast(nb::module_& m) {
     m.def(
         "correction_fast",
-        [](cuda_array_c<const T> X, cuda_array_c<const T> R,
-           cuda_array_c<const T> O, cuda_array_c<const int> cats,
-           cuda_array_c<const int> cat_offsets,
-           cuda_array_c<const int> cell_indices, double ridge_lambda,
+        [](gpu_array_c<const T, Device> X, gpu_array_c<const T, Device> R,
+           gpu_array_c<const T, Device> O, gpu_array_c<const int, Device> cats,
+           gpu_array_c<const int, Device> cat_offsets,
+           gpu_array_c<const int, Device> cell_indices, double ridge_lambda,
            int n_cells, int n_pcs, int n_clusters, int n_batches,
            // workspace
-           cuda_array_c<T> Z, cuda_array_c<T> inv_mat, cuda_array_c<T> R_col,
-           cuda_array_c<T> Phi_t_diag_R_X, cuda_array_c<T> W,
+           gpu_array_c<T, Device> Z, gpu_array_c<T, Device> inv_mat,
+           gpu_array_c<T, Device> R_col, gpu_array_c<T, Device> Phi_t_diag_R_X,
+           gpu_array_c<T, Device> W,
            // gmem workspace
-           cuda_array_c<T> g_factor, cuda_array_c<T> g_P_row0,
+           gpu_array_c<T, Device> g_factor, gpu_array_c<T, Device> g_P_row0,
            std::uintptr_t stream) {
             correction_fast_impl<T>(
                 X.data(), R.data(), O.data(), cats.data(), cat_offsets.data(),
@@ -123,9 +124,9 @@ static void register_correction_fast(nb::module_& m) {
     // Expose single-cluster inv_mat computation for testing
     m.def(
         "compute_inv_mat",
-        [](cuda_array_c<const T> O, double ridge_lambda, int n_batches,
-           int n_clusters, int cluster_k, cuda_array_c<T> inv_mat,
-           cuda_array_c<T> g_factor, cuda_array_c<T> g_P_row0,
+        [](gpu_array_c<const T, Device> O, double ridge_lambda, int n_batches,
+           int n_clusters, int cluster_k, gpu_array_c<T, Device> inv_mat,
+           gpu_array_c<T, Device> g_factor, gpu_array_c<T, Device> g_P_row0,
            std::uintptr_t stream) {
             int bdim = std::min(256, std::max(32, (n_batches + 31) / 32 * 32));
             compute_inv_mats_kernel<T><<<1, bdim, 0, (cudaStream_t)stream>>>(
@@ -137,7 +138,12 @@ static void register_correction_fast(nb::module_& m) {
         "cluster_k"_a, "inv_mat"_a, "g_factor"_a, "g_P_row0"_a, "stream"_a = 0);
 }
 
+template <typename Device>
+void register_bindings(nb::module_& m) {
+    register_correction_fast<float, Device>(m);
+    register_correction_fast<double, Device>(m);
+}
+
 NB_MODULE(_harmony_correction_cuda, m) {
-    register_correction_fast<float>(m);
-    register_correction_fast<double>(m);
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

@@ -117,21 +117,21 @@ static void correction_batched_impl(
 
 // ---- nanobind registration ----
 
-template <typename T>
+template <typename T, typename Device>
 static void register_correction_batched(nb::module_& m) {
     m.def(
         "correction_batched",
-        [](cuda_array_c<const T> X, cuda_array_c<const T> R,
-           cuda_array_c<const T> O, cuda_array_c<const int> cats,
-           cuda_array_c<const int> cat_offsets,
-           cuda_array_c<const int> cell_indices, double ridge_lambda,
+        [](gpu_array_c<const T, Device> X, gpu_array_c<const T, Device> R,
+           gpu_array_c<const T, Device> O, gpu_array_c<const int, Device> cats,
+           gpu_array_c<const int, Device> cat_offsets,
+           gpu_array_c<const int, Device> cell_indices, double ridge_lambda,
            int n_cells, int n_pcs, int n_clusters, int n_batches,
            // workspace
-           cuda_array_c<T> Z, cuda_array_c<T> inv_mats,
-           cuda_array_c<T> Phi_t_diag_R_X_all, cuda_array_c<T> W_all,
-           cuda_array_c<T> g_factor, cuda_array_c<T> g_P_row0,
-           cuda_array_c<T> X_sorted, cuda_array_c<T> R_sorted,
-           std::uintptr_t stream) {
+           gpu_array_c<T, Device> Z, gpu_array_c<T, Device> inv_mats,
+           gpu_array_c<T, Device> Phi_t_diag_R_X_all,
+           gpu_array_c<T, Device> W_all, gpu_array_c<T, Device> g_factor,
+           gpu_array_c<T, Device> g_P_row0, gpu_array_c<T, Device> X_sorted,
+           gpu_array_c<T, Device> R_sorted, std::uintptr_t stream) {
             correction_batched_impl<T>(
                 X.data(), R.data(), O.data(), cats.data(), cat_offsets.data(),
                 cell_indices.data(), static_cast<T>(ridge_lambda), n_cells,
@@ -147,7 +147,12 @@ static void register_correction_batched(nb::module_& m) {
         "X_sorted"_a, "R_sorted"_a, "stream"_a = 0);
 }
 
+template <typename Device>
+void register_bindings(nb::module_& m) {
+    register_correction_batched<float, Device>(m);
+    register_correction_batched<double, Device>(m);
+}
+
 NB_MODULE(_harmony_correction_batched_cuda, m) {
-    register_correction_batched<float>(m);
-    register_correction_batched<double>(m);
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

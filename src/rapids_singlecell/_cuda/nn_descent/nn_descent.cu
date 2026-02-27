@@ -36,11 +36,13 @@ static inline void launch_inner(const float* data, float* out,
         data, out, pairs, n_samples, n_features, n_neighbors);
 }
 
-NB_MODULE(_nn_descent_cuda, m) {
+template <typename Device>
+void register_bindings(nb::module_& m) {
     m.def(
         "sqeuclidean",
-        [](cuda_array_c<const float> data, cuda_array_c<float> out,
-           cuda_array_c<const unsigned int> pairs, long long n_samples,
+        [](gpu_array_c<const float, Device> data,
+           gpu_array_c<float, Device> out,
+           gpu_array_c<const unsigned int, Device> pairs, long long n_samples,
            long long n_features, long long n_neighbors, std::uintptr_t stream) {
             launch_sqeuclidean(data.data(), out.data(), pairs.data(), n_samples,
                                n_features, n_neighbors, (cudaStream_t)stream);
@@ -50,8 +52,9 @@ NB_MODULE(_nn_descent_cuda, m) {
 
     m.def(
         "cosine",
-        [](cuda_array_c<const float> data, cuda_array_c<float> out,
-           cuda_array_c<const unsigned int> pairs, long long n_samples,
+        [](gpu_array_c<const float, Device> data,
+           gpu_array_c<float, Device> out,
+           gpu_array_c<const unsigned int, Device> pairs, long long n_samples,
            long long n_features, long long n_neighbors, std::uintptr_t stream) {
             launch_cosine(data.data(), out.data(), pairs.data(), n_samples,
                           n_features, n_neighbors, (cudaStream_t)stream);
@@ -61,12 +64,17 @@ NB_MODULE(_nn_descent_cuda, m) {
 
     m.def(
         "inner",
-        [](cuda_array_c<const float> data, cuda_array_c<float> out,
-           cuda_array_c<const unsigned int> pairs, long long n_samples,
+        [](gpu_array_c<const float, Device> data,
+           gpu_array_c<float, Device> out,
+           gpu_array_c<const unsigned int, Device> pairs, long long n_samples,
            long long n_features, long long n_neighbors, std::uintptr_t stream) {
             launch_inner(data.data(), out.data(), pairs.data(), n_samples,
                          n_features, n_neighbors, (cudaStream_t)stream);
         },
         "data"_a, nb::kw_only(), "out"_a, "pairs"_a, "n_samples"_a,
         "n_features"_a, "n_neighbors"_a, "stream"_a = 0);
+}
+
+NB_MODULE(_nn_descent_cuda, m) {
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }

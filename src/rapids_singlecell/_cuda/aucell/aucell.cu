@@ -42,18 +42,24 @@ static inline void launch_auc(const int* ranks, int R, int C, const int* cnct,
                                            n_sets, n_up, max_aucs, es);
 }
 
-NB_MODULE(_aucell_cuda, m) {
+template <typename Device>
+void register_bindings(nb::module_& m) {
     m.def(
         "auc",
-        [](cuda_array_c<const int> ranks, int R, int C,
-           cuda_array_c<const int> cnct, cuda_array_c<const int> starts,
-           cuda_array_c<const int> lens, int n_sets, int n_up,
-           cuda_array_c<const float> max_aucs, cuda_array_c<float> es,
-           std::uintptr_t stream) {
+        [](gpu_array_c<const int, Device> ranks, int R, int C,
+           gpu_array_c<const int, Device> cnct,
+           gpu_array_c<const int, Device> starts,
+           gpu_array_c<const int, Device> lens, int n_sets, int n_up,
+           gpu_array_c<const float, Device> max_aucs,
+           gpu_array_c<float, Device> es, std::uintptr_t stream) {
             launch_auc(ranks.data(), R, C, cnct.data(), starts.data(),
                        lens.data(), n_sets, n_up, max_aucs.data(), es.data(),
                        (cudaStream_t)stream);
         },
         "ranks"_a, nb::kw_only(), "R"_a, "C"_a, "cnct"_a, "starts"_a, "lens"_a,
         "n_sets"_a, "n_up"_a, "max_aucs"_a, "es"_a, "stream"_a = 0);
+}
+
+NB_MODULE(_aucell_cuda, m) {
+    REGISTER_GPU_BINDINGS(register_bindings, m);
 }
