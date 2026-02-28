@@ -642,8 +642,8 @@ class EDistanceMetric(BaseMetric):
             pairwise_sums = cp.zeros((k, k), dtype=embedding.dtype)
             for data in device_data:
                 if data is not None:
-                    # cp.asarray handles cross-device copy
-                    pairwise_sums += cp.asarray(data["sums"])
+                    dev0_sums = cp.asarray(data["sums"])
+                    pairwise_sums += dev0_sums
 
             # Normalize sums to means
             norm_matrix = self._compute_norm_matrix(group_sizes, embedding.dtype)
@@ -831,7 +831,8 @@ class EDistanceMetric(BaseMetric):
             onesided_sums = cp.zeros((k, k), dtype=embedding.dtype)
             for data in device_data:
                 if data is not None:
-                    onesided_sums += cp.asarray(data["sums"])
+                    dev0_sums = cp.asarray(data["sums"])
+                    onesided_sums += dev0_sums
 
             norm_matrix = self._compute_norm_matrix(group_sizes, embedding.dtype)
             return onesided_sums / norm_matrix
