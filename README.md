@@ -6,6 +6,7 @@
 [![codecov](https://codecov.io/gh/scverse/rapids_singlecell/graph/badge.svg?token=PFHJEQD94X)](https://codecov.io/gh/scverse/rapids_singlecell)
 [![Chat](https://img.shields.io/badge/zulip-join_chat-%2367b08f.svg)](https://scverse.zulipchat.com)
 
+
 # rapids-singlecell: GPU-Accelerated Single-Cell Analysis within scverse®
 
 rapids-singlecell provides GPU-accelerated single-cell analysis with an AnnData-first API.
@@ -22,11 +23,7 @@ For more information please have a look through the [documentation](https://rapi
 
 ## Citation
 
-If you use this code, please cite: [![DOI](https://zenodo.org/badge/364573913.svg)](https://zenodo.org/badge/latestdoi/364573913)
-
-Please also consider citing: [rapids-single-cell-examples](https://zenodo.org/badge/latestdoi/265649968) and  [scanpy](https://doi.org/10.1186/s13059-017-1382-0)
-
-In addition to that please cite the methods' original research articles in the [scanpy documentation](https://scanpy.readthedocs.io/en/latest/references.html)
+If you use this tool, please cite: [![arXiv](https://img.shields.io/badge/arXiv-2603.02402-b31b1b.svg)](https://doi.org/10.48550/arXiv.2603.02402)
 
 Please cite the relevant tools if used: [decoupler](https://doi.org/10.1093/bioadv/vbac016) for decoupler functions, [squidpy](https://doi.org/10.1038/s41592-021-01358-2) for spatial analysis, and [pertpy](https://doi.org/10.1038/s41592-024-02233-6) for perturbation analysis.
 
