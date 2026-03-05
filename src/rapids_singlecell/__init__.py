@@ -12,9 +12,9 @@ def _detect_duplicate_installation():
     import warnings
 
     known = (
-        "rapids_singlecell",
-        "rapids_singlecell-cu12",
-        "rapids_singlecell-cu13",
+        "rapids-singlecell",
+        "rapids-singlecell-cu12",
+        "rapids-singlecell-cu13",
     )
     installed = []
     for pkg in known:
