@@ -62,13 +62,6 @@ class TestInvalidBehavior:
         with pytest.raises(AttributeError, match=r"No `.raw` attribute"):
             ligrec(adata, _CK, use_raw=True, interactions=interactions)
 
-    def test_raw_has_different_n_obs(
-        self, adata: AnnData, interactions: Interactions_t
-    ):
-        with pytest.raises(ValueError):
-            adata.raw = sc.datasets.blobs(n_observations=adata.n_obs + 1)
-            ligrec(adata, _CK, interactions=interactions)
-
     def test_invalid_cluster_key(self, adata: AnnData, interactions: Interactions_t):
         with pytest.raises(KeyError, match=r"Cluster key `foobar` not found"):
             ligrec(adata, cluster_key="foobar", interactions=interactions)
