@@ -7,7 +7,7 @@ requires = [
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "rapids_singlecell"
+name = "rapids-singlecell"
 description = "running single cell analysis on Nvidia GPUs"
 requires-python = ">=3.12, <3.14"
 license = { file = "LICENSE" }

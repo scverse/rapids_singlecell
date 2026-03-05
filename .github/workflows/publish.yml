@@ -71,8 +71,8 @@ jobs:
 
           # Rename package
           text = text.replace(
-              'name = "rapids_singlecell"',
-              f'name = "rapids_singlecell-cu{cuda}"',
+              'name = "rapids-singlecell"',
+              f'name = "rapids-singlecell-cu{cuda}"',
           )
           # Rename matching extra to "rapids", remove the other
           text = text.replace(f'rapids-cu{cuda} =', 'rapids =')
