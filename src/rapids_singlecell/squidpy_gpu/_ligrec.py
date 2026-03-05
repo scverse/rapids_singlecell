@@ -294,10 +294,6 @@ def ligrec(
             raise AttributeError(
                 "No `.raw` attribute found. Try specifying `use_raw=False`."
             )
-        if adata.raw.n_obs != adata.n_obs:
-            raise ValueError(
-                f"Expected `{adata.n_obs}` cells in `.raw` object, found `{adata.raw.n_obs}`."
-            )
         var_names = adata.raw.var_names
         X = adata.raw.X
     else:
