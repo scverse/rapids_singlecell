@@ -149,7 +149,7 @@ def _run_permutations_dense(
         # Sync all devices after each iteration
         for dd in device_data:
             with cp.cuda.Device(dd["device_id"]):
-                cp.cuda.Stream.null.synchronize()
+                streams[dd["device_id"]].synchronize()
 
     # Phase 3: Gather results on first device and cut to exact size
     with cp.cuda.Device(device_ids[0]):
@@ -318,7 +318,7 @@ def _run_permutations_sparse(
         # Sync all devices after each iteration
         for dd in device_data:
             with cp.cuda.Device(dd["device_id"]):
-                cp.cuda.Stream.null.synchronize()
+                streams[dd["device_id"]].synchronize()
 
     # Phase 3: Gather results on first device and cut to exact size
     with cp.cuda.Device(device_ids[0]):

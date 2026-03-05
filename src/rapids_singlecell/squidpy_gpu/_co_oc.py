@@ -376,14 +376,14 @@ def _co_occurrence_gpu(
     for data in device_data:
         if data is not None:
             with cp.cuda.Device(data["device_id"]):
-                cp.cuda.Stream.null.synchronize()
+                streams[data["device_id"]].synchronize()
 
     # Phase 4: Aggregate counts on first device
     with cp.cuda.Device(device_ids[0]):
         counts = cp.zeros((k, k, l_val), dtype=cp.int32)
         for data in device_data:
             if data is not None:
-                # cp.asarray handles cross-device copy
-                counts += cp.asarray(data["counts"])
+                dev0_counts = cp.asarray(data["counts"])
+                counts += dev0_counts
 
     return counts, True
