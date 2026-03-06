@@ -5,6 +5,7 @@
 // Templated kernel for computing pairwise group distances
 // Supports both float and double precision
 // Uses shared memory tiling over cells and features
+// Output is flat: one sum per pair, indexed by pair_id (blockIdx.x)
 
 template <typename T, int CELL_TILE, int FEAT_TILE>
 __global__ void edistance_kernel(const T* __restrict__ embedding,
@@ -12,8 +13,8 @@ __global__ void edistance_kernel(const T* __restrict__ embedding,
                                  const int* __restrict__ cell_indices,
                                  const int* __restrict__ pair_left,
                                  const int* __restrict__ pair_right,
-                                 T* __restrict__ pairwise_sums, int k,
-                                 int n_features, int blocks_per_pair) {
+                                 T* __restrict__ pairwise_sums, int n_features,
+                                 int blocks_per_pair) {
     // Shared memory for B tile: [FEAT_TILE][CELL_TILE]
     extern __shared__ char smem_raw[];
     T* smem_b = reinterpret_cast<T*>(smem_raw);
@@ -133,10 +134,7 @@ __global__ void edistance_kernel(const T* __restrict__ embedding,
             val += __shfl_down_sync(0xffffffff, val, offset);
 
         if (thread_id == 0) {
-            atomicAdd(&pairwise_sums[a * k + b], val);
-            if (a != b) {
-                atomicAdd(&pairwise_sums[b * k + a], val);
-            }
+            atomicAdd(&pairwise_sums[pair_id], val);
         }
     }
 }
