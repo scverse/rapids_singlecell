@@ -232,7 +232,7 @@ class Distance:
         self,
         adata: AnnData,
         groupby: str,
-        selected_group: str,
+        selected_group: Sequence[str] | str,
         *,
         groups: Sequence[str] | None = None,
         bootstrap: bool = False,
