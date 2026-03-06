@@ -155,16 +155,16 @@ class EDistanceMetric(BaseMetric):
         self,
         adata: AnnData,
         groupby: str,
-        selected_group: str,
+        selected_group: str | Sequence[str],
         *,
         groups: Sequence[str] | None = None,
         bootstrap: bool = False,
         n_bootstrap: int = 100,
         random_state: int = 0,
         multi_gpu: bool | list[int] | str | None = None,
-    ) -> pd.Series | tuple[pd.Series, pd.Series]:
+    ) -> pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Compute energy distances from one selected group to all other groups.
+        Compute energy distances from selected reference group(s) to all other groups.
 
         Parameters
         ----------
@@ -173,7 +173,8 @@ class EDistanceMetric(BaseMetric):
         groupby
             Key in adata.obs for grouping cells
         selected_group
-            Reference group to compute distances from
+            Reference group(s) to compute distances from. Can be a single
+            group name or a sequence of group names for multiple controls.
         groups
             Specific groups to compute distances to (if None, use all)
         bootstrap
@@ -193,19 +194,26 @@ class EDistanceMetric(BaseMetric):
         Returns
         -------
         distances
-            Series containing distances from selected_group to all other groups.
+            DataFrame with groups as index and selected_group(s) as columns.
             If bootstrap=True, returns tuple of (distances, distances_var).
         """
         _assert_categorical_obs(adata, key=groupby)
+
+        # Normalize selected_group to a list
+        if isinstance(selected_group, str):
+            selected_groups = [selected_group]
+        else:
+            selected_groups = list(selected_group)
 
         embedding = self._get_embedding(adata)
         original_groups = adata.obs[groupby]
         group_map = {v: i for i, v in enumerate(original_groups.cat.categories.values)}
 
-        if selected_group not in group_map:
-            raise ValueError(
-                f"Selected group '{selected_group}' not found in groupby '{groupby}'"
-            )
+        for sg in selected_groups:
+            if sg not in group_map:
+                raise ValueError(
+                    f"Selected group '{sg}' not found in groupby '{groupby}'"
+                )
 
         group_labels = cp.array([group_map[c] for c in original_groups], dtype=cp.int32)
         k = len(group_map)
@@ -213,7 +221,7 @@ class EDistanceMetric(BaseMetric):
 
         all_groups = list(original_groups.cat.categories.values)
         groups_list = all_groups if groups is None else list(groups)
-        selected_idx = group_map[selected_group]
+        selected_indices = [group_map[sg] for sg in selected_groups]
 
         device_ids = parse_device_ids(multi_gpu=multi_gpu)
 
@@ -223,30 +231,35 @@ class EDistanceMetric(BaseMetric):
                 cat_offsets=cat_offsets,
                 cell_indices=cell_indices,
                 k=k,
-                selected_idx=selected_idx,
+                selected_indices=selected_indices,
                 n_bootstrap=n_bootstrap,
                 random_state=random_state,
                 device_ids=device_ids,
             )
 
-            # Compute energy distances: e[s,b] = 2*d[s,b] - d[s,s] - d[b,b]
             diag_means = cp.diag(onesided_means)
-            row = onesided_means[selected_idx, :]
-            edistances = 2 * row - diag_means[selected_idx] - diag_means
-            edistances[selected_idx] = 0.0
-
-            # Variance: var[s,b] = 4*var[s,b] + var[s,s] + var[b,b]
             diag_vars = cp.diag(onesided_vars)
-            ed_vars = (
-                4 * onesided_vars[selected_idx, :] + diag_vars[selected_idx] + diag_vars
-            )
-            ed_vars[selected_idx] = 0.0
 
-            series_name = f"edistance to {selected_group}"
-            distances = pd.Series(edistances.get(), index=all_groups, name=series_name)
+            # Compute energy distances for each control:
+            # e[s,b] = 2*d[s,b] - d[s,s] - d[b,b]
+            ed_cols = {}
+            var_cols = {}
+            for sg, si in zip(selected_groups, selected_indices):
+                ed_row = 2 * onesided_means[si, :] - diag_means[si] - diag_means
+                ed_row[si] = 0.0
+                ed_cols[sg] = ed_row.get()
+
+                var_row = 4 * onesided_vars[si, :] + diag_vars[si] + diag_vars
+                var_row[si] = 0.0
+                var_cols[sg] = var_row.get()
+
+            distances = pd.DataFrame(ed_cols, index=all_groups)
             distances.index.name = groupby
-            variances = pd.Series(ed_vars.get(), index=all_groups, name=series_name)
+            distances.columns.name = "selected_group"
+
+            variances = pd.DataFrame(var_cols, index=all_groups)
             variances.index.name = groupby
+            variances.columns.name = "selected_group"
 
             if groups_list != all_groups:
                 distances = distances.loc[groups_list]
@@ -254,32 +267,33 @@ class EDistanceMetric(BaseMetric):
 
             return distances, variances
 
-        # Non-bootstrap path: compute onesided means directly
+        # Non-bootstrap path
         onesided_means = self._onesided_means(
             embedding,
             cat_offsets,
             cell_indices,
             k,
-            selected_idx=selected_idx,
+            selected_indices=selected_indices,
             device_ids=device_ids,
         )
 
-        # Compute energy distances: e[s,b] = 2*d[s,b] - d[s,s] - d[b,b]
+        # Compute energy distances for each control:
+        # e[s,b] = 2*d[s,b] - d[s,s] - d[b,b]
         diag = cp.diag(onesided_means)
-        edistances = 2 * onesided_means[selected_idx, :] - diag[selected_idx] - diag
-        edistances[selected_idx] = 0.0  # Self-distance is 0
+        ed_cols = {}
+        for sg, si in zip(selected_groups, selected_indices):
+            ed_row = 2 * onesided_means[si, :] - diag[si] - diag
+            ed_row[si] = 0.0
+            ed_cols[sg] = ed_row.get()
 
-        # Create Series with pertpy-compatible name
-        series = pd.Series(
-            edistances.get(), index=all_groups, name=f"edistance to {selected_group}"
-        )
-        series.index.name = groupby
+        df = pd.DataFrame(ed_cols, index=all_groups)
+        df.index.name = groupby
+        df.columns.name = "selected_group"
 
-        # Filter to requested groups if needed
         if groups_list != all_groups:
-            series = series.loc[groups_list]
+            df = df.loc[groups_list]
 
-        return series
+        return df
 
     def bootstrap(
         self,
@@ -681,16 +695,16 @@ class EDistanceMetric(BaseMetric):
         cell_indices: cp.ndarray,
         k: int,
         *,
-        selected_idx: int,
+        selected_indices: list[int],
         device_ids: list[int],
     ) -> cp.ndarray:
-        """Compute mean distances from selected group to all groups.
+        """Compute mean distances from selected group(s) to all groups.
 
         Splits pairs across specified GPUs and aggregates results on GPU 0.
 
         Computes:
-        - d[selected_idx, i] for all i (cross-distances)
-        - d[i, i] for all i (self-distances needed for energy distance formula)
+        - d[s, i] for each s in selected_indices, for all i (cross-distances)
+        - d[i, i] for non-selected groups (self-distances for energy distance)
 
         Parameters
         ----------
@@ -702,8 +716,8 @@ class EDistanceMetric(BaseMetric):
             Cell indices on GPU 0
         k
             Number of groups
-        selected_idx
-            Index of the selected group
+        selected_indices
+            Indices of the selected (control) groups
         device_ids
             List of GPU device IDs to use
 
@@ -718,18 +732,28 @@ class EDistanceMetric(BaseMetric):
         # Get group sizes
         group_sizes = cp.diff(cat_offsets).astype(cp.int64)
 
-        # Build pairs for onesided computation
-        all_indices = cp.arange(k, dtype=cp.int32)
-        cross_left = cp.full(k, selected_idx, dtype=cp.int32)
-        cross_right = all_indices
+        # Build pairs for onesided computation.
+        # The kernel symmetrizes: for pair (a,b) it writes to both
+        # sums[a,b] and sums[b,a]. So we must avoid having both (i,j)
+        # and (j,i) in the pair list to prevent double-counting.
+        selected_set = set(selected_indices)
 
-        # Diagonal pairs for other groups with >= 2 cells
-        mask = (all_indices != selected_idx) & (group_sizes >= 2)
-        other_diag = all_indices[mask]
+        # Collect unique pairs as a set of (min, max) tuples
+        pair_set: set[tuple[int, int]] = set()
 
-        # Combine all pairs
-        pair_left = cp.concatenate([cross_left, other_diag])
-        pair_right = cp.concatenate([cross_right, other_diag])
+        # Cross pairs: (s, i) for each selected s and all i
+        for si in selected_indices:
+            for i in range(k):
+                pair_set.add((min(si, i), max(si, i)))
+
+        # Diagonal pairs for non-selected groups with >= 2 cells
+        for i in range(k):
+            if i not in selected_set and int(group_sizes[i]) >= 2:
+                pair_set.add((i, i))
+
+        pairs = sorted(pair_set)
+        pair_left = cp.array([p[0] for p in pairs], dtype=cp.int32)
+        pair_right = cp.array([p[1] for p in pairs], dtype=cp.int32)
         num_pairs = len(pair_left)
 
         if num_pairs == 0:
@@ -913,7 +937,7 @@ class EDistanceMetric(BaseMetric):
         cat_offsets: cp.ndarray,
         cell_indices: cp.ndarray,
         k: int,
-        selected_idx: int,
+        selected_indices: list[int],
         n_bootstrap: int,
         random_state: int,
         device_ids: list[int],
@@ -932,8 +956,8 @@ class EDistanceMetric(BaseMetric):
             Cell indices on GPU 0
         k
             Number of groups
-        selected_idx
-            Index of the selected group
+        selected_indices
+            Indices of the selected (control) groups
         n_bootstrap
             Number of bootstrap iterations
         random_state
@@ -966,7 +990,7 @@ class EDistanceMetric(BaseMetric):
                 cat_offsets=boot_cat_offsets,
                 cell_indices=boot_cell_indices,
                 k=k,
-                selected_idx=selected_idx,
+                selected_indices=selected_indices,
                 device_ids=device_ids,
             )
             all_results.append(onesided_means.get())

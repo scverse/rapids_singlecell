@@ -74,11 +74,12 @@ def test_distance_class_onesided_distances(small_adata: AnnData) -> None:
         small_adata, groupby="group", selected_group="g0"
     )
 
-    assert isinstance(result, pd.Series)
+    assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # 3 groups total
     assert "g0" in result.index
     assert "g1" in result.index
     assert "g2" in result.index
+    assert list(result.columns) == ["g0"]
 
 
 def test_distance_class_onesided_matches_pairwise(small_adata: AnnData) -> None:
@@ -95,10 +96,33 @@ def test_distance_class_onesided_matches_pairwise(small_adata: AnnData) -> None:
         )
         # Should match the row from pairwise matrix
         np.testing.assert_allclose(
-            onesided.values, pairwise_df.loc[group].values, atol=1e-5
+            onesided[group].values, pairwise_df.loc[group].values, atol=1e-5
         )
         # Self-distance should be 0
-        assert onesided[group] == pytest.approx(0.0, abs=1e-6)
+        assert onesided.loc[group, group] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_distance_class_onesided_multiple_controls(small_adata: AnnData) -> None:
+    """Test onesided_distances with multiple selected groups."""
+    distance = Distance(metric="edistance")
+
+    # Multiple controls in a single call
+    result = distance.onesided_distances(
+        small_adata, groupby="group", selected_group=["g0", "g1"]
+    )
+
+    assert isinstance(result, pd.DataFrame)
+    assert list(result.columns) == ["g0", "g1"]
+    assert len(result) == 3
+
+    # Each column should match the single-control result
+    for group in ["g0", "g1"]:
+        single = distance.onesided_distances(
+            small_adata, groupby="group", selected_group=group
+        )
+        np.testing.assert_allclose(
+            result[group].values, single[group].values, atol=1e-6
+        )
 
 
 def test_distance_class_onesided_invalid_group(small_adata: AnnData) -> None:
@@ -127,18 +151,18 @@ def test_distance_class_onesided_bootstrap(small_adata: AnnData) -> None:
     assert len(result) == 2
     distances, distances_var = result
 
-    assert isinstance(distances, pd.Series)
-    assert isinstance(distances_var, pd.Series)
+    assert isinstance(distances, pd.DataFrame)
+    assert isinstance(distances_var, pd.DataFrame)
     assert len(distances) == 3
     assert len(distances_var) == 3
 
     # Self-distance variance should be 0
-    assert distances["g0"] == pytest.approx(0.0, abs=1e-6)
-    assert distances_var["g0"] == pytest.approx(0.0, abs=1e-6)
+    assert distances.loc["g0", "g0"] == pytest.approx(0.0, abs=1e-6)
+    assert distances_var.loc["g0", "g0"] == pytest.approx(0.0, abs=1e-6)
 
     # Non-self variances should be positive
-    assert distances_var["g1"] > 0
-    assert distances_var["g2"] > 0
+    assert distances_var.loc["g1", "g0"] > 0
+    assert distances_var.loc["g2", "g0"] > 0
 
 
 def test_distance_class_onesided_bootstrap_matches_pairwise(
@@ -167,9 +191,11 @@ def test_distance_class_onesided_bootstrap_matches_pairwise(
     )
 
     # Should match the corresponding row from pairwise
-    np.testing.assert_allclose(onesided.values, pairwise_df.loc["g0"].values, atol=1e-6)
     np.testing.assert_allclose(
-        onesided_var.values, pairwise_var_df.loc["g0"].values, atol=1e-6
+        onesided["g0"].values, pairwise_df.loc["g0"].values, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        onesided_var["g0"].values, pairwise_var_df.loc["g0"].values, atol=1e-6
     )
 
 
@@ -305,7 +331,7 @@ def test_onesided_distances_correctness_vs_cpu(small_adata: AnnData) -> None:
             else:
                 expected = _compute_energy_distance_cpu(X, Y)
 
-            actual = onesided[target_group]
+            actual = onesided.loc[target_group, selected_group]
             np.testing.assert_allclose(
                 actual,
                 expected,
@@ -1076,15 +1102,18 @@ def test_pairwise_output_format(small_adata: AnnData) -> None:
 
 
 def test_onesided_output_format(small_adata: AnnData) -> None:
-    """Test onesided_distances output format: Series with proper name."""
+    """Test onesided_distances output format: DataFrame with proper structure."""
     distance = Distance(metric="edistance")
     result = distance.onesided_distances(
         small_adata, groupby="group", selected_group="g0"
     )
 
-    assert isinstance(result, pd.Series), "onesided_distances should return Series"
-    assert "edistance" in result.name, "Series name should contain 'edistance'"
-    assert "g0" in result.name, "Series name should contain selected group"
+    assert isinstance(result, pd.DataFrame), (
+        "onesided_distances should return DataFrame"
+    )
+    assert result.index.name == "group"
+    assert result.columns.name == "selected_group"
+    assert list(result.columns) == ["g0"]
 
 
 # ============================================================================
@@ -1387,7 +1416,7 @@ def test_single_cell_mixed_groups() -> None:
     # Test onesided_distances with single-cell selected group
     onesided = distance.onesided_distances(adata, groupby="group", selected_group="g0")
     assert np.all(np.isfinite(onesided.values)), "Onesided distances should be finite"
-    assert onesided["g0"] == 0.0, "Self-distance should be 0"
+    assert onesided.loc["g0", "g0"] == 0.0, "Self-distance should be 0"
 
 
 def test_high_dimensional_features() -> None:

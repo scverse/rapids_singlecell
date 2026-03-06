@@ -87,7 +87,7 @@ class BaseMetric(ABC):
         self,
         adata: AnnData,
         groupby: str,
-        selected_group: str,
+        selected_group: str | Sequence[str],
         *,
         groups: Sequence[str] | None = None,
         bootstrap: bool = False,
@@ -96,7 +96,7 @@ class BaseMetric(ABC):
         multi_gpu: bool | list[int] | str | None = None,
     ):
         """
-        Compute distances from one selected group to all other groups.
+        Compute distances from selected reference group(s) to all other groups.
 
         Parameters
         ----------
@@ -105,7 +105,8 @@ class BaseMetric(ABC):
         groupby
             Key in adata.obs for grouping cells
         selected_group
-            Reference group to compute distances from
+            Reference group(s) to compute distances from. Can be a single
+            group name or a sequence of group names.
         groups
             Specific groups to compute distances to (if None, use all)
         bootstrap
@@ -125,7 +126,8 @@ class BaseMetric(ABC):
         Returns
         -------
         distances
-            Distance values from selected_group to other groups
+            DataFrame with distances from selected_group(s) to other groups.
+            If bootstrap=True, returns tuple of (distances, distances_var).
         """
         raise NotImplementedError(
             f"{self.__class__.__name__} does not implement onesided_distances"
