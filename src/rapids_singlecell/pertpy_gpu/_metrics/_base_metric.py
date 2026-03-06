@@ -179,3 +179,39 @@ class BaseMetric(ABC):
         raise NotImplementedError(
             f"{self.__class__.__name__} does not implement bootstrap"
         )
+
+    def contrast_distances(
+        self,
+        adata: AnnData,
+        contrasts,
+        *,
+        multi_gpu: bool | list[int] | str | None = None,
+    ):
+        """
+        Compute distances for contrasts.
+
+        Parameters
+        ----------
+        adata
+            Annotated data matrix
+        contrasts
+            Either a DataFrame with a groupby column, a ``reference``
+            column, and optional split columns, or a dict mapping contrast
+            names to ``(condition_a, condition_b)`` tuples.
+        multi_gpu
+            GPU selection:
+            - None: Use all GPUs if metric supports it, else GPU 0 (default)
+            - True: Use all available GPUs
+            - False: Use only GPU 0
+            - list[int]: Use specific GPU IDs (e.g., [0, 2])
+            - str: Comma-separated GPU IDs (e.g., "0,2")
+
+        Returns
+        -------
+        pd.DataFrame or pd.Series
+            DataFrame with distance column when using structured contrasts,
+            Series when using raw dict contrasts.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement contrast_distances"
+        )

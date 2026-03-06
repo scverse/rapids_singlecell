@@ -337,6 +337,118 @@ def test_onesided_distances_correctness_vs_cpu(small_adata: AnnData) -> None:
 
 
 # ============================================================================
+# Contrast distance tests
+# ============================================================================
+
+
+@pytest.fixture
+def contrast_adata() -> AnnData:
+    """AnnData with treatment and celltype columns for contrast tests."""
+    rng = np.random.default_rng(42)
+    n = 10
+    cpu_emb = rng.normal(size=(n * 4, 5)).astype(np.float32)
+    obs = pd.DataFrame(
+        {
+            "treatment": pd.Categorical(
+                ["ctrl"] * n + ["drugA"] * n + ["ctrl"] * n + ["drugA"] * n
+            ),
+            "celltype": pd.Categorical(["T"] * n * 2 + ["B"] * n * 2),
+        }
+    )
+    adata = AnnData(cpu_emb.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_emb, dtype=cp.float32)
+    return adata
+
+
+def test_contrast_distances_matches_compute_distance(
+    contrast_adata: AnnData,
+) -> None:
+    """Test contrast_distances matches per-pair compute_distance reference."""
+    from rapids_singlecell.pertpy_gpu._metrics._edistance import EDistanceMetric
+
+    d = EDistanceMetric(obsm_key="X_pca")
+
+    contrasts = {
+        "drugA_vs_ctrl_T": (
+            {"treatment": "drugA", "celltype": "T"},
+            {"treatment": "ctrl", "celltype": "T"},
+        ),
+        "drugA_vs_ctrl_B": (
+            {"treatment": "drugA", "celltype": "B"},
+            {"treatment": "ctrl", "celltype": "B"},
+        ),
+    }
+
+    result = d.contrast_distances(contrast_adata, contrasts=contrasts)
+
+    assert isinstance(result, pd.Series)
+    assert result.name == "edistance"
+    assert len(result) == 2
+
+    # Verify each contrast against compute_distance
+    for name, (cond_a, cond_b) in contrasts.items():
+        mask_a = np.ones(len(contrast_adata), dtype=bool)
+        mask_b = np.ones(len(contrast_adata), dtype=bool)
+        for col, val in cond_a.items():
+            mask_a &= contrast_adata.obs[col].values == val
+        for col, val in cond_b.items():
+            mask_b &= contrast_adata.obs[col].values == val
+
+        X = contrast_adata.obsm["X_pca"][mask_a]
+        Y = contrast_adata.obsm["X_pca"][mask_b]
+        expected = d.compute_distance(X, Y)
+
+        np.testing.assert_allclose(
+            result[name],
+            expected,
+            atol=1e-6,
+            err_msg=f"Contrast {name} mismatch",
+        )
+
+
+def test_contrast_distances_shared_condition(contrast_adata: AnnData) -> None:
+    """Test that contrasts sharing a condition (e.g. same control) work."""
+    from rapids_singlecell.pertpy_gpu._metrics._edistance import EDistanceMetric
+
+    d = EDistanceMetric(obsm_key="X_pca")
+
+    # Both contrasts share the ctrl_T condition
+    contrasts = {
+        "drugA_vs_ctrl_T": (
+            {"treatment": "drugA", "celltype": "T"},
+            {"treatment": "ctrl", "celltype": "T"},
+        ),
+        "ctrl_T_self": (
+            {"treatment": "ctrl", "celltype": "T"},
+            {"treatment": "ctrl", "celltype": "T"},
+        ),
+    }
+
+    result = d.contrast_distances(contrast_adata, contrasts=contrasts)
+
+    # Self-distance should be 0
+    assert result["ctrl_T_self"] == pytest.approx(0.0, abs=1e-7)
+
+
+def test_contrast_distances_empty_condition(contrast_adata: AnnData) -> None:
+    """Test that a condition matching no cells is handled."""
+    from rapids_singlecell.pertpy_gpu._metrics._edistance import EDistanceMetric
+
+    d = EDistanceMetric(obsm_key="X_pca")
+
+    contrasts = {
+        "nonexistent": (
+            {"treatment": "drugX", "celltype": "T"},
+            {"treatment": "ctrl", "celltype": "T"},
+        ),
+    }
+
+    # Should not crash — group will have 0 cells
+    result = d.contrast_distances(contrast_adata, contrasts=contrasts)
+    assert isinstance(result, pd.Series)
+
+
+# ============================================================================
 # Bootstrap correctness tests
 # ============================================================================
 

@@ -351,6 +351,277 @@ class Distance:
         )
         return MeanVar(mean=mean, variance=variance)
 
+    @staticmethod
+    def create_contrasts(
+        adata: AnnData,
+        groupby: str,
+        selected_group: str,
+        *,
+        groups: Sequence[str] | None = None,
+        split_by: str | Sequence[str] | None = None,
+    ) -> pd.DataFrame:
+        """
+        Build a contrasts DataFrame for use with :meth:`contrast_distances`.
+
+        Each row represents one contrast: comparing a group against the
+        reference, optionally within each level of ``split_by`` columns.
+        The resulting DataFrame can be filtered or modified before passing
+        to :meth:`contrast_distances`.
+
+        The output layout is:
+
+        - **First column** (``groupby``): the target values to compare
+        - **``reference`` column**: the control value in the groupby column
+        - **Remaining columns** (``split_by``): stratification filters
+
+        Parameters
+        ----------
+        adata
+            Annotated data matrix
+        groupby
+            Column in ``adata.obs`` whose levels are compared against
+            ``selected_group``
+        selected_group
+            The reference (control) value in the ``groupby`` column
+        groups
+            Specific groups to include. If None, all non-reference groups
+            are included.
+        split_by
+            Column(s) in ``adata.obs`` to stratify by. If provided,
+            contrasts are computed within each unique combination of
+            these columns. Only combinations where the reference group
+            exists are included.
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per contrast. First column is ``groupby``, then
+            ``reference``, then any ``split_by`` columns.
+
+        Examples
+        --------
+        >>> # All targets vs control, ignoring celltype
+        >>> contrasts = Distance.create_contrasts(
+        ...     adata, groupby="target_gene", selected_group="Non_target"
+        ... )
+
+        >>> # Stratified by celltype
+        >>> contrasts = Distance.create_contrasts(
+        ...     adata, groupby="target_gene", selected_group="Non_target",
+        ...     split_by="group_name",
+        ... )
+
+        >>> # Filter before computing
+        >>> contrasts = contrasts[contrasts["group_name"] != "rare_type"]
+        >>> result = distance.contrast_distances(adata, contrasts=contrasts)
+
+        >>> # Manual construction (no helper needed)
+        >>> import pandas as pd
+        >>> contrasts = pd.DataFrame({
+        ...     "target_gene": ["Irf7", "Ski"],
+        ...     "reference": ["Non_target", "Non_target"],
+        ...     "group_name": ["CD4", "CD4"],
+        ... })
+        """
+        import pandas as pd
+
+        if selected_group not in adata.obs[groupby].values:
+            raise ValueError(
+                f"Reference '{selected_group}' not found in column '{groupby}'"
+            )
+
+        if split_by is None:
+            split_cols: list[str] = []
+        elif isinstance(split_by, str):
+            split_cols = [split_by]
+        else:
+            split_cols = list(split_by)
+
+        allowed_groups = set(groups) if groups is not None else None
+        all_cols = [groupby, *split_cols]
+
+        if split_cols:
+            # Get all existing (groupby, *split) combinations in one pass
+            existing = adata.obs[all_cols].drop_duplicates().reset_index(drop=True)
+
+            # Find which splits have the reference
+            ref_rows = existing[existing[groupby] == selected_group]
+            if len(ref_rows) == 0:
+                df = pd.DataFrame(columns=all_cols)
+            else:
+                # Inner join: keep only targets in splits that have reference
+                ref_splits = ref_rows[split_cols]
+                targets = existing[existing[groupby] != selected_group]
+                if allowed_groups is not None:
+                    targets = targets[targets[groupby].isin(allowed_groups)]
+                df = targets.merge(ref_splits, on=split_cols, how="inner")
+                df = (
+                    df[all_cols]
+                    .sort_values([*split_cols, groupby])
+                    .reset_index(drop=True)
+                )
+        else:
+            # No split — just all non-reference levels of groupby
+            targets = adata.obs[groupby].unique()
+            targets = [
+                t
+                for t in targets
+                if t != selected_group
+                and (allowed_groups is None or t in allowed_groups)
+            ]
+            df = pd.DataFrame({groupby: targets})
+
+        # Insert reference column right after groupby
+        df.insert(1, "reference", selected_group)
+
+        return df
+
+    @staticmethod
+    def validate_contrasts(
+        adata: AnnData,
+        contrasts: pd.DataFrame,
+    ) -> None:
+        """
+        Validate a contrasts DataFrame against an AnnData object.
+
+        Expects the DataFrame layout produced by :meth:`create_contrasts`:
+        first column is the groupby column, ``reference`` column contains
+        the control value, remaining columns are split-by filters.
+
+        Parameters
+        ----------
+        adata
+            Annotated data matrix
+        contrasts
+            DataFrame to validate
+
+        Raises
+        ------
+        ValueError
+            If validation fails.
+        """
+        if "reference" not in contrasts.columns:
+            raise ValueError(
+                "Contrasts DataFrame must have a 'reference' column. "
+                "Use Distance.create_contrasts() or add it manually."
+            )
+
+        groupby = contrasts.columns[0]
+        if groupby == "reference":
+            raise ValueError(
+                "First column cannot be 'reference'. The first column "
+                "must be the groupby column."
+            )
+
+        split_by = [c for c in contrasts.columns if c not in (groupby, "reference")]
+
+        # Check columns exist in adata.obs
+        for col in [groupby, *split_by]:
+            if col not in adata.obs.columns:
+                raise ValueError(
+                    f"Column '{col}' not found in adata.obs. "
+                    f"Available columns: {list(adata.obs.columns)}"
+                )
+
+        # Check reference values exist in adata
+        obs_groupby_values = set(adata.obs[groupby].unique())
+        ref_values = set(contrasts["reference"].unique())
+        missing_refs = ref_values - obs_groupby_values
+        if missing_refs:
+            raise ValueError(
+                f"Reference values not found in adata.obs['{groupby}']: {missing_refs}"
+            )
+
+        # Check target values exist in adata
+        target_values = set(contrasts[groupby].unique())
+        missing_targets = target_values - obs_groupby_values
+        if missing_targets:
+            raise ValueError(
+                f"Groups not found in adata.obs['{groupby}']: {missing_targets}"
+            )
+
+        # Check split_by values exist in adata
+        for col in split_by:
+            obs_vals = set(adata.obs[col].unique())
+            contrast_vals = set(contrasts[col].unique())
+            missing_split = contrast_vals - obs_vals
+            if missing_split:
+                raise ValueError(
+                    f"Values not found in adata.obs['{col}']: {missing_split}"
+                )
+
+    def contrast_distances(
+        self,
+        adata: AnnData,
+        contrasts: pd.DataFrame | dict[str, tuple[dict[str, str], dict[str, str]]],
+        *,
+        multi_gpu: bool | list[int] | str | None = None,
+    ) -> pd.DataFrame | pd.Series:
+        """
+        Compute distances for contrasts.
+
+        Accepts either a structured DataFrame (from :meth:`create_contrasts`
+        or constructed manually) or a raw dict of contrast definitions.
+
+        For DataFrame contrasts, the layout is:
+
+        - **First column**: the groupby column (target values to compare)
+        - **``reference`` column**: the control value in the groupby column
+        - **Other columns**: split-by filters (e.g., cell type)
+
+        Parameters
+        ----------
+        adata
+            Annotated data matrix
+        contrasts
+            Either a DataFrame with a groupby column, a ``reference``
+            column, and optional split columns, or a dict mapping contrast
+            names to ``(condition_a, condition_b)`` tuples.
+        multi_gpu
+            GPU selection:
+            - None: Use all GPUs if metric supports it, else GPU 0 (default)
+            - True: Use all available GPUs
+            - False: Use only GPU 0
+            - list[int]: Use specific GPU IDs (e.g., [0, 2])
+            - str: Comma-separated GPU IDs (e.g., "0,2")
+
+        Returns
+        -------
+        pd.DataFrame or pd.Series
+            DataFrame with distance column when using structured contrasts,
+            Series when using raw dict contrasts.
+
+        Examples
+        --------
+        >>> distance = Distance(metric='edistance')
+
+        >>> # Using create_contrasts helper
+        >>> contrasts = Distance.create_contrasts(
+        ...     adata, groupby="target_gene", selected_group="Non_target",
+        ...     split_by="group_name",
+        ... )
+        >>> result = distance.contrast_distances(adata, contrasts=contrasts)
+
+        >>> # Manual DataFrame construction
+        >>> import pandas as pd
+        >>> contrasts = pd.DataFrame({
+        ...     "target_gene": ["Irf7", "Ski"],
+        ...     "reference": ["Non_target", "Non_target"],
+        ...     "group_name": ["CD4", "CD4"],
+        ... })
+        >>> result = distance.contrast_distances(adata, contrasts)
+        """
+        if not hasattr(self._metric_impl, "contrast_distances"):
+            raise NotImplementedError(
+                f"Metric '{self.metric}' does not support contrast_distances"
+            )
+        multi_gpu = self._check_multi_gpu_support(multi_gpu=multi_gpu)
+        return self._metric_impl.contrast_distances(
+            adata=adata,
+            contrasts=contrasts,
+            multi_gpu=multi_gpu,
+        )
+
     def __repr__(self) -> str:
         """String representation of Distance object."""
         if self.layer_key:
