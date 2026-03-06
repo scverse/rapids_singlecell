@@ -736,24 +736,35 @@ class EDistanceMetric(BaseMetric):
         # The kernel symmetrizes: for pair (a,b) it writes to both
         # sums[a,b] and sums[b,a]. So we must avoid having both (i,j)
         # and (j,i) in the pair list to prevent double-counting.
-        selected_set = set(selected_indices)
+        # Pairs are grouped by control index for L2 cache efficiency.
+        all_indices = cp.arange(k, dtype=cp.int32)
 
-        # Collect unique pairs as a set of (min, max) tuples
-        pair_set: set[tuple[int, int]] = set()
-
-        # Cross pairs: (s, i) for each selected s and all i
+        # Cross pairs grouped by control, deduplicated across controls
+        parts_left = []
+        parts_right = []
+        seen: set[tuple[int, int]] = set()
         for si in selected_indices:
-            for i in range(k):
-                pair_set.add((min(si, i), max(si, i)))
+            cur_left = []
+            cur_right = []
+            for j in range(k):
+                canon = (min(si, j), max(si, j))
+                if canon not in seen:
+                    seen.add(canon)
+                    cur_left.append(si)
+                    cur_right.append(j)
+            parts_left.append(cp.array(cur_left, dtype=cp.int32))
+            parts_right.append(cp.array(cur_right, dtype=cp.int32))
 
         # Diagonal pairs for non-selected groups with >= 2 cells
-        for i in range(k):
-            if i not in selected_set and int(group_sizes[i]) >= 2:
-                pair_set.add((i, i))
+        selected_mask = cp.zeros(k, dtype=bool)
+        selected_mask[cp.array(selected_indices, dtype=cp.int32)] = True
+        diag_mask = ~selected_mask & (group_sizes >= 2)
+        diag_idx = all_indices[diag_mask]
+        parts_left.append(diag_idx)
+        parts_right.append(diag_idx)
 
-        pairs = sorted(pair_set)
-        pair_left = cp.array([p[0] for p in pairs], dtype=cp.int32)
-        pair_right = cp.array([p[1] for p in pairs], dtype=cp.int32)
+        pair_left = cp.concatenate(parts_left)
+        pair_right = cp.concatenate(parts_right)
         num_pairs = len(pair_left)
 
         if num_pairs == 0:
