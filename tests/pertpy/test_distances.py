@@ -115,13 +115,11 @@ def test_distance_class_onesided_multiple_controls(small_adata: AnnData) -> None
     assert list(result.columns) == ["g0", "g1"]
     assert len(result) == 3
 
-    # Each column should match the single-control result
+    # Each column should match the corresponding row from pairwise
+    pairwise_df = distance.pairwise(small_adata, groupby="group")
     for group in ["g0", "g1"]:
-        single = distance.onesided_distances(
-            small_adata, groupby="group", selected_group=group
-        )
         np.testing.assert_allclose(
-            result[group].values, single[group].values, atol=1e-6
+            result[group].values, pairwise_df.loc[group].values, atol=1e-7
         )
 
 
