@@ -239,7 +239,12 @@ class Distance:
         n_bootstrap: int = 100,
         random_state: int = 0,
         multi_gpu: bool | list[int] | str | None = None,
-    ) -> pd.Series | tuple[pd.Series, pd.Series]:
+    ) -> (
+        pd.Series
+        | pd.DataFrame
+        | tuple[pd.Series, pd.Series]
+        | tuple[pd.DataFrame, pd.DataFrame]
+    ):
         """
         Compute distances from one selected group to all other groups.
 

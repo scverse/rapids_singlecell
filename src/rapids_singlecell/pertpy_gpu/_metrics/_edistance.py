@@ -162,7 +162,12 @@ class EDistanceMetric(BaseMetric):
         n_bootstrap: int = 100,
         random_state: int = 0,
         multi_gpu: bool | list[int] | str | None = None,
-    ) -> pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]:
+    ) -> (
+        pd.Series
+        | pd.DataFrame
+        | tuple[pd.Series, pd.Series]
+        | tuple[pd.DataFrame, pd.DataFrame]
+    ):
         """
         Compute energy distances from selected reference group(s) to all other groups.
 
@@ -175,6 +180,8 @@ class EDistanceMetric(BaseMetric):
         selected_group
             Reference group(s) to compute distances from. Can be a single
             group name or a sequence of group names for multiple controls.
+            When a single string is passed, returns a Series. When a sequence
+            is passed, returns a DataFrame with one column per control.
         groups
             Specific groups to compute distances to (if None, use all)
         bootstrap
@@ -194,13 +201,14 @@ class EDistanceMetric(BaseMetric):
         Returns
         -------
         distances
-            DataFrame with groups as index and selected_group(s) as columns.
+            Series (single control) or DataFrame (multiple controls).
             If bootstrap=True, returns tuple of (distances, distances_var).
         """
         _assert_categorical_obs(adata, key=groupby)
 
-        # Normalize selected_group to a list
-        if isinstance(selected_group, str):
+        # Normalize selected_group to a list, track if input was a string
+        single_control = isinstance(selected_group, str)
+        if single_control:
             selected_groups = [selected_group]
         else:
             selected_groups = list(selected_group)
@@ -265,6 +273,9 @@ class EDistanceMetric(BaseMetric):
                 distances = distances.loc[groups_list]
                 variances = variances.loc[groups_list]
 
+            if single_control:
+                sg = selected_groups[0]
+                return distances[sg], variances[sg]
             return distances, variances
 
         # Non-bootstrap path
@@ -293,6 +304,8 @@ class EDistanceMetric(BaseMetric):
         if groups_list != all_groups:
             df = df.loc[groups_list]
 
+        if single_control:
+            return df[selected_groups[0]]
         return df
 
     def bootstrap(
