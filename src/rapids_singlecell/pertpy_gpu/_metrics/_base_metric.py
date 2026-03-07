@@ -195,9 +195,8 @@ class BaseMetric(ABC):
         adata
             Annotated data matrix
         contrasts
-            Either a DataFrame with a groupby column, a ``reference``
-            column, and optional split columns, or a dict mapping contrast
-            names to ``(condition_a, condition_b)`` tuples.
+            DataFrame with a groupby column, a ``reference`` column,
+            and optional split columns.
         multi_gpu
             GPU selection:
             - None: Use all GPUs if metric supports it, else GPU 0 (default)
@@ -208,9 +207,8 @@ class BaseMetric(ABC):
 
         Returns
         -------
-        pd.DataFrame or pd.Series
-            DataFrame with distance column when using structured contrasts,
-            Series when using raw dict contrasts.
+        pd.DataFrame
+            Copy of the input DataFrame with an added distance column.
         """
         raise NotImplementedError(
             f"{self.__class__.__name__} does not implement contrast_distances"

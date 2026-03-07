@@ -368,10 +368,10 @@ class EDistanceMetric(BaseMetric):
     def contrast_distances(
         self,
         adata: AnnData,
-        contrasts: pd.DataFrame | dict[str, tuple[dict[str, str], dict[str, str]]],
+        contrasts: pd.DataFrame,
         *,
         multi_gpu: bool | list[int] | str | None = None,
-    ) -> pd.DataFrame | pd.Series:
+    ) -> pd.DataFrame:
         """
         Compute energy distances for contrasts.
 
@@ -380,9 +380,8 @@ class EDistanceMetric(BaseMetric):
         adata
             Annotated data matrix
         contrasts
-            Either a DataFrame with a groupby column (first), a
-            ``reference`` column, and optional split columns, or a dict
-            mapping contrast names to ``(condition_a, condition_b)`` tuples.
+            DataFrame with a groupby column (first), a ``reference``
+            column, and optional split columns.
         multi_gpu
             GPU selection:
             - None: Use all GPUs if metric supports it, else GPU 0 (default)
@@ -393,22 +392,9 @@ class EDistanceMetric(BaseMetric):
 
         Returns
         -------
-        pd.DataFrame or pd.Series
-            DataFrame with distance column when using structured contrasts,
-            Series when using raw dict contrasts.
+        pd.DataFrame
+            Copy of the input DataFrame with an added ``edistance`` column.
         """
-        if isinstance(contrasts, pd.DataFrame):
-            return self._contrast_structured(adata, contrasts, multi_gpu=multi_gpu)
-        return self._contrast_raw(adata, contrasts, multi_gpu=multi_gpu)
-
-    def _contrast_structured(
-        self,
-        adata: AnnData,
-        contrasts: pd.DataFrame,
-        *,
-        multi_gpu: bool | list[int] | str | None = None,
-    ) -> pd.DataFrame:
-        """Compute contrasts from a structured DataFrame."""
         from rapids_singlecell.pertpy_gpu._distance import Distance
 
         Distance.validate_contrasts(adata, contrasts)
@@ -531,131 +517,6 @@ class EDistanceMetric(BaseMetric):
         result = contrasts.copy()
         result["edistance"] = edistances
         return result
-
-    def _contrast_raw(
-        self,
-        adata: AnnData,
-        contrasts: dict[str, tuple[dict[str, str], dict[str, str]]],
-        *,
-        multi_gpu: bool | list[int] | str | None = None,
-    ) -> pd.Series:
-        """Compute contrasts from a raw dict of contrast definitions."""
-        embedding = self._get_embedding(adata)
-        device_ids = parse_device_ids(multi_gpu=multi_gpu)
-
-        # Deduplicate conditions across all contrasts
-        cond_to_idx: dict[frozenset, int] = {}
-        for _name, (cond_a, cond_b) in contrasts.items():
-            for cond in (cond_a, cond_b):
-                key = frozenset(cond.items())
-                if key not in cond_to_idx:
-                    cond_to_idx[key] = len(cond_to_idx)
-
-        k = len(cond_to_idx)
-
-        # Build cell indices using a single groupby instead of k individual scans
-        all_columns: set[str] = set()
-        for cond_key in cond_to_idx:
-            for col, _val in cond_key:
-                all_columns.add(col)
-        group_cols = sorted(all_columns)
-
-        grouped = adata.obs.groupby(group_cols, observed=True)
-        group_indices = grouped.indices
-
-        group_cells: list[np.ndarray] = [None] * k  # type: ignore[list-item]
-        for cond_key, idx in cond_to_idx.items():
-            cond_dict = dict(cond_key)
-            if len(group_cols) == 1:
-                lookup_key = cond_dict[group_cols[0]]
-            else:
-                lookup_key = tuple(cond_dict[col] for col in group_cols)
-            cell_idx = group_indices.get(lookup_key)
-            group_cells[idx] = (
-                cell_idx if cell_idx is not None else np.array([], dtype=np.intp)
-            )
-
-        # Build cat_offsets and cell_indices
-        offsets = [0]
-        all_cell_idx = []
-        for cells in group_cells:
-            all_cell_idx.append(cells)
-            offsets.append(offsets[-1] + len(cells))
-
-        cat_offsets = cp.array(offsets, dtype=cp.int32)
-        cell_indices = cp.array(np.concatenate(all_cell_idx), dtype=cp.int32)
-        group_sizes = cp.diff(cat_offsets).astype(cp.int64)
-        group_sizes_cpu = group_sizes.get()
-
-        # Build deduplicated pairs
-        pair_to_flat: dict[tuple[int, int], int] = {}
-        contrast_pair_idx: dict[str, tuple[int, int]] = {}
-
-        for name, (cond_a, cond_b) in contrasts.items():
-            idx_a = cond_to_idx[frozenset(cond_a.items())]
-            idx_b = cond_to_idx[frozenset(cond_b.items())]
-            contrast_pair_idx[name] = (idx_a, idx_b)
-
-            cross = (min(idx_a, idx_b), max(idx_a, idx_b))
-            if cross not in pair_to_flat:
-                pair_to_flat[cross] = len(pair_to_flat)
-            if group_sizes_cpu[idx_a] >= 2 and (idx_a, idx_a) not in pair_to_flat:
-                pair_to_flat[(idx_a, idx_a)] = len(pair_to_flat)
-            if group_sizes_cpu[idx_b] >= 2 and (idx_b, idx_b) not in pair_to_flat:
-                pair_to_flat[(idx_b, idx_b)] = len(pair_to_flat)
-
-        n_pairs = len(pair_to_flat)
-        pairs = sorted(pair_to_flat.keys(), key=lambda p: pair_to_flat[p])
-        pair_left = cp.array([p[0] for p in pairs], dtype=cp.int32)
-        pair_right = cp.array([p[1] for p in pairs], dtype=cp.int32)
-
-        if n_pairs == 0:
-            return pd.Series(
-                dict.fromkeys(contrasts, 0.0),
-                dtype=np.float64,
-                name="edistance",
-            )
-
-        flat_sums = self._launch_distance_kernel(
-            embedding,
-            cat_offsets,
-            cell_indices,
-            pair_left=pair_left,
-            pair_right=pair_right,
-            device_ids=device_ids,
-        )
-
-        # Vectorized normalization
-        is_diag = pair_left == pair_right
-        sizes_l = group_sizes[pair_left.astype(cp.intp)]
-        sizes_r = group_sizes[pair_right.astype(cp.intp)]
-        flat_norms = cp.where(
-            is_diag,
-            cp.maximum(sizes_l * (sizes_l - 1) // 2, 1),
-            sizes_l * sizes_r,
-        ).astype(embedding.dtype)
-        flat_means = flat_sums / flat_norms
-
-        flat_means_cpu = flat_means.get()
-        results: dict[str, float] = {}
-        for name, (idx_a, idx_b) in contrast_pair_idx.items():
-            if idx_a == idx_b:
-                results[name] = 0.0
-                continue
-
-            cross = (min(idx_a, idx_b), max(idx_a, idx_b))
-            d_cross = flat_means_cpu[pair_to_flat[cross]]
-            diag_a = pair_to_flat.get((idx_a, idx_a))
-            d_aa = flat_means_cpu[diag_a] if diag_a is not None else 0.0
-            diag_b = pair_to_flat.get((idx_b, idx_b))
-            d_bb = flat_means_cpu[diag_b] if diag_b is not None else 0.0
-            results[name] = float(2 * d_cross - d_aa - d_bb)
-
-        return pd.Series(
-            {name: results[name] for name in contrasts},
-            dtype=np.float64,
-            name="edistance",
-        )
 
     # Helper methods
 
@@ -1016,31 +877,6 @@ class EDistanceMetric(BaseMetric):
         means[pair_right.astype(cp.intp), pair_left.astype(cp.intp)] = flat_means
 
         return means
-
-    def _compute_norm_matrix(
-        self, group_sizes: cp.ndarray, dtype: np.dtype
-    ) -> cp.ndarray:
-        """Compute normalization matrix for pairwise means.
-
-        Parameters
-        ----------
-        group_sizes
-            Array of group sizes
-        dtype
-            Data type for output matrix
-
-        Returns
-        -------
-        cp.ndarray
-            Normalization matrix (k x k)
-        """
-        diag_counts = group_sizes * (group_sizes - 1) // 2
-        # Handle single-cell groups: replace 0 with 1 to avoid division by zero
-        diag_counts = cp.maximum(diag_counts, 1)
-        cross_counts = cp.outer(group_sizes, group_sizes)
-        norm_matrix = cross_counts.astype(dtype)
-        cp.fill_diagonal(norm_matrix, diag_counts.astype(dtype))
-        return norm_matrix
 
     def _onesided_means(
         self,

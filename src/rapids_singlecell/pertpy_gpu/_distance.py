@@ -553,17 +553,15 @@ class Distance:
     def contrast_distances(
         self,
         adata: AnnData,
-        contrasts: pd.DataFrame | dict[str, tuple[dict[str, str], dict[str, str]]],
+        contrasts: pd.DataFrame,
         *,
         multi_gpu: bool | list[int] | str | None = None,
-    ) -> pd.DataFrame | pd.Series:
+    ) -> pd.DataFrame:
         """
         Compute distances for contrasts.
 
-        Accepts either a structured DataFrame (from :meth:`create_contrasts`
-        or constructed manually) or a raw dict of contrast definitions.
-
-        For DataFrame contrasts, the layout is:
+        Accepts a DataFrame (from :meth:`create_contrasts` or constructed
+        manually) with the following layout:
 
         - **First column**: the groupby column (target values to compare)
         - **``reference`` column**: the control value in the groupby column
@@ -574,9 +572,8 @@ class Distance:
         adata
             Annotated data matrix
         contrasts
-            Either a DataFrame with a groupby column, a ``reference``
-            column, and optional split columns, or a dict mapping contrast
-            names to ``(condition_a, condition_b)`` tuples.
+            DataFrame with a groupby column, a ``reference`` column,
+            and optional split columns.
         multi_gpu
             GPU selection:
             - None: Use all GPUs if metric supports it, else GPU 0 (default)
@@ -587,9 +584,8 @@ class Distance:
 
         Returns
         -------
-        pd.DataFrame or pd.Series
-            DataFrame with distance column when using structured contrasts,
-            Series when using raw dict contrasts.
+        pd.DataFrame
+            Copy of the input DataFrame with an added distance column.
 
         Examples
         --------
