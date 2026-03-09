@@ -525,7 +525,7 @@ class EDistanceMetric(BaseMetric):
 
         Preserves the input dtype (float32 or float64) for precision control.
         """
-        if self.layer_key:
+        if self.layer_key is not None:
             data = adata.layers[self.layer_key]
         else:
             data = adata.obsm[self.obsm_key]
