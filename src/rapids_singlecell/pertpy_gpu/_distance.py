@@ -355,7 +355,7 @@ class Distance:
     def create_contrasts(
         adata: AnnData,
         groupby: str,
-        selected_group: str,
+        selected_group: str | Sequence[str],
         *,
         groups: Sequence[str] | None = None,
         split_by: str | Sequence[str] | None = None,
@@ -382,7 +382,10 @@ class Distance:
             Column in ``adata.obs`` whose levels are compared against
             ``selected_group``
         selected_group
-            The reference (control) value in the ``groupby`` column
+            The reference (control) value(s) in the ``groupby`` column.
+            When a sequence is passed, each target is compared against
+            every reference, producing one row per (target, reference)
+            combination.
         groups
             Specific groups to include. If None, all non-reference groups
             are included.
@@ -405,6 +408,12 @@ class Distance:
         ...     adata, groupby="target_gene", selected_group="Non_target"
         ... )
 
+        >>> # Multiple references
+        >>> contrasts = Distance.create_contrasts(
+        ...     adata, groupby="target_gene",
+        ...     selected_group=["Non_target", "Scramble"],
+        ... )
+
         >>> # Stratified by celltype
         >>> contrasts = Distance.create_contrasts(
         ...     adata, groupby="target_gene", selected_group="Non_target",
@@ -425,10 +434,16 @@ class Distance:
         """
         import pandas as pd
 
-        if selected_group not in adata.obs[groupby].values:
-            raise ValueError(
-                f"Reference '{selected_group}' not found in column '{groupby}'"
-            )
+        # Normalize to list
+        if isinstance(selected_group, str):
+            selected_groups = [selected_group]
+        else:
+            selected_groups = list(selected_group)
+
+        obs_values = set(adata.obs[groupby].values)
+        for sg in selected_groups:
+            if sg not in obs_values:
+                raise ValueError(f"Reference '{sg}' not found in column '{groupby}'")
 
         if split_by is None:
             split_cols: list[str] = []
@@ -438,41 +453,46 @@ class Distance:
             split_cols = list(split_by)
 
         allowed_groups = set(groups) if groups is not None else None
+        selected_set = set(selected_groups)
         all_cols = [groupby, *split_cols]
 
-        if split_cols:
-            # Get all existing (groupby, *split) combinations in one pass
-            existing = adata.obs[all_cols].drop_duplicates().reset_index(drop=True)
+        parts: list[pd.DataFrame] = []
+        for sg in selected_groups:
+            if split_cols:
+                existing = adata.obs[all_cols].drop_duplicates().reset_index(drop=True)
 
-            # Find which splits have the reference
-            ref_rows = existing[existing[groupby] == selected_group]
-            if len(ref_rows) == 0:
-                df = pd.DataFrame(columns=all_cols)
-            else:
-                # Inner join: keep only targets in splits that have reference
+                ref_rows = existing[existing[groupby] == sg]
+                if len(ref_rows) == 0:
+                    continue
                 ref_splits = ref_rows[split_cols]
-                targets = existing[existing[groupby] != selected_group]
+                targets = existing[~existing[groupby].isin(selected_set)]
                 if allowed_groups is not None:
                     targets = targets[targets[groupby].isin(allowed_groups)]
-                df = targets.merge(ref_splits, on=split_cols, how="inner")
-                df = (
-                    df[all_cols]
-                    .sort_values([*split_cols, groupby])
-                    .reset_index(drop=True)
-                )
-        else:
-            # No split — just all non-reference levels of groupby
-            targets = adata.obs[groupby].unique()
-            targets = [
-                t
-                for t in targets
-                if t != selected_group
-                and (allowed_groups is None or t in allowed_groups)
-            ]
-            df = pd.DataFrame({groupby: targets})
+                matched = targets.merge(ref_splits, on=split_cols, how="inner")
+                if len(matched) == 0:
+                    continue
+                matched = matched[all_cols].copy()
+            else:
+                target_vals = [
+                    t
+                    for t in adata.obs[groupby].unique()
+                    if t not in selected_set
+                    and (allowed_groups is None or t in allowed_groups)
+                ]
+                if not target_vals:
+                    continue
+                matched = pd.DataFrame({groupby: target_vals})
 
-        # Insert reference column right after groupby
-        df.insert(1, "reference", selected_group)
+            matched.insert(1, "reference", sg)
+            parts.append(matched)
+
+        if not parts:
+            cols = [groupby, "reference", *split_cols]
+            return pd.DataFrame(columns=cols)
+
+        df = pd.concat(parts, ignore_index=True)
+        sort_cols = ["reference", *split_cols, groupby]
+        df = df.sort_values(sort_cols).reset_index(drop=True)
 
         return df
 
