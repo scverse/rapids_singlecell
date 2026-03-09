@@ -368,84 +368,208 @@ def test_contrast_distances_matches_compute_distance(
 
     d = EDistanceMetric(obsm_key="X_pca")
 
-    contrasts = {
-        "drugA_vs_ctrl_T": (
-            {"treatment": "drugA", "celltype": "T"},
-            {"treatment": "ctrl", "celltype": "T"},
-        ),
-        "drugA_vs_ctrl_B": (
-            {"treatment": "drugA", "celltype": "B"},
-            {"treatment": "ctrl", "celltype": "B"},
-        ),
-    }
+    contrasts = Distance.create_contrasts(
+        contrast_adata,
+        groupby="treatment",
+        selected_group="ctrl",
+        split_by="celltype",
+    )
 
     result = d.contrast_distances(contrast_adata, contrasts=contrasts)
 
-    assert isinstance(result, pd.Series)
-    assert result.name == "edistance"
-    assert len(result) == 2
+    assert isinstance(result, pd.DataFrame)
+    assert "edistance" in result.columns
+    assert len(result) == len(contrasts)
 
     # Verify each contrast against compute_distance
-    for name, (cond_a, cond_b) in contrasts.items():
-        mask_a = np.ones(len(contrast_adata), dtype=bool)
-        mask_b = np.ones(len(contrast_adata), dtype=bool)
-        for col, val in cond_a.items():
-            mask_a &= contrast_adata.obs[col].values == val
-        for col, val in cond_b.items():
-            mask_b &= contrast_adata.obs[col].values == val
+    for _, row in result.iterrows():
+        mask_target = (contrast_adata.obs["treatment"].values == row["treatment"]) & (
+            contrast_adata.obs["celltype"].values == row["celltype"]
+        )
+        mask_ref = (contrast_adata.obs["treatment"].values == row["reference"]) & (
+            contrast_adata.obs["celltype"].values == row["celltype"]
+        )
 
-        X = contrast_adata.obsm["X_pca"][mask_a]
-        Y = contrast_adata.obsm["X_pca"][mask_b]
+        X = contrast_adata.obsm["X_pca"][mask_target]
+        Y = contrast_adata.obsm["X_pca"][mask_ref]
         expected = d.compute_distance(X, Y)
 
         np.testing.assert_allclose(
-            result[name],
+            row["edistance"],
             expected,
             atol=1e-6,
-            err_msg=f"Contrast {name} mismatch",
+            err_msg=f"Contrast {row['treatment']} vs {row['reference']} "
+            f"in {row['celltype']} mismatch",
         )
 
 
 def test_contrast_distances_shared_condition(contrast_adata: AnnData) -> None:
     """Test that contrasts sharing a condition (e.g. same control) work."""
+    distance = Distance(metric="edistance")
+
+    contrasts = Distance.create_contrasts(
+        contrast_adata,
+        groupby="treatment",
+        selected_group="ctrl",
+        split_by="celltype",
+    )
+
+    result = distance.contrast_distances(contrast_adata, contrasts=contrasts)
+
+    assert isinstance(result, pd.DataFrame)
+    assert "edistance" in result.columns
+    # All distances should be finite
+    assert np.all(np.isfinite(result["edistance"].values))
+
+
+def test_contrast_distances_self_distance_zero(contrast_adata: AnnData) -> None:
+    """Test that self-distance (same group vs itself) is zero."""
+    distance = Distance(metric="edistance")
+
+    # Manually create a contrast where target == reference
+    contrasts = pd.DataFrame(
+        {
+            "treatment": ["ctrl"],
+            "reference": ["ctrl"],
+            "celltype": ["T"],
+        }
+    )
+
+    result = distance.contrast_distances(contrast_adata, contrasts=contrasts)
+    assert result["edistance"].iloc[0] == pytest.approx(0.0, abs=1e-7)
+
+
+def test_contrast_distances_no_split(contrast_adata: AnnData) -> None:
+    """Test contrast_distances without split_by columns."""
+    distance = Distance(metric="edistance")
+
+    contrasts = Distance.create_contrasts(
+        contrast_adata,
+        groupby="treatment",
+        selected_group="ctrl",
+    )
+
+    result = distance.contrast_distances(contrast_adata, contrasts=contrasts)
+
+    assert isinstance(result, pd.DataFrame)
+    assert "edistance" in result.columns
+    assert len(result) == 1  # only drugA vs ctrl
+    assert np.all(np.isfinite(result["edistance"].values))
+
+
+def test_contrast_distances_filtered(contrast_adata: AnnData) -> None:
+    """Test that filtering a contrasts DataFrame before computing works."""
     from rapids_singlecell.pertpy_gpu._metrics._edistance import EDistanceMetric
 
     d = EDistanceMetric(obsm_key="X_pca")
+    distance = Distance(metric="edistance")
 
-    # Both contrasts share the ctrl_T condition
-    contrasts = {
-        "drugA_vs_ctrl_T": (
-            {"treatment": "drugA", "celltype": "T"},
-            {"treatment": "ctrl", "celltype": "T"},
-        ),
-        "ctrl_T_self": (
-            {"treatment": "ctrl", "celltype": "T"},
-            {"treatment": "ctrl", "celltype": "T"},
-        ),
-    }
+    # Create full contrasts, then drop one celltype
+    contrasts = Distance.create_contrasts(
+        contrast_adata,
+        groupby="treatment",
+        selected_group="ctrl",
+        split_by="celltype",
+    )
+    assert len(contrasts) == 2  # drugA-T, drugA-B
 
-    result = d.contrast_distances(contrast_adata, contrasts=contrasts)
+    # Keep only celltype == "T"
+    filtered = contrasts[contrasts["celltype"] == "T"].reset_index(drop=True)
+    assert len(filtered) == 1
 
-    # Self-distance should be 0
-    assert result["ctrl_T_self"] == pytest.approx(0.0, abs=1e-7)
+    result = distance.contrast_distances(contrast_adata, contrasts=filtered)
+
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 1
+    assert result["celltype"].iloc[0] == "T"
+
+    # Verify the distance matches compute_distance
+    mask_target = (contrast_adata.obs["treatment"].values == "drugA") & (
+        contrast_adata.obs["celltype"].values == "T"
+    )
+    mask_ref = (contrast_adata.obs["treatment"].values == "ctrl") & (
+        contrast_adata.obs["celltype"].values == "T"
+    )
+    expected = d.compute_distance(
+        contrast_adata.obsm["X_pca"][mask_target],
+        contrast_adata.obsm["X_pca"][mask_ref],
+    )
+    np.testing.assert_allclose(result["edistance"].iloc[0], expected, atol=1e-6)
+
+    # Also verify it differs from the full (unfiltered) result
+    full_result = distance.contrast_distances(contrast_adata, contrasts=contrasts)
+    assert len(full_result) == 2
+
+    # The T-cell row should match between filtered and full
+    full_t = full_result[full_result["celltype"] == "T"]["edistance"].iloc[0]
+    np.testing.assert_allclose(result["edistance"].iloc[0], full_t, atol=1e-10)
 
 
-def test_contrast_distances_empty_condition(contrast_adata: AnnData) -> None:
-    """Test that a condition matching no cells is handled."""
+def test_contrast_distances_two_split_by() -> None:
+    """Test contrast_distances with two split_by columns."""
+    rng = np.random.default_rng(42)
+    n = 10
+    cpu_emb = rng.normal(size=(n * 6, 5)).astype(np.float32)
+    obs = pd.DataFrame(
+        {
+            "treatment": pd.Categorical(
+                ["ctrl"] * n
+                + ["drugA"] * n
+                + ["ctrl"] * n
+                + ["drugA"] * n
+                + ["ctrl"] * n
+                + ["drugA"] * n
+            ),
+            "celltype": pd.Categorical(["T"] * n * 2 + ["B"] * n * 2 + ["T"] * n * 2),
+            "batch": pd.Categorical(["b1"] * n * 4 + ["b2"] * n * 2),
+        }
+    )
+    adata = AnnData(cpu_emb.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_emb, dtype=cp.float32)
+
     from rapids_singlecell.pertpy_gpu._metrics._edistance import EDistanceMetric
 
     d = EDistanceMetric(obsm_key="X_pca")
+    distance = Distance(metric="edistance")
 
-    contrasts = {
-        "nonexistent": (
-            {"treatment": "drugX", "celltype": "T"},
-            {"treatment": "ctrl", "celltype": "T"},
-        ),
-    }
+    contrasts = Distance.create_contrasts(
+        adata,
+        groupby="treatment",
+        selected_group="ctrl",
+        split_by=["celltype", "batch"],
+    )
 
-    # Should not crash — group will have 0 cells
-    result = d.contrast_distances(contrast_adata, contrasts=contrasts)
-    assert isinstance(result, pd.Series)
+    assert "celltype" in contrasts.columns
+    assert "batch" in contrasts.columns
+
+    result = distance.contrast_distances(adata, contrasts=contrasts)
+
+    assert isinstance(result, pd.DataFrame)
+    assert "edistance" in result.columns
+
+    # Verify each contrast against compute_distance
+    for _, row in result.iterrows():
+        mask_target = (
+            (adata.obs["treatment"].values == row["treatment"])
+            & (adata.obs["celltype"].values == row["celltype"])
+            & (adata.obs["batch"].values == row["batch"])
+        )
+        mask_ref = (
+            (adata.obs["treatment"].values == row["reference"])
+            & (adata.obs["celltype"].values == row["celltype"])
+            & (adata.obs["batch"].values == row["batch"])
+        )
+
+        X = adata.obsm["X_pca"][mask_target]
+        Y = adata.obsm["X_pca"][mask_ref]
+        expected = d.compute_distance(X, Y)
+
+        np.testing.assert_allclose(
+            row["edistance"],
+            expected,
+            rtol=1e-5,
+            atol=1e-5,
+        )
 
 
 # ============================================================================

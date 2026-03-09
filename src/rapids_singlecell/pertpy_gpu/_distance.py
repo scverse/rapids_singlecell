@@ -620,6 +620,6 @@ class Distance:
 
     def __repr__(self) -> str:
         """String representation of Distance object."""
-        if self.layer_key:
+        if self.layer_key is not None:
             return f"Distance(metric='{self.metric}', layer_key='{self.layer_key}')"
         return f"Distance(metric='{self.metric}', obsm_key='{self.obsm_key}')"
