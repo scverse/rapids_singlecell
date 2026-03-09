@@ -457,6 +457,101 @@ def test_contrast_distances_no_split(contrast_adata: AnnData) -> None:
     assert np.all(np.isfinite(result["edistance"].values))
 
 
+def test_contrast_distances_multiple_references() -> None:
+    """Test create_contrasts with multiple reference groups."""
+    rng = np.random.default_rng(42)
+    n = 10
+    cpu_emb = rng.normal(size=(n * 6, 5)).astype(np.float32)
+    obs = pd.DataFrame(
+        {
+            "treatment": pd.Categorical(
+                ["ref1"] * n
+                + ["ref2"] * n
+                + ["drugA"] * n
+                + ["drugB"] * n
+                + ["ref1"] * n
+                + ["drugA"] * n
+            ),
+            "celltype": pd.Categorical(["T"] * n * 4 + ["B"] * n * 2),
+        }
+    )
+    adata = AnnData(cpu_emb.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_emb, dtype=cp.float32)
+
+    from rapids_singlecell.pertpy_gpu._metrics._edistance import EDistanceMetric
+
+    d = EDistanceMetric(obsm_key="X_pca")
+    distance = Distance(metric="edistance")
+
+    # Two references
+    contrasts = Distance.create_contrasts(
+        adata,
+        groupby="treatment",
+        selected_group=["ref1", "ref2"],
+        split_by="celltype",
+    )
+
+    # References should not appear as targets
+    assert "ref1" not in contrasts["treatment"].values
+    assert "ref2" not in contrasts["treatment"].values
+
+    # Both references should appear in the reference column
+    assert "ref1" in contrasts["reference"].values
+    assert "ref2" in contrasts["reference"].values
+
+    result = distance.contrast_distances(adata, contrasts=contrasts)
+    assert "edistance" in result.columns
+
+    # Verify each row against compute_distance
+    for _, row in result.iterrows():
+        mask_target = (adata.obs["treatment"].values == row["treatment"]) & (
+            adata.obs["celltype"].values == row["celltype"]
+        )
+        mask_ref = (adata.obs["treatment"].values == row["reference"]) & (
+            adata.obs["celltype"].values == row["celltype"]
+        )
+        X = adata.obsm["X_pca"][mask_target]
+        Y = adata.obsm["X_pca"][mask_ref]
+
+        if len(X) == 0 or len(Y) == 0:
+            continue
+        expected = d.compute_distance(X, Y)
+        np.testing.assert_allclose(row["edistance"], expected, rtol=1e-5, atol=1e-5)
+
+
+def test_contrast_distances_multiple_references_no_split() -> None:
+    """Test create_contrasts with multiple references and no split_by."""
+    rng = np.random.default_rng(42)
+    n = 15
+    cpu_emb = rng.normal(size=(n * 4, 5)).astype(np.float32)
+    obs = pd.DataFrame(
+        {
+            "treatment": pd.Categorical(
+                ["ref1"] * n + ["ref2"] * n + ["drugA"] * n + ["drugB"] * n
+            ),
+        }
+    )
+    adata = AnnData(cpu_emb.copy(), obs=obs)
+    adata.obsm["X_pca"] = cp.asarray(cpu_emb, dtype=cp.float32)
+
+    distance = Distance(metric="edistance")
+
+    contrasts = Distance.create_contrasts(
+        adata,
+        groupby="treatment",
+        selected_group=["ref1", "ref2"],
+    )
+
+    # 2 targets x 2 references = 4 rows
+    assert len(contrasts) == 4
+    assert set(contrasts["treatment"].values) == {"drugA", "drugB"}
+    assert set(contrasts["reference"].values) == {"ref1", "ref2"}
+
+    result = distance.contrast_distances(adata, contrasts=contrasts)
+    assert len(result) == 4
+    assert np.all(np.isfinite(result["edistance"].values))
+
+
 def test_contrast_distances_filtered(contrast_adata: AnnData) -> None:
     """Test that filtering a contrasts DataFrame before computing works."""
     from rapids_singlecell.pertpy_gpu._metrics._edistance import EDistanceMetric
