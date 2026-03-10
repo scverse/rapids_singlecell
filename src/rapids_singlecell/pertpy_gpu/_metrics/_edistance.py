@@ -84,21 +84,22 @@ class EDistanceMetric(BaseMetric):
             Ordered group names matching the category indices
         """
         obs_col = adata.obs[groupby]
+        embedding_raw = self._get_embedding(adata)
         if needed_groups is None:
             groups_list = list(obs_col.cat.categories.values)
-            embedding = self._get_embedding(adata)
+            embedding = cp.asarray(embedding_raw)
             group_map = {v: i for i, v in enumerate(groups_list)}
             group_labels = cp.array([group_map[c] for c in obs_col], dtype=cp.int32)
             k = len(groups_list)
             cat_offsets, cell_indices = _create_category_index_mapping(group_labels, k)
             return embedding, cat_offsets, cell_indices, groups_list
 
-        # Subset to only cells in needed_groups
+        # Subset before GPU transfer (CPU subset avoids full GPU allocation)
         needed_set = set(needed_groups)
         groups_list = [g for g in obs_col.cat.categories.values if g in needed_set]
         group_map = {v: i for i, v in enumerate(groups_list)}
         mask = obs_col.isin(groups_list).values
-        embedding = self._get_embedding(adata)[mask]
+        embedding = cp.asarray(embedding_raw[mask])
         group_labels = cp.array([group_map[c] for c in obs_col[mask]], dtype=cp.int32)
         k = len(groups_list)
         cat_offsets, cell_indices = _create_category_index_mapping(group_labels, k)
@@ -432,7 +433,7 @@ class EDistanceMetric(BaseMetric):
         groupby = contrasts.columns[0]
         split_by = [c for c in contrasts.columns if c not in (groupby, "reference")]
 
-        embedding = self._get_embedding(adata)
+        embedding_raw = self._get_embedding(adata)
         device_ids = parse_device_ids(multi_gpu=multi_gpu)
 
         all_cols = [groupby, *split_by]
@@ -463,9 +464,7 @@ class EDistanceMetric(BaseMetric):
                     cond_to_idx[key] = len(cond_to_idx)
 
             contrast_pairs.append((cond_to_idx[target_key], cond_to_idx[ref_key]))
-
         k = len(cond_to_idx)
-
         # Look up cell indices from the groupby
         group_cells: list[np.ndarray] = [None] * k  # type: ignore[list-item]
         for key, idx in cond_to_idx.items():
@@ -474,7 +473,6 @@ class EDistanceMetric(BaseMetric):
             group_cells[idx] = (
                 cell_idx if cell_idx is not None else np.array([], dtype=np.intp)
             )
-
         # Build cat_offsets and cell_indices, subsetting the embedding
         # to only the referenced cells for memory efficiency
         offsets = [0]
@@ -486,15 +484,16 @@ class EDistanceMetric(BaseMetric):
         cat_offsets = cp.array(offsets, dtype=cp.int32)
         original_indices = np.concatenate(all_cell_idx)
 
-        # Subset embedding to only referenced cells and remap indices
-        unique_cells = np.unique(original_indices)
-        embedding = embedding[unique_cells]
-        remap = np.empty(unique_cells.max() + 1, dtype=np.int32)
-        remap[unique_cells] = np.arange(len(unique_cells), dtype=np.int32)
-        cell_indices = cp.array(remap[original_indices], dtype=cp.int32)
+        # Subset before GPU transfer when not all cells are referenced
+        if len(original_indices) < int(len(embedding_raw) * 0.7):
+            embedding = cp.asarray(embedding_raw[original_indices])
+            cell_indices = cp.arange(len(original_indices), dtype=cp.int32)
+        else:
+            embedding = cp.asarray(embedding_raw)
+            cell_indices = cp.array(original_indices, dtype=cp.int32)
+
         group_sizes = cp.diff(cat_offsets).astype(cp.int64)
         group_sizes_cpu = group_sizes.get()
-
         # Build deduplicated pairs
         pair_to_flat: dict[tuple[int, int], int] = {}
         for idx_a, idx_b in contrast_pairs:
