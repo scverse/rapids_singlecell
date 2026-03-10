@@ -53,13 +53,56 @@ class EDistanceMetric(BaseMetric):
         obsm_key: str | None = "X_pca",
     ):
         """Initialize energy distance metric."""
-        if layer_key is not None and obsm_key is not None:
-            raise ValueError(
-                "Cannot use 'layer_key' and 'obsm_key' at the same time. "
-                "Please provide only one of the two keys."
-            )
-        super().__init__(obsm_key=obsm_key)
-        self.layer_key = layer_key
+        super().__init__(layer_key=layer_key, obsm_key=obsm_key)
+
+    def _subset_to_groups(
+        self,
+        adata: AnnData,
+        groupby: str,
+        needed_groups: Sequence[str],
+    ) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, list[str]]:
+        """Subset embedding and category mapping to only the needed groups.
+
+        Parameters
+        ----------
+        adata
+            Annotated data matrix
+        groupby
+            Key in adata.obs for grouping
+        needed_groups
+            Group names to keep
+
+        Returns
+        -------
+        embedding
+            Cell embeddings for the subset
+        cat_offsets
+            Category offsets for the subset
+        cell_indices
+            Cell indices for the subset
+        groups_list
+            Ordered group names matching the category indices
+        """
+        obs_col = adata.obs[groupby]
+        if needed_groups is None:
+            groups_list = list(obs_col.cat.categories.values)
+            embedding = self._get_embedding(adata)
+            group_map = {v: i for i, v in enumerate(groups_list)}
+            group_labels = cp.array([group_map[c] for c in obs_col], dtype=cp.int32)
+            k = len(groups_list)
+            cat_offsets, cell_indices = _create_category_index_mapping(group_labels, k)
+            return embedding, cat_offsets, cell_indices, groups_list
+
+        # Subset to only cells in needed_groups
+        needed_set = set(needed_groups)
+        groups_list = [g for g in obs_col.cat.categories.values if g in needed_set]
+        group_map = {v: i for i, v in enumerate(groups_list)}
+        mask = obs_col.isin(groups_list).values
+        embedding = self._get_embedding(adata)[mask]
+        group_labels = cp.array([group_map[c] for c in obs_col[mask]], dtype=cp.int32)
+        k = len(groups_list)
+        cat_offsets, cell_indices = _create_category_index_mapping(group_labels, k)
+        return embedding, cat_offsets, cell_indices, groups_list
 
     def pairwise(
         self,
@@ -114,17 +157,10 @@ class EDistanceMetric(BaseMetric):
         """
         _assert_categorical_obs(adata, key=groupby)
 
-        embedding = self._get_embedding(adata)
-        original_groups = adata.obs[groupby]
-        group_map = {v: i for i, v in enumerate(original_groups.cat.categories.values)}
-        group_labels = cp.array([group_map[c] for c in original_groups], dtype=cp.int32)
-
-        # Use harmony's category mapping
-        k = len(group_map)
-        cat_offsets, cell_indices = _create_category_index_mapping(group_labels, k)
-
-        all_groups = list(original_groups.cat.categories.values)
-        groups_list = all_groups if groups is None else groups
+        embedding, cat_offsets, cell_indices, groups_list = self._subset_to_groups(
+            adata, groupby, groups
+        )
+        k = len(groups_list)
 
         if not bootstrap:
             return self._prepare_edistance_df(
@@ -132,7 +168,6 @@ class EDistanceMetric(BaseMetric):
                 cat_offsets=cat_offsets,
                 cell_indices=cell_indices,
                 k=k,
-                all_groups=all_groups,
                 groups_list=groups_list,
                 groupby=groupby,
                 multi_gpu=multi_gpu,
@@ -143,7 +178,6 @@ class EDistanceMetric(BaseMetric):
             cat_offsets=cat_offsets,
             cell_indices=cell_indices,
             k=k,
-            all_groups=all_groups,
             groups_list=groups_list,
             groupby=groupby,
             n_bootstrap=n_bootstrap,
@@ -213,22 +247,25 @@ class EDistanceMetric(BaseMetric):
         else:
             selected_groups = list(selected_group)
 
-        embedding = self._get_embedding(adata)
-        original_groups = adata.obs[groupby]
-        group_map = {v: i for i, v in enumerate(original_groups.cat.categories.values)}
-
+        # Validate selected groups exist
+        all_categories = set(adata.obs[groupby].cat.categories.values)
         for sg in selected_groups:
-            if sg not in group_map:
+            if sg not in all_categories:
                 raise ValueError(
                     f"Selected group '{sg}' not found in groupby '{groupby}'"
                 )
 
-        group_labels = cp.array([group_map[c] for c in original_groups], dtype=cp.int32)
-        k = len(group_map)
-        cat_offsets, cell_indices = _create_category_index_mapping(group_labels, k)
+        # Subset to only needed groups: groups ∪ selected_groups
+        if groups is not None:
+            needed = list(set(groups) | set(selected_groups))
+        else:
+            needed = None
 
-        all_groups = list(original_groups.cat.categories.values)
-        groups_list = all_groups if groups is None else list(groups)
+        embedding, cat_offsets, cell_indices, groups_list = self._subset_to_groups(
+            adata, groupby, needed
+        )
+        k = len(groups_list)
+        group_map = {v: i for i, v in enumerate(groups_list)}
         selected_indices = [group_map[sg] for sg in selected_groups]
 
         device_ids = parse_device_ids(multi_gpu=multi_gpu)
@@ -258,17 +295,13 @@ class EDistanceMetric(BaseMetric):
                 var_row[si] = 0.0
                 var_cols[sg] = var_row.get()
 
-            distances = pd.DataFrame(ed_cols, index=all_groups)
+            distances = pd.DataFrame(ed_cols, index=groups_list)
             distances.index.name = groupby
             distances.columns.name = "selected_group"
 
-            variances = pd.DataFrame(var_cols, index=all_groups)
+            variances = pd.DataFrame(var_cols, index=groups_list)
             variances.index.name = groupby
             variances.columns.name = "selected_group"
-
-            if groups_list != all_groups:
-                distances = distances.loc[groups_list]
-                variances = variances.loc[groups_list]
 
             if single_control:
                 sg = selected_groups[0]
@@ -295,12 +328,9 @@ class EDistanceMetric(BaseMetric):
             ed_row[si] = 0.0
             ed_cols[sg] = ed_row.get()
 
-        df = pd.DataFrame(ed_cols, index=all_groups)
+        df = pd.DataFrame(ed_cols, index=groups_list)
         df.index.name = groupby
         df.columns.name = "selected_group"
-
-        if groups_list != all_groups:
-            df = df.loc[groups_list]
 
         if single_control:
             return df[selected_groups[0]]
@@ -445,7 +475,8 @@ class EDistanceMetric(BaseMetric):
                 cell_idx if cell_idx is not None else np.array([], dtype=np.intp)
             )
 
-        # Build cat_offsets and cell_indices
+        # Build cat_offsets and cell_indices, subsetting the embedding
+        # to only the referenced cells for memory efficiency
         offsets = [0]
         all_cell_idx = []
         for cells in group_cells:
@@ -453,7 +484,14 @@ class EDistanceMetric(BaseMetric):
             offsets.append(offsets[-1] + len(cells))
 
         cat_offsets = cp.array(offsets, dtype=cp.int32)
-        cell_indices = cp.array(np.concatenate(all_cell_idx), dtype=cp.int32)
+        original_indices = np.concatenate(all_cell_idx)
+
+        # Subset embedding to only referenced cells and remap indices
+        unique_cells = np.unique(original_indices)
+        embedding = embedding[unique_cells]
+        remap = np.empty(unique_cells.max() + 1, dtype=np.int32)
+        remap[unique_cells] = np.arange(len(unique_cells), dtype=np.int32)
+        cell_indices = cp.array(remap[original_indices], dtype=cp.int32)
         group_sizes = cp.diff(cat_offsets).astype(cp.int64)
         group_sizes_cpu = group_sizes.get()
 
@@ -519,21 +557,6 @@ class EDistanceMetric(BaseMetric):
         return result
 
     # Helper methods
-
-    def _get_embedding(self, adata: AnnData) -> cp.ndarray:
-        """Get embedding from adata using layer_key or obsm_key.
-
-        Preserves the input dtype (float32 or float64) for precision control.
-        """
-        if self.layer_key is not None:
-            data = adata.layers[self.layer_key]
-        else:
-            data = adata.obsm[self.obsm_key]
-
-        # Convert to cupy array if needed, preserving dtype
-        if isinstance(data, cp.ndarray):
-            return data
-        return cp.asarray(data)
 
     def compute_distance(
         self,
@@ -919,45 +942,43 @@ class EDistanceMetric(BaseMetric):
         group_sizes_cpu = group_sizes.get()
         n_selected = len(selected_indices)
 
-        # Build pairs with flat indexing, grouped by control for L2 cache.
-        # Track flat indices so we can reconstruct cross_means and diag_means.
-        pair_list: list[tuple[int, int]] = []  # (left, right) pairs
-        # Map canonical pair -> flat_idx for O(1) dedup lookup
+        # Build pairs with flat indexing, grouped by selected for L2 cache.
+        pair_list: list[tuple[int, int]] = []
         canon_to_flat: dict[tuple[int, int], int] = {}
-        # Map (selected_local_idx, group_j) -> flat_idx for cross pairs
-        cross_flat: list[list[int]] = [[] for _ in range(n_selected)]
-        # Map group_j -> flat_idx for diagonal pairs
         diag_flat: dict[int, int] = {}
+        cross_flat: list[list[int]] = []
 
-        for si_local, si in enumerate(selected_indices):
+        def _add_pair(a: int, b: int) -> int:
+            """Add pair (deduped by canonical key), return flat index."""
+            canon = (min(a, b), max(a, b))
+            idx = canon_to_flat.get(canon)
+            if idx is None:
+                idx = len(pair_list)
+                canon_to_flat[canon] = idx
+                pair_list.append((a, b))  # preserve order for cache locality
+            return idx
+
+        # Cross pairs grouped by selected group
+        for si in selected_indices:
+            row = []
             for j in range(k):
                 if si == j:
-                    # Diagonal for selected group
-                    if j not in diag_flat and group_sizes_cpu[j] >= 2:
-                        diag_flat[j] = len(pair_list)
-                        canon_to_flat[(j, j)] = len(pair_list)
-                        pair_list.append((j, j))
-                    cross_flat[si_local].append(diag_flat.get(j, -1))
-                else:
-                    canon = (min(si, j), max(si, j))
-                    if canon not in canon_to_flat:
-                        flat_idx = len(pair_list)
-                        canon_to_flat[canon] = flat_idx
-                        pair_list.append((si, j))
+                    if group_sizes_cpu[j] >= 2:
+                        idx = _add_pair(j, j)
+                        diag_flat.setdefault(j, idx)
+                        row.append(idx)
                     else:
-                        flat_idx = canon_to_flat[canon]
-                    cross_flat[si_local].append(flat_idx)
+                        row.append(-1)
+                else:
+                    row.append(_add_pair(si, j))
+            cross_flat.append(row)
 
         # Diagonal pairs for non-selected groups with >= 2 cells
         selected_set = set(selected_indices)
         for j in range(k):
-            if j not in selected_set and j not in diag_flat:
-                if group_sizes_cpu[j] >= 2:
-                    diag_flat[j] = len(pair_list)
-                    pair_list.append((j, j))
-
+            if j not in selected_set and group_sizes_cpu[j] >= 2:
+                diag_flat.setdefault(j, _add_pair(j, j))
         n_pairs = len(pair_list)
-
         if n_pairs == 0:
             return (
                 cp.zeros((n_selected, k), dtype=embedding.dtype),
@@ -1220,7 +1241,6 @@ class EDistanceMetric(BaseMetric):
         cat_offsets: cp.ndarray,
         cell_indices: cp.ndarray,
         k: int,
-        all_groups: list[str],
         groups_list: list[str],
         groupby: str,
         n_bootstrap: int = 100,
@@ -1254,25 +1274,19 @@ class EDistanceMetric(BaseMetric):
         )
         cp.fill_diagonal(edistance_vars, 0)
 
-        # Create full DataFrames with all groups
         df_mean = pd.DataFrame(
-            edistance_means.get(), index=all_groups, columns=all_groups
+            edistance_means.get(), index=groups_list, columns=groups_list
         )
         df_mean.index.name = groupby
         df_mean.columns.name = groupby
         df_mean.name = "pairwise edistance"
 
         df_var = pd.DataFrame(
-            edistance_vars.get(), index=all_groups, columns=all_groups
+            edistance_vars.get(), index=groups_list, columns=groups_list
         )
         df_var.index.name = groupby
         df_var.columns.name = groupby
         df_var.name = "pairwise edistance variance"
-
-        # Filter to requested groups if needed
-        if groups_list != all_groups:
-            df_mean = df_mean.loc[groups_list, groups_list]
-            df_var = df_var.loc[groups_list, groups_list]
 
         return df_mean, df_var
 
@@ -1283,7 +1297,6 @@ class EDistanceMetric(BaseMetric):
         cat_offsets: cp.ndarray,
         cell_indices: cp.ndarray,
         k: int,
-        all_groups: list[str],
         groups_list: list[str],
         groupby: str,
         multi_gpu: bool | list[int] | str | None = None,
@@ -1299,14 +1312,11 @@ class EDistanceMetric(BaseMetric):
         edistance_matrix = 2 * pairwise_means - diag[:, None] - diag[None, :]
         cp.fill_diagonal(edistance_matrix, 0)  # Self-distance is 0
 
-        # Create full DataFrame with all groups
-        df = pd.DataFrame(edistance_matrix.get(), index=all_groups, columns=all_groups)
+        df = pd.DataFrame(
+            edistance_matrix.get(), index=groups_list, columns=groups_list
+        )
         df.index.name = groupby
         df.columns.name = groupby
         df.name = "pairwise edistance"
-
-        # Filter to requested groups if needed
-        if groups_list != all_groups:
-            df = df.loc[groups_list, groups_list]
 
         return df
