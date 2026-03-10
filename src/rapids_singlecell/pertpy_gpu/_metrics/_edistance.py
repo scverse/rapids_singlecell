@@ -942,42 +942,31 @@ class EDistanceMetric(BaseMetric):
         group_sizes_cpu = group_sizes.get()
         n_selected = len(selected_indices)
 
-        # Build pairs with flat indexing, grouped by selected for L2 cache.
+        # Diagonal pairs first — one per group with >= 2 cells
         pair_list: list[tuple[int, int]] = []
-        canon_to_flat: dict[tuple[int, int], int] = {}
         diag_flat: dict[int, int] = {}
+        for j in range(k):
+            if group_sizes_cpu[j] >= 2:
+                diag_flat[j] = len(pair_list)
+                pair_list.append((j, j))
+
+        # Cross pairs grouped by selected group for L2 cache locality
+        canon_to_flat: dict[tuple[int, int], int] = {}
         cross_flat: list[list[int]] = []
-
-        def _add_pair(a: int, b: int) -> int:
-            """Add pair (deduped by canonical key), return flat index."""
-            canon = (min(a, b), max(a, b))
-            idx = canon_to_flat.get(canon)
-            if idx is None:
-                idx = len(pair_list)
-                canon_to_flat[canon] = idx
-                pair_list.append((a, b))  # preserve order for cache locality
-            return idx
-
-        # Cross pairs grouped by selected group
         for si in selected_indices:
             row = []
             for j in range(k):
                 if si == j:
-                    if group_sizes_cpu[j] >= 2:
-                        idx = _add_pair(j, j)
-                        diag_flat.setdefault(j, idx)
-                        row.append(idx)
-                    else:
-                        row.append(-1)
+                    row.append(diag_flat.get(j, -1))
                 else:
-                    row.append(_add_pair(si, j))
+                    canon = (min(si, j), max(si, j))
+                    idx = canon_to_flat.get(canon)
+                    if idx is None:
+                        idx = len(pair_list)
+                        canon_to_flat[canon] = idx
+                        pair_list.append((si, j))
+                    row.append(idx)
             cross_flat.append(row)
-
-        # Diagonal pairs for non-selected groups with >= 2 cells
-        selected_set = set(selected_indices)
-        for j in range(k):
-            if j not in selected_set and group_sizes_cpu[j] >= 2:
-                diag_flat.setdefault(j, _add_pair(j, j))
         n_pairs = len(pair_list)
         if n_pairs == 0:
             return (
