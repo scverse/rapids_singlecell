@@ -3,6 +3,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
+import cupy as cp
+
 from rapids_singlecell._utils import parse_device_ids
 
 if TYPE_CHECKING:
@@ -23,6 +25,8 @@ class BaseMetric(ABC):
 
     Parameters
     ----------
+    layer_key
+        Key in adata.layers for cell data. Mutually exclusive with obsm_key.
     obsm_key
         Key in adata.obsm for embeddings (default: 'X_pca')
 
@@ -35,9 +39,33 @@ class BaseMetric(ABC):
 
     supports_multi_gpu: bool = False
 
-    def __init__(self, obsm_key: str = "X_pca"):
-        """Initialize base metric with obsm_key."""
+    def __init__(
+        self,
+        layer_key: str | None = None,
+        obsm_key: str | None = "X_pca",
+    ):
+        """Initialize base metric."""
+        if layer_key is not None and obsm_key is not None:
+            raise ValueError(
+                "Cannot use 'layer_key' and 'obsm_key' at the same time. "
+                "Please provide only one of the two keys."
+            )
+        self.layer_key = layer_key
         self.obsm_key = obsm_key
+
+    def _get_embedding(self, adata: AnnData) -> cp.ndarray:
+        """Get embedding from adata using layer_key or obsm_key.
+
+        Preserves the input dtype (float32 or float64) for precision control.
+        """
+        if self.layer_key is not None:
+            data = adata.layers[self.layer_key]
+        else:
+            data = adata.obsm[self.obsm_key]
+
+        if isinstance(data, cp.ndarray):
+            return data
+        return cp.asarray(data)
 
     @abstractmethod
     def pairwise(
