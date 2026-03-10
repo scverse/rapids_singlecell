@@ -95,7 +95,7 @@ def test_distance_class_onesided_matches_pairwise(small_adata: AnnData) -> None:
         )
         # Should match the row from pairwise matrix
         np.testing.assert_allclose(
-            onesided.values, pairwise_df.loc[group].values, atol=1e-5
+            onesided.values, pairwise_df.loc[group].values, atol=1e-6
         )
         # Self-distance should be 0
         assert onesided.loc[group] == pytest.approx(0.0, abs=1e-6)
@@ -188,9 +188,9 @@ def test_distance_class_onesided_bootstrap_matches_pairwise(
     )
 
     # Should match the corresponding row from pairwise
-    np.testing.assert_allclose(onesided.values, pairwise_df.loc["g0"].values, atol=1e-6)
+    np.testing.assert_allclose(onesided.values, pairwise_df.loc["g0"].values, atol=1e-7)
     np.testing.assert_allclose(
-        onesided_var.values, pairwise_var_df.loc["g0"].values, atol=1e-6
+        onesided_var.values, pairwise_var_df.loc["g0"].values, atol=1e-7
     )
 
 
@@ -260,7 +260,7 @@ def test_edistance_correctness_vs_cpu(small_adata: AnnData) -> None:
                 np.testing.assert_allclose(
                     actual,
                     expected,
-                    rtol=1e-5,
+                    rtol=1e-6,
                     atol=1e-6,
                     err_msg=f"Mismatch for ({g1}, {g2}): GPU={actual}, CPU={expected}",
                 )
@@ -293,7 +293,7 @@ def test_edistance_correctness_larger_dataset() -> None:
         expected = _compute_energy_distance_cpu(X, Y)
         actual = result_df.loc[g1, g2]
         np.testing.assert_allclose(
-            actual, expected, rtol=1e-5, atol=1e-6, err_msg=f"Mismatch for ({g1}, {g2})"
+            actual, expected, rtol=1e-6, atol=1e-6, err_msg=f"Mismatch for ({g1}, {g2})"
         )
 
 
@@ -330,7 +330,7 @@ def test_onesided_distances_correctness_vs_cpu(small_adata: AnnData) -> None:
             np.testing.assert_allclose(
                 actual,
                 expected,
-                rtol=1e-5,
+                rtol=1e-6,
                 atol=1e-6,
                 err_msg=f"Onesided mismatch for ({selected_group}, {target_group})",
             )
@@ -662,8 +662,8 @@ def test_contrast_distances_two_split_by() -> None:
         np.testing.assert_allclose(
             row["edistance"],
             expected,
-            rtol=1e-5,
-            atol=1e-5,
+            rtol=1e-6,
+            atol=1e-6,
         )
 
 
@@ -818,7 +818,7 @@ def test_distance_call_api_vs_cpu_reference(small_adata: AnnData) -> None:
         np.testing.assert_allclose(
             actual,
             expected,
-            rtol=1e-5,
+            rtol=1e-6,
             atol=1e-6,
             err_msg=f"__call__ mismatch for ({g1}, {g2})",
         )
@@ -852,7 +852,7 @@ def test_distance_call_api_vs_pairwise(small_adata: AnnData) -> None:
             np.testing.assert_allclose(
                 call_result,
                 pairwise_result,
-                atol=1e-5,
+                atol=1e-6,
                 err_msg=f"__call__ vs pairwise mismatch for ({g1}, {g2})",
             )
 
@@ -975,7 +975,7 @@ def test_distance_layer_key_basic() -> None:
         np.testing.assert_allclose(
             actual,
             expected,
-            rtol=1e-5,
+            rtol=1e-6,
             atol=1e-6,
             err_msg=f"layer_key mismatch for ({g1}, {g2})",
         )
@@ -1036,7 +1036,7 @@ def test_float64_matches_float32_results() -> None:
     np.testing.assert_allclose(
         result_f32.values,
         result_f64.values,
-        rtol=1e-5,
+        rtol=1e-6,
         atol=1e-6,
         err_msg="Float64 and float32 results should be similar",
     )
@@ -1242,15 +1242,15 @@ def test_block_size_consistency() -> None:
     np.testing.assert_allclose(
         result.values,
         result_256.values,
-        rtol=1e-5,
-        atol=1e-6,
+        rtol=1e-7,
+        atol=1e-7,
         err_msg="256-block and 1024-block paths should produce identical results",
     )
     # Diagonal should be zero (self-distance)
     np.testing.assert_allclose(
         np.diag(result.values),
         0,
-        atol=1e-6,
+        atol=1e-7,
         err_msg="Diagonal (self-distance) should be zero",
     )
 
@@ -1312,7 +1312,7 @@ def test_distance_axioms(
     np.testing.assert_allclose(
         result_df.values,
         result_df.values.T,
-        atol=1e-5,
+        atol=1e-7,
         err_msg="Matrix should be symmetric",
     )
 
@@ -1601,7 +1601,7 @@ def test_unequal_group_sizes() -> None:
         Y = cpu_embedding[np.array(groups) == g2]
         expected = _compute_energy_distance_cpu(X, Y)
         actual = result_df.loc[g1, g2]
-        np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-6)
+        np.testing.assert_allclose(actual, expected, rtol=1e-6, atol=1e-6)
 
 
 def test_distance_call_empty_array_error() -> None:
@@ -1884,8 +1884,8 @@ def test_multi_gpu_pairwise_matches_single_gpu() -> None:
     np.testing.assert_allclose(
         single_result.values,
         multi_result.values,
-        rtol=1e-5,
-        atol=1e-6,
+        rtol=1e-7,
+        atol=1e-7,
         err_msg="Multi-GPU pairwise should match single-GPU",
     )
 
@@ -1923,8 +1923,8 @@ def test_multi_gpu_onesided_matches_single_gpu() -> None:
     np.testing.assert_allclose(
         single_result.values,
         multi_result.values,
-        rtol=1e-5,
-        atol=1e-6,
+        rtol=1e-7,
+        atol=1e-7,
         err_msg="Multi-GPU onesided should match single-GPU",
     )
 
@@ -1976,16 +1976,16 @@ def test_multi_gpu_bootstrap_matches_single_gpu() -> None:
     np.testing.assert_allclose(
         single_df.values,
         multi_df.values,
-        rtol=1e-5,
-        atol=1e-6,
+        rtol=1e-7,
+        atol=1e-7,
         err_msg="Multi-GPU bootstrap mean should match single-GPU",
     )
 
     np.testing.assert_allclose(
         single_var.values,
         multi_var.values,
-        rtol=1e-5,
-        atol=1e-6,
+        rtol=1e-7,
+        atol=1e-7,
         err_msg="Multi-GPU bootstrap variance should match single-GPU",
     )
 
@@ -2035,16 +2035,16 @@ def test_multi_gpu_onesided_bootstrap_matches_single_gpu() -> None:
     np.testing.assert_allclose(
         single_dist.values,
         multi_dist.values,
-        rtol=1e-5,
-        atol=1e-6,
+        rtol=1e-7,
+        atol=1e-7,
         err_msg="Multi-GPU onesided bootstrap mean should match single-GPU",
     )
 
     np.testing.assert_allclose(
         single_var.values,
         multi_var.values,
-        rtol=1e-5,
-        atol=1e-6,
+        rtol=1e-7,
+        atol=1e-7,
         err_msg="Multi-GPU onesided bootstrap variance should match single-GPU",
     )
 
@@ -2068,7 +2068,7 @@ def test_single_gpu_fallback_unchanged(small_adata: AnnData) -> None:
         np.testing.assert_allclose(
             actual,
             expected,
-            rtol=1e-5,
+            rtol=1e-6,
             atol=1e-6,
             err_msg=f"Single-GPU fallback mismatch for ({g1}, {g2})",
         )
@@ -2104,7 +2104,7 @@ def test_small_group_count_works() -> None:
     X = cpu_embedding_np[:cells_per_group]
     Y = cpu_embedding_np[cells_per_group:]
     expected = _compute_energy_distance_cpu(X, Y)
-    np.testing.assert_allclose(result.loc["g0", "g1"], expected, rtol=1e-5, atol=1e-6)
+    np.testing.assert_allclose(result.loc["g0", "g1"], expected, rtol=1e-6, atol=1e-6)
 
 
 def test_multi_gpu_with_more_gpus_than_pairs() -> None:
