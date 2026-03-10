@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 import cupy as cp
+import numpy as np
 
 from rapids_singlecell._utils import parse_device_ids
 
@@ -53,9 +54,10 @@ class BaseMetric(ABC):
         self.layer_key = layer_key
         self.obsm_key = obsm_key
 
-    def _get_embedding(self, adata: AnnData) -> cp.ndarray:
+    def _get_embedding(self, adata: AnnData) -> np.ndarray | cp.ndarray:
         """Get embedding from adata using layer_key or obsm_key.
 
+        Returns the embedding in its original format (numpy or cupy).
         Preserves the input dtype (float32 or float64) for precision control.
         """
         if self.layer_key is not None:
@@ -63,9 +65,9 @@ class BaseMetric(ABC):
         else:
             data = adata.obsm[self.obsm_key]
 
-        if isinstance(data, cp.ndarray):
+        if isinstance(data, (cp.ndarray, np.ndarray)):
             return data
-        return cp.asarray(data)
+        return np.asarray(data)
 
     @abstractmethod
     def pairwise(
