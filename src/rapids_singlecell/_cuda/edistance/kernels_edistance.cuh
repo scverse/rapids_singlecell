@@ -26,13 +26,21 @@ __global__ void edistance_kernel(const T* __restrict__ embedding,
 
     T local_sum = T(0.0);
 
-    const int a = pair_left[pair_id];
-    const int b = pair_right[pair_id];
+    const int pair_a = pair_left[pair_id];
+    const int pair_b = pair_right[pair_id];
 
-    const int start_a = cat_offsets[a];
-    const int end_a = cat_offsets[a + 1];
-    const int start_b = cat_offsets[b];
-    const int end_b = cat_offsets[b + 1];
+    const int start_pa = cat_offsets[pair_a];
+    const int end_pa = cat_offsets[pair_a + 1];
+    const int start_pb = cat_offsets[pair_b];
+    const int end_pb = cat_offsets[pair_b + 1];
+
+    // Always iterate over the larger group (A) and tile the smaller group (B)
+    // into shared memory. Small B stays hot in L2 across many A iterations.
+    const bool swap = (end_pa - start_pa) < (end_pb - start_pb);
+    const int start_a = swap ? start_pb : start_pa;
+    const int end_a = swap ? end_pb : end_pa;
+    const int start_b = swap ? start_pa : start_pb;
+    const int end_b = swap ? end_pa : end_pb;
 
     const int n_a = end_a - start_a;
     const int n_b = end_b - start_b;
@@ -109,7 +117,7 @@ __global__ void edistance_kernel(const T* __restrict__ embedding,
                     int j_local = jb_base + c;
 
                     // Skip lower triangle for diagonal blocks
-                    if (a == b && i_local >= j_local) continue;
+                    if (pair_a == pair_b && i_local >= j_local) continue;
 
                     local_sum += sqrt(dist_sq[c]);
                 }

@@ -298,10 +298,18 @@ __global__ void occur_count_kernel_csr_catpairs_tiled(
     const int a = pair_left[pair_id];
     const int b = pair_right[pair_id];
 
-    const int start_a = cat_offsets[a];
-    const int end_a = cat_offsets[a + 1];
-    const int start_b = cat_offsets[b];
-    const int end_b = cat_offsets[b + 1];
+    const int start_oa = cat_offsets[a];
+    const int end_oa = cat_offsets[a + 1];
+    const int start_ob = cat_offsets[b];
+    const int end_ob = cat_offsets[b + 1];
+
+    // Always iterate over the larger group (A) and tile the smaller group (B)
+    // into shared memory. Small B stays hot in L2 across many A iterations.
+    const bool do_swap = (end_oa - start_oa) < (end_ob - start_ob);
+    const int start_a = do_swap ? start_ob : start_oa;
+    const int end_a = do_swap ? end_ob : end_oa;
+    const int start_b = do_swap ? start_oa : start_ob;
+    const int end_b = do_swap ? end_oa : end_ob;
 
     const int n_a = end_a - start_a;
     const int n_b = end_b - start_b;
