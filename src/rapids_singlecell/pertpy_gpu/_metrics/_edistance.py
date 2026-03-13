@@ -59,7 +59,7 @@ class EDistanceMetric(BaseMetric):
         self,
         adata: AnnData,
         groupby: str,
-        needed_groups: Sequence[str],
+        needed_groups: Sequence[str] | None,
     ) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, list[str]]:
         """Subset embedding and category mapping to only the needed groups.
 
@@ -85,22 +85,16 @@ class EDistanceMetric(BaseMetric):
         """
         obs_col = adata.obs[groupby]
         embedding_raw = self._get_embedding(adata)
-        if needed_groups is None:
-            groups_list = list(obs_col.cat.categories.values)
-            embedding = cp.asarray(embedding_raw)
-            group_map = {v: i for i, v in enumerate(groups_list)}
-            group_labels = cp.array([group_map[c] for c in obs_col], dtype=cp.int32)
-            k = len(groups_list)
-            cat_offsets, cell_indices = _create_category_index_mapping(group_labels, k)
-            return embedding, cat_offsets, cell_indices, groups_list
 
-        # Subset before GPU transfer (CPU subset avoids full GPU allocation)
-        needed_set = set(needed_groups)
-        groups_list = [g for g in obs_col.cat.categories.values if g in needed_set]
-        group_map = {v: i for i, v in enumerate(groups_list)}
-        mask = obs_col.isin(groups_list).values
-        embedding = cp.asarray(embedding_raw[mask])
-        group_labels = cp.array([group_map[c] for c in obs_col[mask]], dtype=cp.int32)
+        if needed_groups is not None:
+            mask = obs_col.isin(needed_groups).values
+            obs_col = obs_col[mask].cat.remove_unused_categories()
+            embedding = cp.asarray(embedding_raw[mask])
+        else:
+            embedding = cp.asarray(embedding_raw)
+
+        groups_list = list(obs_col.cat.categories)
+        group_labels = cp.array(obs_col.cat.codes.values, dtype=cp.int32)
         k = len(groups_list)
         cat_offsets, cell_indices = _create_category_index_mapping(group_labels, k)
         return embedding, cat_offsets, cell_indices, groups_list
