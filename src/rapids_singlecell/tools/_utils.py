@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import math  # noqa: F401
-
 import cupy as cp
 from cupyx.scipy.sparse import issparse, isspmatrix_csc, isspmatrix_csr
 

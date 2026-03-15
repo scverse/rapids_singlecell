@@ -223,7 +223,7 @@ def _scale_sparse_csc(
             ncols=X.shape[1],
             stream=cp.cuda.get_current_stream().ptr,
         )
-        if max_value:
+        if max_value is not None:
             X.data = cp.clip(X.data, a_min=None, a_max=max_value)
 
         return X, mean, std
