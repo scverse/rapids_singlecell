@@ -11,8 +11,6 @@ from rapids_singlecell.decoupler_gpu._helper._Method import Method, MethodMeta
 
 def _fit(X: cp.ndarray, y: cp.ndarray, inv: cp.ndarray, df: float) -> cp.ndarray:
     X = cp.ascontiguousarray(X)
-    y.shape[1]
-    X.shape[1]
     coef, sse, _, _ = cp.linalg.lstsq(X, y, rcond=-1)
     if len(sse) == 0:
         raise ValueError(
