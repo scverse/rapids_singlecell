@@ -38,10 +38,17 @@ def _random_state_kwargs(
     (a ``numpy.random.Generator``) on several internal helpers.  This function
     inspects the target callable and returns the right keyword dict so that
     rapids_singlecell works with both old and new scanpy.
+
+    When the new API is detected we wrap the seed in scanpy's ``_LegacyRng``
+    so that functions like ``sample_comb`` fall back to sklearn's
+    ``sample_without_replacement``, preserving the same random stream as the
+    old ``random_state`` code path.
     """
     import inspect
 
     sig = inspect.signature(func)
     if "rng" in sig.parameters:
-        return {"rng": np.random.default_rng(seed)}
+        from scanpy._utils.random import _LegacyRng
+
+        return {"rng": _LegacyRng(seed)}
     return {"random_state": seed}
