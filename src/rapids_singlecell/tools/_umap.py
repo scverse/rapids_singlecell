@@ -14,6 +14,7 @@ from scanpy._utils import NeighborsView
 from scanpy.tools._utils import get_init_pos_from_paga
 from sklearn.utils import check_random_state
 
+from rapids_singlecell._compat import _random_state_kwargs
 from rapids_singlecell._utils import _get_logger_level
 
 from ._utils import _choose_representation
@@ -205,7 +206,9 @@ def umap(
                 init_coords = adata.obsm[init_pos]
             case str() if init_pos == "paga":
                 init_coords = get_init_pos_from_paga(
-                    adata, random_state=random_state, neighbors_key=neighbors_key
+                    adata,
+                    **_random_state_kwargs(get_init_pos_from_paga, random_state),
+                    neighbors_key=neighbors_key,
                 )
             case str() if init_pos == "auto":
                 init_coords = "spectral" if n_obs < 1000000 else "random"
