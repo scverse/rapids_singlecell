@@ -5,11 +5,14 @@
 
 using namespace nb::literals;
 
+constexpr int BLOCK_SIZE_SPARSE = 64;
+constexpr int BLOCK_SIZE_DENSE_TILE = 32;
+
 template <typename T>
 static inline void launch_csc_scale_diff(const int* indptr, T* data,
                                          const T* std, int ncols,
                                          cudaStream_t stream) {
-    dim3 block(64);
+    dim3 block(BLOCK_SIZE_SPARSE);
     dim3 grid(ncols);
     csc_scale_diff_kernel<T>
         <<<grid, block, 0, stream>>>(indptr, data, std, ncols);
@@ -21,7 +24,7 @@ static inline void launch_csr_scale_diff(const int* indptr, const int* indices,
                                          T* data, const T* std, const int* mask,
                                          T clipper, int nrows,
                                          cudaStream_t stream) {
-    dim3 block(64);
+    dim3 block(BLOCK_SIZE_SPARSE);
     dim3 grid(nrows);
     csr_scale_diff_kernel<T><<<grid, block, 0, stream>>>(
         indptr, indices, data, std, mask, clipper, nrows);
@@ -34,7 +37,7 @@ static inline void launch_dense_scale_center_diff(T* data, const T* mean,
                                                   T clipper, long long nrows,
                                                   long long ncols,
                                                   cudaStream_t stream) {
-    dim3 block(32, 32);
+    dim3 block(BLOCK_SIZE_DENSE_TILE, BLOCK_SIZE_DENSE_TILE);
     dim3 grid((unsigned)((nrows + block.x - 1) / block.x),
               (unsigned)((ncols + block.y - 1) / block.y));
     dense_scale_center_diff_kernel<T><<<grid, block, 0, stream>>>(
@@ -47,7 +50,7 @@ static inline void launch_dense_scale_diff(T* data, const T* std,
                                            const int* mask, T clipper,
                                            long long nrows, long long ncols,
                                            cudaStream_t stream) {
-    dim3 block(32, 32);
+    dim3 block(BLOCK_SIZE_DENSE_TILE, BLOCK_SIZE_DENSE_TILE);
     dim3 grid((unsigned)((nrows + block.x - 1) / block.x),
               (unsigned)((ncols + block.y - 1) / block.y));
     dense_scale_diff_kernel<T>

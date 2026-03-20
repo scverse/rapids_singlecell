@@ -5,13 +5,16 @@
 
 using namespace nb::literals;
 
+constexpr int BLOCK_SIZE_MINOR = 32;
+constexpr int BLOCK_SIZE_MAJOR = 64;
+
 template <typename T>
 static inline void launch_nan_mean_minor(const int* index, const T* data,
                                          double* means, int* nans,
                                          const bool* mask, int nnz,
                                          cudaStream_t stream) {
-    dim3 block(32);
-    dim3 grid((nnz + block.x - 1) / block.x);
+    dim3 block(BLOCK_SIZE_MINOR);
+    dim3 grid((nnz + BLOCK_SIZE_MINOR - 1) / BLOCK_SIZE_MINOR);
     nan_mean_minor_kernel<T>
         <<<grid, block, 0, stream>>>(index, data, means, nans, mask, nnz);
     CUDA_CHECK_LAST_ERROR(nan_mean_minor_kernel);
@@ -22,7 +25,7 @@ static inline void launch_nan_mean_major(const int* indptr, const int* index,
                                          const T* data, double* means,
                                          int* nans, const bool* mask, int major,
                                          int minor, cudaStream_t stream) {
-    dim3 block(64);
+    dim3 block(BLOCK_SIZE_MAJOR);
     dim3 grid(major);
     nan_mean_major_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, means, nans, mask, major, minor);

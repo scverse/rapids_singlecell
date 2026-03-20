@@ -6,6 +6,11 @@
 
 using namespace nb::literals;
 
+constexpr unsigned WARP_SIZE = 32;
+constexpr int MAX_BLOCK_DIM_1D = 1024;
+constexpr int BLOCKS_PER_SM = 8;
+constexpr int ATOMIC_BLOCKS_PER_SM = 4;
+
 template <typename T>
 static inline void launch_colsum(const T* A, T* out, size_t rows, size_t cols,
                                  cudaStream_t stream) {
@@ -13,10 +18,14 @@ static inline void launch_colsum(const T* A, T* out, size_t rows, size_t cols,
     cudaGetDevice(&device);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, device);
-    int max_blocks = prop.multiProcessorCount * 8;
+    int max_blocks = prop.multiProcessorCount * BLOCKS_PER_SM;
 
-    // Scale thread count with rows, capped at 1024, minimum 32
-    int threads = std::min(1024, std::max(32, (int)((rows + 31) / 32) * 32));
+    // Scale thread count with rows, capped at MAX_BLOCK_DIM_1D, minimum
+    // WARP_SIZE
+    int threads = std::min(
+        MAX_BLOCK_DIM_1D,
+        std::max((int)WARP_SIZE,
+                 (int)((rows + WARP_SIZE - 1) / WARP_SIZE) * (int)WARP_SIZE));
     int blocks = std::min((int)cols, max_blocks);
     colsum_kernel<T><<<blocks, threads, 0, stream>>>(A, out, rows, cols);
     CUDA_CHECK_LAST_ERROR(colsum_kernel);
@@ -31,14 +40,15 @@ static inline void launch_colsum_atomic(const T* A, T* out, size_t rows,
     cudaGetDeviceProperties(&prop, device);
     int n_sm = prop.multiProcessorCount;
 
-    int col_tiles = (int)((cols + 31) / 32);
-    int target_row_tiles = std::max(1, n_sm * 4 / std::max(1, col_tiles));
-    size_t rows_per_tile =
-        std::max((size_t)32, (rows + target_row_tiles - 1) / target_row_tiles);
+    int col_tiles = (int)((cols + WARP_SIZE - 1) / WARP_SIZE);
+    int target_row_tiles =
+        std::max(1, n_sm * ATOMIC_BLOCKS_PER_SM / std::max(1, col_tiles));
+    size_t rows_per_tile = std::max(
+        (size_t)WARP_SIZE, (rows + target_row_tiles - 1) / target_row_tiles);
 
     int row_tiles = (int)((rows + rows_per_tile - 1) / rows_per_tile);
     dim3 grid(col_tiles, row_tiles);
-    dim3 threads(32, 32);
+    dim3 threads(WARP_SIZE, WARP_SIZE);
     colsum_atomic_kernel<T>
         <<<grid, threads, 0, stream>>>(A, out, rows, cols, rows_per_tile);
     CUDA_CHECK_LAST_ERROR(colsum_atomic_kernel);

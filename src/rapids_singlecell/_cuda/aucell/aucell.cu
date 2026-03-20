@@ -36,8 +36,9 @@ static inline void launch_auc(const int* ranks, int R, int C, const int* cnct,
                               const int* starts, const int* lens, int n_sets,
                               int n_up, const float* max_aucs, float* es,
                               cudaStream_t stream) {
-    dim3 block(32);
-    dim3 grid((unsigned)n_sets, (unsigned)((R + block.x - 1) / block.x));
+    constexpr int BLOCK_SIZE = 32;
+    dim3 block(BLOCK_SIZE);
+    dim3 grid((unsigned)n_sets, (unsigned)((R + BLOCK_SIZE - 1) / BLOCK_SIZE));
     auc_kernel<<<grid, block, 0, stream>>>(ranks, R, C, cnct, starts, lens,
                                            n_sets, n_up, max_aucs, es);
     CUDA_CHECK_LAST_ERROR(auc_kernel);

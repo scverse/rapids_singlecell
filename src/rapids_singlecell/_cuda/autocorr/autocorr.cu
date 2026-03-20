@@ -5,15 +5,19 @@
 
 using namespace nb::literals;
 
+constexpr int DENSE_BLOCK_DIM = 8;
+constexpr int SPARSE_BLOCK_SIZE = 1024;
+constexpr int ELEMENTWISE_BLOCK_SIZE = 32;
+
 template <typename T>
 static inline void launch_morans_dense(const T* data_centered,
                                        const int* adj_row_ptr,
                                        const int* adj_col_ind,
                                        const T* adj_data, T* num, int n_samples,
                                        int n_features, cudaStream_t stream) {
-    dim3 block(8, 8);
-    dim3 grid((n_features + block.x - 1) / block.x,
-              (n_samples + block.y - 1) / block.y);
+    dim3 block(DENSE_BLOCK_DIM, DENSE_BLOCK_DIM);
+    dim3 grid((n_features + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM,
+              (n_samples + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM);
     morans_I_num_dense_kernel<<<grid, block, 0, stream>>>(
         data_centered, adj_row_ptr, adj_col_ind, adj_data, num, n_samples,
         n_features);
@@ -26,7 +30,7 @@ static inline void launch_morans_sparse(
     const int* data_row_ptr, const int* data_col_ind, const T* data_values,
     int n_samples, int n_features, const T* mean_array, T* num,
     cudaStream_t stream) {
-    dim3 block(1024);
+    dim3 block(SPARSE_BLOCK_SIZE);
     dim3 grid(n_samples);
     morans_I_num_sparse_kernel<<<grid, block, 0, stream>>>(
         adj_row_ptr, adj_col_ind, adj_data, data_row_ptr, data_col_ind,
@@ -39,9 +43,9 @@ static inline void launch_gearys_dense(const T* data, const int* adj_row_ptr,
                                        const int* adj_col_ind,
                                        const T* adj_data, T* num, int n_samples,
                                        int n_features, cudaStream_t stream) {
-    dim3 block(8, 8);
-    dim3 grid((n_features + block.x - 1) / block.x,
-              (n_samples + block.y - 1) / block.y);
+    dim3 block(DENSE_BLOCK_DIM, DENSE_BLOCK_DIM);
+    dim3 grid((n_features + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM,
+              (n_samples + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM);
     gearys_C_num_dense_kernel<<<grid, block, 0, stream>>>(
         data, adj_row_ptr, adj_col_ind, adj_data, num, n_samples, n_features);
     CUDA_CHECK_LAST_ERROR(gearys_C_num_dense_kernel);
@@ -52,7 +56,7 @@ static inline void launch_gearys_sparse(
     const int* adj_row_ptr, const int* adj_col_ind, const T* adj_data,
     const int* data_row_ptr, const int* data_col_ind, const T* data_values,
     int n_samples, int n_features, T* num, cudaStream_t stream) {
-    dim3 block(1024);
+    dim3 block(SPARSE_BLOCK_SIZE);
     dim3 grid(n_samples);
     gearys_C_num_sparse_kernel<<<grid, block, 0, stream>>>(
         adj_row_ptr, adj_col_ind, adj_data, data_row_ptr, data_col_ind,
@@ -65,8 +69,8 @@ static inline void launch_pre_den_sparse(const int* data_col_ind,
                                          const T* data_values, int nnz,
                                          const T* mean_array, T* den,
                                          int* counter, cudaStream_t stream) {
-    dim3 block(32);
-    dim3 grid((nnz + block.x - 1) / block.x);
+    dim3 block(ELEMENTWISE_BLOCK_SIZE);
+    dim3 grid((nnz + ELEMENTWISE_BLOCK_SIZE - 1) / ELEMENTWISE_BLOCK_SIZE);
     pre_den_sparse_kernel<<<grid, block, 0, stream>>>(
         data_col_ind, data_values, nnz, mean_array, den, counter);
     CUDA_CHECK_LAST_ERROR(pre_den_sparse_kernel);

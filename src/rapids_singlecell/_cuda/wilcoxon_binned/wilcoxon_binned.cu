@@ -5,13 +5,15 @@
 
 using namespace nb::literals;
 
+constexpr int BLOCK_SIZE = 256;
+
 template <typename T>
 static inline void launch_dense_hist(const T* X, const int* gcodes,
                                      unsigned int* hist, int n_cells,
                                      int n_genes, int n_groups, int n_bins,
                                      double bin_low, double inv_bin_width,
                                      cudaStream_t stream) {
-    dim3 block(256);
+    dim3 block(BLOCK_SIZE);
     dim3 grid(n_genes);
     dense_hist_kernel<T><<<grid, block, 0, stream>>>(X, gcodes, hist, n_cells,
                                                      n_genes, n_groups, n_bins,
@@ -26,7 +28,7 @@ static inline void launch_csr_hist(const T* data, const int* indices,
                                    int n_groups, int n_bins, double bin_low,
                                    double inv_bin_width, int gene_start,
                                    cudaStream_t stream) {
-    dim3 block(256);
+    dim3 block(BLOCK_SIZE);
     dim3 grid(n_cells);
     csr_hist_kernel<T><<<grid, block, 0, stream>>>(
         data, indices, indptr, gcodes, hist, n_cells, n_genes, n_groups, n_bins,
@@ -41,7 +43,7 @@ static inline void launch_csc_hist(const T* data, const int* indices,
                                    int n_groups, int n_bins, double bin_low,
                                    double inv_bin_width, int gene_start,
                                    cudaStream_t stream) {
-    dim3 block(256);
+    dim3 block(BLOCK_SIZE);
     dim3 grid(n_genes);
     csc_hist_kernel<T><<<grid, block, 0, stream>>>(
         data, indices, indptr, gcodes, hist, n_cells, n_genes, n_groups, n_bins,

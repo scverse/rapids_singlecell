@@ -2,6 +2,9 @@
 
 #include <cuda_runtime.h>
 
+// Warp size (threads per warp on NVIDIA GPUs)
+static constexpr int WARP_SIZE = 32;
+
 // Templated kernel for computing pairwise group distances
 // Supports both float and double precision
 // Uses shared memory tiling over cells and features
@@ -127,18 +130,20 @@ __global__ void edistance_kernel(const T* __restrict__ embedding,
 
     // Warp shuffle reduction
 #pragma unroll
-    for (int offset = 16; offset > 0; offset >>= 1)
+    for (int offset = WARP_SIZE / 2; offset > 0; offset >>= 1)
         local_sum += __shfl_down_sync(0xffffffff, local_sum, offset);
 
     // Block reduction via shared memory
-    static __shared__ T warp_sums[32];
-    if ((thread_id & 31) == 0) warp_sums[thread_id >> 5] = local_sum;
+    static __shared__ T warp_sums[WARP_SIZE];
+    if ((thread_id & (WARP_SIZE - 1)) == 0)
+        warp_sums[thread_id / WARP_SIZE] = local_sum;
     __syncthreads();
 
-    if (thread_id < 32) {
-        T val = (thread_id < (block_size >> 5)) ? warp_sums[thread_id] : T(0.0);
+    if (thread_id < WARP_SIZE) {
+        T val = (thread_id < (block_size / WARP_SIZE)) ? warp_sums[thread_id]
+                                                       : T(0.0);
 #pragma unroll
-        for (int offset = 16; offset > 0; offset >>= 1)
+        for (int offset = WARP_SIZE / 2; offset > 0; offset >>= 1)
             val += __shfl_down_sync(0xffffffff, val, offset);
 
         if (thread_id == 0) {

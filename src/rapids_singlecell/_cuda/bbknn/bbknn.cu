@@ -5,14 +5,16 @@
 
 using namespace nb::literals;
 
+constexpr int BLOCK_SIZE = 64;
+
 static inline void launch_find_top_k_per_row(const float* data,
                                              const int* indptr, int n_rows,
                                              int trim, float* vals,
                                              cudaStream_t stream) {
-    dim3 block(64);
-    dim3 grid((n_rows + 64 - 1) / 64);
-    size_t shared_mem_size =
-        static_cast<size_t>(64) * static_cast<size_t>(trim) * sizeof(float);
+    dim3 block(BLOCK_SIZE);
+    dim3 grid((n_rows + BLOCK_SIZE - 1) / BLOCK_SIZE);
+    size_t shared_mem_size = static_cast<size_t>(BLOCK_SIZE) *
+                             static_cast<size_t>(trim) * sizeof(float);
     find_top_k_per_row_kernel<<<grid, block, shared_mem_size, stream>>>(
         data, indptr, n_rows, trim, vals);
     CUDA_CHECK_LAST_ERROR(find_top_k_per_row_kernel);
@@ -22,7 +24,7 @@ static inline void launch_cut_smaller(int* indptr, int* index, float* data,
                                       float* vals, int n_rows,
                                       cudaStream_t stream) {
     dim3 grid(n_rows);
-    dim3 block(64);
+    dim3 block(BLOCK_SIZE);
     cut_smaller_kernel<<<grid, block, 0, stream>>>(indptr, index, data, vals,
                                                    n_rows);
     CUDA_CHECK_LAST_ERROR(cut_smaller_kernel);

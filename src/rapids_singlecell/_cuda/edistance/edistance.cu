@@ -28,7 +28,7 @@ static int choose_feat_tile_64(int n_features) {
 static int choose_feat_tile(int n_features, size_t max_shared_bytes,
                             int cell_tile, int dtype_size) {
     // Shared memory: cell_tile * feat_tile * dtype_size + warp_sums overhead
-    size_t warp_sums_overhead = 32 * dtype_size;
+    size_t warp_sums_overhead = WARP_SIZE * dtype_size;
     size_t available_shared = max_shared_bytes - warp_sums_overhead;
 
     int best_tile = 32;  // default minimum

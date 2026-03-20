@@ -5,13 +5,17 @@
 
 using namespace nb::literals;
 
+constexpr int SPARSE_BLOCK_SIZE = 32;
+constexpr int DENSE_BLOCK_DIM = 32;
+
 template <typename T>
 static inline void launch_sum_count_dense(const T* data, const int* clusters,
                                           T* sum, int* count, int rows,
                                           int cols, int ncls,
                                           cudaStream_t stream) {
-    dim3 block(32, 32);
-    dim3 grid((rows + block.x - 1) / block.x, (cols + block.y - 1) / block.y);
+    dim3 block(DENSE_BLOCK_DIM, DENSE_BLOCK_DIM);
+    dim3 grid((rows + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM,
+              (cols + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM);
     sum_and_count_dense_kernel<T><<<grid, block, 0, stream>>>(
         data, clusters, sum, count, rows, cols, ncls);
     CUDA_CHECK_LAST_ERROR(sum_and_count_dense_kernel);
@@ -22,8 +26,8 @@ static inline void launch_sum_count_sparse(const int* indptr, const int* index,
                                            const T* data, const int* clusters,
                                            T* sum, int* count, int rows,
                                            int ncls, cudaStream_t stream) {
-    dim3 block(32);
-    dim3 grid((rows + block.x - 1) / block.x);
+    dim3 block(SPARSE_BLOCK_SIZE);
+    dim3 grid((rows + SPARSE_BLOCK_SIZE - 1) / SPARSE_BLOCK_SIZE);
     sum_and_count_sparse_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, clusters, sum, count, rows, ncls);
     CUDA_CHECK_LAST_ERROR(sum_and_count_sparse_kernel);
@@ -33,8 +37,9 @@ template <typename T>
 static inline void launch_mean_dense(const T* data, const int* clusters, T* g,
                                      int rows, int cols, int ncls,
                                      cudaStream_t stream) {
-    dim3 block(32, 32);
-    dim3 grid((rows + block.x - 1) / block.x, (cols + block.y - 1) / block.y);
+    dim3 block(DENSE_BLOCK_DIM, DENSE_BLOCK_DIM);
+    dim3 grid((rows + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM,
+              (cols + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM);
     mean_dense_kernel<T>
         <<<grid, block, 0, stream>>>(data, clusters, g, rows, cols, ncls);
     CUDA_CHECK_LAST_ERROR(mean_dense_kernel);
@@ -44,8 +49,8 @@ template <typename T>
 static inline void launch_mean_sparse(const int* indptr, const int* index,
                                       const T* data, const int* clusters, T* g,
                                       int rows, int ncls, cudaStream_t stream) {
-    dim3 block(32);
-    dim3 grid((rows + block.x - 1) / block.x);
+    dim3 block(SPARSE_BLOCK_SIZE);
+    dim3 grid((rows + SPARSE_BLOCK_SIZE - 1) / SPARSE_BLOCK_SIZE);
     mean_sparse_kernel<T><<<grid, block, 0, stream>>>(indptr, index, data,
                                                       clusters, g, rows, ncls);
     CUDA_CHECK_LAST_ERROR(mean_sparse_kernel);
@@ -55,9 +60,9 @@ template <typename T>
 static inline void launch_elementwise_diff(T* g, const T* total_counts,
                                            int n_genes, int n_clusters,
                                            cudaStream_t stream) {
-    dim3 block(32, 32);
-    dim3 grid((n_genes + block.x - 1) / block.x,
-              (n_clusters + block.y - 1) / block.y);
+    dim3 block(DENSE_BLOCK_DIM, DENSE_BLOCK_DIM);
+    dim3 grid((n_genes + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM,
+              (n_clusters + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM);
     elementwise_diff_kernel<T>
         <<<grid, block, 0, stream>>>(g, total_counts, n_genes, n_clusters);
     CUDA_CHECK_LAST_ERROR(elementwise_diff_kernel);
@@ -69,9 +74,9 @@ static inline void launch_interaction(const int* interactions,
                                       const T* mean, T* res, const bool* mask,
                                       const T* g, int n_iter, int n_inter_clust,
                                       int ncls, cudaStream_t stream) {
-    dim3 block(32, 32);
-    dim3 grid((n_iter + block.x - 1) / block.x,
-              (n_inter_clust + block.y - 1) / block.y);
+    dim3 block(DENSE_BLOCK_DIM, DENSE_BLOCK_DIM);
+    dim3 grid((n_iter + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM,
+              (n_inter_clust + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM);
     interaction_kernel<T><<<grid, block>>>(interactions, interaction_clusters,
                                            mean, res, mask, g, n_iter,
                                            n_inter_clust, ncls);
@@ -84,9 +89,9 @@ static inline void launch_res_mean(const int* interactions,
                                    const T* mean, T* res_mean, int n_inter,
                                    int n_inter_clust, int ncls,
                                    cudaStream_t stream) {
-    dim3 block(32, 32);
-    dim3 grid((n_inter + block.x - 1) / block.x,
-              (n_inter_clust + block.y - 1) / block.y);
+    dim3 block(DENSE_BLOCK_DIM, DENSE_BLOCK_DIM);
+    dim3 grid((n_inter + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM,
+              (n_inter_clust + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM);
     res_mean_kernel<T>
         <<<grid, block, 0, stream>>>(interactions, interaction_clusters, mean,
                                      res_mean, n_inter, n_inter_clust, ncls);

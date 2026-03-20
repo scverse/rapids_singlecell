@@ -5,11 +5,15 @@
 
 using namespace nb::literals;
 
+constexpr int GRAM_BLOCK_SIZE = 128;
+constexpr int MATRIX_BLOCK_DIM = 32;
+constexpr int ELEMENTWISE_BLOCK_SIZE = 32;
+
 template <typename T>
 static inline void launch_gram_csr_upper(const int* indptr, const int* index,
                                          const T* data, int nrows, int ncols,
                                          T* out, cudaStream_t stream) {
-    dim3 block(128);
+    dim3 block(GRAM_BLOCK_SIZE);
     dim3 grid(nrows);
     gram_csr_upper_kernel<T>
         <<<grid, block, 0, stream>>>(indptr, index, data, nrows, ncols, out);
@@ -19,8 +23,9 @@ static inline void launch_gram_csr_upper(const int* indptr, const int* index,
 template <typename T>
 static inline void launch_copy_upper_to_lower(T* out, int ncols,
                                               cudaStream_t stream) {
-    dim3 block(32, 32);
-    dim3 grid((ncols + block.x - 1) / block.x, (ncols + block.y - 1) / block.y);
+    dim3 block(MATRIX_BLOCK_DIM, MATRIX_BLOCK_DIM);
+    dim3 grid((ncols + MATRIX_BLOCK_DIM - 1) / MATRIX_BLOCK_DIM,
+              (ncols + MATRIX_BLOCK_DIM - 1) / MATRIX_BLOCK_DIM);
     copy_upper_to_lower_kernel<T><<<grid, block, 0, stream>>>(out, ncols);
     CUDA_CHECK_LAST_ERROR(copy_upper_to_lower_kernel);
 }
@@ -29,8 +34,9 @@ template <typename T>
 static inline void launch_cov_from_gram(T* cov, const T* gram, const T* meanx,
                                         const T* meany, int ncols,
                                         cudaStream_t stream) {
-    dim3 block(32, 32);
-    dim3 grid((ncols + 31) / 32, (ncols + 31) / 32);
+    dim3 block(MATRIX_BLOCK_DIM, MATRIX_BLOCK_DIM);
+    dim3 grid((ncols + MATRIX_BLOCK_DIM - 1) / MATRIX_BLOCK_DIM,
+              (ncols + MATRIX_BLOCK_DIM - 1) / MATRIX_BLOCK_DIM);
     cov_from_gram_kernel<T>
         <<<grid, block, 0, stream>>>(cov, gram, meanx, meany, ncols);
     CUDA_CHECK_LAST_ERROR(cov_from_gram_kernel);
@@ -40,8 +46,8 @@ static inline void launch_check_zero_genes(const int* indices, int* genes,
                                            int nnz, int num_genes,
                                            cudaStream_t stream) {
     if (nnz > 0) {
-        dim3 block(32);
-        dim3 grid((nnz + block.x - 1) / block.x);
+        dim3 block(ELEMENTWISE_BLOCK_SIZE);
+        dim3 grid((nnz + ELEMENTWISE_BLOCK_SIZE - 1) / ELEMENTWISE_BLOCK_SIZE);
         check_zero_genes_kernel<<<grid, block, 0, stream>>>(indices, genes, nnz,
                                                             num_genes);
         CUDA_CHECK_LAST_ERROR(check_zero_genes_kernel);
