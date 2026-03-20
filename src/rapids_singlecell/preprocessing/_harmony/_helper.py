@@ -207,7 +207,7 @@ def _get_aggregated_matrix(
 
 
 def _get_batch_codes(batch_mat: pd.DataFrame, batch_key: str | list[str]) -> pd.Series:
-    if type(batch_key) is str:
+    if isinstance(batch_key, str):
         batch_vec = batch_mat[batch_key]
 
     elif len(batch_key) == 1:

@@ -82,7 +82,7 @@ def _validate_mat(
     )
 
     # Check for empty samples
-    if type(mat) is csr_matrix:
+    if isinstance(mat, csr_matrix):
         msk_row = mat.getnnz(axis=1) == 0
     elif cp_issparse(mat):
         msk_row = cp.diff(mat.indptr) == 0
@@ -185,7 +185,7 @@ def _extract(data: DataType, *, raw=None, layer=None, pre_load=False):
         Array of feature names.
     """
 
-    if type(data) is list:
+    if isinstance(data, list):
         m, r, c = data
         m = np.array(m, dtype=float)
         r = np.array(r, dtype="U")
@@ -194,7 +194,7 @@ def _extract(data: DataType, *, raw=None, layer=None, pre_load=False):
         m = data.values.astype(float)
         r = data.index.to_numpy(dtype="U")
         c = data.columns.to_numpy(dtype="U")
-    elif type(data) is AnnData:
+    elif isinstance(data, AnnData):
         use_raw = _check_use_raw(data, layer, use_raw=raw)
         m = _get_obs_rep(data, layer=layer, use_raw=raw)
         c = (

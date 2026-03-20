@@ -16,14 +16,6 @@ def _meta_sparse(dtype):
     return csr_matrix(cp.array((1.0,), dtype=dtype))
 
 
-def _meta_dense(dtype):
-    return cp.zeros([0], dtype=dtype)
-
-
-def _meta_sparse(dtype):
-    return csr_matrix(cp.array((1.0,), dtype=dtype))
-
-
 def _meta_dense_cpu(dtype):
     return np.zeros([0], dtype=dtype)
 
