@@ -8,6 +8,8 @@ import numpy as np
 from cuml.thirdparty_adapters import check_array as check_array_cuml
 from scanpy.tools._utils import get_init_pos_from_paga
 
+from rapids_singlecell._compat import _random_state_kwargs
+
 from ._clustering import _create_graph
 
 if TYPE_CHECKING:
@@ -58,7 +60,9 @@ def draw_graph(
             init_coords = adata.obsm[init_pos]
         case str() if init_pos == "paga":
             init_coords = get_init_pos_from_paga(
-                adata, random_state=0, neighbors_key="connectivities"
+                adata,
+                **_random_state_kwargs(get_init_pos_from_paga, 0),
+                neighbors_key="connectivities",
             )
         case _:
             init_coords = init_pos
