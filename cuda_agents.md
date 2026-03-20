@@ -128,7 +128,7 @@ Before commenting, ask:
 ## Examples to Follow
 
 **CRITICAL** (shared memory overflow):
-```
+```text
 CRITICAL: Shared memory may exceed device limit
 
 Issue: `cell_tile * feature_tile * sizeof(float)` = 128 * 128 * 4 = 64KB, exactly at T4 limit
@@ -142,7 +142,7 @@ int tile = select_tile(max_shared, dtype_size);
 ```
 
 **CRITICAL** (missing syncthreads):
-```
+```text
 CRITICAL: Missing __syncthreads() between shared memory write and read
 
 Issue: Thread writes to shared_data[tid] then other threads read shared_data[other_tid]
@@ -156,7 +156,7 @@ result = shared_data[other_tid];
 ```
 
 **HIGH** (L2 cache locality):
-```
+```text
 HIGH: Pair ordering destroys L2 cache locality
 
 Issue: Pairs sorted by packed key instead of grouped by shared index
@@ -183,7 +183,7 @@ Consider: Group pairs so consecutive pairs share a common index
 ### Nanobind Module Structure
 
 Each kernel module in `_cuda/` follows this pattern:
-```
+```text
 module_name/
 ├── module_name.cu      # nanobind bindings + kernel launch wrappers
 └── kernels_module.cuh  # CUDA kernel implementations (__global__ functions)

@@ -141,7 +141,7 @@ Before commenting, ask:
 ## Examples to Follow
 
 **CRITICAL** (dtype mismatch):
-```
+```text
 CRITICAL: float64 array passed to float32 kernel
 
 Issue: `X.astype(cp.float32)` missing before kernel call; X may be float64
@@ -153,7 +153,7 @@ X = X.astype(cp.float32, copy=False)
 ```
 
 **CRITICAL** (group subsetting):
-```
+```text
 CRITICAL: Computing over all groups then filtering results
 
 Issue: Pairwise distances computed for all k=10000 groups, then filtered to requested 3
@@ -166,7 +166,7 @@ adata_sub = adata[mask]
 ```
 
 **HIGH** (GPU sync in loop):
-```
+```text
 HIGH: Per-element GPU→CPU sync in Python loop
 
 Issue: `int(cupy_array[i])` inside loop triggers sync per iteration
@@ -179,7 +179,7 @@ for i in range(len(values)):
 ```
 
 **HIGH** (None check):
-```
+```text
 HIGH: Truthiness check on optional parameter
 
 Issue: `if layer_key:` instead of `if layer_key is not None:`
@@ -190,7 +190,7 @@ if layer_key is not None:
 ```
 
 **HIGH** (p-value precision loss):
-```
+```text
 HIGH: Using normal CDF/SF instead of erfc for p-values
 
 Issue: `p = 2 * ndtr(-abs(z))` or `p = 2 * norm.sf(abs(z))` loses precision for extreme z-scores
@@ -207,7 +207,7 @@ p_values = cupyx_special.erfc(cp.abs(z) * cp.float64(cp.sqrt(0.5)))  # Accurate 
 ```
 
 **HIGH** (float32 z-scores):
-```
+```text
 HIGH: Statistical test computed in float32
 
 Issue: z-scores and p-values computed in float32 instead of float64
@@ -222,7 +222,7 @@ z = diff / cp.sqrt(variance)
 ```
 
 **HIGH** (tolerance change without justification):
-```
+```text
 HIGH: Test tolerance loosened without explanation
 
 Issue: atol changed from 1e-7 to 1e-3 without documenting why
