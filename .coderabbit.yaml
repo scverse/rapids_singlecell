@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+reviews:
+  profile: chill
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  collapse_walkthrough: true
+  sequence_diagrams: false
+  poem: false
+  request_changes_workflow: false
+  review_status: false
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "^main$"
+  tools:
+    markdownlint:
+      enabled: true
+    shellcheck:
+      enabled: true
+    gitleaks:
+      enabled: true
+  path_instructions:
+    - path: "src/rapids_singlecell/_cuda/**"
+      instructions: |
+        These are nanobind CUDA C++ kernels. Pay close attention to:
+        - Shared memory usage and device limits
+        - Thread/block configuration
+        - Memory access patterns and coalescing
+        - Correct use of atomicAdd and synchronization
+        - Template parameter correctness (float vs double)
+    - path: "src/rapids_singlecell/**/_kernels/**"
+      instructions: |
+        These are CuPy RawKernel definitions. Review for:
+        - Correct CUDA kernel launch configurations
+        - Shared memory bounds
+        - Type safety (float32 vs float64 mismatches)
+    - path: "tests/**"
+      instructions: |
+        Do not suggest changing test tolerances without strong justification.
+        Tests run on GPU; some numerical differences vs CPU are expected.
+    - path: "docs/**"
+      instructions: |
+        For documentation changes, focus on:
+        - Accuracy of code examples
+        - Completeness of API documentation
+        - Consistency with current code
+    - path: ".github/**"
+      instructions: |
+        For CI/workflow changes:
+        - Check for proper error handling
+        - Verify GPU availability checks before tests
+        - Watch for semicolon issues in CMAKE_CUDA_ARCHITECTURES
+knowledge_base:
+  opt_out: false
+  code_guidelines:
+    filePatterns:
+      - "python_agents.md"
+      - "cuda_agents.md"
+      - "docs/contributing.md"
+chat:
+  auto_reply: true
