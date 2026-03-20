@@ -30,12 +30,16 @@ reviews:
         - Memory access patterns and coalescing
         - Correct use of atomicAdd and synchronization
         - Template parameter correctness (float vs double)
+        - MANDATORY: Every kernel launch (<<<grid, block, shared, stream>>>) MUST be followed by cudaGetLastError() to catch launch failures. Flag any kernel launch missing this check.
+        - MANDATORY: No magic numbers. All block sizes, tile sizes, grid calculations, and thresholds must use named constants (constexpr int BLOCK_SIZE = 256). Flag any raw numeric literal in dim3, grid, or shared memory calculations.
     - path: "src/rapids_singlecell/**/_kernels/**"
       instructions: |
         These are CuPy RawKernel definitions. Review for:
         - Correct CUDA kernel launch configurations
         - Shared memory bounds
         - Type safety (float32 vs float64 mismatches)
+        - No magic numbers in kernel launch configurations or kernel code. Block sizes, tile sizes, and thresholds must use named constants.
+        - After RawKernel calls, check for cp.cuda.runtime.getLastError() to catch silent launch failures.
     - path: "tests/**"
       instructions: |
         Do not suggest changing test tolerances without strong justification.

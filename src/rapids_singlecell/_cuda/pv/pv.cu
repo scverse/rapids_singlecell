@@ -10,6 +10,7 @@ static inline void launch_rev_cummin64(const double* x, double* y, int n_rows,
     dim3 block(256);
     dim3 grid((unsigned)((n_rows + block.x - 1) / block.x));
     rev_cummin64_kernel<<<grid, block, 0, stream>>>(x, y, n_rows, m);
+    CUDA_CHECK_LAST_ERROR(rev_cummin64_kernel);
 }
 
 template <typename Device>

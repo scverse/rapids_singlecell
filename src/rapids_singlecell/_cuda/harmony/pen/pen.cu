@@ -15,6 +15,7 @@ static inline void launch_fused_pen_norm(const T* similarities,
         std::min(256u, std::max(32u, ((unsigned)n_cols + 31u) / 32u * 32u));
     fused_pen_norm_kernel<T, IdxT><<<n_rows, block_dim, 0, stream>>>(
         similarities, penalty, cats, idx_in, R_out, term, n_rows, n_cols);
+    CUDA_CHECK_LAST_ERROR(fused_pen_norm_kernel);
 }
 
 template <typename T>
@@ -24,6 +25,7 @@ static inline void launch_penalty(const T* E, const T* O, const T* theta,
     int total = n_batches * n_clusters;
     penalty_kernel<T><<<(total + 255) / 256, 256, 0, stream>>>(
         E, O, theta, penalty, n_batches, n_clusters);
+    CUDA_CHECK_LAST_ERROR(penalty_kernel);
 }
 
 template <typename T, typename Device>

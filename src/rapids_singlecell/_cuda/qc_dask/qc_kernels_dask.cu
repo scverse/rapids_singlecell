@@ -14,6 +14,7 @@ static inline void launch_qc_csr_cells(const int* indptr, const int* index,
     dim3 grid((n_cells + 31) / 32);
     qc_csr_cells_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, sums_cells, cell_ex, n_cells);
+    CUDA_CHECK_LAST_ERROR(qc_csr_cells_kernel);
 }
 
 template <typename T>
@@ -24,6 +25,7 @@ static inline void launch_qc_csr_genes(const int* index, const T* data,
     int grid = (nnz + block - 1) / block;
     qc_csr_genes_kernel<T>
         <<<grid, block, 0, stream>>>(index, data, sums_genes, gene_ex, nnz);
+    CUDA_CHECK_LAST_ERROR(qc_csr_genes_kernel);
 }
 
 template <typename T>
@@ -34,6 +36,7 @@ static inline void launch_qc_dense_cells(const T* data, T* sums_cells,
     dim3 grid((n_cells + 15) / 16, (n_genes + 15) / 16);
     qc_dense_cells_kernel<T><<<grid, block, 0, stream>>>(
         data, sums_cells, cell_ex, n_cells, n_genes);
+    CUDA_CHECK_LAST_ERROR(qc_dense_cells_kernel);
 }
 
 template <typename T>
@@ -44,6 +47,7 @@ static inline void launch_qc_dense_genes(const T* data, T* sums_genes,
     dim3 grid((n_cells + 15) / 16, (n_genes + 15) / 16);
     qc_dense_genes_kernel<T><<<grid, block, 0, stream>>>(
         data, sums_genes, gene_ex, n_cells, n_genes);
+    CUDA_CHECK_LAST_ERROR(qc_dense_genes_kernel);
 }
 
 template <typename Device>

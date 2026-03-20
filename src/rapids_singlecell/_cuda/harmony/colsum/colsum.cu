@@ -19,6 +19,7 @@ static inline void launch_colsum(const T* A, T* out, size_t rows, size_t cols,
     int threads = std::min(1024, std::max(32, (int)((rows + 31) / 32) * 32));
     int blocks = std::min((int)cols, max_blocks);
     colsum_kernel<T><<<blocks, threads, 0, stream>>>(A, out, rows, cols);
+    CUDA_CHECK_LAST_ERROR(colsum_kernel);
 }
 
 template <typename T>
@@ -40,6 +41,7 @@ static inline void launch_colsum_atomic(const T* A, T* out, size_t rows,
     dim3 threads(32, 32);
     colsum_atomic_kernel<T>
         <<<grid, threads, 0, stream>>>(A, out, rows, cols, rows_per_tile);
+    CUDA_CHECK_LAST_ERROR(colsum_atomic_kernel);
 }
 
 template <typename Device>

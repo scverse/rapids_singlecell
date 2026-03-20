@@ -40,10 +40,12 @@ static void correction_fast_impl(
         compute_inv_mats_kernel<T>
             <<<1, bdim, 0, stream>>>(O, ridge_lambda, inv_mat, g_factor,
                                      g_P_row0, n_batches, n_clusters, k);
+        CUDA_CHECK_LAST_ERROR(compute_inv_mats_kernel);
 
         // R_col = R[:, k]
         gather_column_kernel<T><<<(n_cells + 255) / 256, 256, 0, stream>>>(
             R, R_col, k, n_cells, n_clusters);
+        CUDA_CHECK_LAST_ERROR(gather_column_kernel);
 
         // Zero Phi_t_diag_R_X
         cudaMemsetAsync(Phi_t_diag_R_X, 0, (size_t)nb1 * n_pcs * sizeof(T),
@@ -55,6 +57,7 @@ static void correction_fast_impl(
             dim3 grid((n_pcs + 1) / 2, 8);
             scatter_add_kernel_with_bias_cat0<T><<<grid, block, 0, stream>>>(
                 X, n_cells, n_pcs, Phi_t_diag_R_X, R_col);
+            CUDA_CHECK_LAST_ERROR(scatter_add_kernel_with_bias_cat0);
         } else {
             // cuBLAS GEMV: Phi_t_diag_R_X[0,:] = X^T @ R_col
             cublas_gemv(handle, CUBLAS_OP_N, n_pcs, n_cells, &one, X, n_pcs,
@@ -68,6 +71,7 @@ static void correction_fast_impl(
             scatter_add_kernel_with_bias_block<T><<<grid, block, 0, stream>>>(
                 X, cat_offsets, cell_indices, n_cells, n_pcs, n_batches,
                 Phi_t_diag_R_X, R_col);
+            CUDA_CHECK_LAST_ERROR(scatter_add_kernel_with_bias_block);
         }
 
         // W = inv_mat @ Phi_t_diag_R_X
@@ -85,6 +89,7 @@ static void correction_fast_impl(
             long long n = (long long)n_cells * n_pcs;
             harmony_correction_kernel<T><<<(n + 255) / 256, 256, 0, stream>>>(
                 Z, W, cats, R_col, n_cells, n_pcs);
+            CUDA_CHECK_LAST_ERROR(harmony_correction_kernel);
         }
     }
 
@@ -133,6 +138,7 @@ static void register_correction_fast(nb::module_& m) {
                 O.data(), static_cast<T>(ridge_lambda), inv_mat.data(),
                 g_factor.data(), g_P_row0.data(), n_batches, n_clusters,
                 cluster_k);
+            CUDA_CHECK_LAST_ERROR(compute_inv_mats_kernel);
         },
         "O"_a, nb::kw_only(), "ridge_lambda"_a, "n_batches"_a, "n_clusters"_a,
         "cluster_k"_a, "inv_mat"_a, "g_factor"_a, "g_P_row0"_a, "stream"_a = 0);

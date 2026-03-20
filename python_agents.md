@@ -93,12 +93,21 @@ At millions of cells, numerical edge cases that "never happen" on small data bec
 - Unsafe deserialization of data files
 - Missing bounds checking allowing resource exhaustion
 
+### Magic Numbers
+- Hard-coded numeric literals (128, 256, 512, 1024, etc.) in kernel configurations, thresholds, or tile sizes without named constants
+- Use descriptive constants: `BLOCK_SIZE = 256`, `SHARED_MEM_THRESHOLD = 48 * 1024`
+- Tile sizes, block dimensions, and heuristic thresholds must all be named
+
+### Missing Kernel Error Checking
+- After calling nanobind CUDA kernel wrappers from Python, the next CuPy operation may silently consume a pending CUDA error
+- After RawKernel launches, call `cp.cuda.runtime.getLastError()` to surface launch failures immediately (e.g., shared memory overflow, invalid grid dimensions)
+- This is especially important in development and testing — a kernel that silently fails produces garbage results that look like algorithm bugs
+
 ## MEDIUM Issues (Comment Selectively)
 
 - Edge cases not handled (empty AnnData, single observation)
 - Deprecated API usage
 - Minor inefficiencies in non-critical code paths
-- Magic numbers without descriptive constant names
 
 ## Review Protocol
 

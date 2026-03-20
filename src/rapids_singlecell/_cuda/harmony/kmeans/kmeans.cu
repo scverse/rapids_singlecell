@@ -17,6 +17,7 @@ static inline void launch_kmeans_err(const T* r, const T* dot, size_t n, T* out,
     int blocks = std::min((int)((n + threads - 1) / threads),
                           prop.multiProcessorCount * 8);
     kmeans_err_kernel<T><<<blocks, threads, 0, stream>>>(r, dot, n, out);
+    CUDA_CHECK_LAST_ERROR(kmeans_err_kernel);
 }
 
 template <typename Device>

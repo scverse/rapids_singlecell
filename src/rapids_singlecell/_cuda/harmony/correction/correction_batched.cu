@@ -29,6 +29,7 @@ static void correction_batched_impl(
     compute_inv_mats_kernel<T><<<n_clusters, bdim, 0, stream>>>(
         O, ridge_lambda, inv_mats, g_factor, g_P_row0, n_batches, n_clusters,
         /*cluster_k=*/-1);
+    CUDA_CHECK_LAST_ERROR(compute_inv_mats_kernel);
 
     // cuBLAS handle
     cublasHandle_t handle;
@@ -56,10 +57,12 @@ static void correction_batched_impl(
         size_t n_x = (size_t)n_cells * n_pcs;
         gather_rows_kernel<T><<<(int)((n_x + 255) / 256), 256, 0, stream>>>(
             X, cell_indices, X_sorted, n_cells, n_pcs);
+        CUDA_CHECK_LAST_ERROR(gather_rows_kernel);
 
         size_t n_r = (size_t)n_cells * n_clusters;
         gather_rows_kernel<T><<<(int)((n_r + 255) / 256), 256, 0, stream>>>(
             R, cell_indices, R_sorted, n_cells, n_clusters);
+        CUDA_CHECK_LAST_ERROR(gather_rows_kernel);
     }
 
     // Copy cat_offsets to host for batch loop
@@ -110,6 +113,7 @@ static void correction_batched_impl(
         batched_correction_kernel<T>
             <<<(int)((n_total + 255) / 256), 256, 0, stream>>>(
                 Z, W_all, cats, R, n_cells, n_pcs, n_clusters, nb1);
+        CUDA_CHECK_LAST_ERROR(batched_correction_kernel);
     }
 
     cublasDestroy(handle);

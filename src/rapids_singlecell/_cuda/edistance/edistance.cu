@@ -109,6 +109,7 @@ static void launch_edistance_kernel(const T* embedding, const int* cat_offsets,
         <<<grid, block, shared_mem, stream>>>(
             embedding, cat_offsets, cell_indices, pair_left, pair_right,
             pairwise_sums, n_features, blocks_per_pair);
+    CUDA_CHECK_LAST_ERROR(edistance_kernel);
 }
 
 // Dispatch to correct tile size specialization for float32

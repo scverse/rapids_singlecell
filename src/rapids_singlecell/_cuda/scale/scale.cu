@@ -13,6 +13,7 @@ static inline void launch_csc_scale_diff(const int* indptr, T* data,
     dim3 grid(ncols);
     csc_scale_diff_kernel<T>
         <<<grid, block, 0, stream>>>(indptr, data, std, ncols);
+    CUDA_CHECK_LAST_ERROR(csc_scale_diff_kernel);
 }
 
 template <typename T>
@@ -24,6 +25,7 @@ static inline void launch_csr_scale_diff(const int* indptr, const int* indices,
     dim3 grid(nrows);
     csr_scale_diff_kernel<T><<<grid, block, 0, stream>>>(
         indptr, indices, data, std, mask, clipper, nrows);
+    CUDA_CHECK_LAST_ERROR(csr_scale_diff_kernel);
 }
 
 template <typename T>
@@ -37,6 +39,7 @@ static inline void launch_dense_scale_center_diff(T* data, const T* mean,
               (unsigned)((ncols + block.y - 1) / block.y));
     dense_scale_center_diff_kernel<T><<<grid, block, 0, stream>>>(
         data, mean, std, mask, clipper, nrows, ncols);
+    CUDA_CHECK_LAST_ERROR(dense_scale_center_diff_kernel);
 }
 
 template <typename T>
@@ -49,6 +52,7 @@ static inline void launch_dense_scale_diff(T* data, const T* std,
               (unsigned)((ncols + block.y - 1) / block.y));
     dense_scale_diff_kernel<T>
         <<<grid, block, 0, stream>>>(data, std, mask, clipper, nrows, ncols);
+    CUDA_CHECK_LAST_ERROR(dense_scale_diff_kernel);
 }
 
 template <typename Device>

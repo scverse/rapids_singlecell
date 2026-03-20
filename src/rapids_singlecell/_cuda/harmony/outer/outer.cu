@@ -14,6 +14,7 @@ static inline void launch_outer(T* E, const T* Pr_b, const T* R_sum,
     dim3 grid((unsigned)((N + block.x - 1) / block.x));
     outer_kernel<T>
         <<<grid, block, 0, stream>>>(E, Pr_b, R_sum, n_cats, n_pcs, switcher);
+    CUDA_CHECK_LAST_ERROR(outer_kernel);
 }
 
 template <typename T>
@@ -25,6 +26,7 @@ static inline void launch_harmony_corr(T* Z, const T* W, const int* cats,
     dim3 grid((unsigned)((N + block.x - 1) / block.x));
     harmony_correction_kernel<T>
         <<<grid, block, 0, stream>>>(Z, W, cats, R, n_cells, n_pcs);
+    CUDA_CHECK_LAST_ERROR(harmony_correction_kernel);
 }
 
 template <typename T>
@@ -38,6 +40,7 @@ static inline void launch_batched_correction(T* Z, const T* W_all,
     dim3 grid((unsigned)((N + block.x - 1) / block.x));
     batched_correction_kernel<T><<<grid, block, 0, stream>>>(
         Z, W_all, cats, R, n_cells, n_pcs, n_clusters, n_batches_p1);
+    CUDA_CHECK_LAST_ERROR(batched_correction_kernel);
 }
 
 template <typename Device>

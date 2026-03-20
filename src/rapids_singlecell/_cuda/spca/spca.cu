@@ -13,6 +13,7 @@ static inline void launch_gram_csr_upper(const int* indptr, const int* index,
     dim3 grid(nrows);
     gram_csr_upper_kernel<T>
         <<<grid, block, 0, stream>>>(indptr, index, data, nrows, ncols, out);
+    CUDA_CHECK_LAST_ERROR(gram_csr_upper_kernel);
 }
 
 template <typename T>
@@ -21,6 +22,7 @@ static inline void launch_copy_upper_to_lower(T* out, int ncols,
     dim3 block(32, 32);
     dim3 grid((ncols + block.x - 1) / block.x, (ncols + block.y - 1) / block.y);
     copy_upper_to_lower_kernel<T><<<grid, block, 0, stream>>>(out, ncols);
+    CUDA_CHECK_LAST_ERROR(copy_upper_to_lower_kernel);
 }
 
 template <typename T>
@@ -31,6 +33,7 @@ static inline void launch_cov_from_gram(T* cov, const T* gram, const T* meanx,
     dim3 grid((ncols + 31) / 32, (ncols + 31) / 32);
     cov_from_gram_kernel<T>
         <<<grid, block, 0, stream>>>(cov, gram, meanx, meany, ncols);
+    CUDA_CHECK_LAST_ERROR(cov_from_gram_kernel);
 }
 
 static inline void launch_check_zero_genes(const int* indices, int* genes,
@@ -41,6 +44,7 @@ static inline void launch_check_zero_genes(const int* indices, int* genes,
         dim3 grid((nnz + block.x - 1) / block.x);
         check_zero_genes_kernel<<<grid, block, 0, stream>>>(indices, genes, nnz,
                                                             num_genes);
+        CUDA_CHECK_LAST_ERROR(check_zero_genes_kernel);
     }
 }
 

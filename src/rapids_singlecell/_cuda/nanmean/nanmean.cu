@@ -14,6 +14,7 @@ static inline void launch_nan_mean_minor(const int* index, const T* data,
     dim3 grid((nnz + block.x - 1) / block.x);
     nan_mean_minor_kernel<T>
         <<<grid, block, 0, stream>>>(index, data, means, nans, mask, nnz);
+    CUDA_CHECK_LAST_ERROR(nan_mean_minor_kernel);
 }
 
 template <typename T>
@@ -25,6 +26,7 @@ static inline void launch_nan_mean_major(const int* indptr, const int* index,
     dim3 grid(major);
     nan_mean_major_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, means, nans, mask, major, minor);
+    CUDA_CHECK_LAST_ERROR(nan_mean_major_kernel);
 }
 
 template <typename Device>

@@ -16,6 +16,7 @@ static inline void launch_sparse_norm_res_csc(
     sparse_norm_res_csc_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, sums_cells, sums_genes, residuals, inv_sum_total,
         clip, inv_theta, n_cells, n_genes);
+    CUDA_CHECK_LAST_ERROR(sparse_norm_res_csc_kernel);
 }
 
 template <typename T>
@@ -28,6 +29,7 @@ static inline void launch_sparse_norm_res_csr(
     sparse_norm_res_csr_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, sums_cells, sums_genes, residuals, inv_sum_total,
         clip, inv_theta, n_cells, n_genes);
+    CUDA_CHECK_LAST_ERROR(sparse_norm_res_csr_kernel);
 }
 
 template <typename T>
@@ -42,6 +44,7 @@ static inline void launch_dense_norm_res(const T* X, T* residuals,
     dense_norm_res_kernel<T><<<grid, block, 0, stream>>>(
         X, residuals, sums_cells, sums_genes, inv_sum_total, clip, inv_theta,
         n_cells, n_genes);
+    CUDA_CHECK_LAST_ERROR(dense_norm_res_kernel);
 }
 
 template <typename T>
@@ -53,6 +56,7 @@ static inline void launch_sparse_sum_csc(const int* indptr, const int* index,
     dim3 grid((n_genes + block.x - 1) / block.x);
     sparse_sum_csc_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, sums_genes, sums_cells, n_genes);
+    CUDA_CHECK_LAST_ERROR(sparse_sum_csc_kernel);
 }
 
 template <typename T>
@@ -67,6 +71,7 @@ static inline void launch_csc_hvg_res(const int* indptr, const int* index,
     csc_hvg_res_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, sums_genes, sums_cells, residuals, inv_sum_total,
         clip, inv_theta, n_genes, n_cells);
+    CUDA_CHECK_LAST_ERROR(csc_hvg_res_kernel);
 }
 
 template <typename T>
@@ -80,6 +85,7 @@ static inline void launch_dense_hvg_res(const T* data, const T* sums_genes,
     dense_hvg_res_kernel<T><<<grid, block, 0, stream>>>(
         data, sums_genes, sums_cells, residuals, inv_sum_total, clip, inv_theta,
         n_genes, n_cells);
+    CUDA_CHECK_LAST_ERROR(dense_hvg_res_kernel);
 }
 
 // Helper to define sparse_norm_res_csc for a given dtype

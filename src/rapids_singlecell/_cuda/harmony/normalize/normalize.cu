@@ -13,6 +13,7 @@ static inline void launch_normalize(T* X, long long rows, long long cols,
     dim3 block(block_dim);
     dim3 grid(rows);
     normalize_kernel<T><<<grid, block, 0, stream>>>(X, rows, cols);
+    CUDA_CHECK_LAST_ERROR(normalize_kernel);
 }
 
 template <typename T>
@@ -22,6 +23,7 @@ static inline void launch_l2_row_normalize(const T* src, T* dst, int n_rows,
         std::min(256u, std::max(32u, ((unsigned)n_cols + 31u) / 32u * 32u));
     l2_row_normalize_kernel<T>
         <<<n_rows, block_dim, 0, stream>>>(src, dst, n_rows, n_cols);
+    CUDA_CHECK_LAST_ERROR(l2_row_normalize_kernel);
 }
 
 template <typename Device>

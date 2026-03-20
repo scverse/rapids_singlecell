@@ -29,6 +29,7 @@ static void launch_expected_zeros(const T* scaled_means, const T* total_counts,
     int grid_size = (n_genes + block_size - 1) / block_size;
     expected_zeros_kernel<T><<<grid_size, block_size, 0, stream>>>(
         scaled_means, total_counts, expected, n_genes, n_cells);
+    CUDA_CHECK_LAST_ERROR(expected_zeros_kernel);
 }
 
 template <typename Device>

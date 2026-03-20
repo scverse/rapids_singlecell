@@ -15,6 +15,7 @@ static inline void launch_scatter_add(const T* v, const int* cats,
     dim3 grid((unsigned)((N + block.x - 1) / block.x));
     scatter_add_kernel<T>
         <<<grid, block, 0, stream>>>(v, cats, n_cells, n_pcs, switcher, a);
+    CUDA_CHECK_LAST_ERROR(scatter_add_kernel);
 }
 
 template <typename T>
@@ -25,6 +26,7 @@ static inline void launch_aggregated_matrix(T* aggregated_matrix, const T* sum,
     dim3 grid((n_batches + 1 + 31) / 32);
     aggregated_matrix_kernel<T><<<grid, block, 0, stream>>>(
         aggregated_matrix, sum, top_corner, n_batches);
+    CUDA_CHECK_LAST_ERROR(aggregated_matrix_kernel);
 }
 
 template <typename T>
@@ -38,6 +40,7 @@ static inline void launch_scatter_add_shared(const T* v, const int* cats,
     size_t shared_mem = (size_t)n_batches * n_pcs * sizeof(T);
     scatter_add_shared_kernel<T><<<grid, block, shared_mem, stream>>>(
         v, cats, n_cells, n_pcs, n_batches, switcher, a);
+    CUDA_CHECK_LAST_ERROR(scatter_add_shared_kernel);
 }
 
 template <typename T>
@@ -48,6 +51,7 @@ static inline void launch_scatter_add_cat0(const T* v, int n_cells, int n_pcs,
     dim3 grid((n_pcs + 1) / 2, 8);
     scatter_add_kernel_with_bias_cat0<T>
         <<<grid, block, 0, stream>>>(v, n_cells, n_pcs, a, bias);
+    CUDA_CHECK_LAST_ERROR(scatter_add_kernel_with_bias_cat0);
 }
 
 template <typename T>
@@ -60,6 +64,7 @@ static inline void launch_scatter_add_block(const T* v, const int* cat_offsets,
     dim3 grid(n_batches * ((n_pcs + 1) / 2));
     scatter_add_kernel_with_bias_block<T><<<grid, block, 0, stream>>>(
         v, cat_offsets, cell_indices, n_cells, n_pcs, n_batches, a, bias);
+    CUDA_CHECK_LAST_ERROR(scatter_add_kernel_with_bias_block);
 }
 
 template <typename T>
@@ -69,6 +74,7 @@ static inline void launch_gather_rows(const T* src, const int* idx, T* dst,
     size_t n = (size_t)n_rows * n_cols;
     gather_rows_kernel<T><<<(int)((n + 255) / 256), 256, 0, stream>>>(
         src, idx, dst, n_rows, n_cols);
+    CUDA_CHECK_LAST_ERROR(gather_rows_kernel);
 }
 
 template <typename T>
@@ -78,11 +84,13 @@ static inline void launch_scatter_rows(const T* src, const int* idx, T* dst,
     size_t n = (size_t)n_rows * n_cols;
     scatter_rows_kernel<T><<<(int)((n + 255) / 256), 256, 0, stream>>>(
         src, idx, dst, n_rows, n_cols);
+    CUDA_CHECK_LAST_ERROR(scatter_rows_kernel);
 }
 
 static inline void launch_gather_int(const int* src, const int* idx, int* dst,
                                      int n, cudaStream_t stream) {
     gather_int_kernel<<<(n + 255) / 256, 256, 0, stream>>>(src, idx, dst, n);
+    CUDA_CHECK_LAST_ERROR(gather_int_kernel);
 }
 
 template <typename Device>

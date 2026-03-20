@@ -15,6 +15,7 @@ static inline void launch_find_top_k_per_row(const float* data,
         static_cast<size_t>(64) * static_cast<size_t>(trim) * sizeof(float);
     find_top_k_per_row_kernel<<<grid, block, shared_mem_size, stream>>>(
         data, indptr, n_rows, trim, vals);
+    CUDA_CHECK_LAST_ERROR(find_top_k_per_row_kernel);
 }
 
 static inline void launch_cut_smaller(int* indptr, int* index, float* data,
@@ -24,6 +25,7 @@ static inline void launch_cut_smaller(int* indptr, int* index, float* data,
     dim3 block(64);
     cut_smaller_kernel<<<grid, block, 0, stream>>>(indptr, index, data, vals,
                                                    n_rows);
+    CUDA_CHECK_LAST_ERROR(cut_smaller_kernel);
 }
 
 template <typename Device>

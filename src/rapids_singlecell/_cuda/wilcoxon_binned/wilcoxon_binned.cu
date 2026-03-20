@@ -16,6 +16,7 @@ static inline void launch_dense_hist(const T* X, const int* gcodes,
     dense_hist_kernel<T><<<grid, block, 0, stream>>>(X, gcodes, hist, n_cells,
                                                      n_genes, n_groups, n_bins,
                                                      bin_low, inv_bin_width);
+    CUDA_CHECK_LAST_ERROR(dense_hist_kernel);
 }
 
 template <typename T>
@@ -30,6 +31,7 @@ static inline void launch_csr_hist(const T* data, const int* indices,
     csr_hist_kernel<T><<<grid, block, 0, stream>>>(
         data, indices, indptr, gcodes, hist, n_cells, n_genes, n_groups, n_bins,
         bin_low, inv_bin_width, gene_start);
+    CUDA_CHECK_LAST_ERROR(csr_hist_kernel);
 }
 
 template <typename T>
@@ -44,6 +46,7 @@ static inline void launch_csc_hist(const T* data, const int* indices,
     csc_hist_kernel<T><<<grid, block, 0, stream>>>(
         data, indices, indptr, gcodes, hist, n_cells, n_genes, n_groups, n_bins,
         bin_low, inv_bin_width, gene_start);
+    CUDA_CHECK_LAST_ERROR(csc_hist_kernel);
 }
 
 template <typename Device>

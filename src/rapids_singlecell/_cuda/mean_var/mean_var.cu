@@ -14,6 +14,7 @@ static inline void launch_mean_var_major(const int* indptr, const int* indices,
     dim3 grid(major);
     mean_var_major_kernel<T><<<grid, block, 0, stream>>>(
         indptr, indices, data, means, vars, major, minor);
+    CUDA_CHECK_LAST_ERROR(mean_var_major_kernel);
 }
 
 template <typename T>
@@ -24,6 +25,7 @@ static inline void launch_mean_var_minor(const int* indices, const T* data,
     int grid = (nnz + block - 1) / block;
     mean_var_minor_kernel<T>
         <<<grid, block, 0, stream>>>(indices, data, means, vars, nnz);
+    CUDA_CHECK_LAST_ERROR(mean_var_minor_kernel);
 }
 
 template <typename Device>

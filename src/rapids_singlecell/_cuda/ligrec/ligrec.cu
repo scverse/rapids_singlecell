@@ -14,6 +14,7 @@ static inline void launch_sum_count_dense(const T* data, const int* clusters,
     dim3 grid((rows + block.x - 1) / block.x, (cols + block.y - 1) / block.y);
     sum_and_count_dense_kernel<T><<<grid, block, 0, stream>>>(
         data, clusters, sum, count, rows, cols, ncls);
+    CUDA_CHECK_LAST_ERROR(sum_and_count_dense_kernel);
 }
 
 template <typename T>
@@ -25,6 +26,7 @@ static inline void launch_sum_count_sparse(const int* indptr, const int* index,
     dim3 grid((rows + block.x - 1) / block.x);
     sum_and_count_sparse_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, clusters, sum, count, rows, ncls);
+    CUDA_CHECK_LAST_ERROR(sum_and_count_sparse_kernel);
 }
 
 template <typename T>
@@ -35,6 +37,7 @@ static inline void launch_mean_dense(const T* data, const int* clusters, T* g,
     dim3 grid((rows + block.x - 1) / block.x, (cols + block.y - 1) / block.y);
     mean_dense_kernel<T>
         <<<grid, block, 0, stream>>>(data, clusters, g, rows, cols, ncls);
+    CUDA_CHECK_LAST_ERROR(mean_dense_kernel);
 }
 
 template <typename T>
@@ -45,6 +48,7 @@ static inline void launch_mean_sparse(const int* indptr, const int* index,
     dim3 grid((rows + block.x - 1) / block.x);
     mean_sparse_kernel<T><<<grid, block, 0, stream>>>(indptr, index, data,
                                                       clusters, g, rows, ncls);
+    CUDA_CHECK_LAST_ERROR(mean_sparse_kernel);
 }
 
 template <typename T>
@@ -56,6 +60,7 @@ static inline void launch_elementwise_diff(T* g, const T* total_counts,
               (n_clusters + block.y - 1) / block.y);
     elementwise_diff_kernel<T>
         <<<grid, block, 0, stream>>>(g, total_counts, n_genes, n_clusters);
+    CUDA_CHECK_LAST_ERROR(elementwise_diff_kernel);
 }
 
 template <typename T>
@@ -70,6 +75,7 @@ static inline void launch_interaction(const int* interactions,
     interaction_kernel<T><<<grid, block>>>(interactions, interaction_clusters,
                                            mean, res, mask, g, n_iter,
                                            n_inter_clust, ncls);
+    CUDA_CHECK_LAST_ERROR(interaction_kernel);
 }
 
 template <typename T>
@@ -84,6 +90,7 @@ static inline void launch_res_mean(const int* interactions,
     res_mean_kernel<T>
         <<<grid, block, 0, stream>>>(interactions, interaction_clusters, mean,
                                      res_mean, n_inter, n_inter_clust, ncls);
+    CUDA_CHECK_LAST_ERROR(res_mean_kernel);
 }
 
 template <typename Device>

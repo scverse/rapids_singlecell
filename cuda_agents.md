@@ -19,7 +19,7 @@
 ### GPU/CUDA Errors
 - Race conditions in GPU kernels (shared memory, atomics)
 - Invalid memory access (out-of-bounds, host/device confusion)
-- Missing CUDA error checking after kernel launches
+- **Missing `cudaGetLastError()` after kernel launches**: Every kernel launch (`<<<grid, block, shared, stream>>>`) MUST be followed by `cudaGetLastError()` to detect launch failures (invalid config, shared memory overflow, etc.). Without this, errors are silently deferred and may corrupt later operations or produce garbage results.
 - Kernel launch with zero blocks/threads or invalid grid/block dimensions
 - **Template type mismatches**: kernel templated on `float` but receiving `double` data from Python
 - **Shared memory overflow**: exceeding device shared memory limit (varies by GPU, e.g. T4 = 64KB)
@@ -73,7 +73,7 @@
 ### Kernel Configuration
 - Hard-coded shared memory sizes that may exceed device limits
 - Fixed tile sizes that don't adapt to device capabilities
-- **Magic numbers** in grid/block calculations without descriptive constants
+- **Magic numbers**: all numeric literals for block sizes, tile dimensions, shared memory sizes, and heuristic thresholds MUST use named constants. `dim3 block(256)` is not acceptable — use `constexpr int BLOCK_SIZE = 256; dim3 block(BLOCK_SIZE);`
 
 ### Test Quality
 - Missing validation of numerical correctness against CPU reference
@@ -139,6 +139,43 @@ Suggested fix:
 // Query device limit and select valid tile size
 int max_shared = device.attributes["MaxSharedMemoryPerBlock"];
 int tile = select_tile(max_shared, dtype_size);
+```
+
+**CRITICAL** (missing cudaGetLastError):
+```text
+CRITICAL: Missing cudaGetLastError() after kernel launch
+
+Issue: Kernel launched without error checking — launch failures are silently deferred
+Why: Invalid grid/block config, shared memory overflow, or other launch errors go undetected
+Impact: Garbage results that look like algorithm bugs, not CUDA errors
+
+Bad:
+my_kernel<<<grid, block, shared_mem, stream>>>(...);
+
+Good:
+my_kernel<<<grid, block, shared_mem, stream>>>(...);
+cudaError_t err = cudaGetLastError();
+if (err != cudaSuccess) {
+    throw std::runtime_error(std::string("Kernel launch failed: ") + cudaGetErrorString(err));
+}
+```
+
+**HIGH** (magic numbers):
+```text
+HIGH: Magic numbers in kernel configuration
+
+Issue: `dim3 block(64)` and `dim3 grid((n + 63) / 64)` use raw numeric literals
+Why: Obscures intent, error-prone when changing, harder to review
+Impact: Maintainability and correctness risk
+
+Bad:
+dim3 block(64);
+dim3 grid((n + 63) / 64);
+
+Good:
+constexpr int BLOCK_SIZE = 64;
+dim3 block(BLOCK_SIZE);
+dim3 grid((n + BLOCK_SIZE - 1) / BLOCK_SIZE);
 ```
 
 **CRITICAL** (missing syncthreads):
@@ -266,8 +303,9 @@ module_name/
 ### When Reviewing Nanobind Bindings (.cu files)
 - [ ] Is the template type `T` dispatched correctly based on array dtype?
 - [ ] Are array dimensions validated before kernel launch?
-- [ ] Is error checking done after CUDA calls?
+- [ ] Is `cudaGetLastError()` called after every kernel launch to catch launch failures?
 - [ ] Are DLPack/array interface conversions correct?
+- [ ] Are all numeric literals for block sizes, tile sizes, and thresholds defined as named constants?
 
 ### When Reviewing CuPy RawKernels (_kernels/*.py)
 - [ ] Is the kernel string syntactically correct CUDA C?

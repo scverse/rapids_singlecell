@@ -60,6 +60,7 @@ static inline void colsum_dispatch(int algo, cublasHandle_t handle, const T* A,
             int threads = std::min(1024, std::max(32, (rows + 31) / 32 * 32));
             colsum_kernel<T><<<std::min(cols, n_sm * 8), threads, 0, stream>>>(
                 A, out, rows, cols);
+            CUDA_CHECK_LAST_ERROR(colsum_kernel);
             break;
         }
         case COLSUM_ATOMICS: {
@@ -73,6 +74,7 @@ static inline void colsum_dispatch(int algo, cublasHandle_t handle, const T* A,
             colsum_atomic_kernel<T>
                 <<<dim3(col_tiles, row_tiles), dim3(32, 32), 0, stream>>>(
                     A, out, rows, cols, rows_per_tile);
+            CUDA_CHECK_LAST_ERROR(colsum_atomic_kernel);
             break;
         }
         default:  // COLSUM_GEMM
@@ -95,11 +97,13 @@ static inline void scatter_add_to_O(const T* R_buf, const int* cats_in,
         int blocks = std::min(n_sm * 4, max_blocks);
         scatter_add_shared_kernel<T><<<blocks, 256, shared_bytes, stream>>>(
             R_buf, cats_in, current_bs, n_clusters, n_batches, switcher, O);
+        CUDA_CHECK_LAST_ERROR(scatter_add_shared_kernel);
     } else {
         size_t N = (size_t)current_bs * n_clusters;
         scatter_add_kernel<T><<<(int)((N + 255) / 256), 256, 0, stream>>>(
             R_buf, cats_in, (size_t)current_bs, (size_t)n_clusters,
             (size_t)switcher, O);
+        CUDA_CHECK_LAST_ERROR(scatter_add_kernel);
     }
 }
 
@@ -168,12 +172,14 @@ static T compute_objective_impl(const T* R, const T* similarities, const T* O,
         size_t n = (size_t)n_cells * n_clusters;
         kmeans_err_kernel<T><<<grid_1d((int)n, n_sm), 256, 0, stream>>>(
             R, similarities, n, obj_scalar);
+        CUDA_CHECK_LAST_ERROR(kmeans_err_kernel);
     }
 
     // Entropy: sigma * sum(x_norm * log(x_norm + eps)), row-normalized
     // internally
     entropy_kernel<T><<<n_cells, warp_aligned_bdim(n_clusters), 0, stream>>>(
         R, sigma, n_cells, n_clusters, obj_scalar);
+    CUDA_CHECK_LAST_ERROR(entropy_kernel);
 
     // Diversity: sigma * sum(theta[b] * O[b,k] * log((O[b,k]+1)/(E[b,k]+1)))
     {
@@ -183,6 +189,7 @@ static T compute_objective_impl(const T* R, const T* similarities, const T* O,
             std::max(1, std::min(n_sm, (ob_total + threads - 1) / threads));
         diversity_kernel<T><<<blocks, threads, 0, stream>>>(
             O, E, theta, sigma, n_batches, n_clusters, obj_scalar);
+        CUDA_CHECK_LAST_ERROR(diversity_kernel);
     }
 
     T host_obj;
@@ -233,6 +240,7 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
         l2_row_normalize_kernel<T>
             <<<a.n_clusters, warp_aligned_bdim(a.n_pcs), 0, a.stream>>>(
                 a.Y, a.Y_norm, a.n_clusters, a.n_pcs);
+        CUDA_CHECK_LAST_ERROR(l2_row_normalize_kernel);
 
         // ---- Similarities: Z_norm @ Y_norm^T ----
         cublas_gemm<T>(handle, CUBLAS_OP_T, CUBLAS_OP_N, a.n_clusters,
@@ -242,8 +250,10 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
         // ---- Shuffle: random permutation via PCG hash + radix sort ----
         pcg_hash_kernel<<<grid_1d(a.n_cells, n_sm), 256, 0, a.stream>>>(
             a.sort_keys, a.n_cells, a.seed + iter);
+        CUDA_CHECK_LAST_ERROR(pcg_hash_kernel);
         iota_kernel<<<grid_1d(a.n_cells, n_sm), 256, 0, a.stream>>>(a.idx_list,
                                                                     a.n_cells);
+        CUDA_CHECK_LAST_ERROR(iota_kernel);
 
         cub::DeviceRadixSort::SortPairs(
             a.cub_temp, cub_temp_bytes, a.sort_keys, a.sort_keys_alt,
@@ -258,8 +268,10 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
             gather_rows_kernel<T>
                 <<<grid_1d(bs * a.n_clusters, n_sm), 256, 0, a.stream>>>(
                     a.R, block_idx, a.R_out_buffer, bs, a.n_clusters);
+            CUDA_CHECK_LAST_ERROR(gather_rows_kernel);
             gather_int_kernel<<<grid_1d(bs, n_sm), 256, 0, a.stream>>>(
                 a.cats, block_idx, a.cats_in, bs);
+            CUDA_CHECK_LAST_ERROR(gather_int_kernel);
 
             // Remove old contribution: O -= scatter(R_in), E -= Pr_b @ R_in_sum
             colsum_dispatch<T>(a.colsum_algo, handle, a.R_out_buffer,
@@ -271,20 +283,24 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
             outer_kernel<T><<<(ob_total + 255) / 256, 256, 0, a.stream>>>(
                 a.E, a.Pr_b, a.R_in_sum, (long long)a.n_batches,
                 (long long)a.n_clusters, 0LL);
+            CUDA_CHECK_LAST_ERROR(outer_kernel);
 
             // Compute penalty and fused softmax -> R_out_buffer
             penalty_kernel<T><<<(ob_total + 255) / 256, 256, 0, a.stream>>>(
                 a.E, a.O, a.theta, a.penalty, a.n_batches, a.n_clusters);
+            CUDA_CHECK_LAST_ERROR(penalty_kernel);
             fused_pen_norm_kernel<T, int>
                 <<<bs, warp_aligned_bdim(a.n_clusters), 0, a.stream>>>(
                     a.similarities, a.penalty, a.cats_in, block_idx,
                     a.R_out_buffer, term, bs, a.n_clusters);
+            CUDA_CHECK_LAST_ERROR(fused_pen_norm_kernel);
 
             // Write back and add new contribution: O += scatter(R_out), E +=
             // Pr_b @ R_out_sum
             scatter_rows_kernel<T>
                 <<<grid_1d(bs * a.n_clusters, n_sm), 256, 0, a.stream>>>(
                     a.R_out_buffer, block_idx, a.R, bs, a.n_clusters);
+            CUDA_CHECK_LAST_ERROR(scatter_rows_kernel);
             colsum_dispatch<T>(a.colsum_algo, handle, a.R_out_buffer,
                                a.R_out_sum, a.ones_vec, bs, a.n_clusters, n_sm,
                                a.stream);
@@ -294,6 +310,7 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
             outer_kernel<T><<<(ob_total + 255) / 256, 256, 0, a.stream>>>(
                 a.E, a.Pr_b, a.R_out_sum, (long long)a.n_batches,
                 (long long)a.n_clusters, 1LL);
+            CUDA_CHECK_LAST_ERROR(outer_kernel);
         }
 
         // ---- Objective function (reuses similarities buffer) ----

@@ -14,6 +14,7 @@ static inline void launch_sqeuclidean(const float* data, float* out,
     dim3 grid((unsigned)((n_samples + block.x - 1) / block.x));
     compute_distances_sqeuclidean_kernel<<<grid, block, 0, stream>>>(
         data, out, pairs, n_samples, n_features, n_neighbors);
+    CUDA_CHECK_LAST_ERROR(compute_distances_sqeuclidean_kernel);
 }
 
 static inline void launch_cosine(const float* data, float* out,
@@ -24,6 +25,7 @@ static inline void launch_cosine(const float* data, float* out,
     dim3 grid((unsigned)((n_samples + block.x - 1) / block.x));
     compute_distances_cosine_kernel<<<grid, block, 0, stream>>>(
         data, out, pairs, n_samples, n_features, n_neighbors);
+    CUDA_CHECK_LAST_ERROR(compute_distances_cosine_kernel);
 }
 
 static inline void launch_inner(const float* data, float* out,
@@ -34,6 +36,7 @@ static inline void launch_inner(const float* data, float* out,
     dim3 grid((unsigned)((n_samples + block.x - 1) / block.x));
     compute_distances_inner_kernel<<<grid, block, 0, stream>>>(
         data, out, pairs, n_samples, n_features, n_neighbors);
+    CUDA_CHECK_LAST_ERROR(compute_distances_inner_kernel);
 }
 
 template <typename Device>

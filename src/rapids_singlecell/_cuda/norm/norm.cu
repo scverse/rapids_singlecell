@@ -12,6 +12,7 @@ static inline void launch_dense_row_scale(T* data, int nrows, int ncols,
     dim3 grid(nrows);
     dense_row_scale_kernel<T>
         <<<grid, block, 0, stream>>>(data, nrows, ncols, target_sum);
+    CUDA_CHECK_LAST_ERROR(dense_row_scale_kernel);
 }
 
 template <typename T>
@@ -21,6 +22,7 @@ static inline void launch_csr_row_scale(const int* indptr, T* data, int nrows,
     dim3 grid(nrows);
     csr_row_scale_kernel<T>
         <<<grid, block, 0, stream>>>(indptr, data, nrows, target_sum);
+    CUDA_CHECK_LAST_ERROR(csr_row_scale_kernel);
 }
 
 template <typename T>
@@ -31,6 +33,7 @@ static inline void launch_csr_sum_major(const int* indptr, const T* data,
     dim3 grid(major);
     csr_sum_major_kernel<T>
         <<<grid, block, 0, stream>>>(indptr, data, sums, major);
+    CUDA_CHECK_LAST_ERROR(csr_sum_major_kernel);
 }
 
 template <typename T>
@@ -42,6 +45,7 @@ static inline void launch_find_hi_genes_csr(const int* indptr,
     dim3 grid(nrows);
     find_hi_genes_csr_kernel<T><<<grid, block, 0, stream>>>(
         indptr, indices, data, gene_is_hi, max_fraction, nrows);
+    CUDA_CHECK_LAST_ERROR(find_hi_genes_csr_kernel);
 }
 
 template <typename T>
@@ -53,6 +57,7 @@ static inline void launch_masked_mul_csr(const int* indptr, const int* indices,
     dim3 grid(nrows);
     masked_mul_csr_kernel<T><<<grid, block, 0, stream>>>(
         indptr, indices, data, gene_mask, nrows, tsum);
+    CUDA_CHECK_LAST_ERROR(masked_mul_csr_kernel);
 }
 
 template <typename T>
@@ -64,6 +69,7 @@ static inline void launch_masked_sum_major(const int* indptr,
     dim3 grid(major);
     masked_sum_major_kernel<T><<<grid, block, 0, stream>>>(
         indptr, indices, data, gene_mask, sums, major);
+    CUDA_CHECK_LAST_ERROR(masked_sum_major_kernel);
 }
 
 template <typename T>
@@ -74,6 +80,7 @@ static inline void launch_prescaled_mul_csr(const int* indptr, T* data,
     dim3 grid(nrows);
     prescaled_mul_csr_kernel<T>
         <<<grid, block, 0, stream>>>(indptr, data, scales, nrows);
+    CUDA_CHECK_LAST_ERROR(prescaled_mul_csr_kernel);
 }
 
 template <typename T>
@@ -84,6 +91,7 @@ static inline void launch_prescaled_mul_dense(T* data, const T* scales,
     dim3 grid(nrows);
     prescaled_mul_dense_kernel<T>
         <<<grid, block, 0, stream>>>(data, scales, nrows, ncols);
+    CUDA_CHECK_LAST_ERROR(prescaled_mul_dense_kernel);
 }
 
 template <typename Device>

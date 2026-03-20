@@ -15,6 +15,7 @@ static inline void launch_csr_aggr(const int* indptr, const int* index,
     dim3 block(64);
     csr_aggr_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, out, cats, mask, n_cells, n_genes, n_groups);
+    CUDA_CHECK_LAST_ERROR(csr_aggr_kernel);
 }
 
 template <typename T>
@@ -27,6 +28,7 @@ static inline void launch_csc_aggr(const int* indptr, const int* index,
     dim3 block(64);
     csc_aggr_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, out, cats, mask, n_cells, n_genes, n_groups);
+    CUDA_CHECK_LAST_ERROR(csc_aggr_kernel);
 }
 
 template <typename T>
@@ -38,6 +40,7 @@ static inline void launch_dense_aggr_C(const T* data, double* out,
     dim3 grid((unsigned)((n_cells * n_genes + block.x - 1) / block.x));
     dense_aggr_kernel_C<T><<<grid, block, 0, stream>>>(
         data, out, cats, mask, n_cells, n_genes, n_groups);
+    CUDA_CHECK_LAST_ERROR(dense_aggr_kernel_C);
 }
 
 template <typename T>
@@ -49,6 +52,7 @@ static inline void launch_dense_aggr_F(const T* data, double* out,
     dim3 grid((unsigned)((n_cells * n_genes + block.x - 1) / block.x));
     dense_aggr_kernel_F<T><<<grid, block, 0, stream>>>(
         data, out, cats, mask, n_cells, n_genes, n_groups);
+    CUDA_CHECK_LAST_ERROR(dense_aggr_kernel_F);
 }
 
 template <typename T>
@@ -61,6 +65,7 @@ static inline void launch_csr_to_coo(const int* indptr, const int* index,
     dim3 block(64);
     csr_to_coo_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, row, col, ndata, cats, mask, n_cells);
+    CUDA_CHECK_LAST_ERROR(csr_to_coo_kernel);
 }
 
 static inline void launch_sparse_var(const int* indptr, const int* index,
@@ -71,6 +76,7 @@ static inline void launch_sparse_var(const int* indptr, const int* index,
     dim3 block(64);
     sparse_var_kernel<<<grid, block, 0, stream>>>(
         indptr, index, data, mean_data, n_cells, dof, n_groups);
+    CUDA_CHECK_LAST_ERROR(sparse_var_kernel);
 }
 
 template <typename T, typename Device>

@@ -14,6 +14,7 @@ static inline void launch_qc_csc(const int* indptr, const int* index,
     dim3 grid((n_genes + block.x - 1) / block.x);
     qc_csc_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, sums_cells, sums_genes, cell_ex, gene_ex, n_genes);
+    CUDA_CHECK_LAST_ERROR(qc_csc_kernel);
 }
 
 template <typename T>
@@ -25,6 +26,7 @@ static inline void launch_qc_csr(const int* indptr, const int* index,
     dim3 grid((n_cells + block.x - 1) / block.x);
     qc_csr_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, sums_cells, sums_genes, cell_ex, gene_ex, n_cells);
+    CUDA_CHECK_LAST_ERROR(qc_csr_kernel);
 }
 
 template <typename T>
@@ -36,6 +38,7 @@ static inline void launch_qc_dense(const T* data, T* sums_cells, T* sums_genes,
               (n_genes + block.y - 1) / block.y);
     qc_dense_kernel<T><<<grid, block, 0, stream>>>(
         data, sums_cells, sums_genes, cell_ex, gene_ex, n_cells, n_genes);
+    CUDA_CHECK_LAST_ERROR(qc_dense_kernel);
 }
 
 template <typename T>
@@ -47,6 +50,7 @@ static inline void launch_qc_csc_sub(const int* indptr, const int* index,
     dim3 grid((n_genes + block.x - 1) / block.x);
     qc_csc_sub_kernel<T><<<grid, block, 0, stream>>>(indptr, index, data,
                                                      sums_cells, mask, n_genes);
+    CUDA_CHECK_LAST_ERROR(qc_csc_sub_kernel);
 }
 
 template <typename T>
@@ -58,6 +62,7 @@ static inline void launch_qc_csr_sub(const int* indptr, const int* index,
     dim3 grid((n_cells + block.x - 1) / block.x);
     qc_csr_sub_kernel<T><<<grid, block, 0, stream>>>(indptr, index, data,
                                                      sums_cells, mask, n_cells);
+    CUDA_CHECK_LAST_ERROR(qc_csr_sub_kernel);
 }
 
 template <typename T>
@@ -69,6 +74,7 @@ static inline void launch_qc_dense_sub(const T* data, T* sums_cells,
               (n_genes + block.y - 1) / block.y);
     qc_dense_sub_kernel<T>
         <<<grid, block, 0, stream>>>(data, sums_cells, mask, n_cells, n_genes);
+    CUDA_CHECK_LAST_ERROR(qc_dense_sub_kernel);
 }
 
 template <typename Device>

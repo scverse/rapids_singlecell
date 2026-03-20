@@ -17,6 +17,7 @@ static inline void launch_morans_dense(const T* data_centered,
     morans_I_num_dense_kernel<<<grid, block, 0, stream>>>(
         data_centered, adj_row_ptr, adj_col_ind, adj_data, num, n_samples,
         n_features);
+    CUDA_CHECK_LAST_ERROR(morans_I_num_dense_kernel);
 }
 
 template <typename T>
@@ -30,6 +31,7 @@ static inline void launch_morans_sparse(
     morans_I_num_sparse_kernel<<<grid, block, 0, stream>>>(
         adj_row_ptr, adj_col_ind, adj_data, data_row_ptr, data_col_ind,
         data_values, n_samples, n_features, mean_array, num);
+    CUDA_CHECK_LAST_ERROR(morans_I_num_sparse_kernel);
 }
 
 template <typename T>
@@ -42,6 +44,7 @@ static inline void launch_gearys_dense(const T* data, const int* adj_row_ptr,
               (n_samples + block.y - 1) / block.y);
     gearys_C_num_dense_kernel<<<grid, block, 0, stream>>>(
         data, adj_row_ptr, adj_col_ind, adj_data, num, n_samples, n_features);
+    CUDA_CHECK_LAST_ERROR(gearys_C_num_dense_kernel);
 }
 
 template <typename T>
@@ -54,6 +57,7 @@ static inline void launch_gearys_sparse(
     gearys_C_num_sparse_kernel<<<grid, block, 0, stream>>>(
         adj_row_ptr, adj_col_ind, adj_data, data_row_ptr, data_col_ind,
         data_values, n_samples, n_features, num);
+    CUDA_CHECK_LAST_ERROR(gearys_C_num_sparse_kernel);
 }
 
 template <typename T>
@@ -65,6 +69,7 @@ static inline void launch_pre_den_sparse(const int* data_col_ind,
     dim3 grid((nnz + block.x - 1) / block.x);
     pre_den_sparse_kernel<<<grid, block, 0, stream>>>(
         data_col_ind, data_values, nnz, mean_array, den, counter);
+    CUDA_CHECK_LAST_ERROR(pre_den_sparse_kernel);
 }
 
 template <typename Device>

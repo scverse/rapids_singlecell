@@ -40,6 +40,7 @@ static inline void launch_auc(const int* ranks, int R, int C, const int* cnct,
     dim3 grid((unsigned)n_sets, (unsigned)((R + block.x - 1) / block.x));
     auc_kernel<<<grid, block, 0, stream>>>(ranks, R, C, cnct, starts, lens,
                                            n_sets, n_up, max_aucs, es);
+    CUDA_CHECK_LAST_ERROR(auc_kernel);
 }
 
 template <typename Device>
