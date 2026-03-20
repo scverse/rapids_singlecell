@@ -14,6 +14,25 @@ from rapids_singlecell._cuda import _harmony_scatter_cuda as _hc_sc
 if TYPE_CHECKING:
     import pandas as pd
 
+# Shared-memory scatter_add heuristics
+MIN_CELLS_FOR_SHARED = 50_000
+MIN_CELLS_PER_BATCH_SHARED = 10_000
+MAX_SHARED_MEM_BYTES = 48 * 1024  # 48 KB shared memory budget
+MIN_CELLS_PER_BLOCK = 64
+
+# Kernel selection threshold for scatter_add_bias_csr
+SCATTER_BIAS_KERNEL_THRESHOLD = 300_000
+
+# Column-sum heuristic thresholds (rows x cols regions)
+_COLSUM_COLS_SMALL = 200
+_COLSUM_COLS_MEDIUM = 800
+_COLSUM_COLS_LARGE = 1024
+_COLSUM_COLS_XLARGE = 2000
+_COLSUM_ROWS_TINY = 5_000
+_COLSUM_ROWS_SMALL = 10_000
+_COLSUM_ROWS_MEDIUM = 20_000
+_COLSUM_ROWS_LARGE = 100_000
+
 
 def _normalize_cp_p1(X: cp.ndarray) -> cp.ndarray:
     """
@@ -81,17 +100,13 @@ def _scatter_add_cp(
 
     # Determine whether to use shared memory kernel
     if use_shared is None:
-        min_cells_for_shared = 50000
-        min_cells_per_batch = 10000
-        max_shared_mem = 48 * 1024
-
         use_shared = False
-        if n_batches is not None and n_cells >= min_cells_for_shared:
+        if n_batches is not None and n_cells >= MIN_CELLS_FOR_SHARED:
             cells_per_batch = n_cells // n_batches
             shared_mem_needed = n_batches * n_pcs * X.dtype.itemsize
             if (
-                shared_mem_needed <= max_shared_mem
-                and cells_per_batch >= min_cells_per_batch
+                shared_mem_needed <= MAX_SHARED_MEM_BYTES
+                and cells_per_batch >= MIN_CELLS_PER_BATCH_SHARED
             ):
                 use_shared = True
 
@@ -100,9 +115,8 @@ def _scatter_add_cp(
             raise ValueError("n_batches must be provided when use_shared=True")
         dev = cp.cuda.Device()
         n_sm = dev.attributes["MultiProcessorCount"]
-        min_cells_per_block = 64
         max_blocks_by_cells = max(
-            1, (n_cells + min_cells_per_block - 1) // min_cells_per_block
+            1, (n_cells + MIN_CELLS_PER_BLOCK - 1) // MIN_CELLS_PER_BLOCK
         )
         n_blocks = min(n_sm * 4, max_blocks_by_cells)
 
@@ -234,7 +248,7 @@ def _scatter_add_cp_bias_csr(
     n_cells = X.shape[0]
     n_pcs = X.shape[1]
 
-    if n_cells < 300_000:
+    if n_cells < SCATTER_BIAS_KERNEL_THRESHOLD:
         _hc_sc.scatter_add_cat0(
             X,
             n_cells=n_cells,
@@ -368,17 +382,17 @@ def _choose_colsum_algo_heuristic(rows: int, cols: int, algo: str | None) -> cal
 # TODO: Make this more robust
 def _colsum_heuristic(rows: int, cols: int, compute_capability: str) -> str:
     is_data_center = compute_capability in ["100", "90"]
-    if cols < 200 and rows < 20000:
+    if cols < _COLSUM_COLS_SMALL and rows < _COLSUM_ROWS_MEDIUM:
         return "columns"
-    if cols < 200 and rows < 100000 and is_data_center:
+    if cols < _COLSUM_COLS_SMALL and rows < _COLSUM_ROWS_LARGE and is_data_center:
         return "columns"
-    if cols < 800 and rows < 10000:
+    if cols < _COLSUM_COLS_MEDIUM and rows < _COLSUM_ROWS_SMALL:
         return "atomics"
-    if cols < 1024 and rows < 5000:
+    if cols < _COLSUM_COLS_LARGE and rows < _COLSUM_ROWS_TINY:
         return "atomics"
-    if cols < 800 and rows < 20000 and is_data_center:
+    if cols < _COLSUM_COLS_MEDIUM and rows < _COLSUM_ROWS_MEDIUM and is_data_center:
         return "atomics"
-    if cols < 2000 and rows < 10000 and is_data_center:
+    if cols < _COLSUM_COLS_XLARGE and rows < _COLSUM_ROWS_SMALL and is_data_center:
         return "atomics"
     return "gemm"
 

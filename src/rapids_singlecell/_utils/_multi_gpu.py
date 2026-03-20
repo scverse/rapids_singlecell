@@ -189,11 +189,11 @@ def _calculate_blocks_per_pair(num_pairs: int) -> int:
     int
         Optimal number of blocks per pair
     """
-    target_blocks = 300_000
-    max_blocks_per_pair = 32
+    TARGET_TOTAL_BLOCKS = 300_000
+    MAX_BLOCKS_PER_PAIR = 32
 
-    blocks_per_pair = max(1, (target_blocks + num_pairs - 1) // num_pairs)
-    blocks_per_pair = min(blocks_per_pair, max_blocks_per_pair)
+    blocks_per_pair = max(1, (TARGET_TOTAL_BLOCKS + num_pairs - 1) // num_pairs)
+    blocks_per_pair = min(blocks_per_pair, MAX_BLOCKS_PER_PAIR)
 
     return blocks_per_pair
 

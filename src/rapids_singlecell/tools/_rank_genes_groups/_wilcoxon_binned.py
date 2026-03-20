@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
 _CHUNK_BUDGET = 30_000_000  # default chunk * n_groups * n_bins (500 * 60 * 1000)
 _LOG1P_RANGE = (0.0, 15.0)  # covers log1p(x) for raw counts up to ~3.3 million
+_DASK_N_BINS = 200
+_DEFAULT_N_BINS = 1000
 
 
 def _fill_sparse_zero_bin(hist: cp.ndarray, group_counts: cp.ndarray) -> None:
@@ -116,8 +118,6 @@ def wilcoxon_binned(
     X = rg.X
     ireference = rg.ireference
 
-    _DASK_N_BINS = 200
-    _DEFAULT_N_BINS = 1000
     if n_bins is None:
         n_bins = _DASK_N_BINS if isinstance(X, DaskArray) else _DEFAULT_N_BINS
 
