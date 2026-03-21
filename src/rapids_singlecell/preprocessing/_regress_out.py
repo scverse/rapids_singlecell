@@ -134,13 +134,15 @@ def _regress_out_continuous(X, adata, keys, batchsize):
         regressors[:, i + 1] = cp.array(adata.obs[keys[i]], dtype=X.dtype).ravel()
 
     # Set default batch size based on the number of samples in X
+    DEFAULT_GENE_BATCH = 100
+    BATCH_CELL_THRESHOLD = 100_000
     if batchsize is None:
-        batchsize = 100 if X.shape[0] > 100000 else "all"
+        batchsize = DEFAULT_GENE_BATCH if X.shape[0] > BATCH_CELL_THRESHOLD else "all"
 
     # Validate the choice of "all" batch size
     if batchsize == "all":
         if cp.linalg.det(regressors.T @ regressors) == 0:
-            batchsize = 100
+            batchsize = DEFAULT_GENE_BATCH
 
     # Do regression
     if batchsize == "all":

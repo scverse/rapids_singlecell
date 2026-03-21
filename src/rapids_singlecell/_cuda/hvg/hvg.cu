@@ -25,10 +25,11 @@ template <typename T>
 static void launch_expected_zeros(const T* scaled_means, const T* total_counts,
                                   T* expected, int n_genes, int n_cells,
                                   cudaStream_t stream) {
-    int block_size = 256;
-    int grid_size = (n_genes + block_size - 1) / block_size;
-    expected_zeros_kernel<T><<<grid_size, block_size, 0, stream>>>(
+    constexpr int BLOCK_SIZE = 256;
+    int grid_size = (n_genes + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    expected_zeros_kernel<T><<<grid_size, BLOCK_SIZE, 0, stream>>>(
         scaled_means, total_counts, expected, n_genes, n_cells);
+    CUDA_CHECK_LAST_ERROR(expected_zeros_kernel);
 }
 
 template <typename Device>

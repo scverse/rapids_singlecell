@@ -5,6 +5,9 @@
 
 using namespace nb::literals;
 
+constexpr int BLOCK_SIZE_SPARSE = 64;
+constexpr int BLOCK_SIZE_DENSE = 256;
+
 template <typename T>
 static inline void launch_csr_aggr(const int* indptr, const int* index,
                                    const T* data, double* out, const int* cats,
@@ -12,9 +15,10 @@ static inline void launch_csr_aggr(const int* indptr, const int* index,
                                    size_t n_genes, size_t n_groups,
                                    cudaStream_t stream) {
     dim3 grid((unsigned)n_cells);
-    dim3 block(64);
+    dim3 block(BLOCK_SIZE_SPARSE);
     csr_aggr_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, out, cats, mask, n_cells, n_genes, n_groups);
+    CUDA_CHECK_LAST_ERROR(csr_aggr_kernel);
 }
 
 template <typename T>
@@ -24,9 +28,10 @@ static inline void launch_csc_aggr(const int* indptr, const int* index,
                                    size_t n_genes, size_t n_groups,
                                    cudaStream_t stream) {
     dim3 grid((unsigned)n_genes);
-    dim3 block(64);
+    dim3 block(BLOCK_SIZE_SPARSE);
     csc_aggr_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, out, cats, mask, n_cells, n_genes, n_groups);
+    CUDA_CHECK_LAST_ERROR(csc_aggr_kernel);
 }
 
 template <typename T>
@@ -34,10 +39,11 @@ static inline void launch_dense_aggr_C(const T* data, double* out,
                                        const int* cats, const bool* mask,
                                        size_t n_cells, size_t n_genes,
                                        size_t n_groups, cudaStream_t stream) {
-    dim3 block(256);
+    dim3 block(BLOCK_SIZE_DENSE);
     dim3 grid((unsigned)((n_cells * n_genes + block.x - 1) / block.x));
     dense_aggr_kernel_C<T><<<grid, block, 0, stream>>>(
         data, out, cats, mask, n_cells, n_genes, n_groups);
+    CUDA_CHECK_LAST_ERROR(dense_aggr_kernel_C);
 }
 
 template <typename T>
@@ -45,10 +51,11 @@ static inline void launch_dense_aggr_F(const T* data, double* out,
                                        const int* cats, const bool* mask,
                                        size_t n_cells, size_t n_genes,
                                        size_t n_groups, cudaStream_t stream) {
-    dim3 block(256);
+    dim3 block(BLOCK_SIZE_DENSE);
     dim3 grid((unsigned)((n_cells * n_genes + block.x - 1) / block.x));
     dense_aggr_kernel_F<T><<<grid, block, 0, stream>>>(
         data, out, cats, mask, n_cells, n_genes, n_groups);
+    CUDA_CHECK_LAST_ERROR(dense_aggr_kernel_F);
 }
 
 template <typename T>
@@ -58,9 +65,10 @@ static inline void launch_csr_to_coo(const int* indptr, const int* index,
                                      const bool* mask, int n_cells,
                                      cudaStream_t stream) {
     dim3 grid((unsigned)n_cells);
-    dim3 block(64);
+    dim3 block(BLOCK_SIZE_SPARSE);
     csr_to_coo_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, row, col, ndata, cats, mask, n_cells);
+    CUDA_CHECK_LAST_ERROR(csr_to_coo_kernel);
 }
 
 static inline void launch_sparse_var(const int* indptr, const int* index,
@@ -68,9 +76,10 @@ static inline void launch_sparse_var(const int* indptr, const int* index,
                                      double* n_cells, int dof, int n_groups,
                                      cudaStream_t stream) {
     dim3 grid((unsigned)n_groups);
-    dim3 block(64);
+    dim3 block(BLOCK_SIZE_SPARSE);
     sparse_var_kernel<<<grid, block, 0, stream>>>(
         indptr, index, data, mean_data, n_cells, dof, n_groups);
+    CUDA_CHECK_LAST_ERROR(sparse_var_kernel);
 }
 
 template <typename T, typename Device>

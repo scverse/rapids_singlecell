@@ -122,6 +122,7 @@ static void launch_csr_catpairs_kernel(
         <<<grid, block, shared_mem, stream>>>(
             spatial, thresholds, cat_offsets, cell_indices, pair_left,
             pair_right, counts, k, l_val, blocks_per_pair, l_pad);
+    CUDA_CHECK_LAST_ERROR(occur_count_kernel_csr_catpairs_tiled);
 }
 
 // Dispatch to correct template specialization based on cell_tile
@@ -192,6 +193,7 @@ static inline void launch_count_pairwise(const float* spatial,
     dim3 block(32);
     occur_count_kernel_pairwise<<<grid, block, 0, stream>>>(
         spatial, thresholds, labels, result, n, k, l_val);
+    CUDA_CHECK_LAST_ERROR(occur_count_kernel_pairwise);
 }
 
 // Shared memory reduction launch
@@ -213,6 +215,7 @@ static inline bool launch_reduce_shared(const int* result, float* out, int k,
         static_cast<size_t>(k) * static_cast<size_t>(k + 1) * sizeof(float);
     occur_reduction_kernel_shared<<<grid, block, smem, stream>>>(result, out, k,
                                                                  l_val, format);
+    CUDA_CHECK_LAST_ERROR(occur_reduction_kernel_shared);
     return true;
 }
 
@@ -225,6 +228,7 @@ static inline void launch_reduce_global(const int* result, float* inter_out,
     size_t smem = static_cast<size_t>(k) * sizeof(float);
     occur_reduction_kernel_global<<<grid, block, smem, stream>>>(
         result, inter_out, out, k, l_val, format);
+    CUDA_CHECK_LAST_ERROR(occur_reduction_kernel_global);
 }
 
 template <typename Device>

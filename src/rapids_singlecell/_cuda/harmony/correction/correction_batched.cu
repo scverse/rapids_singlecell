@@ -10,6 +10,10 @@
 
 using namespace nb::literals;
 
+constexpr int WARP_SIZE = 32;
+constexpr int MAX_BLOCK_DIM = 256;
+constexpr int BLOCK_DIM_1D = 256;
+
 template <typename T>
 static void correction_batched_impl(
     const T* X, const T* R, const T* O, const int* cats, const int* cat_offsets,
@@ -25,10 +29,13 @@ static void correction_batched_impl(
                     cudaMemcpyDeviceToDevice, stream);
 
     // Step 2: Compute all inv_mats at once (n_clusters blocks, cluster_k=-1)
-    int bdim = std::min(256, std::max(32, (n_batches + 31) / 32 * 32));
+    int bdim = std::min(MAX_BLOCK_DIM,
+                        std::max(WARP_SIZE, (n_batches + WARP_SIZE - 1) /
+                                                WARP_SIZE * WARP_SIZE));
     compute_inv_mats_kernel<T><<<n_clusters, bdim, 0, stream>>>(
         O, ridge_lambda, inv_mats, g_factor, g_P_row0, n_batches, n_clusters,
         /*cluster_k=*/-1);
+    CUDA_CHECK_LAST_ERROR(compute_inv_mats_kernel);
 
     // cuBLAS handle
     cublasHandle_t handle;
@@ -54,12 +61,16 @@ static void correction_batched_impl(
     // Gather X and R into batch-sorted order
     {
         size_t n_x = (size_t)n_cells * n_pcs;
-        gather_rows_kernel<T><<<(int)((n_x + 255) / 256), 256, 0, stream>>>(
-            X, cell_indices, X_sorted, n_cells, n_pcs);
+        gather_rows_kernel<T>
+            <<<(int)((n_x + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D), BLOCK_DIM_1D, 0,
+               stream>>>(X, cell_indices, X_sorted, n_cells, n_pcs);
+        CUDA_CHECK_LAST_ERROR(gather_rows_kernel);
 
         size_t n_r = (size_t)n_cells * n_clusters;
-        gather_rows_kernel<T><<<(int)((n_r + 255) / 256), 256, 0, stream>>>(
-            R, cell_indices, R_sorted, n_cells, n_clusters);
+        gather_rows_kernel<T>
+            <<<(int)((n_r + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D), BLOCK_DIM_1D, 0,
+               stream>>>(R, cell_indices, R_sorted, n_cells, n_clusters);
+        CUDA_CHECK_LAST_ERROR(gather_rows_kernel);
     }
 
     // Copy cat_offsets to host for batch loop
@@ -108,8 +119,9 @@ static void correction_batched_impl(
     {
         size_t n_total = (size_t)n_cells * n_pcs;
         batched_correction_kernel<T>
-            <<<(int)((n_total + 255) / 256), 256, 0, stream>>>(
-                Z, W_all, cats, R, n_cells, n_pcs, n_clusters, nb1);
+            <<<(int)((n_total + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D), BLOCK_DIM_1D,
+               0, stream>>>(Z, W_all, cats, R, n_cells, n_pcs, n_clusters, nb1);
+        CUDA_CHECK_LAST_ERROR(batched_correction_kernel);
     }
 
     cublasDestroy(handle);

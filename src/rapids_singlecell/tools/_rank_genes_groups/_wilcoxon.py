@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
     from ._core import _RankGenes
 
+MIN_GROUP_SIZE_WARNING = 25
+
 
 def _average_ranks(
     matrix: cp.ndarray, *, return_sorted: bool = False
@@ -140,7 +142,7 @@ def _wilcoxon_vs_rest(
     # Warn for small groups
     for name, size in zip(rg.groups_order, group_sizes, strict=False):
         rest = n_cells - size
-        if size <= 25 or rest <= 25:
+        if size <= MIN_GROUP_SIZE_WARNING or rest <= MIN_GROUP_SIZE_WARNING:
             warnings.warn(
                 f"Group {name} has size {size} (rest {rest}); normal approximation "
                 "of the Wilcoxon statistic may be inaccurate.",
@@ -234,7 +236,7 @@ def _wilcoxon_with_reference(
         n_combined = n_group + n_ref
 
         # Warn for small groups
-        if n_group <= 25 or n_ref <= 25:
+        if n_group <= MIN_GROUP_SIZE_WARNING or n_ref <= MIN_GROUP_SIZE_WARNING:
             warnings.warn(
                 f"Group {rg.groups_order[group_index]} has size {n_group} "
                 f"(reference {n_ref}); normal approximation "

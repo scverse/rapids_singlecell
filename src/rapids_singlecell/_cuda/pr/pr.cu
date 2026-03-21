@@ -6,16 +6,21 @@
 
 using namespace nb::literals;
 
+constexpr int SPARSE_BLOCK_SIZE = 32;
+constexpr int CSR_NORM_BLOCK_SIZE = 8;
+constexpr int DENSE_BLOCK_DIM = 8;
+
 template <typename T>
 static inline void launch_sparse_norm_res_csc(
     const int* indptr, const int* index, const T* data, const T* sums_cells,
     const T* sums_genes, T* residuals, T inv_sum_total, T clip, T inv_theta,
     int n_cells, int n_genes, cudaStream_t stream) {
-    dim3 block(32);
-    dim3 grid((n_genes + block.x - 1) / block.x);
+    dim3 block(SPARSE_BLOCK_SIZE);
+    dim3 grid((n_genes + SPARSE_BLOCK_SIZE - 1) / SPARSE_BLOCK_SIZE);
     sparse_norm_res_csc_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, sums_cells, sums_genes, residuals, inv_sum_total,
         clip, inv_theta, n_cells, n_genes);
+    CUDA_CHECK_LAST_ERROR(sparse_norm_res_csc_kernel);
 }
 
 template <typename T>
@@ -23,11 +28,12 @@ static inline void launch_sparse_norm_res_csr(
     const int* indptr, const int* index, const T* data, const T* sums_cells,
     const T* sums_genes, T* residuals, T inv_sum_total, T clip, T inv_theta,
     int n_cells, int n_genes, cudaStream_t stream) {
-    dim3 block(8);
-    dim3 grid((n_cells + block.x - 1) / block.x);
+    dim3 block(CSR_NORM_BLOCK_SIZE);
+    dim3 grid((n_cells + CSR_NORM_BLOCK_SIZE - 1) / CSR_NORM_BLOCK_SIZE);
     sparse_norm_res_csr_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, sums_cells, sums_genes, residuals, inv_sum_total,
         clip, inv_theta, n_cells, n_genes);
+    CUDA_CHECK_LAST_ERROR(sparse_norm_res_csr_kernel);
 }
 
 template <typename T>
@@ -36,12 +42,13 @@ static inline void launch_dense_norm_res(const T* X, T* residuals,
                                          const T* sums_genes, T inv_sum_total,
                                          T clip, T inv_theta, int n_cells,
                                          int n_genes, cudaStream_t stream) {
-    dim3 block(8, 8);
-    dim3 grid((n_cells + block.x - 1) / block.x,
-              (n_genes + block.y - 1) / block.y);
+    dim3 block(DENSE_BLOCK_DIM, DENSE_BLOCK_DIM);
+    dim3 grid((n_cells + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM,
+              (n_genes + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM);
     dense_norm_res_kernel<T><<<grid, block, 0, stream>>>(
         X, residuals, sums_cells, sums_genes, inv_sum_total, clip, inv_theta,
         n_cells, n_genes);
+    CUDA_CHECK_LAST_ERROR(dense_norm_res_kernel);
 }
 
 template <typename T>
@@ -49,10 +56,11 @@ static inline void launch_sparse_sum_csc(const int* indptr, const int* index,
                                          const T* data, T* sums_genes,
                                          T* sums_cells, int n_genes,
                                          cudaStream_t stream) {
-    dim3 block(32);
-    dim3 grid((n_genes + block.x - 1) / block.x);
+    dim3 block(SPARSE_BLOCK_SIZE);
+    dim3 grid((n_genes + SPARSE_BLOCK_SIZE - 1) / SPARSE_BLOCK_SIZE);
     sparse_sum_csc_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, sums_genes, sums_cells, n_genes);
+    CUDA_CHECK_LAST_ERROR(sparse_sum_csc_kernel);
 }
 
 template <typename T>
@@ -62,11 +70,12 @@ static inline void launch_csc_hvg_res(const int* indptr, const int* index,
                                       T inv_sum_total, T clip, T inv_theta,
                                       int n_genes, int n_cells,
                                       cudaStream_t stream) {
-    dim3 block(32);
-    dim3 grid((n_genes + block.x - 1) / block.x);
+    dim3 block(SPARSE_BLOCK_SIZE);
+    dim3 grid((n_genes + SPARSE_BLOCK_SIZE - 1) / SPARSE_BLOCK_SIZE);
     csc_hvg_res_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, sums_genes, sums_cells, residuals, inv_sum_total,
         clip, inv_theta, n_genes, n_cells);
+    CUDA_CHECK_LAST_ERROR(csc_hvg_res_kernel);
 }
 
 template <typename T>
@@ -75,11 +84,12 @@ static inline void launch_dense_hvg_res(const T* data, const T* sums_genes,
                                         T inv_sum_total, T clip, T inv_theta,
                                         int n_genes, int n_cells,
                                         cudaStream_t stream) {
-    dim3 block(32);
-    dim3 grid((n_genes + block.x - 1) / block.x);
+    dim3 block(SPARSE_BLOCK_SIZE);
+    dim3 grid((n_genes + SPARSE_BLOCK_SIZE - 1) / SPARSE_BLOCK_SIZE);
     dense_hvg_res_kernel<T><<<grid, block, 0, stream>>>(
         data, sums_genes, sums_cells, residuals, inv_sum_total, clip, inv_theta,
         n_genes, n_cells);
+    CUDA_CHECK_LAST_ERROR(dense_hvg_res_kernel);
 }
 
 // Helper to define sparse_norm_res_csc for a given dtype

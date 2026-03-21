@@ -1,9 +1,25 @@
 #pragma once
 
+#include <cuda_runtime.h>
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <stdexcept>
+#include <string>
 
 namespace nb = nanobind;
+
+/// Check the last CUDA error after a kernel launch.
+/// Call immediately after every <<<...>>> launch to catch configuration errors
+/// (invalid grid/block, shared memory overflow, etc.) before they propagate.
+inline void cuda_check_last_error(const char* kernel_name) {
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        throw std::runtime_error(std::string(kernel_name) +
+                                 " launch failed: " + cudaGetErrorString(err));
+    }
+}
+
+#define CUDA_CHECK_LAST_ERROR(kernel_name) cuda_check_last_error(#kernel_name)
 
 // GPU array aliases for nanobind bindings, parameterized on device type.
 // Bindings are registered for both nb::device::cuda (kDLCUDA = 2) and

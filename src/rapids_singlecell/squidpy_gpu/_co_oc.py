@@ -170,10 +170,10 @@ def _co_occurrence_helper(
         pair_left = cp.asarray(pair_left, dtype=cp.int32)
         pair_right = cp.asarray(pair_right, dtype=cp.int32)
 
-        # Use single GPU for small workloads (< 100k cells)
-        min_cells_for_multi_gpu = 100_000
+        # Use single GPU for small workloads
+        MIN_CELLS_FOR_MULTI_GPU = 100_000
         n_devices = len(device_ids)
-        if n_devices > 1 and n < min_cells_for_multi_gpu:
+        if n_devices > 1 and n < MIN_CELLS_FOR_MULTI_GPU:
             device_ids = [device_ids[0]]
 
         counts, use_fast_kernel = _co_occurrence_gpu(
