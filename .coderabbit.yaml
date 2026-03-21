@@ -7,7 +7,7 @@ reviews:
   collapse_walkthrough: true
   sequence_diagrams: false
   poem: false
-  request_changes_workflow: false
+  request_changes_workflow: true
   review_status: false
   auto_review:
     enabled: true
@@ -22,6 +22,19 @@ reviews:
     gitleaks:
       enabled: true
   path_instructions:
+    - path: "src/rapids_singlecell/**"
+      instructions: |
+        For every code change, check whether the PR includes adequate test coverage in tests/.
+        If new functionality is added or existing behavior is changed and no tests are added or updated, flag this.
+        However, if a change is a pure internal optimization (e.g., replacing CuPy operations with a fused kernel, rewriting a RawKernel as nanobind C++)
+        and the existing tests already cover the affected behavior, new tests are not required — note this in the review.
+        Codecov line-coverage numbers alone are not meaningful — check that tests verify the specific behavior being changed, not just that the code path is hit.
+        Multi-GPU / cross-device: NEVER inline cross-device cp.asarray D2D copies with arithmetic
+        (e.g., `sums += cp.asarray(data["sums"])`). This fuses allocation + copy + addition and can
+        surface stale CUDA async errors through cudaMalloc (cudaErrorLaunchFailure), especially without
+        RMM pool allocation. Always split into a separate assignment first:
+        `dev0_sums = cp.asarray(data["sums"])` then `sums += dev0_sums`.
+        Sync non-blocking streams explicitly, not the null stream.
     - path: "src/rapids_singlecell/_cuda/**"
       instructions: |
         These are nanobind CUDA C++ kernels. Pay close attention to:
@@ -60,8 +73,8 @@ knowledge_base:
   opt_out: false
   code_guidelines:
     filePatterns:
-      - "python_agents.md"
-      - "cuda_agents.md"
+      - ".coderabbit/python_agents.md"
+      - ".coderabbit/cuda_agents.md"
       - "docs/contributing.md"
 chat:
   auto_reply: true
