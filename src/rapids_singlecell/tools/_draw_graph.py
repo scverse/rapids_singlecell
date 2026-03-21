@@ -99,6 +99,7 @@ def draw_graph(
         gravity=1.0,
         random_state=0,
     )
+    positions = positions.sort_values("vertex").reset_index(drop=True)
     positions = cp.vstack((positions["x"].to_cupy(), positions["y"].to_cupy())).T
     layout = "fa"
     adata.uns["draw_graph"] = {}
