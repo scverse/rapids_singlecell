@@ -2,22 +2,22 @@
 
 #include <cuda_runtime.h>
 
-template <typename T>
-__global__ void gram_csr_upper_kernel(const int* indptr, const int* index,
+template <typename T, typename IdxT>
+__global__ void gram_csr_upper_kernel(const IdxT* indptr, const IdxT* index,
                                       const T* data, int nrows, int ncols,
                                       T* out) {
     int row = blockIdx.x;
     int col_offset = threadIdx.x;
     if (row >= nrows) return;
 
-    int start = indptr[row];
-    int end = indptr[row + 1];
+    IdxT start = indptr[row];
+    IdxT end = indptr[row + 1];
 
-    for (int idx1 = start; idx1 < end; ++idx1) {
-        int index1 = index[idx1];
+    for (IdxT idx1 = start; idx1 < end; ++idx1) {
+        IdxT index1 = index[idx1];
         T data1 = data[idx1];
-        for (int idx2 = idx1 + col_offset; idx2 < end; idx2 += blockDim.x) {
-            int index2 = index[idx2];
+        for (IdxT idx2 = idx1 + col_offset; idx2 < end; idx2 += blockDim.x) {
+            IdxT index2 = index[idx2];
             T data2 = data[idx2];
             size_t lo = min(index1, index2);
             size_t hi = max(index1, index2);
@@ -47,11 +47,12 @@ __global__ void cov_from_gram_kernel(T* cov_values, const T* gram_matrix,
         gram_matrix[rid * ncols + cid] - mean_x[rid] * mean_y[cid];
 }
 
-__global__ void check_zero_genes_kernel(const int* indices, int* genes, int nnz,
-                                        int num_genes) {
-    int value = blockIdx.x * blockDim.x + threadIdx.x;
+template <typename IdxT>
+__global__ void check_zero_genes_kernel(const IdxT* indices, int* genes,
+                                        long long nnz, int num_genes) {
+    long long value = (long long)blockIdx.x * blockDim.x + threadIdx.x;
     if (value >= nnz) return;
-    int gene_index = indices[value];
+    int gene_index = static_cast<int>(indices[value]);
     if (gene_index >= 0 && gene_index < num_genes) {
         atomicAdd(&genes[gene_index], 1);
     }

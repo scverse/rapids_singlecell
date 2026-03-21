@@ -9,13 +9,13 @@ constexpr int GRAM_BLOCK_SIZE = 128;
 constexpr int MATRIX_BLOCK_DIM = 32;
 constexpr int ELEMENTWISE_BLOCK_SIZE = 32;
 
-template <typename T>
-static inline void launch_gram_csr_upper(const int* indptr, const int* index,
+template <typename T, typename IdxT>
+static inline void launch_gram_csr_upper(const IdxT* indptr, const IdxT* index,
                                          const T* data, int nrows, int ncols,
                                          T* out, cudaStream_t stream) {
     dim3 block(GRAM_BLOCK_SIZE);
     dim3 grid(nrows);
-    gram_csr_upper_kernel<T>
+    gram_csr_upper_kernel<T, IdxT>
         <<<grid, block, 0, stream>>>(indptr, index, data, nrows, ncols, out);
     CUDA_CHECK_LAST_ERROR(gram_csr_upper_kernel);
 }
@@ -42,44 +42,71 @@ static inline void launch_cov_from_gram(T* cov, const T* gram, const T* meanx,
     CUDA_CHECK_LAST_ERROR(cov_from_gram_kernel);
 }
 
-static inline void launch_check_zero_genes(const int* indices, int* genes,
-                                           int nnz, int num_genes,
+template <typename IdxT>
+static inline void launch_check_zero_genes(const IdxT* indices, int* genes,
+                                           long long nnz, int num_genes,
                                            cudaStream_t stream) {
     if (nnz > 0) {
         dim3 block(ELEMENTWISE_BLOCK_SIZE);
         dim3 grid((nnz + ELEMENTWISE_BLOCK_SIZE - 1) / ELEMENTWISE_BLOCK_SIZE);
-        check_zero_genes_kernel<<<grid, block, 0, stream>>>(indices, genes, nnz,
-                                                            num_genes);
+        check_zero_genes_kernel<IdxT>
+            <<<grid, block, 0, stream>>>(indices, genes, nnz, num_genes);
         CUDA_CHECK_LAST_ERROR(check_zero_genes_kernel);
     }
 }
 
 template <typename Device>
 void register_bindings(nb::module_& m) {
-    // gram_csr_upper - float32
+    // gram_csr_upper - int32 indices
     m.def(
         "gram_csr_upper",
         [](gpu_array_c<const int, Device> indptr,
            gpu_array_c<const int, Device> index,
            gpu_array_c<const float, Device> data, int nrows, int ncols,
            gpu_array_c<float, Device> out, std::uintptr_t stream) {
-            launch_gram_csr_upper<float>(indptr.data(), index.data(),
-                                         data.data(), nrows, ncols, out.data(),
-                                         (cudaStream_t)stream);
+            launch_gram_csr_upper<float, int>(indptr.data(), index.data(),
+                                              data.data(), nrows, ncols,
+                                              out.data(), (cudaStream_t)stream);
         },
         "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "nrows"_a, "ncols"_a,
         "out"_a, "stream"_a = 0);
 
-    // gram_csr_upper - float64
     m.def(
         "gram_csr_upper",
         [](gpu_array_c<const int, Device> indptr,
            gpu_array_c<const int, Device> index,
            gpu_array_c<const double, Device> data, int nrows, int ncols,
            gpu_array_c<double, Device> out, std::uintptr_t stream) {
-            launch_gram_csr_upper<double>(indptr.data(), index.data(),
-                                          data.data(), nrows, ncols, out.data(),
-                                          (cudaStream_t)stream);
+            launch_gram_csr_upper<double, int>(
+                indptr.data(), index.data(), data.data(), nrows, ncols,
+                out.data(), (cudaStream_t)stream);
+        },
+        "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "nrows"_a, "ncols"_a,
+        "out"_a, "stream"_a = 0);
+
+    // gram_csr_upper - int64 indices
+    m.def(
+        "gram_csr_upper",
+        [](gpu_array_c<const long long, Device> indptr,
+           gpu_array_c<const long long, Device> index,
+           gpu_array_c<const float, Device> data, int nrows, int ncols,
+           gpu_array_c<float, Device> out, std::uintptr_t stream) {
+            launch_gram_csr_upper<float, long long>(
+                indptr.data(), index.data(), data.data(), nrows, ncols,
+                out.data(), (cudaStream_t)stream);
+        },
+        "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "nrows"_a, "ncols"_a,
+        "out"_a, "stream"_a = 0);
+
+    m.def(
+        "gram_csr_upper",
+        [](gpu_array_c<const long long, Device> indptr,
+           gpu_array_c<const long long, Device> index,
+           gpu_array_c<const double, Device> data, int nrows, int ncols,
+           gpu_array_c<double, Device> out, std::uintptr_t stream) {
+            launch_gram_csr_upper<double, long long>(
+                indptr.data(), index.data(), data.data(), nrows, ncols,
+                out.data(), (cudaStream_t)stream);
         },
         "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "nrows"_a, "ncols"_a,
         "out"_a, "stream"_a = 0);
@@ -130,13 +157,25 @@ void register_bindings(nb::module_& m) {
         "gram"_a, "meanx"_a, "meany"_a, nb::kw_only(), "cov"_a, "ncols"_a,
         "stream"_a = 0);
 
-    // check_zero_genes
+    // check_zero_genes - int32 indices
     m.def(
         "check_zero_genes",
         [](gpu_array_c<const int, Device> indices, gpu_array_c<int, Device> out,
-           int nnz, int num_genes, std::uintptr_t stream) {
-            launch_check_zero_genes(indices.data(), out.data(), nnz, num_genes,
-                                    (cudaStream_t)stream);
+           long long nnz, int num_genes, std::uintptr_t stream) {
+            launch_check_zero_genes<int>(indices.data(), out.data(), nnz,
+                                         num_genes, (cudaStream_t)stream);
+        },
+        "indices"_a, nb::kw_only(), "out"_a, "nnz"_a, "num_genes"_a,
+        "stream"_a = 0);
+
+    // check_zero_genes - int64 indices
+    m.def(
+        "check_zero_genes",
+        [](gpu_array_c<const long long, Device> indices,
+           gpu_array_c<int, Device> out, long long nnz, int num_genes,
+           std::uintptr_t stream) {
+            launch_check_zero_genes<long long>(indices.data(), out.data(), nnz,
+                                               num_genes, (cudaStream_t)stream);
         },
         "indices"_a, nb::kw_only(), "out"_a, "nnz"_a, "num_genes"_a,
         "stream"_a = 0);

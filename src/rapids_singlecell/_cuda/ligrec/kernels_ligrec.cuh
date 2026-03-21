@@ -20,9 +20,9 @@ __global__ void sum_and_count_dense_kernel(const T* __restrict__ data,
     }
 }
 
-template <typename T>
-__global__ void sum_and_count_sparse_kernel(const int* __restrict__ indptr,
-                                            const int* __restrict__ index,
+template <typename T, typename IdxT>
+__global__ void sum_and_count_sparse_kernel(const IdxT* __restrict__ indptr,
+                                            const IdxT* __restrict__ index,
                                             const T* __restrict__ data,
                                             const int* __restrict__ clusters,
                                             T* __restrict__ sum_gt0,
@@ -30,10 +30,10 @@ __global__ void sum_and_count_sparse_kernel(const int* __restrict__ indptr,
                                             int nrows, int n_cls) {
     int cell = blockDim.x * blockIdx.x + threadIdx.x;
     if (cell >= nrows) return;
-    int start_idx = indptr[cell];
-    int stop_idx = indptr[cell + 1];
+    IdxT start_idx = indptr[cell];
+    IdxT stop_idx = indptr[cell + 1];
     int cluster = clusters[cell];
-    for (int gene = start_idx; gene < stop_idx; gene++) {
+    for (IdxT gene = start_idx; gene < stop_idx; gene++) {
         T value = data[gene];
         int gene_number = index[gene];
         if (value > (T)0) {
@@ -54,19 +54,19 @@ __global__ void mean_dense_kernel(const T* __restrict__ data,
     atomicAdd(&g_cluster[j * n_cls + clusters[i]], data[i * num_cols + j]);
 }
 
-template <typename T>
-__global__ void mean_sparse_kernel(const int* __restrict__ indptr,
-                                   const int* __restrict__ index,
+template <typename T, typename IdxT>
+__global__ void mean_sparse_kernel(const IdxT* __restrict__ indptr,
+                                   const IdxT* __restrict__ index,
                                    const T* __restrict__ data,
                                    const int* __restrict__ clusters,
                                    T* __restrict__ sum_gt0, int nrows,
                                    int n_cls) {
     int cell = blockDim.x * blockIdx.x + threadIdx.x;
     if (cell >= nrows) return;
-    int start_idx = indptr[cell];
-    int stop_idx = indptr[cell + 1];
+    IdxT start_idx = indptr[cell];
+    IdxT stop_idx = indptr[cell + 1];
     int cluster = clusters[cell];
-    for (int gene = start_idx; gene < stop_idx; gene++) {
+    for (IdxT gene = start_idx; gene < stop_idx; gene++) {
         T value = data[gene];
         int gene_number = index[gene];
         if (value > (T)0) {

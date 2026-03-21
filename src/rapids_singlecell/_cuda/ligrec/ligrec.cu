@@ -21,14 +21,15 @@ static inline void launch_sum_count_dense(const T* data, const int* clusters,
     CUDA_CHECK_LAST_ERROR(sum_and_count_dense_kernel);
 }
 
-template <typename T>
-static inline void launch_sum_count_sparse(const int* indptr, const int* index,
-                                           const T* data, const int* clusters,
-                                           T* sum, int* count, int rows,
-                                           int ncls, cudaStream_t stream) {
+template <typename T, typename IdxT>
+static inline void launch_sum_count_sparse(const IdxT* indptr,
+                                           const IdxT* index, const T* data,
+                                           const int* clusters, T* sum,
+                                           int* count, int rows, int ncls,
+                                           cudaStream_t stream) {
     dim3 block(SPARSE_BLOCK_SIZE);
     dim3 grid((rows + SPARSE_BLOCK_SIZE - 1) / SPARSE_BLOCK_SIZE);
-    sum_and_count_sparse_kernel<T><<<grid, block, 0, stream>>>(
+    sum_and_count_sparse_kernel<T, IdxT><<<grid, block, 0, stream>>>(
         indptr, index, data, clusters, sum, count, rows, ncls);
     CUDA_CHECK_LAST_ERROR(sum_and_count_sparse_kernel);
 }
@@ -45,14 +46,14 @@ static inline void launch_mean_dense(const T* data, const int* clusters, T* g,
     CUDA_CHECK_LAST_ERROR(mean_dense_kernel);
 }
 
-template <typename T>
-static inline void launch_mean_sparse(const int* indptr, const int* index,
+template <typename T, typename IdxT>
+static inline void launch_mean_sparse(const IdxT* indptr, const IdxT* index,
                                       const T* data, const int* clusters, T* g,
                                       int rows, int ncls, cudaStream_t stream) {
     dim3 block(SPARSE_BLOCK_SIZE);
     dim3 grid((rows + SPARSE_BLOCK_SIZE - 1) / SPARSE_BLOCK_SIZE);
-    mean_sparse_kernel<T><<<grid, block, 0, stream>>>(indptr, index, data,
-                                                      clusters, g, rows, ncls);
+    mean_sparse_kernel<T, IdxT><<<grid, block, 0, stream>>>(
+        indptr, index, data, clusters, g, rows, ncls);
     CUDA_CHECK_LAST_ERROR(mean_sparse_kernel);
 }
 
@@ -128,7 +129,7 @@ void register_bindings(nb::module_& m) {
         "data"_a, nb::kw_only(), "clusters"_a, "sum"_a, "count"_a, "rows"_a,
         "cols"_a, "ncls"_a, "stream"_a = 0);
 
-    // sum_count_sparse - float32
+    // sum_count_sparse - float32, int indices
     m.def(
         "sum_count_sparse",
         [](gpu_array_c<const int, Device> indptr,
@@ -144,11 +145,43 @@ void register_bindings(nb::module_& m) {
         "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "clusters"_a, "sum"_a,
         "count"_a, "rows"_a, "ncls"_a, "stream"_a = 0);
 
-    // sum_count_sparse - float64
+    // sum_count_sparse - float64, int indices
     m.def(
         "sum_count_sparse",
         [](gpu_array_c<const int, Device> indptr,
            gpu_array_c<const int, Device> index,
+           gpu_array_c<const double, Device> data,
+           gpu_array_c<const int, Device> clusters,
+           gpu_array_c<double, Device> sum, gpu_array_c<int, Device> count,
+           int rows, int ncls, std::uintptr_t stream) {
+            launch_sum_count_sparse<double>(
+                indptr.data(), index.data(), data.data(), clusters.data(),
+                sum.data(), count.data(), rows, ncls, (cudaStream_t)stream);
+        },
+        "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "clusters"_a, "sum"_a,
+        "count"_a, "rows"_a, "ncls"_a, "stream"_a = 0);
+
+    // sum_count_sparse - float32, int64 indices
+    m.def(
+        "sum_count_sparse",
+        [](gpu_array_c<const long long, Device> indptr,
+           gpu_array_c<const long long, Device> index,
+           gpu_array_c<const float, Device> data,
+           gpu_array_c<const int, Device> clusters,
+           gpu_array_c<float, Device> sum, gpu_array_c<int, Device> count,
+           int rows, int ncls, std::uintptr_t stream) {
+            launch_sum_count_sparse<float>(
+                indptr.data(), index.data(), data.data(), clusters.data(),
+                sum.data(), count.data(), rows, ncls, (cudaStream_t)stream);
+        },
+        "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "clusters"_a, "sum"_a,
+        "count"_a, "rows"_a, "ncls"_a, "stream"_a = 0);
+
+    // sum_count_sparse - float64, int64 indices
+    m.def(
+        "sum_count_sparse",
+        [](gpu_array_c<const long long, Device> indptr,
+           gpu_array_c<const long long, Device> index,
            gpu_array_c<const double, Device> data,
            gpu_array_c<const int, Device> clusters,
            gpu_array_c<double, Device> sum, gpu_array_c<int, Device> count,
@@ -186,7 +219,7 @@ void register_bindings(nb::module_& m) {
         "data"_a, nb::kw_only(), "clusters"_a, "g"_a, "rows"_a, "cols"_a,
         "ncls"_a, "stream"_a = 0);
 
-    // mean_sparse - float32
+    // mean_sparse - float32, int indices
     m.def(
         "mean_sparse",
         [](gpu_array_c<const int, Device> indptr,
@@ -202,11 +235,43 @@ void register_bindings(nb::module_& m) {
         "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "clusters"_a, "g"_a,
         "rows"_a, "ncls"_a, "stream"_a = 0);
 
-    // mean_sparse - float64
+    // mean_sparse - float64, int indices
     m.def(
         "mean_sparse",
         [](gpu_array_c<const int, Device> indptr,
            gpu_array_c<const int, Device> index,
+           gpu_array_c<const double, Device> data,
+           gpu_array_c<const int, Device> clusters,
+           gpu_array_c<double, Device> g, int rows, int ncls,
+           std::uintptr_t stream) {
+            launch_mean_sparse<double>(indptr.data(), index.data(), data.data(),
+                                       clusters.data(), g.data(), rows, ncls,
+                                       (cudaStream_t)stream);
+        },
+        "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "clusters"_a, "g"_a,
+        "rows"_a, "ncls"_a, "stream"_a = 0);
+
+    // mean_sparse - float32, int64 indices
+    m.def(
+        "mean_sparse",
+        [](gpu_array_c<const long long, Device> indptr,
+           gpu_array_c<const long long, Device> index,
+           gpu_array_c<const float, Device> data,
+           gpu_array_c<const int, Device> clusters,
+           gpu_array_c<float, Device> g, int rows, int ncls,
+           std::uintptr_t stream) {
+            launch_mean_sparse<float>(indptr.data(), index.data(), data.data(),
+                                      clusters.data(), g.data(), rows, ncls,
+                                      (cudaStream_t)stream);
+        },
+        "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "clusters"_a, "g"_a,
+        "rows"_a, "ncls"_a, "stream"_a = 0);
+
+    // mean_sparse - float64, int64 indices
+    m.def(
+        "mean_sparse",
+        [](gpu_array_c<const long long, Device> indptr,
+           gpu_array_c<const long long, Device> index,
            gpu_array_c<const double, Device> data,
            gpu_array_c<const int, Device> clusters,
            gpu_array_c<double, Device> g, int rows, int ncls,
