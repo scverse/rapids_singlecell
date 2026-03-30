@@ -23,12 +23,22 @@ def harmony_integrate(
     **kwargs,
 ) -> None:
     """
-    Integrate different experiments using the Harmony algorithm :cite:p:`Korsunsky2019`.
+    Integrate different experiments using the Harmony algorithm :cite:p:`Korsunsky2019,Patikas2026`.
 
     This GPU-accelerated implementation is based on the `harmony-pytorch` package.
     As Harmony works by adjusting the
     principal components, this function should be run after performing
     PCA but before computing the neighbor graph.
+
+    By default, the Harmony2 algorithm is used, which includes a stabilized
+    diversity penalty, dynamic per-cluster-per-batch ridge regularization,
+    and automatic batch pruning. To revert to the original Harmony behavior::
+
+        rsc.pp.harmony_integrate(
+            adata, key,
+            stabilized_penalty=False,
+            dynamic_lambda=False,
+        )
 
     Parameters
     ----------

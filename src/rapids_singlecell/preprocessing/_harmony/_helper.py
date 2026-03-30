@@ -553,7 +553,7 @@ def _fused_calc_pen_norm(
 
 def _compute_inv_mats_batched(
     O: cp.ndarray,
-    ridge_lambda: float,
+    lambda_kb: cp.ndarray,
     dtype: cp.dtype,
 ) -> cp.ndarray:
     """
@@ -566,8 +566,8 @@ def _compute_inv_mats_batched(
     ----------
     O
         Observed cluster-batch counts, shape (n_batches, n_clusters)
-    ridge_lambda
-        Ridge regression parameter
+    lambda_kb
+        Per-(k,b) ridge regularization, shape (n_batches, n_clusters)
 
     Returns
     -------
@@ -580,7 +580,7 @@ def _compute_inv_mats_batched(
     # Pre-allocate output
     inv_mats = cp.zeros((n_clusters, n_batches_p1, n_batches_p1), dtype=dtype)
 
-    factor = 1.0 / (O.T + ridge_lambda)
+    factor = 1.0 / (O.T + lambda_kb.T)
 
     N_k = O.sum(axis=0)
 

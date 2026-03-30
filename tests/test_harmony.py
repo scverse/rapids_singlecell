@@ -149,6 +149,8 @@ def test_harmony_integrate_reference(
         dtype=dtype,
         colsum_algo=column,
         max_iter_harmony=20,
+        stabilized_penalty=False,
+        dynamic_lambda=False,
     )
 
     assert (
