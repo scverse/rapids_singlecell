@@ -364,6 +364,29 @@ def test_compute_lambda_kb_dynamic_false(dtype):
 
 
 @pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
+def test_compute_lambda_kb_fixed_ridge_zero(dtype):
+    """dynamic_lambda=False with ridge_lambda=0 still guards zero-denominator."""
+    sentinel = dtype(_SUPPRESS_PENALTY)
+    E = cp.array([[5.0, 0.0]], dtype=dtype)
+    O = cp.array([[10.0, 0.0]], dtype=dtype)
+    N_b = cp.array([100.0], dtype=dtype)
+
+    result = _compute_lambda_kb(
+        E,
+        O=O,
+        N_b=N_b,
+        alpha=0.2,
+        threshold=None,
+        ridge_lambda=0.0,
+        dynamic_lambda=False,
+    )
+    # (0,0): O=10 + lambda=0 = 10 → no guard, stays 0.0
+    assert result[0, 0] == dtype(0.0)
+    # (0,1): O=0 + lambda=0 = 0 → sentinel
+    assert result[0, 1] == sentinel
+
+
+@pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
 def test_compute_lambda_kb_zero_denom(dtype):
     """_compute_lambda_kb guards against O==0 and E==0 (zero-denominator)."""
     sentinel = dtype(_SUPPRESS_PENALTY)

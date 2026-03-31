@@ -459,13 +459,14 @@ def _compute_lambda_kb(
     """Compute per-(k,b) ridge regularization array."""
     sentinel = E.dtype.type(_SUPPRESS_PENALTY)
     if not dynamic_lambda:
-        return cp.full_like(E, ridge_lambda)
-    lambda_kb = (alpha * E).astype(E.dtype)
-    if threshold is not None:
-        safe_N_b = cp.where(N_b > 0, N_b, cp.ones_like(N_b))
-        prune_mask = (O / safe_N_b[:, None]) < threshold
-        prune_mask |= N_b[:, None] == 0
-        lambda_kb[prune_mask] = sentinel
+        lambda_kb = cp.full_like(E, ridge_lambda)
+    else:
+        lambda_kb = (alpha * E).astype(E.dtype)
+        if threshold is not None:
+            safe_N_b = cp.where(N_b > 0, N_b, cp.ones_like(N_b))
+            prune_mask = (O / safe_N_b[:, None]) < threshold
+            prune_mask |= N_b[:, None] == 0
+            lambda_kb[prune_mask] = sentinel
     # Where both O and lambda_kb are zero, the kernel would divide by zero.
     # These pairs have no cells, so suppress correction entirely.
     lambda_kb[(O + lambda_kb) == 0] = sentinel
