@@ -58,7 +58,14 @@ def _resolve_mask_var(
     if isinstance(mask_var, str):
         mask_array = adata.var[mask_var].to_numpy()
         return mask_var, mask_array
-    return mask_var, mask_var
+
+    mask_var = np.asarray(mask_var)
+    if mask_var.shape != (adata.n_vars,):
+        raise ValueError(
+            f"The shape of the mask ({mask_var.shape}) does not match "
+            f"the number of variables ({adata.n_vars})."
+        )
+    return None, mask_var
 
 
 def pca(
