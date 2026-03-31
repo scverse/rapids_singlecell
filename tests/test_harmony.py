@@ -28,7 +28,10 @@ def _get_measure(x, base, norm):
         return np.linalg.norm(x - base) / np.linalg.norm(base)
 
 
-@pytest.fixture
+_HARMONY_DATA_BASE = "https://exampledata.scverse.org/rapids-singlecell/harmony_data"
+
+
+@pytest.fixture(scope="module")
 def adata_reference():
     X_pca_file = pooch.retrieve(
         f"{_HARMONY_DATA_BASE}/pbmc_3500_pcs.tsv.gz",
@@ -53,10 +56,7 @@ def adata_reference():
     return adata
 
 
-_HARMONY_DATA_BASE = "https://exampledata.scverse.org/rapids-singlecell/harmony_data"
-
-
-@pytest.fixture
+@pytest.fixture(scope="module")
 def adata_ircolitis_harmony2():
     """IRcolitis blood CD8 dataset (68k cells) with Harmony2 (R) reference output."""
     pcs_file = pooch.retrieve(
@@ -192,8 +192,9 @@ def test_harmony_integrate_reference(
     """
     Test that Harmony integrate works.
     """
+    adata = adata_reference.copy()
     rsc.pp.harmony_integrate(
-        adata_reference,
+        adata,
         "donor",
         correction_method=correction_method,
         dtype=dtype,
@@ -205,23 +206,23 @@ def test_harmony_integrate_reference(
 
     assert (
         _get_measure(
-            adata_reference.obsm["harmony_org"],
-            adata_reference.obsm["X_pca_harmony"],
+            adata.obsm["harmony_org"],
+            adata.obsm["X_pca_harmony"],
             "L2",
         ).max()
         < 0.05
     )
     assert (
         _get_measure(
-            adata_reference.obsm["harmony_org"],
-            adata_reference.obsm["X_pca_harmony"],
+            adata.obsm["harmony_org"],
+            adata.obsm["X_pca_harmony"],
             "r",
         ).min()
         > 0.95
     )
 
 
-@pytest.mark.parametrize("correction_method", ["fast", "original", "batched"])
+@pytest.mark.parametrize("correction_method", ["original", "batched"])
 @pytest.mark.parametrize("dtype", [cp.float64, cp.float32])
 def test_harmony2_correction_methods_agree(
     adata_reference, *, dtype, correction_method
@@ -299,16 +300,17 @@ def test_harmony2_ircolitis_reference(
     adata_ircolitis_harmony2, correction_method, dtype
 ):
     """Harmony2 on IRcolitis (68k cells, 11 batches) matches R harmony2 reference."""
+    adata = adata_ircolitis_harmony2.copy()
     rsc.pp.harmony_integrate(
-        adata_ircolitis_harmony2,
+        adata,
         "batch",
         correction_method=correction_method,
         dtype=dtype,
         max_iter_harmony=10,
     )
 
-    ref = adata_ircolitis_harmony2.obsm["harmony2_ref"]
-    result = adata_ircolitis_harmony2.obsm["X_pca_harmony"]
+    ref = adata.obsm["harmony2_ref"]
+    result = adata.obsm["X_pca_harmony"]
 
     assert _get_measure(ref, result, "r").min() > 0.95
     assert _get_measure(ref, result, "L2").max() < 0.1

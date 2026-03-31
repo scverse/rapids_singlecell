@@ -466,9 +466,7 @@ def _compute_lambda_kb(
         lambda_kb[prune_mask] = sentinel
     # Where both O and lambda_kb are zero, the kernel would divide by zero.
     # These pairs have no cells, so suppress correction entirely.
-    zero_denom = (O + lambda_kb) == 0
-    if cp.any(zero_denom):
-        lambda_kb[zero_denom] = sentinel
+    lambda_kb[(O + lambda_kb) == 0] = sentinel
     return lambda_kb
 
 
