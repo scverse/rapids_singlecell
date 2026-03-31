@@ -173,8 +173,10 @@ def harmonize(
 
     # Validate parameters
     assert block_proportion > 0 and block_proportion <= 1
-    if alpha < 0:
-        raise ValueError(f"alpha must be non-negative, got {alpha}.")
+    if not np.isfinite(alpha) or (alpha <= 0 and dynamic_lambda):
+        raise ValueError(
+            f"alpha must be a finite positive number when dynamic_lambda=True, got {alpha}."
+        )
     if batch_prune_threshold is not None and not (0 <= batch_prune_threshold <= 1):
         raise ValueError(
             f"batch_prune_threshold must be in [0, 1] or None, got {batch_prune_threshold}."

@@ -10,6 +10,10 @@ import scanpy as sc
 from scipy.stats import pearsonr
 
 import rapids_singlecell as rsc
+from rapids_singlecell.preprocessing._harmony import (
+    _SUPPRESS_PENALTY,
+    _compute_lambda_kb,
+)
 from rapids_singlecell.preprocessing._harmony._helper import (
     _choose_colsum_algo_benchmark,
     _choose_colsum_algo_heuristic,
@@ -86,11 +90,12 @@ def adata_ircolitis_harmony2():
     return adata
 
 
-def test_harmony_integrate_alpha_negative():
-    """Negative alpha raises ValueError."""
+@pytest.mark.parametrize("bad_alpha", [-0.1, 0.0, float("inf"), float("nan")])
+def test_harmony_integrate_bad_alpha(bad_alpha):
+    """Non-positive or non-finite alpha with dynamic_lambda raises ValueError."""
     adata = sc.datasets.pbmc68k_reduced()
-    with pytest.raises(ValueError, match="alpha must be non-negative"):
-        rsc.pp.harmony_integrate(adata, "bulk_labels", alpha=-0.1)
+    with pytest.raises(ValueError, match="alpha must be a finite positive"):
+        rsc.pp.harmony_integrate(adata, "bulk_labels", alpha=bad_alpha)
 
 
 @pytest.mark.parametrize("bad_threshold", [-0.1, 1.5, 2.0])
@@ -292,6 +297,94 @@ def test_scatter_add_shared_vs_optimized(n_cells, n_pcs, n_batches, switcher):
     cp.testing.assert_array_equal(out_optimized, expected)
     cp.testing.assert_array_equal(out_shared, expected)
     cp.testing.assert_array_equal(out_optimized, out_shared)
+
+
+@pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
+def test_compute_lambda_kb_pruning(dtype):
+    """_compute_lambda_kb suppresses correction for N_b==0 and below-threshold pairs."""
+    n_batches, n_clusters = 4, 3
+    alpha = 0.2
+    threshold = 1e-5
+    sentinel = dtype(_SUPPRESS_PENALTY)
+
+    # batch 0 has zero cells (N_b==0), batch 2 has very few (below threshold)
+    N_b = cp.array([0, 100, 1, 50], dtype=dtype)
+    O = cp.array(
+        [
+            [0, 0, 0],  # batch 0: no cells
+            [30, 40, 30],  # batch 1: well-represented
+            [0, 0, 1],  # batch 2: 1 cell total, only in cluster 2
+            [20, 15, 15],
+        ],  # batch 3: well-represented
+        dtype=dtype,
+    )
+    E = cp.ones((n_batches, n_clusters), dtype=dtype) * 10
+
+    result = _compute_lambda_kb(
+        E,
+        O=O,
+        N_b=N_b,
+        alpha=alpha,
+        threshold=threshold,
+        ridge_lambda=1.0,
+        dynamic_lambda=True,
+    )
+
+    # batch 0 (N_b==0): all clusters must be sentinel
+    assert cp.all(result[0] == sentinel)
+    # batch 1 (well-represented): should be alpha * E = 2.0
+    cp.testing.assert_allclose(result[1], cp.full(n_clusters, alpha * 10, dtype=dtype))
+    # batch 2, clusters 0,1 (O/N_b = 0/1 < threshold): sentinel
+    assert result[2, 0] == sentinel
+    assert result[2, 1] == sentinel
+    # batch 2, cluster 2 (O/N_b = 1/1 = 1.0 >= threshold): alpha * E
+    cp.testing.assert_allclose(result[2, 2], dtype(alpha * 10))
+    # batch 3: all alpha * E
+    cp.testing.assert_allclose(result[3], cp.full(n_clusters, alpha * 10, dtype=dtype))
+
+
+@pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
+def test_compute_lambda_kb_dynamic_false(dtype):
+    """_compute_lambda_kb returns uniform ridge_lambda when dynamic_lambda=False."""
+    n_batches, n_clusters = 3, 5
+    E = cp.ones((n_batches, n_clusters), dtype=dtype)
+    O = cp.ones((n_batches, n_clusters), dtype=dtype)
+    N_b = cp.ones(n_batches, dtype=dtype)
+
+    result = _compute_lambda_kb(
+        E,
+        O=O,
+        N_b=N_b,
+        alpha=0.5,
+        threshold=1e-5,
+        ridge_lambda=1.0,
+        dynamic_lambda=False,
+    )
+    cp.testing.assert_array_equal(result, cp.full_like(E, 1.0))
+
+
+@pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
+def test_compute_lambda_kb_zero_denom(dtype):
+    """_compute_lambda_kb guards against O==0 and E==0 (zero-denominator)."""
+    sentinel = dtype(_SUPPRESS_PENALTY)
+    # E==0 means lambda_kb = alpha*0 = 0; combined with O==0 triggers zero-denom guard
+    E = cp.array([[0.0, 5.0]], dtype=dtype)
+    O = cp.array([[0.0, 10.0]], dtype=dtype)
+    N_b = cp.array([100.0], dtype=dtype)
+
+    result = _compute_lambda_kb(
+        E,
+        O=O,
+        N_b=N_b,
+        alpha=0.2,
+        threshold=None,
+        ridge_lambda=1.0,
+        dynamic_lambda=True,
+    )
+    # (0,0): O+lambda_kb = 0+0 = 0 → sentinel
+    assert result[0, 0] == sentinel
+    # (0,1): normal → alpha * E = 1.0
+    cp.testing.assert_allclose(result[0, 1], dtype(1.0))
 
 
 @pytest.mark.parametrize("correction_method", ["fast", "original", "batched"])
