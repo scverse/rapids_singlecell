@@ -551,58 +551,6 @@ def _fused_calc_pen_norm(
     )
 
 
-def _compute_inv_mats_batched(
-    O: cp.ndarray,
-    lambda_kb: cp.ndarray,
-    dtype: cp.dtype,
-) -> cp.ndarray:
-    """
-    Compute all inverse matrices for the fast correction method at once.
-
-    Uses the algebraic simplification from the fast method to avoid explicit
-    matrix inversion for each cluster.
-
-    Parameters
-    ----------
-    O
-        Observed cluster-batch counts, shape (n_batches, n_clusters)
-    lambda_kb
-        Per-(k,b) ridge regularization, shape (n_batches, n_clusters)
-
-    Returns
-    -------
-    inv_mats
-        All inverse matrices, shape (n_clusters, n_batches+1, n_batches+1)
-    """
-    n_batches, n_clusters = O.shape
-    n_batches_p1 = n_batches + 1
-
-    # Pre-allocate output
-    inv_mats = cp.zeros((n_clusters, n_batches_p1, n_batches_p1), dtype=dtype)
-
-    factor = 1.0 / (O.T + lambda_kb.T)
-
-    N_k = O.sum(axis=0)
-
-    c = N_k + cp.sum(-factor * (O.T**2), axis=1)
-    c_inv = 1.0 / c
-
-    P_row0 = -factor * O.T
-    inv_mats[:, 0, 0] = c_inv
-
-    inv_mats[:, 0, 1:] = c_inv[:, None] * P_row0
-
-    inv_mats[:, 1:, 0] = P_row0 * c_inv[:, None]
-
-    outer = P_row0[:, :, None] * c_inv[:, None, None] * P_row0[:, None, :]
-    inv_mats[:, 1:, 1:] = outer
-
-    diag_indices = cp.arange(1, n_batches_p1)
-    inv_mats[:, diag_indices, diag_indices] += factor
-
-    return inv_mats
-
-
 def _scatter_add_bias_batched(
     X: cp.ndarray,
     R: cp.ndarray,

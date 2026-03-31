@@ -31,17 +31,17 @@ def _get_measure(x, base, norm):
 @pytest.fixture
 def adata_reference():
     X_pca_file = pooch.retrieve(
-        "https://github.com/slowkow/harmonypy/raw/refs/heads/master/data/pbmc_3500_pcs.tsv.gz",
+        f"{_HARMONY_DATA_BASE}/pbmc_3500_pcs.tsv.gz",
         known_hash="md5:27e319b3ddcc0c00d98e70aa8e677b10",
     )
     X_pca = pd.read_csv(X_pca_file, delimiter="\t")
     X_pca_harmony_file = pooch.retrieve(
-        "https://github.com/slowkow/harmonypy/raw/refs/heads/master/data/pbmc_3500_pcs_harmonized.tsv.gz",
+        f"{_HARMONY_DATA_BASE}/pbmc_3500_pcs_harmonized.tsv.gz",
         known_hash="md5:a7c4ce4b98c390997c66d63d48e09221",
     )
     X_pca_harmony = pd.read_csv(X_pca_harmony_file, delimiter="\t")
     meta_file = pooch.retrieve(
-        "https://github.com/slowkow/harmonypy/raw/refs/heads/master/data/pbmc_3500_meta.tsv.gz",
+        f"{_HARMONY_DATA_BASE}/pbmc_3500_meta.tsv.gz",
         known_hash="md5:8c7ca20e926513da7cf0def1211baecb",
     )
     meta = pd.read_csv(meta_file, delimiter="\t")
@@ -51,6 +51,56 @@ def adata_reference():
         obsm={"X_pca": X_pca.values, "harmony_org": X_pca_harmony.values},
     )
     return adata
+
+
+_HARMONY_DATA_BASE = "https://exampledata.scverse.org/rapids-singlecell/harmony_data"
+
+
+@pytest.fixture
+def adata_ircolitis_harmony2():
+    """IRcolitis blood CD8 dataset (68k cells) with Harmony2 (R) reference output."""
+    pcs_file = pooch.retrieve(
+        f"{_HARMONY_DATA_BASE}/ircolitis_blood_cd8_pcs.tsv.gz",
+        known_hash="md5:9f28afa68ed4e1fd465d53d360b58a35",
+    )
+    pcs = pd.read_csv(pcs_file, delimiter="\t")
+    harmony2_file = pooch.retrieve(
+        f"{_HARMONY_DATA_BASE}/ircolitis_blood_cd8_pcs_harmonized.tsv.gz",
+        known_hash="md5:848f1e09016c633e044b7d93650505ba",
+    )
+    h2 = pd.read_csv(harmony2_file, delimiter="\t")
+    obs_file = pooch.retrieve(
+        f"{_HARMONY_DATA_BASE}/ircolitis_blood_cd8_obs.tsv.gz",
+        known_hash="md5:46efe419e59450504c3d3b343eff8022",
+    )
+    obs = pd.read_csv(obs_file, delimiter="\t", low_memory=False)
+
+    X_pca = pcs.drop(columns=["cell_barcode"]).values
+    X_harmony2 = h2.drop(columns=["cell_barcode"]).values
+
+    adata = ad.AnnData(
+        X=None,
+        obs=obs,
+        obsm={"X_pca": X_pca, "harmony2_ref": X_harmony2},
+    )
+    return adata
+
+
+def test_harmony_integrate_alpha_negative():
+    """Negative alpha raises ValueError."""
+    adata = sc.datasets.pbmc68k_reduced()
+    with pytest.raises(ValueError, match="alpha must be non-negative"):
+        rsc.pp.harmony_integrate(adata, "bulk_labels", alpha=-0.1)
+
+
+@pytest.mark.parametrize("bad_threshold", [-0.1, 1.5, 2.0])
+def test_harmony_integrate_bad_prune_threshold(bad_threshold):
+    """batch_prune_threshold outside [0, 1] raises ValueError."""
+    adata = sc.datasets.pbmc68k_reduced()
+    with pytest.raises(ValueError, match="batch_prune_threshold must be in"):
+        rsc.pp.harmony_integrate(
+            adata, "bulk_labels", batch_prune_threshold=bad_threshold
+        )
 
 
 @pytest.mark.parametrize("correction_method", ["fast", "original", "batched"])
@@ -171,6 +221,37 @@ def test_harmony_integrate_reference(
     )
 
 
+@pytest.mark.parametrize("correction_method", ["fast", "original", "batched"])
+@pytest.mark.parametrize("dtype", [cp.float64, cp.float32])
+def test_harmony2_correction_methods_agree(
+    adata_reference, *, dtype, correction_method
+):
+    """Harmony2 default path: correction methods produce consistent results."""
+    adata = adata_reference.copy()
+    rsc.pp.harmony_integrate(
+        adata,
+        "donor",
+        correction_method=correction_method,
+        dtype=dtype,
+        max_iter_harmony=20,
+    )
+    h2 = adata.obsm["X_pca_harmony"]
+
+    # Run the reference method (fast) for comparison
+    adata_ref = adata_reference.copy()
+    rsc.pp.harmony_integrate(
+        adata_ref,
+        "donor",
+        correction_method="fast",
+        dtype=dtype,
+        max_iter_harmony=20,
+    )
+    h2_ref = adata_ref.obsm["X_pca_harmony"]
+
+    assert _get_measure(h2, h2_ref, "r").min() > 0.99
+    assert _get_measure(h2, h2_ref, "L2").max() < 0.05
+
+
 @pytest.mark.parametrize("n_cells", [1000, 60000])
 @pytest.mark.parametrize("n_pcs", [20, 50])
 @pytest.mark.parametrize("n_batches", [3, 10])
@@ -210,3 +291,24 @@ def test_scatter_add_shared_vs_optimized(n_cells, n_pcs, n_batches, switcher):
     cp.testing.assert_array_equal(out_optimized, expected)
     cp.testing.assert_array_equal(out_shared, expected)
     cp.testing.assert_array_equal(out_optimized, out_shared)
+
+
+@pytest.mark.parametrize("correction_method", ["fast", "original", "batched"])
+@pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
+def test_harmony2_ircolitis_reference(
+    adata_ircolitis_harmony2, correction_method, dtype
+):
+    """Harmony2 on IRcolitis (68k cells, 11 batches) matches R harmony2 reference."""
+    rsc.pp.harmony_integrate(
+        adata_ircolitis_harmony2,
+        "batch",
+        correction_method=correction_method,
+        dtype=dtype,
+        max_iter_harmony=10,
+    )
+
+    ref = adata_ircolitis_harmony2.obsm["harmony2_ref"]
+    result = adata_ircolitis_harmony2.obsm["X_pca_harmony"]
+
+    assert _get_measure(ref, result, "r").min() > 0.95
+    assert _get_measure(ref, result, "L2").max() < 0.1

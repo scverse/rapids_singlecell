@@ -20,6 +20,10 @@ def harmony_integrate(
     dtype: type = np.float64,
     correction_method: Literal["fast", "original", "batched"] | None = None,
     colsum_algo: COLSUM_ALGO | None = None,
+    stabilized_penalty: bool = True,
+    dynamic_lambda: bool = True,
+    alpha: float = 0.2,
+    batch_prune_threshold: float | None = 1e-5,
     **kwargs,
 ) -> None:
     """
@@ -61,6 +65,20 @@ def harmony_integrate(
             Choose which method for the correction step: ``original`` for original method, ``fast`` for improved method, ``batched`` for batched processing of all clusters simultaneously (fastest but needs more memory). If ``None`` (default), automatically selects ``batched`` unless the workspace would exceed 1 GB, in which case ``fast`` is used.
         colsum_algo
             Choose which algorithm to use for column sums. If `None`, choose the algorithm based on the number of rows and columns. If `'benchmark'`, benchmark all algorithms and choose the best one.
+        stabilized_penalty
+            Use the Harmony2 stabilized diversity penalty. When ``True``,
+            the penalty denominator includes both ``O`` and ``E`` terms,
+            improving convergence on datasets with many batches.
+        dynamic_lambda
+            Use per-cluster-per-batch ridge regularization (``alpha * E``)
+            instead of a fixed scalar. Adapts correction strength to the
+            expected batch–cluster composition.
+        alpha
+            Scaling factor for dynamic lambda. Only used when
+            ``dynamic_lambda=True``.
+        batch_prune_threshold
+            Fraction threshold below which a batch–cluster pair is pruned
+            (correction suppressed). Set to ``None`` to disable pruning.
         kwargs
             Any additional arguments will be passed to
             ``_harmony.harmonize``.
@@ -124,6 +142,10 @@ def harmony_integrate(
         key,
         correction_method=correction_method,
         colsum_algo=colsum_algo,
+        stabilized_penalty=stabilized_penalty,
+        dynamic_lambda=dynamic_lambda,
+        alpha=alpha,
+        batch_prune_threshold=batch_prune_threshold,
         **kwargs,
     )
 

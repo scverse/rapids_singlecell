@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
 COLSUM_ALGO = Literal["columns", "atomics", "gemm", "benchmark"]
+_SUPPRESS_PENALTY = 1e30
 
 
 def harmonize(
@@ -172,6 +173,12 @@ def harmonize(
 
     # Validate parameters
     assert block_proportion > 0 and block_proportion <= 1
+    if alpha < 0:
+        raise ValueError(f"alpha must be non-negative, got {alpha}.")
+    if batch_prune_threshold is not None and not (0 <= batch_prune_threshold <= 1):
+        raise ValueError(
+            f"batch_prune_threshold must be in [0, 1] or None, got {batch_prune_threshold}."
+        )
     if correction_method is not None and correction_method not in {
         "fast",
         "original",
@@ -448,12 +455,20 @@ def _compute_lambda_kb(
     dynamic_lambda: bool,
 ) -> cp.ndarray:
     """Compute per-(k,b) ridge regularization array."""
+    sentinel = E.dtype.type(_SUPPRESS_PENALTY)
     if not dynamic_lambda:
         return cp.full_like(E, ridge_lambda)
     lambda_kb = (alpha * E).astype(E.dtype)
     if threshold is not None:
-        prune_mask = (O / N_b[:, None]) < threshold
-        lambda_kb[prune_mask] = E.dtype.type(1e30)
+        safe_N_b = cp.where(N_b > 0, N_b, cp.ones_like(N_b))
+        prune_mask = (O / safe_N_b[:, None]) < threshold
+        prune_mask |= N_b[:, None] == 0
+        lambda_kb[prune_mask] = sentinel
+    # Where both O and lambda_kb are zero, the kernel would divide by zero.
+    # These pairs have no cells, so suppress correction entirely.
+    zero_denom = (O + lambda_kb) == 0
+    if cp.any(zero_denom):
+        lambda_kb[zero_denom] = sentinel
     return lambda_kb
 
 

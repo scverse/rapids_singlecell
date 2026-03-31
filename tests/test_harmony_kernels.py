@@ -325,8 +325,9 @@ def test_compute_inv_mat(n_batches, n_clusters, dtype):
     """Test that compute_inv_mat matches CuPy reference."""
     rng = np.random.default_rng(42)
     O = cp.array(rng.random((n_batches, n_clusters)) * 100, dtype=dtype)
-    ridge_lambda = 1.0
-    lambda_kb = cp.full_like(O, ridge_lambda)
+    # Non-uniform lambda_kb to catch stride/transpose bugs
+    lambda_kb = cp.array(rng.random((n_batches, n_clusters)) * 5 + 0.1, dtype=dtype)
+    lambda_kb[0, 0] = dtype(1e30)  # sentinel: exercises the pruning path
     nb1 = n_batches + 1
     stream = cp.cuda.get_current_stream().ptr
 
@@ -349,6 +350,80 @@ def test_compute_inv_mat(n_batches, n_clusters, dtype):
         )
         cp.cuda.Device().synchronize()
 
+        expected = _inv_mat_reference(O[:, k], lambda_kb[:, k], dtype)
+        atol = 1e-6 if dtype == cp.float32 else 1e-12
+        cp.testing.assert_allclose(inv_mat, expected, atol=atol, rtol=1e-5)
+
+
+# ---------- edge cases: absent batches (O=0) ----------
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+@pytest.mark.parametrize("stabilized", [True, False])
+def test_penalty_absent_batch(dtype, stabilized):
+    """Penalty kernel stays finite when some O entries are zero."""
+    n_batches, n_clusters = 4, 10
+    rng = cp.random.default_rng(42)
+    E = rng.random((n_batches, n_clusters), dtype=dtype) * 10
+    O = rng.random((n_batches, n_clusters), dtype=dtype) * 10
+    O[0, 0] = 0
+    O[2, 5] = 0
+    theta = rng.random(n_batches, dtype=dtype) * 2 + 0.5
+    penalty = cp.empty_like(E)
+
+    _pen.penalty(
+        E,
+        O=O,
+        theta=theta,
+        penalty=penalty,
+        n_batches=n_batches,
+        n_clusters=n_clusters,
+        stabilized=stabilized,
+    )
+    cp.cuda.Device().synchronize()
+
+    assert cp.all(cp.isfinite(penalty)), "Penalty has non-finite values with O=0"
+
+    denom = (O + E + 1) if stabilized else (O + 1)
+    expected = cp.power((E + 1) / denom, theta[:, None])
+    atol = 1e-5 if dtype == np.float32 else 1e-10
+    cp.testing.assert_allclose(penalty, expected, atol=atol, rtol=1e-4)
+
+
+@pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
+def test_compute_inv_mat_absent_batch(dtype):
+    """compute_inv_mat stays finite when O=0 and lambda_kb is large (pruned)."""
+    n_batches, n_clusters = 5, 10
+    rng = np.random.default_rng(99)
+    O = cp.array(rng.random((n_batches, n_clusters)) * 100, dtype=dtype)
+    lambda_kb = cp.array(rng.random((n_batches, n_clusters)) * 2 + 0.1, dtype=dtype)
+
+    O[0, 0] = 0
+    lambda_kb[0, 0] = dtype(1e30)
+    O[3, 2] = 0
+    lambda_kb[3, 2] = dtype(1e30)
+
+    nb1 = n_batches + 1
+    stream = cp.cuda.get_current_stream().ptr
+    g_factor = cp.empty(n_batches, dtype=dtype)
+    g_P_row0 = cp.empty(n_batches, dtype=dtype)
+
+    for k in [0, 2]:
+        inv_mat = cp.empty((nb1, nb1), dtype=dtype)
+        _corr.compute_inv_mat(
+            O,
+            lambda_kb=lambda_kb,
+            n_batches=n_batches,
+            n_clusters=n_clusters,
+            cluster_k=k,
+            inv_mat=inv_mat,
+            g_factor=g_factor,
+            g_P_row0=g_P_row0,
+            stream=stream,
+        )
+        cp.cuda.Device().synchronize()
+
+        assert cp.all(cp.isfinite(inv_mat)), f"inv_mat non-finite for cluster {k}"
         expected = _inv_mat_reference(O[:, k], lambda_kb[:, k], dtype)
         atol = 1e-6 if dtype == cp.float32 else 1e-12
         cp.testing.assert_allclose(inv_mat, expected, atol=atol, rtol=1e-5)
