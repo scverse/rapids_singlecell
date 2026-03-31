@@ -69,7 +69,7 @@ def test_score_with_reference(array_type):
         elif array_type == "csc":
             adata.X = csc_matrix(adata.X)
     adata.X = adata.X.astype(np.float64)
-    sc.pp.normalize_per_cell(adata, counts_per_cell_after=10000)
+    sc.pp.normalize_total(adata, target_sum=10000)
 
     sc.tl.score_genes(adata, gene_list=adata.var_names[:100], score_name="Test_cpu")
     rsc.tl.score_genes(adata, gene_list=adata.var_names[:100], score_name="Test_gpu")
@@ -85,7 +85,7 @@ def test_add_score():
     """
     adata = _create_adata(100, 1000, p_zero=0, p_nan=0).copy()
 
-    sc.pp.normalize_per_cell(adata, counts_per_cell_after=1e4)
+    sc.pp.normalize_total(adata, target_sum=1e4)
     sc.pp.log1p(adata)
 
     # the actual genes names are all 6letters
@@ -201,7 +201,7 @@ def test_use_raw_None():
 def test_layer():
     adata = _create_adata(100, 1000, p_zero=0, p_nan=0)
 
-    sc.pp.normalize_per_cell(adata, counts_per_cell_after=1e4)
+    sc.pp.normalize_total(adata, target_sum=1e4)
     sc.pp.log1p(adata)
 
     # score X
