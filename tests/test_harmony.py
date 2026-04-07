@@ -92,7 +92,7 @@ def adata_ircolitis_harmony2():
 
 @pytest.mark.parametrize("bad_alpha", [-0.1, 0.0, float("inf"), float("nan")])
 def test_harmony_integrate_bad_alpha(bad_alpha):
-    """Non-positive or non-finite alpha with dynamic_lambda raises ValueError."""
+    """Non-positive or non-finite alpha with flavor='harmony2' raises ValueError."""
     adata = sc.datasets.pbmc68k_reduced()
     with pytest.raises(ValueError, match="alpha must be a finite positive"):
         rsc.pp.harmony_integrate(adata, "bulk_labels", alpha=bad_alpha)
@@ -205,8 +205,7 @@ def test_harmony_integrate_reference(
         dtype=dtype,
         colsum_algo=column,
         max_iter_harmony=20,
-        stabilized_penalty=False,
-        dynamic_lambda=False,
+        flavor="harmony1",
     )
 
     assert (

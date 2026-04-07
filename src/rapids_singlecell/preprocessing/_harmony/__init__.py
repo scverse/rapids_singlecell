@@ -122,7 +122,6 @@ def harmonize(
     dynamic_lambda
         If ``True`` (default), use per-cluster-per-batch ridge regularization
         ``lambda_kb = alpha * E_kb`` instead of a fixed ``ridge_lambda``.
-        This prevents overcorrection of rare or non-overlapping populations.
 
     alpha
         Scaling factor for dynamic lambda. Only used when ``dynamic_lambda=True``.
@@ -139,6 +138,7 @@ def harmonize(
     -------
     The integrated embedding by Harmony, of the same shape as the input embedding.
     """
+
     Z_norm = _normalize_cp(Z)
     n_cells = Z.shape[0]
 
@@ -173,14 +173,15 @@ def harmonize(
 
     # Validate parameters
     assert block_proportion > 0 and block_proportion <= 1
-    if not np.isfinite(alpha) or (alpha <= 0 and dynamic_lambda):
-        raise ValueError(
-            f"alpha must be a finite positive number when dynamic_lambda=True, got {alpha}."
-        )
-    if batch_prune_threshold is not None and not (0 <= batch_prune_threshold <= 1):
-        raise ValueError(
-            f"batch_prune_threshold must be in [0, 1] or None, got {batch_prune_threshold}."
-        )
+    if dynamic_lambda:
+        if not np.isfinite(alpha) or alpha <= 0:
+            raise ValueError(
+                f"alpha must be a finite positive number when dynamic_lambda=True, got {alpha}."
+            )
+        if batch_prune_threshold is not None and not (0 <= batch_prune_threshold <= 1):
+            raise ValueError(
+                f"batch_prune_threshold must be in [0, 1] or None, got {batch_prune_threshold}."
+            )
     if correction_method is not None and correction_method not in {
         "fast",
         "original",
