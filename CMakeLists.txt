@@ -100,4 +100,6 @@ if (RSC_BUILD_EXTENSIONS)
   target_link_libraries(_harmony_correction_batched_cuda PRIVATE CUDA::cublas)
   # Wilcoxon binned histogram CUDA module
   add_nb_cuda_module(_wilcoxon_binned_cuda   src/rapids_singlecell/_cuda/wilcoxon_binned/wilcoxon_binned.cu)
+  # NMF HALS CUDA module
+  add_nb_cuda_module(_nmf_cuda              src/rapids_singlecell/_cuda/nmf/nmf.cu)
 endif()
