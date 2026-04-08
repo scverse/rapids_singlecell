@@ -66,8 +66,10 @@ __global__ void entropy_kernel(const T* __restrict__ R, T sigma, int n_cells,
 }
 
 // ---- Diversity kernel ----
-// sigma * sum_{b,k} theta[b] * O[b,k] * log((O[b,k]+1)/(E[b,k]+1))
-template <typename T>
+// Stabilized=false: sigma * sum(theta[b] * O[b,k] * log((O+1)/(E+1)))
+// [Harmony1] Stabilized=true:  sigma * sum(theta[b] * O[b,k] *
+// log((O+E+1)/(E+1))) [Harmony2]
+template <typename T, bool Stabilized>
 __global__ void diversity_kernel(const T* __restrict__ O,
                                  const T* __restrict__ E,
                                  const T* __restrict__ theta, T sigma,
@@ -79,7 +81,8 @@ __global__ void diversity_kernel(const T* __restrict__ O,
     int stride = blockDim.x * gridDim.x;
     for (int i = idx; i < total; i += stride) {
         int batch = i / n_clusters;
-        T ratio = (O[i] + T(1)) / (E[i] + T(1));
+        T numer = Stabilized ? (O[i] + E[i] + T(1)) : (O[i] + T(1));
+        T ratio = numer / (E[i] + T(1));
         T log_val;
         if constexpr (std::is_same<T, float>::value)
             log_val = logf(ratio);

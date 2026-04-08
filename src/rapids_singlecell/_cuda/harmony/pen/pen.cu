@@ -26,11 +26,16 @@ static inline void launch_fused_pen_norm(const T* similarities,
 template <typename T>
 static inline void launch_penalty(const T* E, const T* O, const T* theta,
                                   T* penalty, int n_batches, int n_clusters,
-                                  cudaStream_t stream) {
+                                  bool stabilized, cudaStream_t stream) {
     int total = n_batches * n_clusters;
-    penalty_kernel<T>
-        <<<(total + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D, BLOCK_DIM_1D, 0,
-           stream>>>(E, O, theta, penalty, n_batches, n_clusters);
+    if (stabilized)
+        penalty_kernel<T, true>
+            <<<(total + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D, BLOCK_DIM_1D, 0,
+               stream>>>(E, O, theta, penalty, n_batches, n_clusters);
+    else
+        penalty_kernel<T, false>
+            <<<(total + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D, BLOCK_DIM_1D, 0,
+               stream>>>(E, O, theta, penalty, n_batches, n_clusters);
     CUDA_CHECK_LAST_ERROR(penalty_kernel);
 }
 
@@ -59,12 +64,14 @@ static void register_penalty(nb::module_& m) {
         "penalty",
         [](gpu_array_c<const T, Device> E, gpu_array_c<const T, Device> O,
            gpu_array_c<const T, Device> theta, gpu_array_c<T, Device> penalty,
-           int n_batches, int n_clusters, std::uintptr_t stream) {
+           int n_batches, int n_clusters, bool stabilized,
+           std::uintptr_t stream) {
             launch_penalty<T>(E.data(), O.data(), theta.data(), penalty.data(),
-                              n_batches, n_clusters, (cudaStream_t)stream);
+                              n_batches, n_clusters, stabilized,
+                              (cudaStream_t)stream);
         },
         "E"_a, nb::kw_only(), "O"_a, "theta"_a, "penalty"_a, "n_batches"_a,
-        "n_clusters"_a, "stream"_a = 0);
+        "n_clusters"_a, "stabilized"_a, "stream"_a = 0);
 }
 
 template <typename T, typename Device>

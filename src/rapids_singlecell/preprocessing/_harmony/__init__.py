@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
 COLSUM_ALGO = Literal["columns", "atomics", "gemm", "benchmark"]
+_SUPPRESS_PENALTY = 1e30
 
 
 def harmonize(
@@ -55,6 +56,10 @@ def harmonize(
     correction_method: str | None = None,
     colsum_algo: COLSUM_ALGO | None = None,
     random_state: int = 0,
+    stabilized_penalty: bool = True,
+    dynamic_lambda: bool = True,
+    alpha: float = 0.2,
+    batch_prune_threshold: float | None = 1e-5,
     verbose: bool = False,
 ) -> cp.array:
     """
@@ -110,6 +115,22 @@ def harmonize(
     random_state
         Random seed for reproducing results.
 
+    stabilized_penalty
+        If ``True`` (default), use the Harmony2 stabilized diversity penalty
+        that prevents overintegration when batches are absent from clusters.
+
+    dynamic_lambda
+        If ``True`` (default), use per-cluster-per-batch ridge regularization
+        ``lambda_kb = alpha * E_kb`` instead of a fixed ``ridge_lambda``.
+
+    alpha
+        Scaling factor for dynamic lambda. Only used when ``dynamic_lambda=True``.
+
+    batch_prune_threshold
+        Prune batches from clusters when ``O_kb / N_b < threshold``.
+        Pruned batches receive zero correction for that cluster.
+        Only used when ``dynamic_lambda=True``. Set to ``None`` to disable pruning.
+
     verbose
         Whether to print benchmarking results for the column sum algorithm and the number of iterations until convergence.
 
@@ -117,6 +138,7 @@ def harmonize(
     -------
     The integrated embedding by Harmony, of the same shape as the input embedding.
     """
+
     Z_norm = _normalize_cp(Z)
     n_cells = Z.shape[0]
 
@@ -151,6 +173,15 @@ def harmonize(
 
     # Validate parameters
     assert block_proportion > 0 and block_proportion <= 1
+    if dynamic_lambda:
+        if not np.isfinite(alpha) or alpha <= 0:
+            raise ValueError(
+                f"alpha must be a finite positive number when dynamic_lambda=True, got {alpha}."
+            )
+        if batch_prune_threshold is not None and not (0 <= batch_prune_threshold <= 1):
+            raise ValueError(
+                f"batch_prune_threshold must be in [0, 1] or None, got {batch_prune_threshold}."
+            )
     if correction_method is not None and correction_method not in {
         "fast",
         "original",
@@ -179,6 +210,7 @@ def harmonize(
         cats=cats,
         n_batches=n_batches,
         colsum_func=colsum_func_big,
+        stabilized_penalty=stabilized_penalty,
     )
 
     # Pre-allocate C++ workspace buffers (reused across harmony iterations)
@@ -212,14 +244,25 @@ def harmonize(
             colsum_func=colsum_func_small,
             n_batches=n_batches,
             random_state=random_state + i * 1000003,
+            stabilized_penalty=stabilized_penalty,
             cpp_workspace=cpp_workspace,
+        )
+        # Compute per-(k,b) ridge regularization
+        lambda_kb = _compute_lambda_kb(
+            E,
+            O=O,
+            N_b=N_b,
+            alpha=alpha,
+            threshold=batch_prune_threshold,
+            ridge_lambda=ridge_lambda,
+            dynamic_lambda=dynamic_lambda,
         )
         # Correction step
         Z_hat = _correction(
             Z,
             R=R,
             O=O,
-            ridge_lambda=ridge_lambda,
+            lambda_kb=lambda_kb,
             correction_method=correction_method,
             cats=cats,
             n_batches=n_batches,
@@ -254,6 +297,7 @@ def _initialize_centroids(
     cats: cp.ndarray,
     n_batches: int,
     colsum_func: callable = None,
+    stabilized_penalty: bool = True,
 ) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, list]:
     """
     Initialize cluster centroids and related matrices for Harmony algorithm.
@@ -300,6 +344,7 @@ def _initialize_centroids(
         O=O,
         E=E,
         objective_arr=objectives_harmony,
+        stabilized_penalty=stabilized_penalty,
     )
 
     return R, E, O, objectives_harmony
@@ -361,6 +406,7 @@ def _clustering(
     colsum_func: callable = None,
     n_batches: int = 0,
     random_state: int = 0,
+    stabilized_penalty: bool = True,
     cpp_workspace: dict = None,
 ) -> None:
     """
@@ -395,9 +441,39 @@ def _clustering(
         tol=float(tol),
         max_iter=max_iter,
         seed=random_state & 0xFFFFFFFF,
+        stabilized=stabilized_penalty,
         stream=cp.cuda.get_current_stream().ptr,
     )
     objectives_harmony.append(float(cpp_workspace["last_obj"][0]))
+
+
+def _compute_lambda_kb(
+    E: cp.ndarray,
+    *,
+    O: cp.ndarray,
+    N_b: cp.ndarray,
+    alpha: float,
+    threshold: float | None,
+    ridge_lambda: float,
+    dynamic_lambda: bool,
+) -> cp.ndarray:
+    """Compute per-(k,b) ridge regularization array."""
+    sentinel = E.dtype.type(_SUPPRESS_PENALTY)
+    if not dynamic_lambda:
+        lambda_kb = cp.full_like(E, ridge_lambda)
+    else:
+        lambda_kb = (alpha * E).astype(E.dtype)
+        if threshold is not None:
+            safe_N_b = cp.where(N_b > 0, N_b, cp.ones_like(N_b))
+            prune_mask = (O / safe_N_b[:, None]) < threshold
+            prune_mask |= N_b[:, None] == 0
+            lambda_kb[prune_mask] = sentinel
+    # Where both O and lambda_kb are zero, the kernel computes 1/(O+lambda)
+    # which would divide by zero.  Both values are exactly zero here: O comes
+    # from an integer scatter-add of assignments, and lambda_kb is alpha*E
+    # where E is also zero for absent batch-cluster pairs.
+    lambda_kb[(O + lambda_kb) == 0] = sentinel
+    return lambda_kb
 
 
 def _correction(
@@ -405,7 +481,7 @@ def _correction(
     *,
     R: cp.ndarray,
     O: cp.ndarray,
-    ridge_lambda: float,
+    lambda_kb: cp.ndarray,
     correction_method: str = "batched",
     cats: cp.ndarray,
     n_batches: int,
@@ -420,7 +496,7 @@ def _correction(
             X,
             R,
             O=O,
-            ridge_lambda=ridge_lambda,
+            lambda_kb=lambda_kb,
             cats=cats,
             n_batches=n_batches,
             cat_offsets=cat_offsets,
@@ -431,7 +507,7 @@ def _correction(
             X,
             R,
             O=O,
-            ridge_lambda=ridge_lambda,
+            lambda_kb=lambda_kb,
             cats=cats,
             n_batches=n_batches,
             cat_offsets=cat_offsets,
@@ -441,7 +517,7 @@ def _correction(
         return _correction_original(
             X,
             R,
-            ridge_lambda=ridge_lambda,
+            lambda_kb=lambda_kb,
             cats=cats,
             n_batches=n_batches,
             cat_offsets=cat_offsets,
@@ -453,7 +529,7 @@ def _correction_original(
     X: cp.ndarray,
     R: cp.ndarray,
     *,
-    ridge_lambda: float,
+    lambda_kb: cp.ndarray,
     cats: cp.ndarray,
     n_batches: int,
     cat_offsets: cp.ndarray,
@@ -465,10 +541,10 @@ def _correction_original(
     n_clusters = R.shape[1]
 
     Z = X.copy()
-    id_mat = cp.eye(n_batches + 1, n_batches + 1, dtype=X.dtype)
-    id_mat[0, 0] = 0
-    Lambda = ridge_lambda * id_mat
     for k in range(n_clusters):
+        Lambda_diag = cp.zeros(n_batches + 1, dtype=X.dtype)
+        Lambda_diag[1:] = lambda_kb[:, k]
+        Lambda = cp.diag(Lambda_diag)
         R_col = R[:, k].copy()
         scatter_sum = cp.zeros(n_batches, dtype=R.dtype)
         cp.add.at(scatter_sum, cats, R_col)
@@ -495,7 +571,7 @@ def _correction_fast(
     R: cp.ndarray,
     *,
     O: cp.ndarray,
-    ridge_lambda: float,
+    lambda_kb: cp.ndarray,
     cats: cp.ndarray,
     n_batches: int,
     cat_offsets: cp.ndarray,
@@ -525,7 +601,7 @@ def _correction_fast(
         cats=cats,
         cat_offsets=cat_offsets,
         cell_indices=cell_indices,
-        ridge_lambda=float(ridge_lambda),
+        lambda_kb=lambda_kb,
         n_cells=n_cells,
         n_pcs=n_pcs,
         n_clusters=n_clusters,
@@ -547,7 +623,7 @@ def _correction_batched(
     R: cp.ndarray,
     *,
     O: cp.ndarray,
-    ridge_lambda: float,
+    lambda_kb: cp.ndarray,
     cats: cp.ndarray,
     n_batches: int,
     cat_offsets: cp.ndarray,
@@ -581,7 +657,7 @@ def _correction_batched(
         cats=cats,
         cat_offsets=cat_offsets,
         cell_indices=cell_indices,
-        ridge_lambda=float(ridge_lambda),
+        lambda_kb=lambda_kb,
         n_cells=n_cells,
         n_pcs=n_pcs,
         n_clusters=n_clusters,
@@ -608,6 +684,7 @@ def _compute_objective(
     O: cp.ndarray,
     E: cp.ndarray,
     objective_arr: list,
+    stabilized_penalty: bool = True,
 ) -> None:
     """
     Compute the objective function value for Harmony.
@@ -630,6 +707,7 @@ def _compute_objective(
         n_cells=n_cells,
         n_clusters=n_clusters,
         n_batches=n_batches,
+        stabilized=stabilized_penalty,
         stream=cp.cuda.get_current_stream().ptr,
     )
     objective_arr.append(obj)
