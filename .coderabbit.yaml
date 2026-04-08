@@ -1,0 +1,80 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+reviews:
+  profile: chill
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  collapse_walkthrough: true
+  sequence_diagrams: false
+  poem: false
+  request_changes_workflow: true
+  review_status: false
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "^main$"
+  tools:
+    markdownlint:
+      enabled: true
+    shellcheck:
+      enabled: true
+    gitleaks:
+      enabled: true
+  path_instructions:
+    - path: "src/rapids_singlecell/**"
+      instructions: |
+        For every code change, check whether the PR includes adequate test coverage in tests/.
+        If new functionality is added or existing behavior is changed and no tests are added or updated, flag this.
+        However, if a change is a pure internal optimization (e.g., replacing CuPy operations with a fused kernel, rewriting a RawKernel as nanobind C++)
+        and the existing tests already cover the affected behavior, new tests are not required — note this in the review.
+        Codecov line-coverage numbers alone are not meaningful — check that tests verify the specific behavior being changed, not just that the code path is hit.
+        Multi-GPU / cross-device: NEVER inline cross-device cp.asarray D2D copies with arithmetic
+        (e.g., `sums += cp.asarray(data["sums"])`). This fuses allocation + copy + addition and can
+        surface stale CUDA async errors through cudaMalloc (cudaErrorLaunchFailure), especially without
+        RMM pool allocation. Always split into a separate assignment first:
+        `dev0_sums = cp.asarray(data["sums"])` then `sums += dev0_sums`.
+        Sync non-blocking streams explicitly, not the null stream.
+    - path: "src/rapids_singlecell/_cuda/**"
+      instructions: |
+        These are nanobind CUDA C++ kernels. Pay close attention to:
+        - Shared memory usage and device limits
+        - Thread/block configuration
+        - Memory access patterns and coalescing
+        - Correct use of atomicAdd and synchronization
+        - Template parameter correctness (float vs double)
+        - MANDATORY: Every kernel launch (<<<grid, block, shared, stream>>>) MUST be followed by cudaGetLastError() to catch launch failures. Flag any kernel launch missing this check.
+        - MANDATORY: No magic numbers. All block sizes, tile sizes, grid calculations, and thresholds must use named constants (constexpr int BLOCK_SIZE = 256). Flag any raw numeric literal in dim3, grid, or shared memory calculations.
+    - path: "src/rapids_singlecell/**/_kernels/**"
+      instructions: |
+        These are CuPy RawKernel definitions. Review for:
+        - Correct CUDA kernel launch configurations
+        - Shared memory bounds
+        - Type safety (float32 vs float64 mismatches)
+        - No magic numbers in kernel launch configurations or kernel code. Block sizes, tile sizes, and thresholds must use named constants.
+        - After RawKernel calls, check for cp.cuda.runtime.getLastError() to catch silent launch failures.
+    - path: "tests/**"
+      instructions: |
+        Do not suggest changing test tolerances without strong justification.
+        Tests run on GPU; some numerical differences vs CPU are expected.
+    - path: "docs/**"
+      instructions: |
+        For documentation changes, focus on:
+        - Accuracy of code examples
+        - Completeness of API documentation
+        - Consistency with current code
+    - path: ".github/**"
+      instructions: |
+        For CI/workflow changes:
+        - Check for proper error handling
+        - Verify GPU availability checks before tests
+        - Watch for semicolon issues in CMAKE_CUDA_ARCHITECTURES
+knowledge_base:
+  opt_out: false
+  code_guidelines:
+    filePatterns:
+      - ".coderabbit/python_agents.md"
+      - ".coderabbit/cuda_agents.md"
+      - "docs/contributing.md"
+chat:
+  auto_reply: true

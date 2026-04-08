@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-from typing import (
-    TYPE_CHECKING,
-    Literal,
-    Union,
-    get_args,
-)
+from typing import TYPE_CHECKING, Literal, Union, get_args
 
 import cupy as cp
 from anndata import AnnData
@@ -13,10 +8,8 @@ from cupyx.scipy import sparse as cp_sparse
 from scanpy._utils import _resolve_axis
 from scanpy.get._aggregated import _combine_categories
 
-from rapids_singlecell._compat import (
-    DaskArray,
-    _meta_dense,
-)
+from rapids_singlecell._compat import DaskArray, _meta_dense
+from rapids_singlecell._cuda import _aggr_cuda
 from rapids_singlecell.get import _check_mask
 from rapids_singlecell.preprocessing._utils import _check_gpu_X
 
@@ -28,7 +21,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 Array = Union[cp.ndarray, cp_sparse.csc_matrix, cp_sparse.csr_matrix]  # noqa: UP007
-AggType = Literal["count_nonzero", "mean", "sum", "var"]
+AggType = Literal["count_nonzero", "mean", "sum", "var", "sq_sum"]
 
 
 class Aggregate:
@@ -59,6 +52,8 @@ class Aggregate:
         self.n_cells = cp.array(cp.bincount(self.groupby), dtype=cp.float64).reshape(
             -1, 1
         )
+        if data.dtype.kind != "f" and not isinstance(data, DaskArray):
+            data = data.astype(cp.float32, copy=False)
         self.data = data
 
     groupby: cp.ndarray
@@ -70,6 +65,29 @@ class Aggregate:
         else:
             return cp.ones(self.data.shape[0], dtype=bool)
 
+    def _build_result(self, sums, counts, sq_sums, dof):
+        """Compute derived statistics from raw kernel accumulators."""
+        counts = counts.astype(cp.int32)
+        means = sums / self.n_cells
+        var = sq_sums / self.n_cells - means**2
+        var *= self.n_cells / (self.n_cells - dof)
+        return {
+            "sum": sums,
+            "sq_sum": sq_sums,
+            "count_nonzero": counts,
+            "mean": means,
+            "var": var,
+        }
+
+    def count_mean_var(self, dof: int = 1, split_every: int = 2):
+        """Dispatch to the appropriate count_mean_var method based on data type."""
+        if isinstance(self.data, DaskArray):
+            return self.count_mean_var_dask(dof, split_every=split_every)
+        elif cp_sparse.issparse(self.data):
+            return self.count_mean_var_sparse(dof)
+        else:
+            return self.count_mean_var_dense(dof)
+
     def count_mean_var_dask(self, dof: int = 1, split_every: int = 2):
         """
         This function is used to calculate the sum, mean, and variance of the data matrix.
@@ -79,57 +97,38 @@ class Aggregate:
         import dask.array as da
 
         assert dof >= 0
-        from ._kernels._aggr_kernels import (
-            _get_aggr_dense_kernel_C,
-            _get_aggr_sparse_kernel,
-        )
-
-        if isinstance(self.data._meta, cp.ndarray):
-            kernel = _get_aggr_dense_kernel_C(self.data.dtype)
-            is_sparse = False
-        else:
-            kernel = _get_aggr_sparse_kernel(self.data.dtype)
-            is_sparse = True
-
-        kernel.compile()
+        is_sparse = not isinstance(self.data._meta, cp.ndarray)
         n_groups = self.n_cells.shape[0]
 
         def __aggregate_dask(X_part, mask_part, groupby_part):
             out = cp.zeros((1, 3, n_groups, self.data.shape[1]), dtype=cp.float64)
-            threads_per_block = 512
+            gb = groupby_part.ravel()
+            mk = mask_part.ravel()
 
             if is_sparse:
-                # Sparse matrix kernel parameters
-                grid = (X_part.shape[0],)
-                kernel_args = (
+                _aggr_cuda.sparse_aggr(
                     X_part.indptr,
                     X_part.indices,
                     X_part.data,
+                    out=out,
+                    cats=gb,
+                    mask=mk,
+                    n_cells=X_part.shape[0],
+                    n_genes=X_part.shape[1],
+                    n_groups=n_groups,
+                    is_csc=False,
                 )
             else:
-                # Dense matrix kernel parameters
-                N = X_part.shape[0] * X_part.shape[1]
-
-                blocks = min(
-                    (N + threads_per_block - 1) // threads_per_block,
-                    cp.cuda.Device().attributes["MultiProcessorCount"] * 8,
+                _aggr_cuda.dense_aggr(
+                    X_part,
+                    out=out,
+                    cats=gb,
+                    mask=mk,
+                    n_cells=X_part.shape[0],
+                    n_genes=X_part.shape[1],
+                    n_groups=n_groups,
+                    is_fortran=X_part.flags.f_contiguous,
                 )
-                grid = (blocks,)
-                kernel_args = (X_part,)
-
-            kernel(
-                grid,
-                (threads_per_block,),
-                (
-                    *kernel_args,
-                    out,
-                    groupby_part,
-                    mask_part,
-                    X_part.shape[0],
-                    X_part.shape[1],
-                    n_groups,
-                ),
-            )
             return out
 
         # Prepare Dask arrays
@@ -163,14 +162,7 @@ class Aggregate:
         # Compute final aggregated results
         out = out.sum(axis=0, split_every=split_every).compute()
         sums, counts, sq_sums = out[0], out[1], out[2]
-
-        # Calculate statistics
-        counts = counts.astype(cp.int32)
-        means = sums / self.n_cells
-        var = sq_sums / self.n_cells - cp.power(means, 2)
-        var *= self.n_cells / (self.n_cells - dof)
-
-        return {"mean": means, "var": var, "sum": sums, "count_nonzero": counts}
+        return self._build_result(sums, counts, sq_sums, dof)
 
     def count_mean_var_sparse(self, dof: int = 1):
         """
@@ -179,49 +171,29 @@ class Aggregate:
         """
 
         assert dof >= 0
-        from ._kernels._aggr_kernels import (
-            _get_aggr_sparse_kernel,
-            _get_aggr_sparse_kernel_csc,
-        )
-
         out = cp.zeros(
             (3, self.n_cells.shape[0] * self.data.shape[1]), dtype=cp.float64
         )
-
-        block = (512,)
-        if self.data.format == "csc":
-            grid = (self.data.shape[1],)
-            aggr_kernel = _get_aggr_sparse_kernel_csc(self.data.dtype)
-        else:
-            grid = (self.data.shape[0],)
-            aggr_kernel = _get_aggr_sparse_kernel(self.data.dtype)
         mask = self._get_mask()
-        aggr_kernel(
-            grid,
-            block,
-            (
-                self.data.indptr,
-                self.data.indices,
-                self.data.data,
-                out,
-                self.groupby,
-                mask,
-                self.data.shape[0],
-                self.data.shape[1],
-                self.n_cells.shape[0],
-            ),
+
+        _aggr_cuda.sparse_aggr(
+            self.data.indptr,
+            self.data.indices,
+            self.data.data,
+            out=out,
+            cats=self.groupby,
+            mask=mask,
+            n_cells=self.data.shape[0],
+            n_genes=self.data.shape[1],
+            n_groups=self.n_cells.shape[0],
+            is_csc=self.data.format == "csc",
         )
         sums, counts, sq_sums = out[0, :], out[1, :], out[2, :]
-        sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])
-        sq_sums = sq_sums.reshape(self.n_cells.shape[0], self.data.shape[1])
-        counts = counts.reshape(self.n_cells.shape[0], self.data.shape[1])
-        counts = counts.astype(cp.int32)
-        means = sums / self.n_cells
-        var = sq_sums / self.n_cells - means**2
-        var *= self.n_cells / (self.n_cells - dof)
-
-        results = {"sum": sums, "count_nonzero": counts, "mean": means, "var": var}
-        return results
+        n_groups, n_genes = self.n_cells.shape[0], self.data.shape[1]
+        sums = sums.reshape(n_groups, n_genes)
+        sq_sums = sq_sums.reshape(n_groups, n_genes)
+        counts = counts.reshape(n_groups, n_genes)
+        return self._build_result(sums, counts, sq_sums, dof)
 
     def count_mean_var_sparse_sparse(self, funcs, dof: int = 1):
         """
@@ -237,10 +209,6 @@ class Aggregate:
             _sum_duplicates_assign,
             _sum_duplicates_diff,
         )
-        from ._kernels._aggr_kernels import (
-            _get_aggr_sparse_sparse_kernel,
-            _get_sparse_var_kernel,
-        )
 
         if self.data.format == "csc":
             self.data = self.data.tocsr()
@@ -248,24 +216,18 @@ class Aggregate:
         src_row = cp.zeros(self.data.nnz, dtype=cp.int32)
         src_col = cp.zeros(self.data.nnz, dtype=cp.int32)
         src_data = cp.zeros(self.data.nnz, dtype=cp.float64)
-        block = (128,)
-        grid = (self.data.shape[0],)
-        aggr_kernel = _get_aggr_sparse_sparse_kernel(self.data.dtype)
         mask = self._get_mask()
-        aggr_kernel(
-            grid,
-            block,
-            (
-                self.data.indptr,
-                self.data.indices,
-                self.data.data,
-                src_row,
-                src_col,
-                src_data,
-                self.groupby,
-                mask,
-                self.data.shape[0],
-            ),
+
+        _aggr_cuda.csr_to_coo(
+            self.data.indptr,
+            self.data.indices,
+            self.data.data,
+            out_row=src_row,
+            out_col=src_col,
+            out_data=src_data,
+            cats=self.groupby,
+            mask=mask,
+            n_cells=self.data.shape[0],
         )
         n_groups = self.n_cells.shape[0]
         fused_key = src_row.astype(cp.int64) * self.data.shape[1] + src_col
@@ -319,19 +281,15 @@ class Aggregate:
                     shape=(self.n_cells.shape[0], self.data.shape[1]),
                 )
 
-                sparse_var = _get_sparse_var_kernel(var.dtype)
-                sparse_var(
-                    grid,
-                    block,
-                    (
-                        var.indptr,
-                        var.indices,
-                        var.data,
-                        means,
-                        self.n_cells,
-                        dof,
-                        var.shape[0],
-                    ),
+                _aggr_cuda.sparse_var(
+                    var.indptr,
+                    var.indices,
+                    var.data,
+                    means=means,
+                    n_cells=self.n_cells,
+                    dof=int(dof),
+                    n_groups=var.shape[0],
+                    stream=cp.cuda.get_current_stream().ptr,
                 )
                 results["var"] = var
         if "count_nonzero" in funcs:
@@ -351,49 +309,26 @@ class Aggregate:
         """
 
         assert dof >= 0
-        from ._kernels._aggr_kernels import (
-            _get_aggr_dense_kernel_C,
-            _get_aggr_dense_kernel_F,
-        )
-
         out = cp.zeros((3, self.n_cells.shape[0], self.data.shape[1]), dtype=cp.float64)
 
-        N = self.data.shape[0] * self.data.shape[1]
-        threads_per_block = 512
-        blocks = min(
-            (N + threads_per_block - 1) // threads_per_block,
-            cp.cuda.Device().attributes["MultiProcessorCount"] * 8,
-        )
-        if self.data.flags.c_contiguous:
-            aggr_kernel = _get_aggr_dense_kernel_C(self.data.dtype)
-        else:
-            aggr_kernel = _get_aggr_dense_kernel_F(self.data.dtype)
         mask = self._get_mask()
-        aggr_kernel(
-            (blocks,),
-            (threads_per_block,),
-            (
-                self.data,
-                out,
-                self.groupby,
-                mask,
-                self.data.shape[0],
-                self.data.shape[1],
-                self.n_cells.shape[0],
-            ),
+
+        _aggr_cuda.dense_aggr(
+            self.data,
+            out=out,
+            cats=self.groupby,
+            mask=mask,
+            n_cells=self.data.shape[0],
+            n_genes=self.data.shape[1],
+            n_groups=self.n_cells.shape[0],
+            is_fortran=self.data.flags.f_contiguous,
         )
         sums, counts, sq_sums = out[0], out[1], out[2]
-        sums = sums.reshape(self.n_cells.shape[0], self.data.shape[1])
-        counts = counts.reshape(self.n_cells.shape[0], self.data.shape[1])
-        sq_sums = sq_sums.reshape(self.n_cells.shape[0], self.data.shape[1])
-        counts = counts.astype(cp.int32)
-        means = sums / self.n_cells
-        var = sq_sums / self.n_cells - cp.power(means, 2)
-        var *= self.n_cells / (self.n_cells - dof)
-
-        results = {"sum": sums, "count_nonzero": counts, "mean": means, "var": var}
-
-        return results
+        n_groups, n_genes = self.n_cells.shape[0], self.data.shape[1]
+        sums = sums.reshape(n_groups, n_genes)
+        sq_sums = sq_sums.reshape(n_groups, n_genes)
+        counts = counts.reshape(n_groups, n_genes)
+        return self._build_result(sums, counts, sq_sums, dof)
 
 
 def aggregate(
@@ -512,22 +447,13 @@ def aggregate(
     if unknown := funcs - set(get_args(AggType)):
         raise ValueError(f"func {unknown} is not one of {get_args(AggType)}")
 
-    if isinstance(data, cp.ndarray):
-        result = groupby.count_mean_var_dense(dof)
-    elif isinstance(data, DaskArray):
-        if "split_every" in kwargs:
-            assert isinstance(kwargs["split_every"], int)
-            assert kwargs["split_every"] > 0
-            split_every = kwargs["split_every"]
-        else:
-            split_every = 2
-        result = groupby.count_mean_var_dask(dof, split_every=split_every)
-
+    if return_sparse and cp_sparse.issparse(data):
+        result = groupby.count_mean_var_sparse_sparse(funcs, dof)
     else:
-        if return_sparse:
-            result = groupby.count_mean_var_sparse_sparse(funcs, dof)
-        else:
-            result = groupby.count_mean_var_sparse(dof)
+        split_every = kwargs.pop("split_every", 2)
+        if kwargs:
+            raise TypeError(f"Unexpected keyword arguments: {set(kwargs)}")
+        result = groupby.count_mean_var(dof, split_every=split_every)
     layers = {}
 
     if "sum" in funcs:
@@ -538,6 +464,8 @@ def aggregate(
         layers["count_nonzero"] = result["count_nonzero"]
     if "var" in funcs:
         layers["var"] = result["var"]
+    if "sq_sum" in funcs:
+        layers["sq_sum"] = result["sq_sum"]
 
     result = AnnData(
         layers=layers,

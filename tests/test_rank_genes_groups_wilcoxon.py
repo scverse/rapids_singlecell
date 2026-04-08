@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import cupy as cp
 import numpy as np
+import pandas as pd
 import pytest
 import scanpy as sc
 import scipy.sparse as sp
-from scipy.stats import rankdata, tiecorrect
+from scipy.stats import mannwhitneyu, rankdata, tiecorrect
 
 import rapids_singlecell as rsc
 
@@ -58,9 +59,7 @@ def test_rank_genes_groups_wilcoxon_matches_scanpy(reference, tie_correct, spars
         for group in gpu_field.dtype.names:
             gpu_values = np.asarray(gpu_field[group], dtype=float)
             cpu_values = np.asarray(cpu_field[group], dtype=float)
-            np.testing.assert_allclose(
-                gpu_values, cpu_values, rtol=1e-5, atol=1e-6, equal_nan=True
-            )
+            np.testing.assert_allclose(gpu_values, cpu_values, rtol=1e-13, atol=1e-15)
 
     params = gpu_result["params"]
     assert params["use_raw"] is False
@@ -213,8 +212,8 @@ def test_rank_genes_groups_wilcoxon_with_unsorted_groups(reference):
         np.testing.assert_allclose(
             np.asarray(adata.uns["rank_genes_groups"][field][test_group], dtype=float),
             np.asarray(bdata.uns["rank_genes_groups"][field][test_group], dtype=float),
-            rtol=1e-5,
-            atol=1e-6,
+            rtol=1e-13,
+            atol=1e-15,
             equal_nan=True,
         )
 
@@ -268,7 +267,7 @@ def test_rank_genes_groups_wilcoxon_pts(reference, pre_load):
 
     for col in gpu_pts.columns:
         np.testing.assert_allclose(
-            gpu_pts[col].values, cpu_pts[col].values, rtol=1e-5, atol=1e-6
+            gpu_pts[col].values, cpu_pts[col].values, rtol=1e-13, atol=1e-15
         )
 
     # pts_rest only exists when reference='rest'
@@ -281,8 +280,167 @@ def test_rank_genes_groups_wilcoxon_pts(reference, pre_load):
 
         for col in gpu_pts_rest.columns:
             np.testing.assert_allclose(
-                gpu_pts_rest[col].values, cpu_pts_rest[col].values, rtol=1e-5, atol=1e-6
+                gpu_pts_rest[col].values,
+                cpu_pts_rest[col].values,
+                rtol=1e-13,
+                atol=1e-15,
             )
+
+
+# ============================================================================
+# Ground-truth validation against scipy.stats.mannwhitneyu
+# ============================================================================
+
+
+def _make_perturbation_adata(
+    n_control: int = 200,
+    n_treatment: int = 150,
+    n_genes: int = 500,
+    n_de_genes: int = 50,
+    seed: int = 42,
+):
+    """Two-group perturbation AnnData with count-based log1p data (many ties)."""
+    rng = np.random.default_rng(seed)
+    n_cells = n_control + n_treatment
+
+    gene_means = rng.gamma(shape=2.0, scale=5.0, size=n_genes)
+    X = rng.poisson(lam=gene_means[None, :], size=(n_cells, n_genes)).astype(np.float32)
+    for g in range(n_de_genes):
+        X[n_control:, g] = rng.poisson(
+            lam=gene_means[g] * 1.5, size=n_treatment
+        ).astype(np.float32)
+
+    obs = pd.DataFrame(
+        {
+            "group": pd.Categorical(
+                ["control"] * n_control + ["treatment"] * n_treatment,
+                categories=["control", "treatment"],
+            ),
+        },
+        index=[f"cell_{i}" for i in range(n_cells)],
+    )
+    var = pd.DataFrame(index=[f"gene_{i}" for i in range(n_genes)])
+    adata = sc.AnnData(X=X, obs=obs, var=var)
+    sc.pp.normalize_total(adata, target_sum=1e4)
+    sc.pp.log1p(adata)
+    return adata
+
+
+def _scipy_mannwhitneyu_pvals(adata, *, group, reference, groupby="group"):
+    """Per-gene two-sided Mann-Whitney U p-values via scipy (ground truth)."""
+    X = adata.X.toarray() if sp.issparse(adata.X) else np.array(adata.X)
+    X = X.astype(np.float64)
+    mask_g = (adata.obs[groupby] == group).values
+    mask_r = (adata.obs[groupby] == reference).values
+    return np.array(
+        [
+            mannwhitneyu(X[mask_g, i], X[mask_r, i], alternative="two-sided").pvalue
+            for i in range(X.shape[1])
+        ]
+    )
+
+
+@pytest.fixture
+def perturbation_adata():
+    return _make_perturbation_adata()
+
+
+class TestWilcoxonAgainstScipy:
+    """Validate rsc wilcoxon p-values against scipy.stats.mannwhitneyu."""
+
+    def test_with_continuity_matches_scipy(self, perturbation_adata):
+        """use_continuity + tie_correct matches scipy mannwhitneyu to machine eps."""
+        adata = perturbation_adata.copy()
+        rsc.tl.rank_genes_groups(
+            adata,
+            "group",
+            groups=["treatment"],
+            reference="control",
+            method="wilcoxon",
+            use_raw=False,
+            tie_correct=True,
+            use_continuity=True,
+        )
+
+        rsc_df = (
+            sc.get.rank_genes_groups_df(adata, group="treatment")
+            .sort_values("names")
+            .reset_index(drop=True)
+        )
+        scipy_pvals = _scipy_mannwhitneyu_pvals(
+            perturbation_adata, group="treatment", reference="control"
+        )
+        # Align scipy pvals to the same gene order
+        gene_to_idx = {g: i for i, g in enumerate(perturbation_adata.var_names)}
+        scipy_sorted = np.array([scipy_pvals[gene_to_idx[g]] for g in rsc_df["names"]])
+
+        np.testing.assert_allclose(
+            rsc_df["pvals"].values, scipy_sorted, rtol=1e-13, atol=1e-15
+        )
+
+    def test_without_continuity_close_to_scipy(self, perturbation_adata):
+        """Without continuity correction the gap is only the 0.5 adjustment term."""
+        adata = perturbation_adata.copy()
+        rsc.tl.rank_genes_groups(
+            adata,
+            "group",
+            groups=["treatment"],
+            reference="control",
+            method="wilcoxon",
+            use_raw=False,
+            tie_correct=True,
+            use_continuity=False,
+        )
+
+        rsc_df = (
+            sc.get.rank_genes_groups_df(adata, group="treatment")
+            .sort_values("names")
+            .reset_index(drop=True)
+        )
+        scipy_pvals = _scipy_mannwhitneyu_pvals(
+            perturbation_adata, group="treatment", reference="control"
+        )
+        gene_to_idx = {g: i for i, g in enumerate(perturbation_adata.var_names)}
+        scipy_sorted = np.array([scipy_pvals[gene_to_idx[g]] for g in rsc_df["names"]])
+
+        np.testing.assert_allclose(
+            rsc_df["pvals"].values, scipy_sorted, rtol=1e-2, atol=1e-15
+        )
+
+    @pytest.mark.parametrize("sparse", [True, False])
+    def test_sparse_matches_dense(self, perturbation_adata, sparse):
+        """Sparse and dense wilcoxon give identical results."""
+        adata_dense = perturbation_adata.copy()
+        adata_sparse = perturbation_adata.copy()
+        adata_sparse.X = sp.csr_matrix(adata_sparse.X)
+
+        kw = {
+            "groupby": "group",
+            "groups": ["treatment"],
+            "reference": "control",
+            "method": "wilcoxon",
+            "use_raw": False,
+            "tie_correct": True,
+        }
+        rsc.tl.rank_genes_groups(adata_dense, **kw)
+        rsc.tl.rank_genes_groups(adata_sparse, **kw)
+
+        dense_df = (
+            sc.get.rank_genes_groups_df(adata_dense, group="treatment")
+            .sort_values("names")
+            .reset_index(drop=True)
+        )
+        sparse_df = (
+            sc.get.rank_genes_groups_df(adata_sparse, group="treatment")
+            .sort_values("names")
+            .reset_index(drop=True)
+        )
+        np.testing.assert_array_equal(
+            dense_df["scores"].values, sparse_df["scores"].values
+        )
+        np.testing.assert_array_equal(
+            dense_df["pvals"].values, sparse_df["pvals"].values
+        )
 
 
 # ============================================================================

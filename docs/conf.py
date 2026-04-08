@@ -117,7 +117,6 @@ intersphinx_mapping = {
     "pandas": ("https://pandas.pydata.org/docs/", None),
     "cudf": ("https://docs.rapids.ai/api/cudf/stable/", None),
     "cugraph": ("https://docs.rapids.ai/api/cugraph/stable/", None),
-    "pymde": ("https://pymde.org", None),
     "scanpy": ("https://scanpy.readthedocs.io/en/stable/", None),
     "squidpy": ("https://squidpy.readthedocs.io/en/stable/", None),
     "pertpy": ("https://pertpy.readthedocs.io/en/stable/", None),

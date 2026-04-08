@@ -149,70 +149,76 @@ def _normalize_total_csr(
     gene_is_hi = None
 
     if exclude_highly_expressed:
-        from ._kernels._norm_kernel import _find_hi_genes_csr
+        from rapids_singlecell._cuda import _norm_cuda as _nc
 
         gene_is_hi = cp.zeros(n_genes, dtype=cp.bool_)
-        kernel = _find_hi_genes_csr(X.dtype)
-        kernel(
-            (n_cells,),
-            (256,),
-            (
-                X.indptr,
-                X.indices,
-                X.data,
-                gene_is_hi,
-                X.dtype.type(max_fraction),
-                n_cells,
-            ),
+        _nc.find_hi_genes_csr(
+            X.indptr,
+            X.indices,
+            X.data,
+            gene_is_hi=gene_is_hi,
+            max_fraction=float(max_fraction),
+            nrows=n_cells,
+            stream=cp.cuda.get_current_stream().ptr,
         )
 
     if target_sum is not None and gene_is_hi is None:
         # Fused: row sum + scale in one pass
-        from ._kernels._norm_kernel import _mul_csr
+        from rapids_singlecell._cuda import _norm_cuda as _nc
 
-        kernel = _mul_csr(X.dtype)
-        kernel((n_cells,), (256,), (X.indptr, X.data, n_cells, int(target_sum)))
+        _nc.mul_csr(
+            X.indptr,
+            X.data,
+            nrows=n_cells,
+            target_sum=float(target_sum),
+            stream=cp.cuda.get_current_stream().ptr,
+        )
     elif target_sum is not None:
         # Fused: masked row sum + scale in one pass
-        from ._kernels._norm_kernel import _masked_mul_csr
+        from rapids_singlecell._cuda import _norm_cuda as _nc
 
-        kernel = _masked_mul_csr(X.dtype)
-        kernel(
-            (n_cells,),
-            (256,),
-            (
-                X.indptr,
-                X.indices,
-                X.data,
-                gene_is_hi,
-                n_cells,
-                X.dtype.type(target_sum),
-            ),
+        _nc.masked_mul_csr(
+            X.indptr,
+            X.indices,
+            X.data,
+            gene_mask=gene_is_hi,
+            nrows=n_cells,
+            tsum=float(target_sum),
+            stream=cp.cuda.get_current_stream().ptr,
         )
     else:
         # Two-pass: compute counts → median → prescaled multiply
-        from ._kernels._norm_kernel import _prescaled_mul_csr
+        from rapids_singlecell._cuda import _norm_cuda as _nc
 
         if gene_is_hi is None:
-            from ._kernels._norm_kernel import _get_sparse_sum_major
-
             counts = cp.zeros(n_cells, dtype=X.dtype)
-            kernel = _get_sparse_sum_major(X.dtype)
-            kernel((n_cells,), (256,), (X.indptr, X.data, counts, n_cells))
+            _nc.sum_major(
+                X.indptr,
+                X.data,
+                sums=counts,
+                major=n_cells,
+                stream=cp.cuda.get_current_stream().ptr,
+            )
         else:
-            from ._kernels._norm_kernel import _masked_sum_major
-
             counts = cp.zeros(n_cells, dtype=X.dtype)
-            kernel = _masked_sum_major(X.dtype)
-            kernel(
-                (n_cells,),
-                (256,),
-                (X.indptr, X.indices, X.data, gene_is_hi, counts, n_cells),
+            _nc.masked_sum_major(
+                X.indptr,
+                X.indices,
+                X.data,
+                gene_mask=gene_is_hi,
+                sums=counts,
+                major=n_cells,
+                stream=cp.cuda.get_current_stream().ptr,
             )
 
         scales = _counts_to_scales(counts)
-        kernel = _prescaled_mul_csr(X.dtype)
-        kernel((n_cells,), (256,), (X.indptr, X.data, scales, n_cells))
+        _nc.prescaled_mul_csr(
+            X.indptr,
+            X.data,
+            scales=scales,
+            nrows=n_cells,
+            stream=cp.cuda.get_current_stream().ptr,
+        )
 
     return X
 
@@ -231,13 +237,18 @@ def _normalize_total_dense(
 
     if target_sum is not None and not exclude_highly_expressed:
         # Fused: row sum + scale in one pass
-        from ._kernels._norm_kernel import _mul_dense
+        from rapids_singlecell._cuda import _norm_cuda as _nc
 
-        kernel = _mul_dense(X.dtype)
-        kernel((n_cells,), (256,), (X, n_cells, n_cols, int(target_sum)))
+        _nc.mul_dense(
+            X,
+            nrows=n_cells,
+            ncols=n_cols,
+            target_sum=float(target_sum),
+            stream=cp.cuda.get_current_stream().ptr,
+        )
     else:
         # Compute per-cell counts, then prescaled multiply
-        from ._kernels._norm_kernel import _prescaled_mul_dense
+        from rapids_singlecell._cuda import _norm_cuda as _nc
 
         counts_per_cell = X.sum(axis=1)
         if exclude_highly_expressed:
@@ -246,8 +257,13 @@ def _normalize_total_dense(
             counts_per_cell = X[:, gene_subset].sum(axis=1)
 
         scales = _counts_to_scales(counts_per_cell, target_sum)
-        kernel = _prescaled_mul_dense(X.dtype)
-        kernel((n_cells,), (256,), (X, scales, n_cells, n_cols))
+        _nc.prescaled_mul_dense(
+            X,
+            scales=scales,
+            nrows=n_cells,
+            ncols=n_cols,
+            stream=cp.cuda.get_current_stream().ptr,
+        )
 
     return X
 
@@ -257,31 +273,29 @@ def _normalize_total_dask(X: DaskArray, target_sum: float | None) -> DaskArray:
         target_sum = _get_target_sum_dask(X)
 
     if isinstance(X._meta, sparse.csr_matrix):
-        from ._kernels._norm_kernel import _mul_csr
-
-        mul_kernel = _mul_csr(X.dtype)
-        mul_kernel.compile()
+        from rapids_singlecell._cuda import _norm_cuda as _nc
 
         def __mul(X_part):
-            mul_kernel(
-                (X_part.shape[0],),
-                (256,),
-                (X_part.indptr, X_part.data, X_part.shape[0], int(target_sum)),
+            _nc.mul_csr(
+                X_part.indptr,
+                X_part.data,
+                nrows=X_part.shape[0],
+                target_sum=float(target_sum),
+                stream=cp.cuda.get_current_stream().ptr,
             )
             return X_part
 
         X = X.map_blocks(__mul, meta=_meta_sparse(X.dtype))
     elif isinstance(X._meta, cp.ndarray):
-        from ._kernels._norm_kernel import _mul_dense
-
-        mul_kernel = _mul_dense(X.dtype)
-        mul_kernel.compile()
+        from rapids_singlecell._cuda import _norm_cuda as _nc
 
         def __mul(X_part):
-            mul_kernel(
-                (X_part.shape[0],),
-                (256,),
-                (X_part, X_part.shape[0], X_part.shape[1], int(target_sum)),
+            _nc.mul_dense(
+                X_part,
+                nrows=X_part.shape[0],
+                ncols=X_part.shape[1],
+                target_sum=float(target_sum),
+                stream=cp.cuda.get_current_stream().ptr,
             )
             return X_part
 
@@ -293,17 +307,16 @@ def _normalize_total_dask(X: DaskArray, target_sum: float | None) -> DaskArray:
 
 def _get_target_sum_dask(X: DaskArray) -> int:
     if isinstance(X._meta, sparse.csr_matrix):
-        from ._kernels._norm_kernel import _get_sparse_sum_major
-
-        sum_kernel = _get_sparse_sum_major(X.dtype)
-        sum_kernel.compile()
+        from rapids_singlecell._cuda import _norm_cuda as _nc
 
         def __sum(X_part):
             counts_per_cell = cp.zeros(X_part.shape[0], dtype=X_part.dtype)
-            sum_kernel(
-                (X_part.shape[0],),
-                (256,),
-                (X_part.indptr, X_part.data, counts_per_cell, X_part.shape[0]),
+            _nc.sum_major(
+                X_part.indptr,
+                X_part.data,
+                sums=counts_per_cell,
+                major=X_part.shape[0],
+                stream=cp.cuda.get_current_stream().ptr,
             )
             return counts_per_cell
 
@@ -456,112 +469,83 @@ def normalize_pearson_residuals(
     if theta <= 0:
         raise ValueError("Pearson residuals require theta > 0")
     if clip is None:
-        n = X.shape[0]
-        clip = cp.sqrt(n, dtype=X.dtype)
+        clip = math.sqrt(X.shape[0])
     if clip < 0:
         raise ValueError("Pearson residuals require `clip>=0` or `clip=None`.")
-    theta = cp.array([1 / theta], dtype=X.dtype)
-    clip = cp.array([clip], dtype=X.dtype)
-    sums_cells = cp.zeros(X.shape[0], dtype=X.dtype)
-    sums_genes = cp.zeros(X.shape[1], dtype=X.dtype)
+
+    from rapids_singlecell._cuda import _pr_cuda as _pr
+
+    inv_theta = 1.0 / theta
+    n_cells, n_genes = X.shape
+    stream = cp.cuda.get_current_stream().ptr
 
     if sparse.issparse(X):
         residuals = cp.zeros(X.shape, dtype=X.dtype)
         if sparse.isspmatrix_csc(X):
-            from ._kernels._pr_kernels import _sparse_norm_res_csc, _sparse_sum_csc
-
-            block = (8,)
-            grid = (int(math.ceil(X.shape[1] / block[0])),)
-            sum_csc = _sparse_sum_csc(X.dtype)
-            sum_csc(
-                grid,
-                block,
-                (X.indptr, X.indices, X.data, sums_genes, sums_cells, X.shape[1]),
+            sums_genes = cp.zeros(n_genes, dtype=X.dtype)
+            sums_cells = cp.zeros(n_cells, dtype=X.dtype)
+            _pr.sparse_sum_csc(
+                X.indptr,
+                X.indices,
+                X.data,
+                sums_genes=sums_genes,
+                sums_cells=sums_cells,
+                n_genes=n_genes,
+                stream=stream,
             )
-            sum_total = 1 / sums_genes.sum().squeeze()
-            norm_res = _sparse_norm_res_csc(X.dtype)
-            norm_res(
-                grid,
-                block,
-                (
-                    X.indptr,
-                    X.indices,
-                    X.data,
-                    sums_cells,
-                    sums_genes,
-                    residuals,
-                    sum_total,
-                    clip,
-                    theta,
-                    X.shape[0],
-                    X.shape[1],
-                ),
+            inv_sum_total = float(1.0 / sums_genes.sum())
+            _pr.sparse_norm_res_csc(
+                X.indptr,
+                X.indices,
+                X.data,
+                sums_cells=sums_cells,
+                sums_genes=sums_genes,
+                residuals=residuals,
+                inv_sum_total=inv_sum_total,
+                clip=float(clip),
+                inv_theta=inv_theta,
+                n_cells=n_cells,
+                n_genes=n_genes,
+                stream=stream,
             )
         elif sparse.isspmatrix_csr(X):
-            from ._kernels._pr_kernels import _sparse_norm_res_csr, _sparse_sum_csr
-
-            block = (8,)
-            grid = (int(math.ceil(X.shape[0] / block[0])),)
-            sum_csr = _sparse_sum_csr(X.dtype)
-            sum_csr(
-                grid,
-                block,
-                (X.indptr, X.indices, X.data, sums_genes, sums_cells, X.shape[0]),
-            )
-            sum_total = 1 / sums_genes.sum().squeeze()
-            norm_res = _sparse_norm_res_csr(X.dtype)
-            norm_res(
-                grid,
-                block,
-                (
-                    X.indptr,
-                    X.indices,
-                    X.data,
-                    sums_cells,
-                    sums_genes,
-                    residuals,
-                    sum_total,
-                    clip,
-                    theta,
-                    X.shape[0],
-                    X.shape[1],
-                ),
+            sums_cells = cp.array(X.sum(axis=1), dtype=X.dtype).ravel()
+            sums_genes = cp.array(X.sum(axis=0), dtype=X.dtype).ravel()
+            inv_sum_total = float(1.0 / sums_genes.sum())
+            _pr.sparse_norm_res_csr(
+                X.indptr,
+                X.indices,
+                X.data,
+                sums_cells=sums_cells,
+                sums_genes=sums_genes,
+                residuals=residuals,
+                inv_sum_total=inv_sum_total,
+                clip=float(clip),
+                inv_theta=inv_theta,
+                n_cells=n_cells,
+                n_genes=n_genes,
+                stream=stream,
             )
         else:
             raise ValueError(
                 "Please transform you sparse matrix into CSR or CSC format."
             )
     else:
-        from ._kernels._pr_kernels import _norm_res_dense, _sum_dense
-
         residuals = cp.zeros(X.shape, dtype=X.dtype)
-        block = (8, 8)
-        grid = (
-            math.ceil(residuals.shape[0] / block[0]),
-            math.ceil(residuals.shape[1] / block[1]),
-        )
-        sum_dense = _sum_dense(X.dtype)
-        sum_dense(
-            grid,
-            block,
-            (X, sums_cells, sums_genes, residuals.shape[0], residuals.shape[1]),
-        )
-        sum_total = 1 / sums_genes.sum().squeeze()
-        norm_res = _norm_res_dense(X.dtype)
-        norm_res(
-            grid,
-            block,
-            (
-                X,
-                residuals,
-                sums_cells,
-                sums_genes,
-                sum_total,
-                clip,
-                theta,
-                residuals.shape[0],
-                residuals.shape[1],
-            ),
+        sums_cells = X.sum(axis=1).astype(X.dtype)
+        sums_genes = X.sum(axis=0).astype(X.dtype)
+        inv_sum_total = float(1.0 / sums_genes.sum())
+        _pr.dense_norm_res(
+            X,
+            residuals=residuals,
+            sums_cells=sums_cells,
+            sums_genes=sums_genes,
+            inv_sum_total=inv_sum_total,
+            clip=float(clip),
+            inv_theta=inv_theta,
+            n_cells=n_cells,
+            n_genes=n_genes,
+            stream=stream,
         )
 
     if inplace is True:

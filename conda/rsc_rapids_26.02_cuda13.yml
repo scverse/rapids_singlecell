@@ -17,4 +17,4 @@ dependencies:
     - gdown
     - wget
     - scikit-misc
-    - rapids-singlecell
+    - rapids-singlecell-cu13

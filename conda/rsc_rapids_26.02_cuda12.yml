@@ -7,7 +7,7 @@ channels:
 dependencies:
  - rapids=26.02
  - python=3.13
- - cuda-version=12.9
+ - cuda-version=12.8
  - cudnn
  - cutensor
  - cusparselt
@@ -17,4 +17,4 @@ dependencies:
     - gdown
     - wget
     - scikit-misc
-    - rapids-singlecell
+    - rapids-singlecell-cu12

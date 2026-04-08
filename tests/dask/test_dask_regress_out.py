@@ -16,11 +16,14 @@ from testing.rapids_singlecell._helper import (
 def _make_adata(n_obs=1000, n_genes=100, density=0.6, dtype="float32"):
     from anndata import AnnData
 
-    X = sp_random(n_obs, n_genes, density=density, format="csr").astype(dtype)
+    rng = np.random.default_rng(42)
+    X = sp_random(
+        n_obs, n_genes, density=density, format="csr", random_state=rng
+    ).astype(dtype)
     adata = AnnData(X)
-    adata.obs["percent_mito"] = np.random.rand(n_obs).astype(dtype)
+    adata.obs["percent_mito"] = rng.random(n_obs).astype(dtype)
     adata.obs["n_counts"] = np.array(X.sum(axis=1)).ravel()
-    adata.obs["batch"] = pd.Categorical(np.random.choice(["a", "b", "c"], size=n_obs))
+    adata.obs["batch"] = pd.Categorical(rng.choice(["a", "b", "c"], size=n_obs))
     return adata
 
 

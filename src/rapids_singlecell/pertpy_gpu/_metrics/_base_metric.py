@@ -3,6 +3,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
+import cupy as cp
+import numpy as np
+
 from rapids_singlecell._utils import parse_device_ids
 
 if TYPE_CHECKING:
@@ -23,6 +26,8 @@ class BaseMetric(ABC):
 
     Parameters
     ----------
+    layer_key
+        Key in adata.layers for cell data. Mutually exclusive with obsm_key.
     obsm_key
         Key in adata.obsm for embeddings (default: 'X_pca')
 
@@ -35,9 +40,34 @@ class BaseMetric(ABC):
 
     supports_multi_gpu: bool = False
 
-    def __init__(self, obsm_key: str = "X_pca"):
-        """Initialize base metric with obsm_key."""
+    def __init__(
+        self,
+        layer_key: str | None = None,
+        obsm_key: str | None = "X_pca",
+    ):
+        """Initialize base metric."""
+        if layer_key is not None and obsm_key is not None:
+            raise ValueError(
+                "Cannot use 'layer_key' and 'obsm_key' at the same time. "
+                "Please provide only one of the two keys."
+            )
+        self.layer_key = layer_key
         self.obsm_key = obsm_key
+
+    def _get_embedding(self, adata: AnnData) -> np.ndarray | cp.ndarray:
+        """Get embedding from adata using layer_key or obsm_key.
+
+        Returns the embedding in its original format (numpy or cupy).
+        Preserves the input dtype (float32 or float64) for precision control.
+        """
+        if self.layer_key is not None:
+            data = adata.layers[self.layer_key]
+        else:
+            data = adata.obsm[self.obsm_key]
+
+        if isinstance(data, (cp.ndarray, np.ndarray)):
+            return data
+        return np.asarray(data)
 
     @abstractmethod
     def pairwise(
@@ -87,7 +117,7 @@ class BaseMetric(ABC):
         self,
         adata: AnnData,
         groupby: str,
-        selected_group: str,
+        selected_group: str | Sequence[str],
         *,
         groups: Sequence[str] | None = None,
         bootstrap: bool = False,
@@ -96,7 +126,7 @@ class BaseMetric(ABC):
         multi_gpu: bool | list[int] | str | None = None,
     ):
         """
-        Compute distances from one selected group to all other groups.
+        Compute distances from selected reference group(s) to all other groups.
 
         Parameters
         ----------
@@ -105,7 +135,8 @@ class BaseMetric(ABC):
         groupby
             Key in adata.obs for grouping cells
         selected_group
-            Reference group to compute distances from
+            Reference group(s) to compute distances from. Can be a single
+            group name or a sequence of group names.
         groups
             Specific groups to compute distances to (if None, use all)
         bootstrap
@@ -125,7 +156,8 @@ class BaseMetric(ABC):
         Returns
         -------
         distances
-            Distance values from selected_group to other groups
+            DataFrame with distances from selected_group(s) to other groups.
+            If bootstrap=True, returns tuple of (distances, distances_var).
         """
         raise NotImplementedError(
             f"{self.__class__.__name__} does not implement onesided_distances"
@@ -176,4 +208,38 @@ class BaseMetric(ABC):
         """
         raise NotImplementedError(
             f"{self.__class__.__name__} does not implement bootstrap"
+        )
+
+    def contrast_distances(
+        self,
+        adata: AnnData,
+        contrasts,
+        *,
+        multi_gpu: bool | list[int] | str | None = None,
+    ):
+        """
+        Compute distances for contrasts.
+
+        Parameters
+        ----------
+        adata
+            Annotated data matrix
+        contrasts
+            DataFrame with a groupby column, a ``reference`` column,
+            and optional split columns.
+        multi_gpu
+            GPU selection:
+            - None: Use all GPUs if metric supports it, else GPU 0 (default)
+            - True: Use all available GPUs
+            - False: Use only GPU 0
+            - list[int]: Use specific GPU IDs (e.g., [0, 2])
+            - str: Comma-separated GPU IDs (e.g., "0,2")
+
+        Returns
+        -------
+        pd.DataFrame
+            Copy of the input DataFrame with an added distance column.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement contrast_distances"
         )

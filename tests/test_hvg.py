@@ -258,7 +258,7 @@ def test_cellranger_n_top_genes_warning(dtype):
 
 
 def _check_pearson_hvg_columns(output_df, n_top_genes):
-    assert pd.api.types.is_float_dtype(output_df["residual_variances"].dtype)
+    assert output_df["residual_variances"].dtype.kind == "f"
 
     assert output_df["highly_variable"].values.dtype is np.dtype("bool")
     assert np.sum(output_df["highly_variable"]) == n_top_genes
@@ -310,6 +310,12 @@ def test_highly_variable_genes_pearson_residuals_general(
     ]:
         assert key in cudata.var.columns
 
+    print(cudata.var["residual_variances"].values.shape)
+    print(residual_variances_reference.shape)
+    print(
+        f"cudata.var['residual_variances'].values: {cudata.var['residual_variances'].values}"
+    )
+    print(f"residual_variances_reference: {residual_variances_reference}")
     assert np.allclose(
         cudata.var["residual_variances"].values, residual_variances_reference
     )
@@ -381,7 +387,7 @@ def test_highly_variable_genes_pearson_residuals_batch(n_top_genes, dtype):
     )
 
     # check ranks (with batch_key these are the median of within-batch ranks)
-    assert pd.api.types.is_float_dtype(cudata.var["highly_variable_rank"].dtype)
+    assert cudata.var["highly_variable_rank"].dtype.kind == "f"
 
     # check nbatches
     assert cudata.var["highly_variable_nbatches"].values.dtype is np.dtype("int")

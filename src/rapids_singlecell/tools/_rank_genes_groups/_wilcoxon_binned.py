@@ -9,12 +9,7 @@ import cupyx.scipy.special as cupyx_special
 import numpy as np
 
 from rapids_singlecell._compat import DaskArray
-
-from ._kernels._wilcoxon_binned import (
-    _get_csc_hist_kernel,
-    _get_csr_hist_kernel,
-    _get_dense_hist_kernel,
-)
+from rapids_singlecell._cuda import _wilcoxon_binned_cuda as _wb
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -23,6 +18,8 @@ if TYPE_CHECKING:
 
 _CHUNK_BUDGET = 30_000_000  # default chunk * n_groups * n_bins (500 * 60 * 1000)
 _LOG1P_RANGE = (0.0, 15.0)  # covers log1p(x) for raw counts up to ~3.3 million
+_DASK_N_BINS = 200
+_DEFAULT_N_BINS = 1000
 
 
 def _fill_sparse_zero_bin(hist: cp.ndarray, group_counts: cp.ndarray) -> None:
@@ -68,6 +65,8 @@ def _data_range(X) -> tuple[float, float]:
 def wilcoxon_binned(
     rg: _RankGenes,
     *,
+    tie_correct: bool = False,
+    use_continuity: bool = False,
     n_bins: int | None = None,
     chunk_size: int | None = None,
     bin_range: Literal["log1p", "auto"] | None = None,
@@ -87,6 +86,10 @@ def wilcoxon_binned(
     ----------
     rg
         The _RankGenes instance.
+    tie_correct
+        Adjust the variance for ties. In the binned approach each bin
+        acts as a tie group, so the correction uses the bin counts
+        directly.
     n_bins
         Number of histogram bins. Higher = better approximation.
         Default is 1000 for in-memory arrays and 200 for Dask arrays.
@@ -113,8 +116,6 @@ def wilcoxon_binned(
     X = rg.X
     ireference = rg.ireference
 
-    _DASK_N_BINS = 200
-    _DEFAULT_N_BINS = 1000
     if n_bins is None:
         n_bins = _DASK_N_BINS if isinstance(X, DaskArray) else _DEFAULT_N_BINS
 
@@ -220,6 +221,8 @@ def wilcoxon_binned(
         "n_cells_total": n_cells,
         "n_cells_per_group_hist": n_cells_per_group_hist_gpu,
         "total_counts_from_all": has_unselected,
+        "tie_correct": tie_correct,
+        "use_continuity": use_continuity,
         "ireference": ireference,
     }
 
@@ -264,6 +267,8 @@ def process_gene_batch(
     n_cells_total: int,
     n_cells_per_group_hist: cp.ndarray,
     total_counts_from_all: bool,
+    tie_correct: bool = False,
+    use_continuity: bool = False,
     ireference: int | None = None,
 ) -> tuple[cp.ndarray, cp.ndarray]:
     """Process one gene batch, dispatching on Dask vs in-memory."""
@@ -331,8 +336,21 @@ def process_gene_batch(
         hist = hist[:, :n_groups, :]
 
     if ireference is not None:
-        return _compute_stats_vs_ref(hist, ireference, n_cells_per_group)
-    return _compute_stats(hist, n_cells_per_group, n_cells_total, total_counts=tc)
+        return _compute_stats_vs_ref(
+            hist,
+            ireference,
+            n_cells_per_group,
+            tie_correct=tie_correct,
+            use_continuity=use_continuity,
+        )
+    return _compute_stats(
+        hist,
+        n_cells_per_group,
+        n_cells_total,
+        total_counts=tc,
+        tie_correct=tie_correct,
+        use_continuity=use_continuity,
+    )
 
 
 def _compute_stats(
@@ -341,6 +359,8 @@ def _compute_stats(
     n_cells_total: int,
     *,
     total_counts: cp.ndarray | None = None,
+    tie_correct: bool = False,
+    use_continuity: bool = False,
 ) -> tuple[cp.ndarray, cp.ndarray]:
     """Compute Wilcoxon z-scores from histograms."""
     n = cp.int64(n_cells_total)
@@ -358,9 +378,19 @@ def _compute_stats(
     expected = n_g * (n + 1) / 2.0
     variance = n_g * n_rest * (n + 1) / 12.0
 
-    z_scores = (rank_sums - expected) / cp.sqrt(variance)
+    if tie_correct:
+        # Each bin is a tie group; t = total_counts per bin per gene
+        t = total_counts.astype(cp.float64)
+        tie_term = (t * t * t - t).sum(axis=1)  # (n_genes,)
+        tc = 1.0 - tie_term / (float(n) ** 3 - float(n))
+        variance = variance * tc[None, :]
+
+    diff = rank_sums - expected
+    if use_continuity:
+        diff = cp.sign(diff) * cp.maximum(cp.abs(diff) - 0.5, 0.0)
+    z_scores = diff / cp.sqrt(variance)
     cp.nan_to_num(z_scores, copy=False)
-    pvals = 2.0 * (1.0 - cupyx_special.ndtr(cp.abs(z_scores)))
+    pvals = cupyx_special.erfc(cp.abs(z_scores) * cp.float64(cp.sqrt(0.5)))
 
     return z_scores, pvals
 
@@ -369,6 +399,9 @@ def _compute_stats_vs_ref(
     hist: cp.ndarray,
     ireference: int,
     n_cells_per_group: cp.ndarray,
+    *,
+    tie_correct: bool = False,
+    use_continuity: bool = False,
 ) -> tuple[cp.ndarray, cp.ndarray]:
     """Compute Wilcoxon z-scores for each group vs a specific reference.
 
@@ -397,9 +430,19 @@ def _compute_stats_vs_ref(
     expected = n_g * (n_combined + 1) / 2.0
     variance = n_g * n_r * (n_combined + 1) / 12.0
 
-    z_scores = (rank_sums - expected) / cp.sqrt(variance)
+    if tie_correct:
+        # Each bin is a tie group; t = pair_total per bin
+        t = pair_total.astype(cp.float64)
+        tie_term = (t * t * t - t).sum(axis=2)  # (n_genes, n_groups)
+        tc = 1.0 - tie_term.T / (n_combined**3 - n_combined)  # (n_groups, n_genes)
+        variance = variance * tc
+
+    diff = rank_sums - expected
+    if use_continuity:
+        diff = cp.sign(diff) * cp.maximum(cp.abs(diff) - 0.5, 0.0)
+    z_scores = diff / cp.sqrt(variance)
     cp.nan_to_num(z_scores, copy=False)
-    pvals = 2.0 * (1.0 - cupyx_special.ndtr(cp.abs(z_scores)))
+    pvals = cupyx_special.erfc(cp.abs(z_scores) * cp.float64(cp.sqrt(0.5)))
 
     return z_scores, pvals
 
@@ -417,20 +460,17 @@ def _launch_dense(
     chunk_f = cp.asfortranarray(chunk)
     hist = cp.zeros((n_genes, n_groups, n_bins + 1), dtype=cp.uint32)
 
-    _get_dense_hist_kernel(chunk_f.dtype)(
-        (n_genes,),
-        (256,),
-        (
-            chunk_f,
-            group_codes,
-            hist,
-            n_cells,
-            n_genes,
-            n_groups,
-            n_bins,
-            cp.float64(bin_low),
-            cp.float64(inv_bin_width),
-        ),
+    _wb.dense_hist(
+        chunk_f,
+        group_codes,
+        hist,
+        n_cells=n_cells,
+        n_genes=n_genes,
+        n_groups=n_groups,
+        n_bins=n_bins,
+        bin_low=float(bin_low),
+        inv_bin_width=float(inv_bin_width),
+        stream=cp.cuda.get_current_stream().ptr,
     )
     return hist
 
@@ -451,23 +491,20 @@ def _launch_csc(
     n_genes = stop - start
     hist = cp.zeros((n_genes, n_groups, n_bins + 1), dtype=cp.uint32)
 
-    _get_csc_hist_kernel(X.data.dtype)(
-        (n_genes,),
-        (256,),
-        (
-            X.data,
-            X.indices,
-            X.indptr,
-            group_codes,
-            hist,
-            n_cells,
-            n_genes,
-            n_groups,
-            n_bins,
-            cp.float64(bin_low),
-            cp.float64(inv_bin_width),
-            cp.int32(start),
-        ),
+    _wb.csc_hist(
+        X.data,
+        X.indices,
+        X.indptr,
+        group_codes,
+        hist,
+        n_cells=n_cells,
+        n_genes=n_genes,
+        n_groups=n_groups,
+        n_bins=n_bins,
+        bin_low=float(bin_low),
+        inv_bin_width=float(inv_bin_width),
+        gene_start=start,
+        stream=cp.cuda.get_current_stream().ptr,
     )
     return hist
 
@@ -488,23 +525,20 @@ def _launch_csr(
     n_genes = stop - start
     hist = cp.zeros((n_genes, n_groups, n_bins + 1), dtype=cp.uint32)
 
-    _get_csr_hist_kernel(X.data.dtype)(
-        (n_cells,),
-        (256,),
-        (
-            X.data,
-            X.indices,
-            X.indptr,
-            group_codes,
-            hist,
-            n_cells,
-            n_genes,
-            n_groups,
-            n_bins,
-            cp.float64(bin_low),
-            cp.float64(inv_bin_width),
-            cp.int32(start),
-        ),
+    _wb.csr_hist(
+        X.data,
+        X.indices,
+        X.indptr,
+        group_codes,
+        hist,
+        n_cells=n_cells,
+        n_genes=n_genes,
+        n_groups=n_groups,
+        n_bins=n_bins,
+        bin_low=float(bin_low),
+        inv_bin_width=float(inv_bin_width),
+        gene_start=start,
+        stream=cp.cuda.get_current_stream().ptr,
     )
     return hist
 
@@ -531,15 +565,7 @@ def _process_dask(
     """
     import dask.array as da
 
-    bin_low_d = cp.float64(bin_low)
-    inv_bw_d = cp.float64(inv_bin_width)
-
-    gene_start = cp.int32(start)
-
     if cpsp.isspmatrix_csr(X._meta):
-        # Uses CSR kernel; blocks that arrive as CSC are converted below.
-        kernel = _get_csr_hist_kernel(X.dtype)
-        kernel.compile()
 
         def _hist_block(block, block_info=None):
             if block_info is None or block_info == []:
@@ -552,29 +578,24 @@ def _process_dask(
             hist = cp.zeros(
                 (n_genes_batch, n_hist_groups, n_bins_total), dtype=cp.uint32
             )
-            kernel(
-                (block.shape[0],),
-                (256,),
-                (
-                    block.data,
-                    block.indices,
-                    block.indptr,
-                    codes_chunk,
-                    hist,
-                    block.shape[0],
-                    n_genes_batch,
-                    n_hist_groups,
-                    n_bins,
-                    bin_low_d,
-                    inv_bw_d,
-                    gene_start,
-                ),
+            _wb.csr_hist(
+                block.data,
+                block.indices,
+                block.indptr,
+                codes_chunk,
+                hist,
+                n_cells=block.shape[0],
+                n_genes=n_genes_batch,
+                n_groups=n_hist_groups,
+                n_bins=n_bins,
+                bin_low=float(bin_low),
+                inv_bin_width=float(inv_bin_width),
+                gene_start=start,
+                stream=cp.cuda.get_current_stream().ptr,
             )
             return hist[None, ...]
 
     elif isinstance(X._meta, cp.ndarray):
-        kernel = _get_dense_hist_kernel(X.dtype)
-        kernel.compile()
 
         def _hist_block(block, block_info=None):
             if block_info is None or block_info == []:
@@ -589,20 +610,17 @@ def _process_dask(
             hist = cp.zeros(
                 (n_genes_batch, n_hist_groups, n_bins_total), dtype=cp.uint32
             )
-            kernel(
-                (n_genes_batch,),
-                (256,),
-                (
-                    blk,
-                    codes_chunk,
-                    hist,
-                    blk.shape[0],
-                    n_genes_batch,
-                    n_hist_groups,
-                    n_bins,
-                    bin_low_d,
-                    inv_bw_d,
-                ),
+            _wb.dense_hist(
+                blk,
+                codes_chunk,
+                hist,
+                n_cells=blk.shape[0],
+                n_genes=n_genes_batch,
+                n_groups=n_hist_groups,
+                n_bins=n_bins,
+                bin_low=float(bin_low),
+                inv_bin_width=float(inv_bin_width),
+                stream=cp.cuda.get_current_stream().ptr,
             )
             return hist[None, ...]
 

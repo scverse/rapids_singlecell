@@ -5,26 +5,33 @@ from typing import TYPE_CHECKING
 import cupy as cp
 import numpy as np
 
-from ._kernels._fused_block import _get_fused_calc_pen_norm_kernel
-from ._kernels._kmeans import _get_kmeans_err_kernel
-from ._kernels._normalize import _get_normalize_kernel_optimized
-from ._kernels._outer import (
-    _get_batched_correction_kernel,
-    _get_colsum_atomic_kernel,
-    _get_colsum_kernel,
-    _get_harmony_correction_kernel,
-    _get_outer_kernel,
-)
-from ._kernels._scatter_add import (
-    _get_aggregated_matrix_kernel,
-    _get_scatter_add_kernel_optimized,
-    _get_scatter_add_kernel_shared,
-    _get_scatter_add_kernel_with_bias_block,
-    _get_scatter_add_kernel_with_bias_cat0,
-)
+from rapids_singlecell._cuda import _harmony_colsum_cuda as _hc_cs
+from rapids_singlecell._cuda import _harmony_normalize_cuda as _hc_norm
+from rapids_singlecell._cuda import _harmony_outer_cuda as _hc_out
+from rapids_singlecell._cuda import _harmony_pen_cuda as _hc_pen
+from rapids_singlecell._cuda import _harmony_scatter_cuda as _hc_sc
 
 if TYPE_CHECKING:
     import pandas as pd
+
+# Shared-memory scatter_add heuristics
+MIN_CELLS_FOR_SHARED = 50_000
+MIN_CELLS_PER_BATCH_SHARED = 10_000
+MAX_SHARED_MEM_BYTES = 48 * 1024  # 48 KB shared memory budget
+MIN_CELLS_PER_BLOCK = 64
+
+# Kernel selection threshold for scatter_add_bias_csr
+SCATTER_BIAS_KERNEL_THRESHOLD = 300_000
+
+# Column-sum heuristic thresholds (rows x cols regions)
+_COLSUM_COLS_SMALL = 200
+_COLSUM_COLS_MEDIUM = 800
+_COLSUM_COLS_LARGE = 1024
+_COLSUM_COLS_XLARGE = 2000
+_COLSUM_ROWS_TINY = 5_000
+_COLSUM_ROWS_SMALL = 10_000
+_COLSUM_ROWS_MEDIUM = 20_000
+_COLSUM_ROWS_LARGE = 100_000
 
 
 def _normalize_cp_p1(X: cp.ndarray) -> cp.ndarray:
@@ -43,14 +50,13 @@ def _normalize_cp_p1(X: cp.ndarray) -> cp.ndarray:
     assert X.ndim == 2, "Input must be a 2D array."
 
     rows, cols = X.shape
-    grid_dim = rows  # One block per row
 
-    # Scale block size with columns, minimum 32, max 256
-    # More threads = more parallelism for wide rows
-    block_dim = min(256, max(32, ((cols + 31) // 32) * 32))
-
-    normalize_p1 = _get_normalize_kernel_optimized(X.dtype)
-    normalize_p1((grid_dim,), (block_dim,), (X, rows, cols))
+    _hc_norm.normalize(
+        X,
+        rows=rows,
+        cols=cols,
+        stream=cp.cuda.get_current_stream().ptr,
+    )
     return X
 
 
@@ -94,58 +100,48 @@ def _scatter_add_cp(
 
     # Determine whether to use shared memory kernel
     if use_shared is None:
-        # Auto-select based on heuristics
-        # Use shared memory kernel if:
-        # 1. n_batches is provided
-        # 2. Output fits in shared memory (< 48KB)
-        # 3. Matrix is large enough to benefit (>= 50k cells)
-        # 4. High atomic contention expected (cells_per_batch > 10000)
-        #    With many batches, contention is naturally low and original kernel is faster
-        min_cells_for_shared = 50000
-        min_cells_per_batch = 10000  # Threshold for high contention
-        max_shared_mem = 48 * 1024  # 48KB typical max
-
         use_shared = False
-        if n_batches is not None and n_cells >= min_cells_for_shared:
+        if n_batches is not None and n_cells >= MIN_CELLS_FOR_SHARED:
             cells_per_batch = n_cells // n_batches
             shared_mem_needed = n_batches * n_pcs * X.dtype.itemsize
             if (
-                shared_mem_needed <= max_shared_mem
-                and cells_per_batch >= min_cells_per_batch
+                shared_mem_needed <= MAX_SHARED_MEM_BYTES
+                and cells_per_batch >= MIN_CELLS_PER_BATCH_SHARED
             ):
                 use_shared = True
 
     if use_shared:
         if n_batches is None:
             raise ValueError("n_batches must be provided when use_shared=True")
-        # Use optimized shared memory kernel
         dev = cp.cuda.Device()
         n_sm = dev.attributes["MultiProcessorCount"]
-        # Use enough blocks to keep GPU busy, but not too many
-        # Each block should have at least ~64 cells to process
-        min_cells_per_block = 64
         max_blocks_by_cells = max(
-            1, (n_cells + min_cells_per_block - 1) // min_cells_per_block
+            1, (n_cells + MIN_CELLS_PER_BLOCK - 1) // MIN_CELLS_PER_BLOCK
         )
         n_blocks = min(n_sm * 4, max_blocks_by_cells)
-        threads = 256
-        shared_mem_needed = n_batches * n_pcs * X.dtype.itemsize
 
-        kernel = _get_scatter_add_kernel_shared(X.dtype)
-        kernel(
-            (n_blocks,),
-            (threads,),
-            (X, cats, n_cells, n_pcs, n_batches, switcher, out),
-            shared_mem=shared_mem_needed,
+        _hc_sc.scatter_add_shared(
+            X,
+            cats=cats,
+            n_cells=n_cells,
+            n_pcs=n_pcs,
+            n_batches=n_batches,
+            switcher=switcher,
+            a=out,
+            n_blocks=n_blocks,
+            stream=cp.cuda.get_current_stream().ptr,
         )
     else:
-        # Use original kernel
-        N = n_cells * n_pcs
-        threads_per_block = 256
-        blocks = (N + threads_per_block - 1) // threads_per_block
-
-        scatter_add_kernel = _get_scatter_add_kernel_optimized(X.dtype)
-        scatter_add_kernel((blocks,), (256,), (X, cats, n_cells, n_pcs, switcher, out))
+        # Use nanobind .cu kernel
+        _hc_sc.scatter_add(
+            X,
+            cats=cats,
+            n_cells=n_cells,
+            n_pcs=n_pcs,
+            switcher=switcher,
+            a=out,
+            stream=cp.cuda.get_current_stream().ptr,
+        )
 
 
 def _Z_correction(
@@ -159,12 +155,16 @@ def _Z_correction(
     """
     n_cells = Z.shape[0]
     n_pcs = Z.shape[1]
-    N = n_cells * n_pcs
-    threads_per_block = 256
-    blocks = (N + threads_per_block - 1) // threads_per_block
 
-    scatter_add_kernel = _get_harmony_correction_kernel(Z.dtype)
-    scatter_add_kernel((blocks,), (256,), (Z, W, cats, R, n_cells, n_pcs))
+    _hc_out.harmony_corr(
+        Z,
+        W=W,
+        cats=cats,
+        R=R,
+        n_cells=n_cells,
+        n_pcs=n_pcs,
+        stream=cp.cuda.get_current_stream().ptr,
+    )
 
 
 def _outer_cp(
@@ -172,13 +172,14 @@ def _outer_cp(
 ) -> None:
     n_cats, n_pcs = E.shape
 
-    # Determine the total number of elements to process and configure the grid.
-    N = n_cats * n_pcs
-    threads_per_block = 256
-    blocks = (N + threads_per_block - 1) // threads_per_block
-    outer_kernel = _get_outer_kernel(E.dtype)
-    outer_kernel(
-        (blocks,), (threads_per_block,), (E, Pr_b, R_sum, n_cats, n_pcs, switcher)
+    _hc_out.outer(
+        E,
+        Pr_b=Pr_b,
+        R_sum=R_sum,
+        n_cats=n_cats,
+        n_pcs=n_pcs,
+        switcher=switcher,
+        stream=cp.cuda.get_current_stream().ptr,
     )
 
 
@@ -187,7 +188,17 @@ def _normalize_cp(X: cp.ndarray, p: int = 2) -> cp.ndarray:
     Analogous to `torch.nn.functional.normalize` for `axis = 1`, `p` in numpy is known as `ord`.
     """
     if p == 2:
-        return X / cp.linalg.norm(X, ord=2, axis=1, keepdims=True).clip(min=1e-12)
+        X = cp.ascontiguousarray(X)
+        dst = cp.empty_like(X)
+        rows, cols = X.shape
+        _hc_norm.l2_row_normalize(
+            X,
+            dst=dst,
+            n_rows=rows,
+            n_cols=cols,
+            stream=cp.cuda.get_current_stream().ptr,
+        )
+        return dst
 
     else:
         return _normalize_cp_p1(X)
@@ -199,17 +210,18 @@ def _get_aggregated_matrix(
     """
     Get the aggregated matrix for the correction step.
     """
-    aggregated_matrix_kernel = _get_aggregated_matrix_kernel(aggregated_matrix.dtype)
 
-    threads_per_block = 32
-    blocks = (n_batches + 1 + threads_per_block - 1) // threads_per_block
-    aggregated_matrix_kernel(
-        (blocks,), (threads_per_block,), (aggregated_matrix, sum, sum.sum(), n_batches)
+    _hc_sc.aggregated_matrix(
+        aggregated_matrix,
+        sum=sum,
+        top_corner=float(sum.sum()),
+        n_batches=n_batches,
+        stream=cp.cuda.get_current_stream().ptr,
     )
 
 
 def _get_batch_codes(batch_mat: pd.DataFrame, batch_key: str | list[str]) -> pd.Series:
-    if type(batch_key) is str:
+    if isinstance(batch_key, str):
         batch_vec = batch_mat[batch_key]
 
     elif len(batch_key) == 1:
@@ -224,25 +236,6 @@ def _get_batch_codes(batch_mat: pd.DataFrame, batch_key: str | list[str]) -> pd.
     return batch_vec.astype("category")
 
 
-def _one_hot_tensor_cp(X: pd.Series) -> cp.array:
-    """
-    One-hot encode a categorical series.
-
-    Parameters
-    ----------
-    X
-        Input categorical series.
-    Returns
-    -------
-    One-hot encoded array.
-    """
-    ids = cp.array(X.cat.codes.values.copy(), dtype=cp.int32).reshape(-1)
-    n_col = X.cat.categories.size
-    Phi = cp.eye(n_col)[ids]
-
-    return Phi
-
-
 def _scatter_add_cp_bias_csr(
     X: cp.ndarray,
     out: cp.ndarray,
@@ -255,38 +248,30 @@ def _scatter_add_cp_bias_csr(
     n_cells = X.shape[0]
     n_pcs = X.shape[1]
 
-    threads_per_block = 1024
-    if n_cells < 300_000:
-        blocks = int((n_pcs + 1) / 2)
-        scatter_kernel0 = _get_scatter_add_kernel_with_bias_cat0(X.dtype)
-        scatter_kernel0(
-            (blocks, 8), (threads_per_block,), (X, n_cells, n_pcs, out, bias)
+    if n_cells < SCATTER_BIAS_KERNEL_THRESHOLD:
+        _hc_sc.scatter_add_cat0(
+            X,
+            n_cells=n_cells,
+            n_pcs=n_pcs,
+            a=out,
+            bias=bias,
+            stream=cp.cuda.get_current_stream().ptr,
         )
+
     else:
         out[0] = X.T @ bias
-    blocks = int((n_batches) * (n_pcs + 1) / 2)
-    scatter_kernel = _get_scatter_add_kernel_with_bias_block(X.dtype)
-    scatter_kernel(
-        (blocks,),
-        (threads_per_block,),
-        (X, cat_offsets, cell_indices, n_cells, n_pcs, n_batches, out, bias),
+
+    _hc_sc.scatter_add_block(
+        X,
+        cat_offsets=cat_offsets,
+        cell_indices=cell_indices,
+        n_cells=n_cells,
+        n_pcs=n_pcs,
+        n_batches=n_batches,
+        a=out,
+        bias=bias,
+        stream=cp.cuda.get_current_stream().ptr,
     )
-
-
-def _kmeans_error(R: cp.ndarray, dot: cp.ndarray) -> float:
-    """Optimized raw CUDA implementation of kmeans error calculation"""
-    assert R.size == dot.size and R.dtype == dot.dtype
-
-    out = cp.zeros(1, dtype=R.dtype)
-    threads = 256
-    blocks = min(
-        (R.size + threads - 1) // threads,
-        cp.cuda.Device().attributes["MultiProcessorCount"] * 8,
-    )
-    kernel = _get_kmeans_err_kernel(R.dtype.name)
-    kernel((blocks,), (threads,), (R, dot, R.size, out))
-
-    return out[0]
 
 
 def _get_theta_array(
@@ -333,14 +318,14 @@ def _column_sum(X: cp.ndarray) -> cp.ndarray:
 
     out = cp.zeros(cols, dtype=X.dtype)
 
-    dev = cp.cuda.Device()
-    nSM = dev.attributes["MultiProcessorCount"]
-    max_blocks = nSM * 8
-    # Scale thread count with rows, capped at 1024, minimum 32
-    threads = min(1024, max(32, ((rows + 31) // 32) * 32))
-    blocks = min(cols, max_blocks)
-    _colsum = _get_colsum_kernel(X.dtype)
-    _colsum((blocks,), (threads,), (X, out, rows, cols))
+    _hc_cs.colsum(
+        X,
+        out=out,
+        rows=rows,
+        cols=cols,
+        stream=cp.cuda.get_current_stream().ptr,
+    )
+
     return out
 
 
@@ -358,26 +343,14 @@ def _column_sum_atomic(X: cp.ndarray) -> cp.ndarray:
 
     out = cp.zeros(cols, dtype=X.dtype)
 
-    # Grid dimensions
-    tile_cols = (cols + 31) // 32  # Number of 32-column tiles
+    _hc_cs.colsum_atomic(
+        X,
+        out=out,
+        rows=rows,
+        cols=cols,
+        stream=cp.cuda.get_current_stream().ptr,
+    )
 
-    # Choose rows_per_tile to balance parallelism vs atomic contention
-    # More rows per tile = fewer atomics but less parallelism
-    dev = cp.cuda.Device()
-    n_sm = dev.attributes["MultiProcessorCount"]
-
-    # Target: enough row-tiles to keep GPU busy, but not too many atomics
-    # Aim for ~4 blocks per SM minimum
-    target_row_tiles = max(1, n_sm * 4 // max(1, tile_cols))
-    rows_per_tile = max(32, (rows + target_row_tiles - 1) // target_row_tiles)
-
-    tile_rows = (rows + rows_per_tile - 1) // rows_per_tile
-
-    threads = (32, 32)
-    grid = (tile_cols, tile_rows)
-
-    kernel = _get_colsum_atomic_kernel(X.dtype)
-    kernel(grid, threads, (X, out, rows, cols, rows_per_tile))
     return out
 
 
@@ -391,45 +364,37 @@ def _gemm_colsum(X: cp.ndarray) -> cp.ndarray:
 def _choose_colsum_algo_heuristic(rows: int, cols: int, algo: str | None) -> callable:
     """
     Returns one of:
-    - _colsum_columns
-    - _colsum_atomics
+    - _column_sum
+    - _column_sum_atomic
     - _gemm_colsum
-    - cp.sum (with axis=0)
     """
     # first pick the strategy string
     if algo is None:
         cc = cp.cuda.Device().compute_capability
         algo = _colsum_heuristic(rows, cols, cc)
-    if algo == "cupy":
-        return lambda X: X.sum(axis=0)
     if algo == "columns":
         return _column_sum
     if algo == "atomics":
         return _column_sum_atomic
-    if algo == "gemm":
-        return _gemm_colsum
-    # fallback: global CuPy reduction
-    return lambda X: X.sum(axis=0)
+    return _gemm_colsum
 
 
 # TODO: Make this more robust
 def _colsum_heuristic(rows: int, cols: int, compute_capability: str) -> str:
     is_data_center = compute_capability in ["100", "90"]
-    if cols < 200 and rows < 20000:
+    if cols < _COLSUM_COLS_SMALL and rows < _COLSUM_ROWS_MEDIUM:
         return "columns"
-    if cols < 200 and rows < 100000 and is_data_center:
+    if cols < _COLSUM_COLS_SMALL and rows < _COLSUM_ROWS_LARGE and is_data_center:
         return "columns"
-    if cols < 800 and rows < 10000:
+    if cols < _COLSUM_COLS_MEDIUM and rows < _COLSUM_ROWS_SMALL:
         return "atomics"
-    if cols < 1024 and rows < 5000:
+    if cols < _COLSUM_COLS_LARGE and rows < _COLSUM_ROWS_TINY:
         return "atomics"
-    if cols < 800 and rows < 20000 and is_data_center:
+    if cols < _COLSUM_COLS_MEDIUM and rows < _COLSUM_ROWS_MEDIUM and is_data_center:
         return "atomics"
-    if cols < 2000 and rows < 10000 and is_data_center:
+    if cols < _COLSUM_COLS_XLARGE and rows < _COLSUM_ROWS_SMALL and is_data_center:
         return "atomics"
-    if rows >= 5000:
-        return "gemm"
-    return "cupy"
+    return "gemm"
 
 
 # TODO: Make this more robust
@@ -453,7 +418,7 @@ def _benchmark_colsum_algorithms(
         Number of benchmark trials
     Returns
     -------
-    Name of the fastest algorithm: 'cupy', 'columns', 'atomics', or 'gemm'
+    Name of the fastest algorithm: 'columns', 'atomics', or 'gemm'
     """
     rows, cols = shape
 
@@ -465,7 +430,6 @@ def _benchmark_colsum_algorithms(
         X = cp.ascontiguousarray(X)
 
     algorithms = {
-        "cupy": lambda x: x.sum(axis=0),
         "columns": _column_sum,
         "atomics": _column_sum_atomic,
         "gemm": _gemm_colsum,
@@ -574,14 +538,16 @@ def _fused_calc_pen_norm(
     if idx_in.dtype != cp.uint64:
         idx_in = idx_in.astype(cp.uint64)
 
-    # Scale block dimension with columns, minimum 32, max 256
-    block_dim = min(256, max(32, ((n_clusters + 31) // 32) * 32))
-
-    kernel = _get_fused_calc_pen_norm_kernel(similarities.dtype)
-    kernel(
-        (block_size,),
-        (block_dim,),
-        (similarities, penalty, cats, idx_in, R_out, term, block_size, n_clusters),
+    _hc_pen.fused_pen_norm(
+        similarities,
+        penalty=penalty,
+        cats=cats,
+        idx_in=idx_in,
+        R_out=R_out,
+        term=float(term),
+        n_rows=block_size,
+        n_cols=n_clusters,
+        stream=cp.cuda.get_current_stream().ptr,
     )
 
 
@@ -628,13 +594,11 @@ def _compute_inv_mats_batched(
 
     inv_mats[:, 1:, 0] = P_row0 * c_inv[:, None]
 
-    diag_indices = cp.arange(1, n_batches_p1)
-    inv_mats[:, diag_indices, diag_indices] = P_row0**2 * c_inv[:, None] + factor
-
     outer = P_row0[:, :, None] * c_inv[:, None, None] * P_row0[:, None, :]
-    inv_mats[:, 1:, 1:] += outer
+    inv_mats[:, 1:, 1:] = outer
 
-    inv_mats[:, diag_indices, diag_indices] -= P_row0**2 * c_inv[:, None]
+    diag_indices = cp.arange(1, n_batches_p1)
+    inv_mats[:, diag_indices, diag_indices] += factor
 
     return inv_mats
 
@@ -719,13 +683,14 @@ def _apply_batched_correction(
     n_clusters = R.shape[1]
     n_batches_p1 = W_all.shape[1]
 
-    N = n_cells * n_pcs
-    threads_per_block = 256
-    blocks = (N + threads_per_block - 1) // threads_per_block
-
-    kernel = _get_batched_correction_kernel(Z.dtype)
-    kernel(
-        (blocks,),
-        (threads_per_block,),
-        (Z, W_all, cats, R, n_cells, n_pcs, n_clusters, n_batches_p1),
+    _hc_out.batched_correction(
+        Z,
+        W_all=W_all,
+        cats=cats,
+        R=R,
+        n_cells=n_cells,
+        n_pcs=n_pcs,
+        n_clusters=n_clusters,
+        n_batches_p1=n_batches_p1,
+        stream=cp.cuda.get_current_stream().ptr,
     )
