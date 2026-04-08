@@ -304,6 +304,60 @@ class TestWilcoxonBinnedEdgeCases:
             scores_sub = np.asarray(result_sub["scores"][group], dtype=float)
             np.testing.assert_allclose(scores_all, scores_sub, rtol=1e-10)
 
+    @pytest.mark.parametrize("reference", ["rest", "1"])
+    def test_unsorted_groups(self, adata_blobs, reference):
+        """Test that group order doesn't affect results."""
+        adata = adata_blobs.copy()
+        bdata = adata_blobs.copy()
+        rsc.get.anndata_to_GPU(adata)
+        rsc.get.anndata_to_GPU(bdata)
+
+        groups = ["0", "1", "2"] if reference != "rest" else ["0", "2"]
+        groups_reversed = list(reversed(groups))
+
+        rsc.tl.rank_genes_groups(
+            adata,
+            "blobs",
+            method="wilcoxon_binned",
+            groups=groups,
+            reference=reference,
+            use_raw=False,
+        )
+        rsc.tl.rank_genes_groups(
+            bdata,
+            "blobs",
+            method="wilcoxon_binned",
+            groups=groups_reversed,
+            reference=reference,
+            use_raw=False,
+        )
+
+        expected_groups = {g for g in groups if g != reference}
+        assert (
+            set(adata.uns["rank_genes_groups"]["names"].dtype.names) == expected_groups
+        )
+        assert (
+            set(bdata.uns["rank_genes_groups"]["names"].dtype.names) == expected_groups
+        )
+
+        test_group = next(iter(expected_groups))
+        for field in ("scores", "logfoldchanges", "pvals", "pvals_adj"):
+            np.testing.assert_allclose(
+                np.asarray(
+                    adata.uns["rank_genes_groups"][field][test_group], dtype=float
+                ),
+                np.asarray(
+                    bdata.uns["rank_genes_groups"][field][test_group], dtype=float
+                ),
+                rtol=1e-5,
+                atol=1e-6,
+                equal_nan=True,
+            )
+
+        assert tuple(adata.uns["rank_genes_groups"]["names"][test_group]) == tuple(
+            bdata.uns["rank_genes_groups"]["names"][test_group]
+        )
+
     def test_mask_var(self, adata_blobs):
         """Test with mask_var to select subset of genes."""
         adata = adata_blobs.copy()
