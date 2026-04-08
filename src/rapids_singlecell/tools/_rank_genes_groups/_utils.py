@@ -46,7 +46,7 @@ def _select_groups(
 
     if selected is None:
         selected = list(all_categories)
-    elif len(selected) > 2:
+    elif len(selected) > 1:
         # Sort to match original category order (scanpy convention)
         cat_order = {str(c): i for i, c in enumerate(all_categories)}
         selected.sort(key=lambda x: cat_order.get(str(x), len(all_categories)))
