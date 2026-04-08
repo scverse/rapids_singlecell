@@ -468,8 +468,10 @@ def _compute_lambda_kb(
             prune_mask = (O / safe_N_b[:, None]) < threshold
             prune_mask |= N_b[:, None] == 0
             lambda_kb[prune_mask] = sentinel
-    # Where both O and lambda_kb are zero, the kernel would divide by zero.
-    # These pairs have no cells, so suppress correction entirely.
+    # Where both O and lambda_kb are zero, the kernel computes 1/(O+lambda)
+    # which would divide by zero.  Both values are exactly zero here: O comes
+    # from an integer scatter-add of assignments, and lambda_kb is alpha*E
+    # where E is also zero for absent batch-cluster pairs.
     lambda_kb[(O + lambda_kb) == 0] = sentinel
     return lambda_kb
 

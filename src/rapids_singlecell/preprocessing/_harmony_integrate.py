@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
@@ -132,6 +133,28 @@ def harmony_integrate(
         raise ValueError(f"flavor must be 'harmony1' or 'harmony2', got {flavor!r}.")
     stabilized_penalty = flavor == "harmony2"
     dynamic_lambda = flavor == "harmony2"
+
+    # Warn when flavor-incompatible parameters are explicitly set
+    if flavor == "harmony2" and ridge_lambda != 1.0:
+        warnings.warn(
+            "ridge_lambda is ignored when flavor='harmony2'; "
+            "use alpha to control regularization strength.",
+            UserWarning,
+            stacklevel=2,
+        )
+    if flavor == "harmony1":
+        if alpha != 0.2:
+            warnings.warn(
+                "alpha is ignored when flavor='harmony1'; use ridge_lambda instead.",
+                UserWarning,
+                stacklevel=2,
+            )
+        if batch_prune_threshold != 1e-5:
+            warnings.warn(
+                "batch_prune_threshold is ignored when flavor='harmony1'.",
+                UserWarning,
+                stacklevel=2,
+            )
 
     # Ensure the basis exists in adata.obsm
     if basis not in adata.obsm:
