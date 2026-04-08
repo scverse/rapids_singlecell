@@ -41,39 +41,30 @@ class _RankGenes:
     ) -> None:
         # Handle groups parameter
         if groups == "all" or groups is None:
-            groups_order: Literal["all"] | list[str] = "all"
+            selected: list | None = None
         elif isinstance(groups, str | int):
             msg = "Specify a sequence of groups"
             raise ValueError(msg)
         else:
-            groups_order = list(groups)
-            if isinstance(groups_order[0], int):
-                groups_order = [str(n) for n in groups_order]
-            if reference != "rest" and reference not in set(groups_order):
-                groups_order += [reference]
+            selected = list(groups)
+            if len(selected) > 0 and isinstance(selected[0], int):
+                selected = [str(n) for n in selected]
+            if reference != "rest" and reference not in set(selected):
+                selected.append(reference)
 
         self.labels = pd.Series(adata.obs[groupby]).reset_index(drop=True)
+        all_categories = self.labels.cat.categories
 
-        if reference != "rest" and reference not in set(self.labels.cat.categories):
-            cats = self.labels.cat.categories.tolist()
+        if reference != "rest" and str(reference) not in {
+            str(c) for c in all_categories
+        }:
+            cats = all_categories.tolist()
             msg = f"reference = {reference} needs to be one of groupby = {cats}."
             raise ValueError(msg)
 
-        self.groups_order, self.groups_masks_obs = _select_groups(
-            self.labels, groups_order
+        self.groups_order, self.group_codes, self.group_sizes = _select_groups(
+            self.labels, selected
         )
-
-        # Validate singlet groups
-        invalid_groups = set()
-        for name, mask in zip(self.groups_order, self.groups_masks_obs, strict=True):
-            if np.count_nonzero(mask) < 2:
-                invalid_groups.add(str(name))
-        if invalid_groups:
-            msg = (
-                f"Could not calculate statistics for groups {', '.join(invalid_groups)} "
-                "since they only contain one sample."
-            )
-            raise ValueError(msg)
 
         # Get data matrix
         if layer is not None:
@@ -104,7 +95,7 @@ class _RankGenes:
 
         self.ireference = None
         if reference != "rest":
-            self.ireference = np.where(self.groups_order == reference)[0][0]
+            self.ireference = int(np.where(self.groups_order == str(reference))[0][0])
 
         # Set up expm1 function based on log base
         self.is_log1p = "log1p" in adata.uns
@@ -113,10 +104,6 @@ class _RankGenes:
             self.expm1_func = lambda x: np.expm1(x * np.log(base))
         else:
             self.expm1_func = np.expm1
-
-        # For logreg
-        self.grouping_mask = self.labels.isin(pd.Series(self.groups_order))
-        self.grouping = self.labels.loc[self.grouping_mask]
 
         # For basic stats
         self.comp_pts = comp_pts
@@ -187,9 +174,7 @@ class _RankGenes:
         cat_to_idx = {str(name): i for i, name in enumerate(cat_names)}
         order = [cat_to_idx[str(name)] for name in self.groups_order]
 
-        n = cp.array([mask.sum() for mask in self.groups_masks_obs], dtype=cp.float64)[
-            :, None
-        ]
+        n = cp.asarray(self.group_sizes, dtype=cp.float64)[:, None]
         sums = result["sum"][order]
         sq_sums = result["sq_sum"][order]
 
@@ -326,6 +311,58 @@ class _RankGenes:
                 ref_nnz = (ref_data != 0).sum(axis=0)
                 self.pts[self.ireference, start:stop] = cp.asnumpy(ref_nnz / n_ref)
 
+    def t_test(
+        self, method: Literal["t-test", "t-test_overestim_var"]
+    ) -> list[tuple[int, NDArray, NDArray]]:
+        """Compute t-test statistics using Welch's t-test."""
+        from ._ttest import t_test
+
+        return t_test(self, method)
+
+    def wilcoxon(
+        self,
+        *,
+        tie_correct: bool,
+        use_continuity: bool = False,
+        chunk_size: int | None = None,
+    ) -> list[tuple[int, NDArray, NDArray]]:
+        """Compute Wilcoxon rank-sum test statistics."""
+        from ._wilcoxon import wilcoxon
+
+        return wilcoxon(
+            self,
+            tie_correct=tie_correct,
+            use_continuity=use_continuity,
+            chunk_size=chunk_size,
+        )
+
+    def wilcoxon_binned(
+        self,
+        *,
+        tie_correct: bool = False,
+        use_continuity: bool = False,
+        n_bins: int | None = None,
+        chunk_size: int | None = None,
+        bin_range: Literal["log1p", "auto"] | None = None,
+    ) -> list[tuple[int, NDArray, NDArray]]:
+        """Histogram-based approximate Wilcoxon rank-sum test."""
+        from ._wilcoxon_binned import wilcoxon_binned
+
+        return wilcoxon_binned(
+            self,
+            tie_correct=tie_correct,
+            use_continuity=use_continuity,
+            n_bins=n_bins,
+            chunk_size=chunk_size,
+            bin_range=bin_range,
+        )
+
+    def logreg(self, **kwds) -> list[tuple[int, NDArray, None]]:
+        """Compute logistic regression scores."""
+        from ._logreg import logreg
+
+        return logreg(self, **kwds)
+
     def compute_statistics(
         self,
         method: _Method,
@@ -349,26 +386,18 @@ class _RankGenes:
             self.X = X_to_GPU(self.X)
 
         if method in {"t-test", "t-test_overestim_var"}:
-            from ._ttest import t_test
-
-            generate_test_results = t_test(self, method)
+            test_results = self.t_test(method)
         elif method == "wilcoxon":
-            from ._wilcoxon import wilcoxon
-
             if isinstance(self.X, DaskArray):
                 msg = "Wilcoxon test is not supported for Dask arrays. Please convert your data to CuPy arrays."
                 raise ValueError(msg)
-            generate_test_results = wilcoxon(
-                self,
+            test_results = self.wilcoxon(
                 tie_correct=tie_correct,
                 use_continuity=use_continuity,
                 chunk_size=chunk_size,
             )
         elif method == "wilcoxon_binned":
-            from ._wilcoxon_binned import wilcoxon_binned
-
-            generate_test_results = wilcoxon_binned(
-                self,
+            test_results = self.wilcoxon_binned(
                 tie_correct=tie_correct,
                 use_continuity=use_continuity,
                 n_bins=n_bins,
@@ -376,9 +405,7 @@ class _RankGenes:
                 bin_range=bin_range,
             )
         elif method == "logreg":
-            from ._logreg import logreg
-
-            generate_test_results = logreg(self, **kwds)
+            test_results = self.logreg(**kwds)
         else:
             assert_never(method)
 
@@ -387,7 +414,7 @@ class _RankGenes:
         # Collect all stats data first to avoid DataFrame fragmentation
         stats_data: dict[tuple[str, str], np.ndarray] = {}
 
-        for group_index, scores, pvals in generate_test_results:
+        for group_index, scores, pvals in test_results:
             group_name = str(self.groups_order[group_index])
 
             if n_genes_user is not None:
