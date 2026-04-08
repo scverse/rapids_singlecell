@@ -22,7 +22,7 @@ constexpr int GRID_Y = 8;          // Y-dimension of grid for scatter_add
 template <typename T>
 static void correction_fast_impl(
     const T* X, const T* R, const T* O, const int* cats, const int* cat_offsets,
-    const int* cell_indices, T ridge_lambda, int n_cells, int n_pcs,
+    const int* cell_indices, const T* lambda_kb, int n_cells, int n_pcs,
     int n_clusters, int n_batches,
     // workspace (per-cluster sized)
     T* Z, T* inv_mat, T* R_col, T* Phi_t_diag_R_X, T* W,
@@ -47,8 +47,8 @@ static void correction_fast_impl(
     for (int k = 0; k < n_clusters; k++) {
         // Compute inv_mat for cluster k only
         compute_inv_mats_kernel<T>
-            <<<1, bdim, 0, stream>>>(O, ridge_lambda, inv_mat, g_factor,
-                                     g_P_row0, n_batches, n_clusters, k);
+            <<<1, bdim, 0, stream>>>(O, lambda_kb, inv_mat, g_factor, g_P_row0,
+                                     n_batches, n_clusters, k);
         CUDA_CHECK_LAST_ERROR(compute_inv_mats_kernel);
 
         // R_col = R[:, k]
@@ -117,8 +117,9 @@ static void register_correction_fast(nb::module_& m) {
         [](gpu_array_c<const T, Device> X, gpu_array_c<const T, Device> R,
            gpu_array_c<const T, Device> O, gpu_array_c<const int, Device> cats,
            gpu_array_c<const int, Device> cat_offsets,
-           gpu_array_c<const int, Device> cell_indices, double ridge_lambda,
-           int n_cells, int n_pcs, int n_clusters, int n_batches,
+           gpu_array_c<const int, Device> cell_indices,
+           gpu_array_c<const T, Device> lambda_kb, int n_cells, int n_pcs,
+           int n_clusters, int n_batches,
            // workspace
            gpu_array_c<T, Device> Z, gpu_array_c<T, Device> inv_mat,
            gpu_array_c<T, Device> R_col, gpu_array_c<T, Device> Phi_t_diag_R_X,
@@ -128,20 +129,21 @@ static void register_correction_fast(nb::module_& m) {
            std::uintptr_t stream) {
             correction_fast_impl<T>(
                 X.data(), R.data(), O.data(), cats.data(), cat_offsets.data(),
-                cell_indices.data(), static_cast<T>(ridge_lambda), n_cells,
-                n_pcs, n_clusters, n_batches, Z.data(), inv_mat.data(),
-                R_col.data(), Phi_t_diag_R_X.data(), W.data(), g_factor.data(),
+                cell_indices.data(), lambda_kb.data(), n_cells, n_pcs,
+                n_clusters, n_batches, Z.data(), inv_mat.data(), R_col.data(),
+                Phi_t_diag_R_X.data(), W.data(), g_factor.data(),
                 g_P_row0.data(), (cudaStream_t)stream);
         },
         "X"_a, nb::kw_only(), "R"_a, "O"_a, "cats"_a, "cat_offsets"_a,
-        "cell_indices"_a, "ridge_lambda"_a, "n_cells"_a, "n_pcs"_a,
-        "n_clusters"_a, "n_batches"_a, "Z"_a, "inv_mat"_a, "R_col"_a,
-        "Phi_t_diag_R_X"_a, "W"_a, "g_factor"_a, "g_P_row0"_a, "stream"_a = 0);
+        "cell_indices"_a, "lambda_kb"_a, "n_cells"_a, "n_pcs"_a, "n_clusters"_a,
+        "n_batches"_a, "Z"_a, "inv_mat"_a, "R_col"_a, "Phi_t_diag_R_X"_a, "W"_a,
+        "g_factor"_a, "g_P_row0"_a, "stream"_a = 0);
 
     // Expose single-cluster inv_mat computation for testing
     m.def(
         "compute_inv_mat",
-        [](gpu_array_c<const T, Device> O, double ridge_lambda, int n_batches,
+        [](gpu_array_c<const T, Device> O,
+           gpu_array_c<const T, Device> lambda_kb, int n_batches,
            int n_clusters, int cluster_k, gpu_array_c<T, Device> inv_mat,
            gpu_array_c<T, Device> g_factor, gpu_array_c<T, Device> g_P_row0,
            std::uintptr_t stream) {
@@ -149,12 +151,11 @@ static void register_correction_fast(nb::module_& m) {
                 MAX_BLOCK_DIM, std::max(WARP_SIZE, (n_batches + WARP_SIZE - 1) /
                                                        WARP_SIZE * WARP_SIZE));
             compute_inv_mats_kernel<T><<<1, bdim, 0, (cudaStream_t)stream>>>(
-                O.data(), static_cast<T>(ridge_lambda), inv_mat.data(),
-                g_factor.data(), g_P_row0.data(), n_batches, n_clusters,
-                cluster_k);
+                O.data(), lambda_kb.data(), inv_mat.data(), g_factor.data(),
+                g_P_row0.data(), n_batches, n_clusters, cluster_k);
             CUDA_CHECK_LAST_ERROR(compute_inv_mats_kernel);
         },
-        "O"_a, nb::kw_only(), "ridge_lambda"_a, "n_batches"_a, "n_clusters"_a,
+        "O"_a, nb::kw_only(), "lambda_kb"_a, "n_batches"_a, "n_clusters"_a,
         "cluster_k"_a, "inv_mat"_a, "g_factor"_a, "g_P_row0"_a, "stream"_a = 0);
 }
 
