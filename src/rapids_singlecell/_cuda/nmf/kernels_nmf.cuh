@@ -126,8 +126,12 @@ __global__ void hals_update_W_cached_kernel(T* __restrict__ W,
     T* sHHt = reinterpret_cast<T*>(smem_raw);
     T* w_cache = reinterpret_cast<T*>(smem_raw) + K * K + threadIdx.x * K;
 
-    for (int idx = threadIdx.x; idx < K * K; idx += blockDim.x)
-        sHHt[idx] = HHt[idx];
+    // Transpose HHt into F-order so the j-loop reads are contiguous.
+    for (int idx = threadIdx.x; idx < K * K; idx += blockDim.x) {
+        int r = idx / K;
+        int c = idx % K;
+        sHHt[c * K + r] = HHt[idx];
+    }
     __syncthreads();
 
     if (row >= n) return;
@@ -137,7 +141,7 @@ __global__ void hals_update_W_cached_kernel(T* __restrict__ W,
     for (int sweep = 0; sweep < n_sweeps; sweep++) {
         for (int kk = 0; kk < K; kk++) {
             T dot = T(0);
-            for (int j = 0; j < K; j++) dot += w_cache[j] * sHHt[j * K + kk];
+            for (int j = 0; j < K; j++) dot += w_cache[j] * sHHt[kk * K + j];
             T diag = sHHt[kk * K + kk] + l2_reg;
             if (diag < EPS) diag = EPS;
             T val = w_cache[kk] +
@@ -166,8 +170,12 @@ __global__ void hals_update_W_local_kernel(T* __restrict__ W,
     extern __shared__ char smem_raw[];
     T* sHHt = reinterpret_cast<T*>(smem_raw);
 
-    for (int idx = threadIdx.x; idx < K * K; idx += blockDim.x)
-        sHHt[idx] = HHt[idx];
+    // Transpose HHt into F-order so the j-loop reads are contiguous.
+    for (int idx = threadIdx.x; idx < K * K; idx += blockDim.x) {
+        int r = idx / K;
+        int c = idx % K;
+        sHHt[c * K + r] = HHt[idx];
+    }
     __syncthreads();
 
     if (row >= n) return;
@@ -178,7 +186,7 @@ __global__ void hals_update_W_local_kernel(T* __restrict__ W,
     for (int sweep = 0; sweep < n_sweeps; sweep++) {
         for (int kk = 0; kk < K; kk++) {
             T dot = T(0);
-            for (int j = 0; j < K; j++) dot += w_local[j] * sHHt[j * K + kk];
+            for (int j = 0; j < K; j++) dot += w_local[j] * sHHt[kk * K + j];
             T diag = sHHt[kk * K + kk] + l2_reg;
             if (diag < EPS) diag = EPS;
             T val = w_local[kk] +
