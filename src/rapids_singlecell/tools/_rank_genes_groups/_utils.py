@@ -102,11 +102,14 @@ def _select_top_n(scores: NDArray, n_top: int) -> NDArray:
     return global_indices
 
 
+DEFAULT_CHUNK_SIZE = 512
+
+
 def _choose_chunk_size(requested: int | None) -> int:
     """Choose chunk size for gene processing."""
     if requested is not None:
         return int(requested)
-    return 128
+    return DEFAULT_CHUNK_SIZE
 
 
 def _csc_columns_to_gpu(X_csc, start: int, stop: int, n_rows: int) -> cp.ndarray:
@@ -124,22 +127,22 @@ def _csc_columns_to_gpu(X_csc, start: int, stop: int, n_rows: int) -> cp.ndarray
     csc_chunk = cpsp.csc_matrix(
         (chunk_data, chunk_indices, chunk_indptr), shape=(n_rows, stop - start)
     )
-    return _sparse_to_dense(csc_chunk, order="F").astype(cp.float64)
+    return _sparse_to_dense(csc_chunk, order="F")
 
 
 def _get_column_block(X, start: int, stop: int) -> cp.ndarray:
-    """Extract a column block as a dense F-order float64 CuPy array."""
+    """Extract a column block as a dense F-order CuPy array (native dtype)."""
     match X:
         case sp.csc_matrix() | sp.csc_array():
             return _csc_columns_to_gpu(X, start, stop, X.shape[0])
         case sp.spmatrix() | sp.sparray():
             chunk = cpsp.csc_matrix(X[:, start:stop].tocsc())
-            return _sparse_to_dense(chunk, order="F").astype(cp.float64)
+            return _sparse_to_dense(chunk, order="F")
         case cpsp.csc_matrix():
             return _csc_columns_to_gpu(X, start, stop, X.shape[0])
         case cpsp.spmatrix():
-            return _sparse_to_dense(X[:, start:stop], order="F").astype(cp.float64)
+            return _sparse_to_dense(X[:, start:stop], order="F")
         case np.ndarray() | cp.ndarray():
-            return cp.asarray(X[:, start:stop], dtype=cp.float64, order="F")
+            return cp.asfortranarray(cp.asarray(X[:, start:stop]))
         case _:
             raise ValueError(f"Unsupported matrix type: {type(X)}")

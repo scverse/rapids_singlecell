@@ -1,11 +1,12 @@
-#include <cuda_runtime.h>
-#include "../nb_types.h"
+#include <cstdint>
 
-#include "kernels_wilcoxon.cuh"
+#include <cub/device/device_segmented_radix_sort.cuh>
+
+#include "../nb_types.h"
+#include "kernels_wilcoxon_ovo.cuh"
 
 using namespace nb::literals;
 
-// Constants for kernel launch configuration
 constexpr int WARP_SIZE = 32;
 constexpr int MAX_THREADS_PER_BLOCK = 512;
 
@@ -14,57 +15,76 @@ static inline int round_up_to_warp(int n) {
     return (rounded < MAX_THREADS_PER_BLOCK) ? rounded : MAX_THREADS_PER_BLOCK;
 }
 
-static inline void launch_tie_correction(const double* sorted_vals,
-                                         double* correction, int n_rows,
-                                         int n_cols, cudaStream_t stream) {
-    int threads_per_block = round_up_to_warp(n_rows);
-    dim3 block(threads_per_block);
-    dim3 grid(n_cols);
-    tie_correction_kernel<<<grid, block, 0, stream>>>(sorted_vals, correction,
-                                                      n_rows, n_cols);
-    CUDA_CHECK_LAST_ERROR(tie_correction_kernel);
-}
-
-static inline void launch_average_rank(const double* sorted_vals,
-                                       const int* sorter, double* ranks,
-                                       int n_rows, int n_cols,
-                                       cudaStream_t stream) {
-    int threads_per_block = round_up_to_warp(n_rows);
-    dim3 block(threads_per_block);
-    dim3 grid(n_cols);
-    average_rank_kernel<<<grid, block, 0, stream>>>(sorted_vals, sorter, ranks,
-                                                    n_rows, n_cols);
-    CUDA_CHECK_LAST_ERROR(average_rank_kernel);
+static size_t get_seg_sort_temp_bytes(int n_items, int n_segments) {
+    size_t bytes = 0;
+    auto* dk = reinterpret_cast<float*>(1);
+    auto* doff = reinterpret_cast<int*>(1);
+    cub::DeviceSegmentedRadixSort::SortKeys(nullptr, bytes, dk, dk, n_items,
+                                            n_segments, doff, doff + 1, 0, 32);
+    return bytes;
 }
 
 template <typename Device>
 void register_bindings(nb::module_& m) {
     m.doc() = "CUDA kernels for Wilcoxon rank-sum test";
 
-    // Tie correction kernel
-    m.def(
-        "tie_correction",
-        [](gpu_array_f<const double, Device> sorted_vals,
-           gpu_array<double, Device> correction, int n_rows, int n_cols,
-           std::uintptr_t stream) {
-            launch_tie_correction(sorted_vals.data(), correction.data(), n_rows,
-                                  n_cols, (cudaStream_t)stream);
-        },
-        "sorted_vals"_a, "correction"_a, nb::kw_only(), "n_rows"_a, "n_cols"_a,
-        "stream"_a = 0);
+    m.def("get_seg_sort_temp_bytes", &get_seg_sort_temp_bytes, "n_items"_a,
+          "n_segments"_a);
 
-    // Average rank kernel
     m.def(
-        "average_rank",
-        [](gpu_array_f<const double, Device> sorted_vals,
-           gpu_array_f<const int, Device> sorter,
-           gpu_array_f<double, Device> ranks, int n_rows, int n_cols,
+        "segmented_sort",
+        [](gpu_array_c<const float, Device> keys_in,
+           gpu_array_c<float, Device> keys_out,
+           gpu_array_c<const int, Device> offsets,
+           gpu_array_c<uint8_t, Device> cub_temp, int n_items, int n_segments,
            std::uintptr_t stream) {
-            launch_average_rank(sorted_vals.data(), sorter.data(), ranks.data(),
-                                n_rows, n_cols, (cudaStream_t)stream);
+            size_t temp_bytes = cub_temp.size();
+            cub::DeviceSegmentedRadixSort::SortKeys(
+                cub_temp.data(), temp_bytes, keys_in.data(), keys_out.data(),
+                n_items, n_segments, offsets.data(), offsets.data() + 1, 0, 32,
+                (cudaStream_t)stream);
+            CUDA_CHECK_LAST_ERROR(DeviceSegmentedRadixSort);
         },
-        "sorted_vals"_a, "sorter"_a, "ranks"_a, nb::kw_only(), "n_rows"_a,
-        "n_cols"_a, "stream"_a = 0);
+        "keys_in"_a, "keys_out"_a, "offsets"_a, "cub_temp"_a, nb::kw_only(),
+        "n_items"_a, "n_segments"_a, "stream"_a = 0);
+
+    m.def(
+        "csr_extract_dense",
+        [](gpu_array_c<const double, Device> data,
+           gpu_array_c<const int, Device> indices,
+           gpu_array_c<const int, Device> indptr,
+           gpu_array_c<const int, Device> row_ids,
+           gpu_array_f<double, Device> out, int n_target, int col_start,
+           int col_stop, std::uintptr_t stream) {
+            int tpb = round_up_to_warp(n_target);
+            int blocks = (n_target + tpb - 1) / tpb;
+            csr_extract_dense_kernel<<<blocks, tpb, 0, (cudaStream_t)stream>>>(
+                data.data(), indices.data(), indptr.data(), row_ids.data(),
+                out.data(), n_target, col_start, col_stop);
+            CUDA_CHECK_LAST_ERROR(csr_extract_dense_kernel);
+        },
+        "data"_a, "indices"_a, "indptr"_a, "row_ids"_a, "out"_a, nb::kw_only(),
+        "n_target"_a, "col_start"_a, "col_stop"_a, "stream"_a = 0);
+
+    m.def(
+        "grouped_stats",
+        [](gpu_array_f<const double, Device> data,
+           gpu_array_c<const int, Device> grp_offsets,
+           gpu_array_c<double, Device> sums,
+           gpu_array_c<double, Device> sq_sums,
+           gpu_array_c<double, Device> nnz_counts, int n_all_rows, int n_cols,
+           int n_groups, bool compute_nnz, std::uintptr_t stream) {
+            constexpr int THREADS = 256;
+            int smem = 3 * n_groups * sizeof(double);
+            grouped_stats_kernel<<<n_cols, THREADS, smem,
+                                   (cudaStream_t)stream>>>(
+                data.data(), grp_offsets.data(), sums.data(), sq_sums.data(),
+                nnz_counts.data(), n_all_rows, n_cols, n_groups, compute_nnz);
+            CUDA_CHECK_LAST_ERROR(grouped_stats_kernel);
+        },
+        "data"_a, "grp_offsets"_a, "sums"_a, "sq_sums"_a, "nnz_counts"_a,
+        nb::kw_only(), "n_all_rows"_a, "n_cols"_a, "n_groups"_a,
+        "compute_nnz"_a, "stream"_a = 0);
 }
 
 NB_MODULE(_wilcoxon_cuda, m) {
