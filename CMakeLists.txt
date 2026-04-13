@@ -34,6 +34,12 @@ if (RSC_BUILD_EXTENSIONS)
   if(_py_prefix)
     list(APPEND _env_roots "${_py_prefix}")
   endif()
+  # CI/cibuildwheel: CIBW_BEFORE_BUILD writes the librmm path to a marker file
+  if(EXISTS "/tmp/.librmm_dir")
+    file(READ "/tmp/.librmm_dir" _rmm_marker)
+    string(STRIP "${_rmm_marker}" _rmm_marker)
+    list(APPEND _env_roots "${_rmm_marker}/..")
+  endif()
   foreach(_root ${_env_roots})
     file(GLOB _hints "${_root}/lib/cmake/rmm"
                      "${_root}/lib/python*/site-packages/librmm/lib*/cmake/rmm"
