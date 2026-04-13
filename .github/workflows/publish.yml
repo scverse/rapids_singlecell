@@ -123,10 +123,14 @@ jobs:
             scikit-build-core cmake ninja nanobind
             librmm-cu${{ matrix.cuda_major }} &&
             SITE=$(python -c "import sysconfig;print(sysconfig.get_path('purelib'))") &&
+            echo "[rsc-build] site-packages=$SITE" &&
+            echo "[rsc-build] librmm=$(ls $SITE/librmm/lib64/*.so 2>/dev/null)" &&
+            echo "[rsc-build] rapids_logger=$(ls $SITE/rapids_logger/lib64/*.so 2>/dev/null)" &&
             ln -sf "$SITE/librmm/lib64/librmm.so" /usr/local/lib/librmm.so &&
             ln -sf "$SITE/rapids_logger/lib64/librapids_logger.so" /usr/local/lib/librapids_logger.so &&
             ldconfig &&
-            python -c "import librmm;print(librmm.__path__[0])" > /tmp/.librmm_dir
+            python -c "import librmm;print(librmm.__path__[0])" > /tmp/.librmm_dir &&
+            echo "[rsc-build] marker=$(cat /tmp/.librmm_dir)"
           CIBW_TEST_SKIP: "*"
           CIBW_TEST_COMMAND: ""
           CIBW_REPAIR_WHEEL_COMMAND: "auditwheel repair --exclude libcublas.so.${{ matrix.cuda_major }} --exclude libcublasLt.so.${{ matrix.cuda_major }} --exclude libcudart.so.${{ matrix.cuda_major }} --exclude librmm.so --exclude librapids_logger.so -w {dest_dir} {wheel}"
