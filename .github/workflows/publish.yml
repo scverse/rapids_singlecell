@@ -74,11 +74,16 @@ jobs:
               'name = "rapids-singlecell"',
               f'name = "rapids-singlecell-cu{cuda}"',
           )
-          # Rename matching extra to "rapids", remove the other
+          # Rename matching extra to "rapids", remove the other CUDA extra
           text = text.replace(f'rapids-cu{cuda} =', 'rapids =')
-          # Remove the other CUDA extra line entirely
-          lines = text.splitlines(keepends=True)
-          text = "".join(l for l in lines if f'rapids-cu{other}' not in l)
+          # Remove the other CUDA extra (handles multi-line TOML arrays)
+          import re
+          text = re.sub(
+              rf'^rapids-cu{other}\s*=\s*\[.*?\]\s*\n',
+              '',
+              text,
+              flags=re.MULTILINE | re.DOTALL,
+          )
 
           # Set CUDA architectures (replace "native" with CI target archs)
           text = text.replace(
