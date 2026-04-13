@@ -112,14 +112,15 @@ jobs:
           CIBW_ENVIRONMENT_PASS_LINUX: SETUPTOOLS_SCM_PRETEND_VERSION
           CIBW_ENVIRONMENT: >
             CUDA_PATH=/usr/local/cuda
-            LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+            LD_LIBRARY_PATH=/usr/local/cuda/lib64:$(python3 -c "import sysconfig,os;sp=sysconfig.get_path('purelib');print(os.path.join(sp,'librmm','lib64')+':'+os.path.join(sp,'rapids_logger','lib64'))" 2>/dev/null || echo ""):$LD_LIBRARY_PATH
             PATH=/usr/local/cuda/bin:$PATH
           CIBW_BEFORE_BUILD: >
             python -m pip install -U pip
             scikit-build-core cmake ninja nanobind
+            librmm-cu${{ matrix.cuda_major }}
           CIBW_TEST_SKIP: "*"
           CIBW_TEST_COMMAND: ""
-          CIBW_REPAIR_WHEEL_COMMAND: "auditwheel repair --exclude libcublas.so.${{ matrix.cuda_major }} --exclude libcublasLt.so.${{ matrix.cuda_major }} --exclude libcudart.so.${{ matrix.cuda_major }} -w {dest_dir} {wheel}"
+          CIBW_REPAIR_WHEEL_COMMAND: "auditwheel repair --exclude libcublas.so.${{ matrix.cuda_major }} --exclude libcublasLt.so.${{ matrix.cuda_major }} --exclude libcudart.so.${{ matrix.cuda_major }} --exclude librmm.so --exclude librapids_logger.so -w {dest_dir} {wheel}"
           CIBW_BUILD_VERBOSITY: "1"
 
       - uses: actions/upload-artifact@v4

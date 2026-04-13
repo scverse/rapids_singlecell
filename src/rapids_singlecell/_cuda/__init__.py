@@ -13,6 +13,18 @@ from __future__ import annotations
 
 import importlib
 
+# Pre-load librmm.so + deps so the dynamic linker can resolve them when
+# our nanobind extensions (which link rmm) are imported.  This is the same
+# pattern used by cuml, cuvs, and other RAPIDS packages.
+try:
+    import librmm
+
+    librmm.load_library()
+except (ImportError, OSError):
+    pass
+
+_RMM_MODULES = {"_wilcoxon_ovo_cuda", "_wilcoxon_ovr_cuda"}
+
 __all__ = [
     "_aggr_cuda",
     "_aucell_cuda",
@@ -44,7 +56,8 @@ __all__ = [
     "_sparse2dense_cuda",
     "_spca_cuda",
     "_wilcoxon_binned_cuda",
-    "_wilcoxon_cuda",
+    "_wilcoxon_ovo_cuda",
+    "_wilcoxon_ovr_cuda",
 ]
 
 

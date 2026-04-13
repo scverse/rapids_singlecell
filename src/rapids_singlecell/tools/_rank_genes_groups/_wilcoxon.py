@@ -9,7 +9,7 @@ import cupyx.scipy.special as cupyx_special
 import numpy as np
 import scipy.sparse as sp
 
-from rapids_singlecell._cuda import _wilcoxon_cuda as _wc
+from rapids_singlecell._cuda import _wilcoxon_ovo_cuda as _wc
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -33,17 +33,27 @@ def _to_gpu_native(X, n_rows: int, n_cols: int):
     if cpsp.issparse(X):
         return X
 
-    # Host sparse → GPU sparse, same format
+    # Host sparse → GPU sparse, same format.
+    # Downcast indices to int32 on host before transfer (column indices
+    # always fit in int32; scipy may use int64 when nnz > 2^31).
     if isinstance(X, sp.spmatrix | sp.sparray):
         if sp.issparse(X) and X.format == "csc":
             csc = X if X.format == "csc" else X.tocsc()
             return cpsp.csc_matrix(
-                (cp.asarray(csc.data), cp.asarray(csc.indices), cp.asarray(csc.indptr)),
+                (
+                    cp.asarray(csc.data),
+                    cp.asarray(csc.indices.astype(np.int32, copy=False)),
+                    cp.asarray(csc.indptr),
+                ),
                 shape=(n_rows, n_cols),
             )
         csr = X.tocsr() if X.format != "csr" else X
         return cpsp.csr_matrix(
-            (cp.asarray(csr.data), cp.asarray(csr.indices), cp.asarray(csr.indptr)),
+            (
+                cp.asarray(csr.data),
+                cp.asarray(csr.indices.astype(np.int32, copy=False)),
+                cp.asarray(csr.indptr),
+            ),
             shape=(n_rows, n_cols),
         )
 
@@ -62,10 +72,10 @@ def _extract_dense_block(
     *,
     csr_arrays: tuple[cp.ndarray, cp.ndarray, cp.ndarray] | None = None,
 ) -> cp.ndarray:
-    """Extract ``X[row_ids, start:stop]`` as dense F-order on GPU (native dtype).
+    """Extract ``X[row_ids, start:stop]`` as dense F-order on GPU.
 
-    The CSR kernel path outputs float64 (kernel writes double*).
-    All other paths preserve the input dtype.
+    CSR kernel path: outputs same dtype as CSR data (float32 or float64).
+    Other paths: preserve input dtype.
     """
     if csr_arrays is not None:
         data, indices, indptr = csr_arrays
@@ -74,19 +84,33 @@ def _extract_dense_block(
             row_ids = cp.arange(n_target, dtype=cp.int32)
         n_target = row_ids.shape[0]
         n_cols = stop - start
-        out = cp.zeros((n_target, n_cols), dtype=cp.float64, order="F")
+        out = cp.zeros((n_target, n_cols), dtype=data.dtype, order="F")
         if n_target > 0 and n_cols > 0:
-            _wc.csr_extract_dense(
-                data,
-                indices,
-                indptr,
-                row_ids,
-                out,
-                n_target=n_target,
-                col_start=start,
-                col_stop=stop,
-                stream=cp.cuda.get_current_stream().ptr,
-            )
+            stream = cp.cuda.get_current_stream().ptr
+            if data.dtype == cp.float32:
+                _wc.csr_extract_dense_f32(
+                    data,
+                    indices,
+                    indptr,
+                    row_ids,
+                    out,
+                    n_target=n_target,
+                    col_start=start,
+                    col_stop=stop,
+                    stream=stream,
+                )
+            else:
+                _wc.csr_extract_dense(
+                    data,
+                    indices,
+                    indptr,
+                    row_ids,
+                    out,
+                    n_target=n_target,
+                    col_start=start,
+                    col_stop=stop,
+                    stream=stream,
+                )
         return out
 
     if isinstance(X, np.ndarray):
@@ -175,8 +199,11 @@ def wilcoxon(
     n_cells, n_total_genes = X.shape
     group_sizes = rg.group_sizes
 
+    # Stats via Aggregate for both OVR and OVO — decoupled from sort.
+    # Aggregate reads original dtype for precision, accumulates in float64.
+    rg._basic_stats()
+
     if rg.ireference is not None:
-        rg._init_stats_arrays(n_total_genes)
         return _wilcoxon_with_reference(
             rg,
             X,
@@ -186,7 +213,6 @@ def wilcoxon(
             use_continuity=use_continuity,
             chunk_size=chunk_size,
         )
-    rg._basic_stats()
     return _wilcoxon_vs_rest(
         rg,
         X,
@@ -220,7 +246,7 @@ def _wilcoxon_vs_rest(
     Dispatches to CSR, CSC, or dense streaming kernel based on input format.
     No unnecessary format conversions.
     """
-    from rapids_singlecell._cuda import _wilcoxon_streaming_cuda as _ws
+    from rapids_singlecell._cuda import _wilcoxon_ovr_cuda as _ovr
 
     n_groups = len(rg.groups_order)
 
@@ -259,7 +285,7 @@ def _wilcoxon_vs_rest(
         tie_corr_np = np.ones(n_total_genes, dtype=np.float64)
 
         if host_csc:
-            _ws.ovr_streaming_csc_host(
+            _ovr.ovr_streaming_csc_host(
                 X.data.astype(np.float32, copy=False),
                 X.indices.astype(np.int32, copy=False),
                 X.indptr.astype(np.int32, copy=False),
@@ -273,7 +299,7 @@ def _wilcoxon_vs_rest(
                 sub_batch_cols=STREAMING_SUB_BATCH,
             )
         else:
-            _ws.ovr_streaming_dense_host(
+            _ovr.ovr_streaming_dense_host(
                 np.asfortranarray(X.astype(np.float32, copy=False)),
                 group_codes,
                 rank_sums_np,
@@ -301,7 +327,7 @@ def _wilcoxon_vs_rest(
         tie_corr = cp.ones(n_total_genes, dtype=cp.float64)
 
         if cpsp.isspmatrix_csr(X_gpu):
-            _ws.ovr_streaming_csr(
+            _ovr.ovr_streaming_csr(
                 X_gpu.data.astype(cp.float32, copy=False),
                 X_gpu.indices.astype(cp.int32, copy=False),
                 X_gpu.indptr.astype(cp.int32, copy=False),
@@ -315,7 +341,7 @@ def _wilcoxon_vs_rest(
                 sub_batch_cols=STREAMING_SUB_BATCH,
             )
         elif cpsp.isspmatrix_csc(X_gpu):
-            _ws.ovr_streaming_csc(
+            _ovr.ovr_streaming_csc(
                 X_gpu.data.astype(cp.float32, copy=False),
                 X_gpu.indices.astype(cp.int32, copy=False),
                 X_gpu.indptr.astype(cp.int32, copy=False),
@@ -330,7 +356,7 @@ def _wilcoxon_vs_rest(
             )
         else:
             dense_f32 = cp.asfortranarray(X_gpu.astype(cp.float32, copy=False))
-            _ws.ovr_streaming(
+            _ovr.ovr_streaming(
                 dense_f32,
                 group_codes_gpu,
                 rank_sums,
@@ -380,7 +406,6 @@ def _wilcoxon_with_reference(
     All test groups are processed in a single batched streaming kernel,
     eliminating per-group kernel launch overhead.
     """
-    from rapids_singlecell._cuda import _wilcoxon_streaming_cuda as _ws
 
     n_cells = X.shape[0]
     n_groups = len(rg.groups_order)
@@ -389,8 +414,6 @@ def _wilcoxon_with_reference(
     codes = rg.group_codes
 
     # ---- build row-index arrays ----
-    ref_row_ids = cp.asarray(np.where(codes == ireference)[0], dtype=cp.int32)
-
     test_group_indices: list[int] = []
     all_grp_rows: list[np.ndarray] = []
     offsets = [0]
@@ -402,22 +425,11 @@ def _wilcoxon_with_reference(
         all_grp_rows.append(rows)
         offsets.append(offsets[-1] + len(rows))
 
-    all_grp_row_ids = cp.asarray(np.concatenate(all_grp_rows), dtype=cp.int32)
+    all_grp_row_ids_np = np.concatenate(all_grp_rows)
     grp_offsets_gpu = cp.asarray(offsets, dtype=cp.int32)
     n_test = len(test_group_indices)
-
-    # ---- move data to GPU ----
-    X_gpu = _to_gpu_native(X, n_cells, n_total_genes)
-
-    # For row extraction, CSR kernel is optimal.  Dense uses cupy indexing.
-    csr_arrays = None
-    if cpsp.issparse(X_gpu):
-        csr_gpu = X_gpu.tocsr() if not cpsp.isspmatrix_csr(X_gpu) else X_gpu
-        csr_arrays = (
-            csr_gpu.data.astype(cp.float64, copy=False),
-            csr_gpu.indices.astype(cp.int32, copy=False),
-            csr_gpu.indptr.astype(cp.int32, copy=False),
-        )
+    n_all_grp = len(all_grp_row_ids_np)
+    ref_row_ids_np = np.where(codes == ireference)[0]
 
     # ---- warn for small groups ----
     for gi in test_group_indices:
@@ -435,52 +447,164 @@ def _wilcoxon_with_reference(
         [group_sizes[gi] for gi in test_group_indices], dtype=cp.float64
     )
 
-    # ---- extract ref + grp blocks (one-shot, all genes) ----
-    ref_block = _extract_dense_block(
-        X_gpu, ref_row_ids, 0, n_total_genes, csr_arrays=csr_arrays
-    )
-    grp_block = _extract_dense_block(
-        X_gpu, all_grp_row_ids, 0, n_total_genes, csr_arrays=csr_arrays
-    )
-    n_all_grp = grp_block.shape[0]
+    # ---- build row maps (numpy, for both host and GPU CSC paths) ----
+    ref_row_map_np = np.full(n_cells, -1, dtype=np.int32)
+    ref_row_map_np[ref_row_ids_np] = np.arange(n_ref, dtype=np.int32)
+    grp_row_map_np = np.full(n_cells, -1, dtype=np.int32)
+    grp_row_map_np[all_grp_row_ids_np] = np.arange(n_all_grp, dtype=np.int32)
+    offsets_np = np.asarray(offsets, dtype=np.int32)
 
-    # ---- stats via fused kernel ----
-    _compute_grouped_stats(
-        rg,
-        ireference,
-        ref_block,
-        n_ref,
-        test_group_indices=test_group_indices,
-        grp_block=grp_block,
-        grp_offsets_gpu=grp_offsets_gpu,
-        n_test=n_test,
-        n_cols=n_total_genes,
-        start=0,
-        stop=n_total_genes,
-    )
+    # ---- host-streaming paths: skip bulk transfer ----
+    host_sparse = isinstance(X, sp.spmatrix | sp.sparray)
+    host_dense = isinstance(X, np.ndarray)
+    if host_sparse or host_dense:
+        if rg._compute_stats_in_chunks:
+            X_gpu_tmp = _to_gpu_native(X, n_cells, n_total_genes)
+            rg.X = X_gpu_tmp
+            rg._compute_stats_in_chunks = False
+            rg._basic_stats()
+            del X_gpu_tmp
 
-    # ---- sort reference once ----
-    ref_sorted = _segmented_sort_columns(
-        ref_block, np.array([0, n_ref], dtype=np.int32), n_ref, n_total_genes, 1
-    )
+        rank_sums_np = np.empty((n_test, n_total_genes), dtype=np.float64)
+        tie_corr_np = np.ones((n_test, n_total_genes), dtype=np.float64)
 
-    # ---- streaming OVO: sort groups + binary search rank sums ----
-    grp_f32 = cp.asfortranarray(grp_block.astype(cp.float32))
-    rank_sums = cp.empty((n_test, n_total_genes), dtype=cp.float64)
-    tie_corr_arr = cp.empty((n_test, n_total_genes), dtype=cp.float64)
+        if host_sparse and X.format == "csc":
+            _wc.ovo_streaming_csc_host(
+                X.data.astype(np.float32, copy=False),
+                X.indices.astype(np.int32, copy=False),
+                X.indptr.astype(np.int32, copy=False),
+                ref_row_map_np,
+                grp_row_map_np,
+                offsets_np,
+                rank_sums_np,
+                tie_corr_np,
+                n_ref=n_ref,
+                n_all_grp=n_all_grp,
+                n_rows=n_cells,
+                n_cols=n_total_genes,
+                n_groups=n_test,
+                compute_tie_corr=tie_correct,
+                sub_batch_cols=STREAMING_SUB_BATCH,
+            )
+        elif host_sparse:
+            csr = X.tocsr() if X.format != "csr" else X
+            _wc.ovo_streaming_csr_host(
+                csr.data.astype(np.float32, copy=False),
+                csr.indices.astype(np.int32, copy=False),
+                csr.indptr.astype(np.int32, copy=False),
+                ref_row_ids_np.astype(np.int32, copy=False),
+                all_grp_row_ids_np.astype(np.int32, copy=False),
+                offsets_np,
+                rank_sums_np,
+                tie_corr_np,
+                n_ref=n_ref,
+                n_all_grp=n_all_grp,
+                n_rows=n_cells,
+                n_cols=n_total_genes,
+                n_groups=n_test,
+                nnz=csr.nnz,
+                compute_tie_corr=tie_correct,
+                sub_batch_cols=STREAMING_SUB_BATCH,
+            )
+        else:
+            _wc.ovo_streaming_dense_host(
+                np.asfortranarray(X.astype(np.float32, copy=False)),
+                ref_row_ids_np.astype(np.int32, copy=False),
+                all_grp_row_ids_np.astype(np.int32, copy=False),
+                offsets_np,
+                rank_sums_np,
+                tie_corr_np,
+                n_ref=n_ref,
+                n_all_grp=n_all_grp,
+                n_rows=n_cells,
+                n_cols=n_total_genes,
+                n_groups=n_test,
+                compute_tie_corr=tie_correct,
+                sub_batch_cols=STREAMING_SUB_BATCH,
+            )
 
-    _ws.ovo_streaming(
-        ref_sorted,
-        grp_f32,
-        grp_offsets_gpu,
-        rank_sums,
-        tie_corr_arr,
-        n_ref=n_ref,
-        n_all_grp=n_all_grp,
-        n_cols=n_total_genes,
-        n_groups=n_test,
-        compute_tie_corr=tie_correct,
-    )
+        rank_sums = cp.asarray(rank_sums_np)
+        tie_corr_arr = cp.asarray(tie_corr_np)
+
+    else:
+        # ---- GPU path: transfer once, then dispatch ----
+        X_gpu = _to_gpu_native(X, n_cells, n_total_genes)
+
+        if rg._compute_stats_in_chunks:
+            rg.X = X_gpu
+            rg._compute_stats_in_chunks = False
+            rg._basic_stats()
+
+        ref_row_ids_gpu = cp.asarray(ref_row_ids_np, dtype=cp.int32)
+        all_grp_row_ids_gpu = cp.asarray(all_grp_row_ids_np, dtype=cp.int32)
+
+        rank_sums = cp.empty((n_test, n_total_genes), dtype=cp.float64)
+        tie_corr_arr = cp.empty((n_test, n_total_genes), dtype=cp.float64)
+
+        if cpsp.isspmatrix_csc(X_gpu):
+            ref_row_map = cp.asarray(ref_row_map_np)
+            grp_row_map = cp.asarray(grp_row_map_np)
+            _wc.ovo_streaming_csc(
+                X_gpu.data.astype(cp.float32, copy=False),
+                X_gpu.indices.astype(cp.int32, copy=False),
+                X_gpu.indptr.astype(cp.int32, copy=False),
+                ref_row_map,
+                grp_row_map,
+                grp_offsets_gpu,
+                rank_sums,
+                tie_corr_arr,
+                n_ref=n_ref,
+                n_all_grp=n_all_grp,
+                n_cols=n_total_genes,
+                n_groups=n_test,
+                compute_tie_corr=tie_correct,
+                sub_batch_cols=STREAMING_SUB_BATCH,
+            )
+        elif cpsp.issparse(X_gpu):
+            # CSR-native: extract ref/grp rows directly
+            csr_gpu = X_gpu.tocsr() if not cpsp.isspmatrix_csr(X_gpu) else X_gpu
+            _wc.ovo_streaming_csr(
+                csr_gpu.data.astype(cp.float32, copy=False),
+                csr_gpu.indices.astype(cp.int32, copy=False),
+                csr_gpu.indptr.astype(cp.int32, copy=False),
+                ref_row_ids_gpu,
+                all_grp_row_ids_gpu,
+                grp_offsets_gpu,
+                rank_sums,
+                tie_corr_arr,
+                n_ref=n_ref,
+                n_all_grp=n_all_grp,
+                n_cols=n_total_genes,
+                n_groups=n_test,
+                compute_tie_corr=tie_correct,
+                sub_batch_cols=STREAMING_SUB_BATCH,
+            )
+        else:
+            # Dense: extract blocks, sort, stream
+            ref_block = _extract_dense_block(X_gpu, ref_row_ids_gpu, 0, n_total_genes)
+            grp_block = _extract_dense_block(
+                X_gpu, all_grp_row_ids_gpu, 0, n_total_genes
+            )
+            ref_sorted = _segmented_sort_columns(
+                ref_block,
+                np.array([0, n_ref], dtype=np.int32),
+                n_ref,
+                n_total_genes,
+                1,
+            )
+            grp_f32 = cp.asfortranarray(grp_block.astype(cp.float32, copy=False))
+            _wc.ovo_streaming(
+                ref_sorted,
+                grp_f32,
+                grp_offsets_gpu,
+                rank_sums,
+                tie_corr_arr,
+                n_ref=n_ref,
+                n_all_grp=n_all_grp,
+                n_cols=n_total_genes,
+                n_groups=n_test,
+                compute_tie_corr=tie_correct,
+            )
 
     # ---- z-scores & p-values (vectorised) ----
     n_combined = test_sizes + n_ref
@@ -502,83 +626,3 @@ def _wilcoxon_with_reference(
     all_p = p_values.get()
 
     return [(gi, all_z[ti], all_p[ti]) for ti, gi in enumerate(test_group_indices)]
-
-
-def _compute_grouped_stats(
-    rg: _RankGenes,
-    ireference: int,
-    ref_block: cp.ndarray,
-    n_ref: int,
-    *,
-    test_group_indices: list[int],
-    grp_block: cp.ndarray,
-    grp_offsets_gpu: cp.ndarray,
-    n_test: int,
-    n_cols: int,
-    start: int,
-    stop: int,
-) -> None:
-    """Compute mean/var/pts for ref + all test groups via fused C++ kernel."""
-    s = slice(start, stop)
-    stream = cp.cuda.get_current_stream().ptr
-
-    # Reference stats (single "group")
-    ref_offsets = cp.array([0, n_ref], dtype=cp.int32)
-    ref_sums = cp.empty((1, n_cols), dtype=cp.float64)
-    ref_sq = cp.empty((1, n_cols), dtype=cp.float64)
-    ref_nnz = cp.empty((1, n_cols), dtype=cp.float64)
-    _wc.grouped_stats(
-        ref_block,
-        ref_offsets,
-        ref_sums,
-        ref_sq,
-        ref_nnz,
-        n_all_rows=n_ref,
-        n_cols=n_cols,
-        n_groups=1,
-        compute_nnz=rg.comp_pts,
-        stream=stream,
-    )
-
-    rg.means[ireference, s] = cp.asnumpy(ref_sums[0] / n_ref)
-    if n_ref > 1:
-        var = (ref_sq[0] - ref_sums[0] ** 2 / n_ref) / (n_ref - 1)
-        rg.vars[ireference, s] = cp.asnumpy(cp.maximum(var, 0))
-    if rg.comp_pts:
-        rg.pts[ireference, s] = cp.asnumpy(ref_nnz[0] / n_ref)
-
-    # All test groups in one kernel launch
-    n_all_grp = grp_block.shape[0]
-    grp_sums = cp.empty((n_test, n_cols), dtype=cp.float64)
-    grp_sq = cp.empty((n_test, n_cols), dtype=cp.float64)
-    grp_nnz = cp.empty((n_test, n_cols), dtype=cp.float64)
-    _wc.grouped_stats(
-        grp_block,
-        grp_offsets_gpu,
-        grp_sums,
-        grp_sq,
-        grp_nnz,
-        n_all_rows=n_all_grp,
-        n_cols=n_cols,
-        n_groups=n_test,
-        compute_nnz=rg.comp_pts,
-        stream=stream,
-    )
-
-    # Vectorised mean/var computation on GPU, single D2H transfer
-    sizes = cp.asarray(
-        [rg.group_sizes[gi] for gi in test_group_indices], dtype=cp.float64
-    )[:, None]
-    means = grp_sums / sizes
-    vars_ = cp.maximum((grp_sq - grp_sums**2 / sizes) / cp.maximum(sizes - 1, 1), 0)
-
-    means_host = cp.asnumpy(means)
-    vars_host = cp.asnumpy(vars_)
-    for ti, gi in enumerate(test_group_indices):
-        rg.means[gi, s] = means_host[ti]
-        rg.vars[gi, s] = vars_host[ti]
-
-    if rg.comp_pts:
-        pts_host = cp.asnumpy(grp_nnz / sizes)
-        for ti, gi in enumerate(test_group_indices):
-            rg.pts[gi, s] = pts_host[ti]
