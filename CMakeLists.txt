@@ -16,33 +16,40 @@ if (RSC_BUILD_EXTENSIONS)
   find_package(CUDAToolkit REQUIRED)
 
   # Find librmm cmake config.
-  # Works with conda, pixi, uv, venv — uses env root to find site-packages.
-  # Priority: LIBRMM_DIR env var > CONDA_PREFIX > VIRTUAL_ENV > Python prefix.
+  # Searches all plausible locations: env vars, Python prefix, base_prefix
+  # (survives build isolation), and CI marker files.  Works with conda, pip,
+  # pixi, uv, hatch, and cibuildwheel.
   set(_env_roots "")
+  # Explicit override
   if(DEFINED ENV{LIBRMM_DIR})
     list(APPEND _env_roots "$ENV{LIBRMM_DIR}/..")
   endif()
+  # Environment managers
   foreach(_var CONDA_PREFIX VIRTUAL_ENV PIXI_PROJECT_ROOT)
     if(DEFINED ENV{${_var}})
       list(APPEND _env_roots "$ENV{${_var}}")
     endif()
   endforeach()
-  # Fallback: Python prefix (works for any env manager)
-  execute_process(
-    COMMAND "${Python_EXECUTABLE}" -c "import sys; print(sys.prefix)"
-    OUTPUT_VARIABLE _py_prefix OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-  if(_py_prefix)
-    list(APPEND _env_roots "${_py_prefix}")
-  endif()
+  # Python prefix + base_prefix (base_prefix survives build isolation —
+  # it points to the outer env even when pip/uv creates a temp venv)
+  foreach(_attr prefix base_prefix)
+    execute_process(
+      COMMAND "${Python_EXECUTABLE}" -c "import sys; print(sys.${_attr})"
+      OUTPUT_VARIABLE _pp OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(_pp)
+      list(APPEND _env_roots "${_pp}")
+    endif()
+  endforeach()
   # CI/cibuildwheel: CIBW_BEFORE_BUILD writes the librmm path to a marker file
   if(EXISTS "/tmp/.librmm_dir")
     file(READ "/tmp/.librmm_dir" _rmm_marker)
     string(STRIP "${_rmm_marker}" _rmm_marker)
-    # Marker contains e.g. /opt/.../site-packages/librmm — find cmake dir + deps
     file(GLOB _marker_hints "${_rmm_marker}/lib*/cmake"
                             "${_rmm_marker}/../rapids_logger/lib*/cmake")
     list(APPEND CMAKE_PREFIX_PATH ${_marker_hints})
   endif()
+  # Search each root for rmm + rapids_logger cmake configs
+  list(REMOVE_DUPLICATES _env_roots)
   foreach(_root ${_env_roots})
     file(GLOB _hints "${_root}/lib/cmake/rmm"
                      "${_root}/lib/python*/site-packages/librmm/lib*/cmake/rmm"
