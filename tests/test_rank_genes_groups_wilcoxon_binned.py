@@ -524,3 +524,220 @@ def test_top_genes_match_scipy(adata_blobs):
         scipy_top = set(adata_blobs.var_names[np.argsort(pvals)[:n_top]])
         overlap = len(binned_top & scipy_top)
         assert overlap >= n_top - 1, f"Group {group}: {overlap}/{n_top} overlap"
+
+
+# ============================================================================
+# tie_correct and use_continuity coverage
+# ============================================================================
+
+
+class TestWilcoxonBinnedCorrections:
+    """Tests for tie_correct and use_continuity branches."""
+
+    def test_tie_correct_changes_scores(self, adata_blobs):
+        """tie_correct=True should produce different scores than False on tied data."""
+        # Create data with heavy ties (integer counts)
+        rng = np.random.default_rng(42)
+        adata = adata_blobs.copy()
+        adata.X = rng.poisson(lam=3.0, size=adata.X.shape).astype(np.float32)
+        rsc.get.anndata_to_GPU(adata)
+        adata_tc = adata.copy()
+
+        rsc.tl.rank_genes_groups(
+            adata,
+            "blobs",
+            method="wilcoxon_binned",
+            use_raw=False,
+            tie_correct=False,
+        )
+        rsc.tl.rank_genes_groups(
+            adata_tc,
+            "blobs",
+            method="wilcoxon_binned",
+            use_raw=False,
+            tie_correct=True,
+        )
+
+        # Scores should differ (tie correction adjusts variance)
+        for group in adata.uns["rank_genes_groups"]["scores"].dtype.names:
+            scores_no = np.asarray(
+                adata.uns["rank_genes_groups"]["scores"][group], dtype=float
+            )
+            scores_tc = np.asarray(
+                adata_tc.uns["rank_genes_groups"]["scores"][group], dtype=float
+            )
+            assert not np.allclose(scores_no, scores_tc, rtol=1e-10), (
+                f"Group {group}: tie_correct had no effect on scores"
+            )
+
+    def test_use_continuity_changes_scores(self, adata_blobs):
+        """use_continuity=True should produce different scores than False."""
+        adata = adata_blobs.copy()
+        rsc.get.anndata_to_GPU(adata)
+        adata_cont = adata.copy()
+
+        rsc.tl.rank_genes_groups(
+            adata,
+            "blobs",
+            method="wilcoxon_binned",
+            use_raw=False,
+            use_continuity=False,
+        )
+        rsc.tl.rank_genes_groups(
+            adata_cont,
+            "blobs",
+            method="wilcoxon_binned",
+            use_raw=False,
+            use_continuity=True,
+        )
+
+        for group in adata.uns["rank_genes_groups"]["scores"].dtype.names:
+            scores_no = np.asarray(
+                adata.uns["rank_genes_groups"]["scores"][group], dtype=float
+            )
+            scores_cont = np.asarray(
+                adata_cont.uns["rank_genes_groups"]["scores"][group], dtype=float
+            )
+            assert not np.allclose(scores_no, scores_cont, rtol=1e-10), (
+                f"Group {group}: use_continuity had no effect on scores"
+            )
+
+    @pytest.mark.parametrize("reference", ["rest", "1"])
+    def test_tie_correct_with_reference(self, adata_blobs, reference):
+        """tie_correct works for both OVR and OVO in binned wilcoxon."""
+        adata = adata_blobs.copy()
+        rsc.get.anndata_to_GPU(adata)
+
+        rsc.tl.rank_genes_groups(
+            adata,
+            "blobs",
+            method="wilcoxon_binned",
+            use_raw=False,
+            reference=reference,
+            tie_correct=True,
+        )
+
+        result = adata.uns["rank_genes_groups"]
+        for group in result["pvals"].dtype.names:
+            pvals = np.asarray(result["pvals"][group], dtype=float)
+            assert np.all(pvals >= 0)
+            assert np.all(pvals <= 1)
+            assert np.all(np.isfinite(pvals))
+
+    @pytest.mark.parametrize("reference", ["rest", "1"])
+    def test_use_continuity_with_reference(self, adata_blobs, reference):
+        """use_continuity works for both OVR and OVO in binned wilcoxon."""
+        adata = adata_blobs.copy()
+        rsc.get.anndata_to_GPU(adata)
+
+        rsc.tl.rank_genes_groups(
+            adata,
+            "blobs",
+            method="wilcoxon_binned",
+            use_raw=False,
+            reference=reference,
+            use_continuity=True,
+        )
+
+        result = adata.uns["rank_genes_groups"]
+        for group in result["pvals"].dtype.names:
+            pvals = np.asarray(result["pvals"][group], dtype=float)
+            assert np.all(pvals >= 0)
+            assert np.all(pvals <= 1)
+            assert np.all(np.isfinite(pvals))
+
+    def test_both_corrections_combined(self, adata_blobs):
+        """tie_correct=True + use_continuity=True together."""
+        adata = adata_blobs.copy()
+        rsc.get.anndata_to_GPU(adata)
+
+        rsc.tl.rank_genes_groups(
+            adata,
+            "blobs",
+            method="wilcoxon_binned",
+            use_raw=False,
+            tie_correct=True,
+            use_continuity=True,
+        )
+
+        result = adata.uns["rank_genes_groups"]
+        for group in result["pvals"].dtype.names:
+            pvals = np.asarray(result["pvals"][group], dtype=float)
+            assert np.all(pvals >= 0)
+            assert np.all(pvals <= 1)
+
+    def test_both_corrections_with_reference(self, adata_blobs):
+        """tie_correct + use_continuity with reference mode."""
+        adata = adata_blobs.copy()
+        rsc.get.anndata_to_GPU(adata)
+
+        rsc.tl.rank_genes_groups(
+            adata,
+            "blobs",
+            method="wilcoxon_binned",
+            use_raw=False,
+            reference="1",
+            tie_correct=True,
+            use_continuity=True,
+        )
+
+        result = adata.uns["rank_genes_groups"]
+        assert "1" not in result["names"].dtype.names
+        for group in result["pvals"].dtype.names:
+            pvals = np.asarray(result["pvals"][group], dtype=float)
+            assert np.all(pvals >= 0)
+            assert np.all(pvals <= 1)
+
+
+# ============================================================================
+# pts (percent expressing) for binned wilcoxon
+# ============================================================================
+
+
+@pytest.mark.parametrize("reference", ["rest", "1"])
+def test_binned_pts(adata_blobs, reference):
+    """pts computation works with wilcoxon_binned."""
+    adata = adata_blobs.copy()
+    rsc.get.anndata_to_GPU(adata)
+
+    rsc.tl.rank_genes_groups(
+        adata,
+        "blobs",
+        method="wilcoxon_binned",
+        use_raw=False,
+        pts=True,
+        reference=reference,
+    )
+
+    result = adata.uns["rank_genes_groups"]
+    assert "pts" in result
+    pts = result["pts"]
+    assert isinstance(pts, __import__("pandas").DataFrame)
+    assert all(0 <= v <= 1 for col in pts.columns for v in pts[col])
+
+    if reference == "rest":
+        assert "pts_rest" in result
+
+
+# ============================================================================
+# mask_var with string key for binned
+# ============================================================================
+
+
+def test_binned_mask_var_string_key(adata_blobs):
+    """mask_var accepts a string key from adata.var for binned."""
+    adata = adata_blobs.copy()
+    adata.var["selected"] = [True] * 5 + [False] * 5
+    rsc.get.anndata_to_GPU(adata)
+
+    rsc.tl.rank_genes_groups(
+        adata,
+        "blobs",
+        method="wilcoxon_binned",
+        use_raw=False,
+        mask_var="selected",
+    )
+
+    result = adata.uns["rank_genes_groups"]
+    for group in result["names"].dtype.names:
+        assert len(result["names"][group]) == 5
