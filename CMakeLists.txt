@@ -30,8 +30,7 @@ if (RSC_BUILD_EXTENSIONS)
       list(APPEND _env_roots "$ENV{${_var}}")
     endif()
   endforeach()
-  # Python prefix + base_prefix (base_prefix survives build isolation —
-  # it points to the outer env even when pip/uv creates a temp venv)
+  # Python prefix, base_prefix, and real executable's env root
   foreach(_attr prefix base_prefix)
     execute_process(
       COMMAND "${Python_EXECUTABLE}" -c "import sys; print(sys.${_attr})"
@@ -40,6 +39,30 @@ if (RSC_BUILD_EXTENSIONS)
       list(APPEND _env_roots "${_pp}")
     endif()
   endforeach()
+  # Resolve symlinks to find the real Python env (works through build isolation)
+  execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c
+      "import sys,pathlib; print(pathlib.Path(sys.executable).resolve().parents[1])"
+    OUTPUT_VARIABLE _real_prefix OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  if(_real_prefix)
+    list(APPEND _env_roots "${_real_prefix}")
+  endif()
+  # Direct site-packages search — the most reliable way to find pip-installed
+  # librmm regardless of venv nesting depth
+  execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c
+      "import site; print(';'.join(site.getsitepackages()))"
+    OUTPUT_VARIABLE _site_paths OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  if(_site_paths)
+    foreach(_sp ${_site_paths})
+      file(GLOB _sp_hints "${_sp}/librmm/lib*/cmake"
+                          "${_sp}/rapids_logger/lib*/cmake")
+      foreach(_h ${_sp_hints})
+        get_filename_component(_dir "${_h}" DIRECTORY)
+        list(APPEND CMAKE_PREFIX_PATH "${_dir}")
+      endforeach()
+    endforeach()
+  endif()
   # CI/cibuildwheel: CIBW_BEFORE_BUILD writes the librmm path to a marker file
   if(EXISTS "/tmp/.librmm_dir")
     file(READ "/tmp/.librmm_dir" _rmm_marker)

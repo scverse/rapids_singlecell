@@ -197,3 +197,10 @@ source = [ "./src", "**/site-packages" ]
 exclude_also = [
     "if TYPE_CHECKING:",
 ]
+
+[tool.uv]
+# librmm headers are needed at build time for the wilcoxon CUDA kernels.
+# The headers are identical across cu12/cu13 — only the .so differs (loaded
+# at runtime via librmm.load_library()).  cu12 is used here as the build-time
+# provider; cu13 envs get the same headers.
+extra-build-dependencies = [ "librmm-cu12>=25.10" ]
