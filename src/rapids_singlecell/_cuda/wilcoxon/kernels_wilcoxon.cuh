@@ -152,8 +152,11 @@ __global__ void rank_sums_from_sorted_kernel(
     }
 
     if (compute_tie_corr) {
-        // Warp buf always in shared memory (32 doubles — always fits)
-        double* warp_buf = use_gmem ? smem : smem + n_groups;
+        // Warp buf sits after all accumulator arrays in shared memory.
+        // gmem path: accumulators are in global mem, warp buf starts at
+        // smem[0]. smem path: 4 arrays of n_groups doubles, then warp buf.
+        int warp_buf_off = use_gmem ? 0 : (compute_stats ? 4 : 1) * n_groups;
+        double* warp_buf = smem + warp_buf_off;
 #pragma unroll
         for (int off = 16; off > 0; off >>= 1)
             local_tie_sum += __shfl_down_sync(0xffffffff, local_tie_sum, off);

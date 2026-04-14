@@ -203,6 +203,8 @@ exclude_also = [
 # The headers are identical across cu12/cu13 — only the .so differs (loaded
 # at runtime via librmm.load_library()).  cu12 is used here as the build-time
 # provider; cu13 envs get the same headers.
+# NOTE: This is uv-specific.  pip users building from source need:
+#   pip install librmm-cu12 && pip install --no-build-isolation -e .
 
 [tool.uv.extra-build-dependencies]
 rapids-singlecell = [ "librmm-cu12>=25.10" ]
