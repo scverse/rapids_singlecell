@@ -164,7 +164,8 @@ def _segmented_sort_columns(
     temp_bytes = _wc.get_seg_sort_temp_bytes(n_items=n_items, n_segments=n_segments)
     cub_temp = cp.empty(temp_bytes, dtype=cp.uint8)
 
-    keys_in = cp.ascontiguousarray(data.astype(cp.float32).ravel(order="F"))
+    # data is F-order; ravel("F") gives a flat C-contiguous view (no copy)
+    keys_in = data.astype(cp.float32, copy=False).ravel(order="F")
     keys_out = cp.empty_like(keys_in)
 
     _wc.segmented_sort(
@@ -424,6 +425,9 @@ def _wilcoxon_with_reference(
         test_group_indices.append(gi)
         all_grp_rows.append(rows)
         offsets.append(offsets[-1] + len(rows))
+
+    if not test_group_indices:
+        return []
 
     all_grp_row_ids_np = np.concatenate(all_grp_rows)
     grp_offsets_gpu = cp.asarray(offsets, dtype=cp.int32)

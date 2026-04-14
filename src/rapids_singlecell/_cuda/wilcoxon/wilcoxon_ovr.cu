@@ -10,6 +10,28 @@
 using namespace nb::literals;
 
 /**
+ * Decide whether to use shared or global memory for OVR rank accumulators.
+ * Returns the smem size to request and sets use_gmem accordingly.
+ */
+static size_t ovr_smem_config(int n_groups, bool& use_gmem) {
+    size_t need = (size_t)(4 * n_groups + 32) * sizeof(double);
+    static int max_smem = -1;
+    if (max_smem < 0) {
+        int device;
+        cudaGetDevice(&device);
+        cudaDeviceGetAttribute(&max_smem, cudaDevAttrMaxSharedMemoryPerBlock,
+                               device);
+    }
+    if ((int)need <= max_smem) {
+        use_gmem = false;
+        return need;
+    }
+    // Fall back to global memory accumulators; only need warp buf in smem
+    use_gmem = true;
+    return 32 * sizeof(double);
+}
+
+/**
  * Extract dense F-order float32 block from CSC.
  * Column range [col_start, col_stop).
  * One block per column, threads scatter nonzeros.
@@ -120,7 +142,8 @@ static void ovr_streaming_impl(const float* block, const int* group_codes,
     }
 
     int tpb_rank = round_up_to_warp(n_rows);
-    int smem_rank = (4 * n_groups + 32) * sizeof(double);
+    bool use_gmem = false;
+    size_t smem_rank = ovr_smem_config(n_groups, use_gmem);
 
     // Process sub-batches round-robin across streams
     int col = 0;
@@ -146,10 +169,15 @@ static void ovr_streaming_impl(const float* block, const int* group_codes,
             buf.seg_offsets + 1, BEGIN_BIT, END_BIT, stream);
 
         // Fused rank sums into sub-batch buffer
+        if (use_gmem) {
+            cudaMemsetAsync(buf.sub_rank_sums, 0,
+                            (size_t)n_groups * sb_cols * sizeof(double),
+                            stream);
+        }
         rank_sums_from_sorted_kernel<<<sb_cols, tpb_rank, smem_rank, stream>>>(
             buf.keys_out, buf.vals_out, group_codes, buf.sub_rank_sums,
             buf.sub_tie_corr, nullptr, nullptr, nullptr, n_rows, sb_cols,
-            n_groups, compute_tie_corr, false);
+            n_groups, compute_tie_corr, false, use_gmem);
 
         // Copy sub-batch results to global output (row-major scatter)
         // rank_sums is (n_groups, n_cols) row-major: group g, col c →
@@ -171,7 +199,11 @@ static void ovr_streaming_impl(const float* block, const int* group_codes,
 
     // Sync all streams
     for (int s = 0; s < n_streams; s++) {
-        cudaStreamSynchronize(streams[s]);
+        cudaError_t err = cudaStreamSynchronize(streams[s]);
+        if (err != cudaSuccess)
+            throw std::runtime_error(
+                std::string("CUDA error in wilcoxon streaming: ") +
+                cudaGetErrorString(err));
     }
 
     for (int s = 0; s < n_streams; s++) cudaStreamDestroy(streams[s]);
@@ -233,7 +265,8 @@ static void ovr_streaming_csr_impl(
     }
 
     int tpb_rank = round_up_to_warp(n_rows);
-    int smem_rank = (4 * n_groups + 32) * sizeof(double);
+    bool use_gmem = false;
+    size_t smem_rank = ovr_smem_config(n_groups, use_gmem);
 
     int col = 0;
     int batch_idx = 0;
@@ -264,10 +297,15 @@ static void ovr_streaming_csr_impl(
             buf.seg_offsets + 1, BEGIN_BIT, END_BIT, stream);
 
         // Fused rank sums
+        if (use_gmem) {
+            cudaMemsetAsync(buf.sub_rank_sums, 0,
+                            (size_t)n_groups * sb_cols * sizeof(double),
+                            stream);
+        }
         rank_sums_from_sorted_kernel<<<sb_cols, tpb_rank, smem_rank, stream>>>(
             buf.keys_out, buf.vals_out, group_codes, buf.sub_rank_sums,
             buf.sub_tie_corr, nullptr, nullptr, nullptr, n_rows, sb_cols,
-            n_groups, compute_tie_corr, false);
+            n_groups, compute_tie_corr, false, use_gmem);
 
         // Scatter to global output
         cudaMemcpy2DAsync(rank_sums + col, n_cols * sizeof(double),
@@ -284,7 +322,13 @@ static void ovr_streaming_csr_impl(
         batch_idx++;
     }
 
-    for (int s = 0; s < n_streams; s++) cudaStreamSynchronize(streams[s]);
+    for (int s = 0; s < n_streams; s++) {
+        cudaError_t err = cudaStreamSynchronize(streams[s]);
+        if (err != cudaSuccess)
+            throw std::runtime_error(
+                std::string("CUDA error in wilcoxon streaming: ") +
+                cudaGetErrorString(err));
+    }
 
     for (int s = 0; s < n_streams; s++) cudaStreamDestroy(streams[s]);
 }
@@ -345,7 +389,8 @@ static void ovr_streaming_csc_impl(
     }
 
     int tpb_rank = round_up_to_warp(n_rows);
-    int smem_rank = (4 * n_groups + 32) * sizeof(double);
+    bool use_gmem = false;
+    size_t smem_rank = ovr_smem_config(n_groups, use_gmem);
 
     int col = 0;
     int batch_idx = 0;
@@ -376,10 +421,15 @@ static void ovr_streaming_csc_impl(
             buf.seg_offsets + 1, BEGIN_BIT, END_BIT, stream);
 
         // Fused rank sums
+        if (use_gmem) {
+            cudaMemsetAsync(buf.sub_rank_sums, 0,
+                            (size_t)n_groups * sb_cols * sizeof(double),
+                            stream);
+        }
         rank_sums_from_sorted_kernel<<<sb_cols, tpb_rank, smem_rank, stream>>>(
             buf.keys_out, buf.vals_out, group_codes, buf.sub_rank_sums,
             buf.sub_tie_corr, nullptr, nullptr, nullptr, n_rows, sb_cols,
-            n_groups, compute_tie_corr, false);
+            n_groups, compute_tie_corr, false, use_gmem);
 
         // Scatter to global output
         cudaMemcpy2DAsync(rank_sums + col, n_cols * sizeof(double),
@@ -396,7 +446,13 @@ static void ovr_streaming_csc_impl(
         batch_idx++;
     }
 
-    for (int s = 0; s < n_streams; s++) cudaStreamSynchronize(streams[s]);
+    for (int s = 0; s < n_streams; s++) {
+        cudaError_t err = cudaStreamSynchronize(streams[s]);
+        if (err != cudaSuccess)
+            throw std::runtime_error(
+                std::string("CUDA error in wilcoxon streaming: ") +
+                cudaGetErrorString(err));
+    }
 
     for (int s = 0; s < n_streams; s++) cudaStreamDestroy(streams[s]);
 }
@@ -477,7 +533,8 @@ static void ovr_streaming_csc_host_impl(
                cudaMemcpyHostToDevice);
 
     int tpb_rank = round_up_to_warp(n_rows);
-    int smem_rank = (4 * n_groups + 32) * sizeof(double);
+    bool use_gmem = false;
+    size_t smem_rank = ovr_smem_config(n_groups, use_gmem);
 
     // Pin host memory for async transfers
     cudaHostRegister(const_cast<float*>(h_data),
@@ -538,10 +595,15 @@ static void ovr_streaming_csc_host_impl(
             buf.seg_offsets + 1, BEGIN_BIT, END_BIT, stream);
 
         // Fused rank sums
+        if (use_gmem) {
+            cudaMemsetAsync(buf.d_rank_sums, 0,
+                            (size_t)n_groups * sb_cols * sizeof(double),
+                            stream);
+        }
         rank_sums_from_sorted_kernel<<<sb_cols, tpb_rank, smem_rank, stream>>>(
             buf.keys_out, buf.vals_out, d_group_codes, buf.d_rank_sums,
             buf.d_tie_corr, nullptr, nullptr, nullptr, n_rows, sb_cols,
-            n_groups, compute_tie_corr, false);
+            n_groups, compute_tie_corr, false, use_gmem);
 
         // D2H: scatter results to host output
         cudaMemcpy2DAsync(h_rank_sums + col, n_cols * sizeof(double),
@@ -558,7 +620,13 @@ static void ovr_streaming_csc_host_impl(
         batch_idx++;
     }
 
-    for (int s = 0; s < n_streams; s++) cudaStreamSynchronize(streams[s]);
+    for (int s = 0; s < n_streams; s++) {
+        cudaError_t err = cudaStreamSynchronize(streams[s]);
+        if (err != cudaSuccess)
+            throw std::runtime_error(
+                std::string("CUDA error in wilcoxon streaming: ") +
+                cudaGetErrorString(err));
+    }
 
     cudaHostUnregister(const_cast<float*>(h_data));
     cudaHostUnregister(const_cast<int*>(h_indices));
@@ -628,7 +696,8 @@ static void ovr_streaming_dense_host_impl(
                cudaMemcpyHostToDevice);
 
     int tpb_rank = round_up_to_warp(n_rows);
-    int smem_rank = (4 * n_groups + 32) * sizeof(double);
+    bool use_gmem = false;
+    size_t smem_rank = ovr_smem_config(n_groups, use_gmem);
 
     // Pin host memory
     cudaHostRegister(const_cast<float*>(h_block),
@@ -664,10 +733,15 @@ static void ovr_streaming_dense_host_impl(
             buf.seg_offsets + 1, BEGIN_BIT, END_BIT, stream);
 
         // Fused rank sums
+        if (use_gmem) {
+            cudaMemsetAsync(buf.d_rank_sums, 0,
+                            (size_t)n_groups * sb_cols * sizeof(double),
+                            stream);
+        }
         rank_sums_from_sorted_kernel<<<sb_cols, tpb_rank, smem_rank, stream>>>(
             buf.keys_out, buf.vals_out, d_group_codes, buf.d_rank_sums,
             buf.d_tie_corr, nullptr, nullptr, nullptr, n_rows, sb_cols,
-            n_groups, compute_tie_corr, false);
+            n_groups, compute_tie_corr, false, use_gmem);
 
         // D2H: scatter results
         cudaMemcpy2DAsync(h_rank_sums + col, n_cols * sizeof(double),
@@ -684,7 +758,13 @@ static void ovr_streaming_dense_host_impl(
         batch_idx++;
     }
 
-    for (int s = 0; s < n_streams; s++) cudaStreamSynchronize(streams[s]);
+    for (int s = 0; s < n_streams; s++) {
+        cudaError_t err = cudaStreamSynchronize(streams[s]);
+        if (err != cudaSuccess)
+            throw std::runtime_error(
+                std::string("CUDA error in wilcoxon streaming: ") +
+                cudaGetErrorString(err));
+    }
 
     cudaHostUnregister(const_cast<float*>(h_block));
     cudaHostUnregister(h_rank_sums);

@@ -22,7 +22,9 @@ if (RSC_BUILD_EXTENSIONS)
   set(_env_roots "")
   # Explicit override
   if(DEFINED ENV{LIBRMM_DIR})
-    list(APPEND _env_roots "$ENV{LIBRMM_DIR}/..")
+    file(GLOB _librmm_hints "$ENV{LIBRMM_DIR}/lib*/cmake"
+                            "$ENV{LIBRMM_DIR}/../rapids_logger/lib*/cmake")
+    list(APPEND CMAKE_PREFIX_PATH ${_librmm_hints})
   endif()
   # Environment managers
   foreach(_var CONDA_PREFIX VIRTUAL_ENV PIXI_PROJECT_ROOT)

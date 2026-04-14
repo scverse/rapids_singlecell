@@ -181,7 +181,13 @@ static void ovo_streaming_impl(const float* ref_sorted, const float* grp_data,
         batch_idx++;
     }
 
-    for (int s = 0; s < n_streams; s++) cudaStreamSynchronize(streams[s]);
+    for (int s = 0; s < n_streams; s++) {
+        cudaError_t err = cudaStreamSynchronize(streams[s]);
+        if (err != cudaSuccess)
+            throw std::runtime_error(
+                std::string("CUDA error in wilcoxon streaming: ") +
+                cudaGetErrorString(err));
+    }
     for (int s = 0; s < n_streams; s++) cudaStreamDestroy(streams[s]);
 }
 
@@ -383,7 +389,13 @@ static void ovo_streaming_csr_impl(
         batch_idx++;
     }
 
-    for (int s = 0; s < n_streams; s++) cudaStreamSynchronize(streams[s]);
+    for (int s = 0; s < n_streams; s++) {
+        cudaError_t err = cudaStreamSynchronize(streams[s]);
+        if (err != cudaSuccess)
+            throw std::runtime_error(
+                std::string("CUDA error in wilcoxon streaming: ") +
+                cudaGetErrorString(err));
+    }
     for (int s = 0; s < n_streams; s++) cudaStreamDestroy(streams[s]);
 }
 
@@ -571,7 +583,13 @@ static void ovo_streaming_csc_impl(
         batch_idx++;
     }
 
-    for (int s = 0; s < n_streams; s++) cudaStreamSynchronize(streams[s]);
+    for (int s = 0; s < n_streams; s++) {
+        cudaError_t err = cudaStreamSynchronize(streams[s]);
+        if (err != cudaSuccess)
+            throw std::runtime_error(
+                std::string("CUDA error in wilcoxon streaming: ") +
+                cudaGetErrorString(err));
+    }
     for (int s = 0; s < n_streams; s++) cudaStreamDestroy(streams[s]);
 }
 
@@ -808,7 +826,13 @@ static void ovo_streaming_csc_host_impl(
         batch_idx++;
     }
 
-    for (int s = 0; s < n_streams; s++) cudaStreamSynchronize(streams[s]);
+    for (int s = 0; s < n_streams; s++) {
+        cudaError_t err = cudaStreamSynchronize(streams[s]);
+        if (err != cudaSuccess)
+            throw std::runtime_error(
+                std::string("CUDA error in wilcoxon streaming: ") +
+                cudaGetErrorString(err));
+    }
 
     cudaHostUnregister(const_cast<float*>(h_data));
     cudaHostUnregister(const_cast<int*>(h_indices));
@@ -1040,7 +1064,13 @@ static void ovo_streaming_csr_host_impl(
         batch_idx++;
     }
 
-    for (int s = 0; s < n_streams; s++) cudaStreamSynchronize(streams[s]);
+    for (int s = 0; s < n_streams; s++) {
+        cudaError_t err = cudaStreamSynchronize(streams[s]);
+        if (err != cudaSuccess)
+            throw std::runtime_error(
+                std::string("CUDA error in wilcoxon streaming: ") +
+                cudaGetErrorString(err));
+    }
 
     cudaHostUnregister(const_cast<float*>(h_data));
     cudaHostUnregister(const_cast<int*>(h_indices));
@@ -1272,7 +1302,13 @@ static void ovo_streaming_dense_host_impl(
         batch_idx++;
     }
 
-    for (int s = 0; s < n_streams; s++) cudaStreamSynchronize(streams[s]);
+    for (int s = 0; s < n_streams; s++) {
+        cudaError_t err = cudaStreamSynchronize(streams[s]);
+        if (err != cudaSuccess)
+            throw std::runtime_error(
+                std::string("CUDA error in wilcoxon streaming: ") +
+                cudaGetErrorString(err));
+    }
 
     cudaHostUnregister(const_cast<float*>(h_block));
     cudaHostUnregister(h_rank_sums);

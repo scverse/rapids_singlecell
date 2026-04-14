@@ -122,12 +122,12 @@ jobs:
             python -m pip install -U pip
             scikit-build-core cmake ninja nanobind
             librmm-cu${{ matrix.cuda_major }} &&
-            SITE=$(python -c "import sysconfig;print(sysconfig.get_path('purelib'))") &&
-            echo "[rsc-build] site-packages=$SITE" &&
-            echo "[rsc-build] librmm=$(ls $SITE/librmm/lib64/*.so 2>/dev/null)" &&
-            echo "[rsc-build] rapids_logger=$(ls $SITE/rapids_logger/lib64/*.so 2>/dev/null)" &&
-            ln -sf "$SITE/librmm/lib64/librmm.so" /usr/local/lib/librmm.so &&
-            ln -sf "$SITE/rapids_logger/lib64/librapids_logger.so" /usr/local/lib/librapids_logger.so &&
+            RMM_ROOT=$(python -c "import librmm;print(librmm.__path__[0])") &&
+            LOG_ROOT=$(python -c "import rapids_logger;print(rapids_logger.__path__[0])") &&
+            echo "[rsc-build] librmm=$RMM_ROOT" &&
+            echo "[rsc-build] rapids_logger=$LOG_ROOT" &&
+            ln -sf "$RMM_ROOT/lib64/librmm.so" /usr/local/lib/librmm.so &&
+            ln -sf "$LOG_ROOT/lib64/librapids_logger.so" /usr/local/lib/librapids_logger.so &&
             ldconfig &&
             python -c "import librmm;print(librmm.__path__[0])" > /tmp/.librmm_dir &&
             echo "[rsc-build] marker=$(cat /tmp/.librmm_dir)"
