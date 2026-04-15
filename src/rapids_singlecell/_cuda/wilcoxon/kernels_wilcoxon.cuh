@@ -179,3 +179,244 @@ __global__ void rank_sums_from_sorted_kernel(
         }
     }
 }
+
+/**
+ * Sparse-aware OVR rank-sum kernel for sorted stored values.
+ *
+ * After CUB sort the stored values are in ascending order:
+ *   [negatives..., stored_zeros..., positives...]
+ * Implicit zeros (n_rows − nnz_stored) are inserted analytically
+ * between negatives and positives to form the full ranking.
+ *
+ * Full sorted array (conceptual):
+ *   [negatives..., ALL_zeros (stored+implicit)..., positives...]
+ *   |<- neg_end ->|<------- total_zero -------->|
+ *
+ * Rank offsets:
+ *   negative at stored pos i : full pos = i              (no shift)
+ *   positive at stored pos i : full pos = i + n_impl_zero (shift right)
+ *   zeros                    : avg rank = neg_end + (total_zero+1)/2
+ *
+ * Shared-memory layout (doubles):
+ *   grp_sums[n_groups]      rank-sum accumulators
+ *   grp_nz_count[n_groups]  nonzero-per-group counters
+ *   warp_buf[32]            tie-correction reduction scratch
+ *
+ * Grid: (sb_cols,)   Block: (tpb,)
+ */
+__global__ void rank_sums_sparse_ovr_kernel(
+    const float* __restrict__ sorted_vals,
+    const int* __restrict__ sorted_row_idx,
+    const int* __restrict__ col_seg_offsets,
+    const int* __restrict__ group_codes, const double* __restrict__ group_sizes,
+    double* __restrict__ rank_sums, double* __restrict__ tie_corr, int n_rows,
+    int sb_cols, int n_groups, bool compute_tie_corr) {
+    int col = blockIdx.x;
+    if (col >= sb_cols) return;
+
+    int seg_start = col_seg_offsets[col];
+    int seg_end = col_seg_offsets[col + 1];
+    int nnz_stored = seg_end - seg_start;
+
+    const float* sv = sorted_vals + seg_start;
+    const int* si = sorted_row_idx + seg_start;
+
+    extern __shared__ double smem[];
+    double* grp_sums = smem;
+    double* grp_nz_count = smem + n_groups;
+
+    for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
+        grp_sums[g] = 0.0;
+        grp_nz_count[g] = 0.0;
+    }
+    __syncthreads();
+
+    // --- Find zero range: neg_end = first val >= 0, pos_start = first val > 0
+    // ---
+    __shared__ int sh_neg_end;
+    __shared__ int sh_pos_start;
+    if (threadIdx.x == 0) {
+        // Binary search: first index where sv[i] >= 0.0
+        int lo = 0, hi = nnz_stored;
+        while (lo < hi) {
+            int mid = (lo + hi) >> 1;
+            if (sv[mid] < 0.0f)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        sh_neg_end = lo;
+        // Binary search: first index where sv[i] > 0.0
+        hi = nnz_stored;
+        while (lo < hi) {
+            int mid = (lo + hi) >> 1;
+            if (sv[mid] <= 0.0f)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        sh_pos_start = lo;
+    }
+    __syncthreads();
+
+    int neg_end = sh_neg_end;
+    int pos_start = sh_pos_start;
+    int n_stored_zero = pos_start - neg_end;
+    int n_implicit_zero = n_rows - nnz_stored;
+    int total_zero = n_implicit_zero + n_stored_zero;
+    double zero_avg_rank =
+        (total_zero > 0) ? (double)neg_end + (total_zero + 1.0) / 2.0 : 0.0;
+
+    // Rank offset for positive stored values:
+    //   full_pos(i) = i + n_implicit_zero  for i >= pos_start
+    // So avg_rank for tie group [a,b) of positives:
+    //   = n_implicit_zero + (a + b + 1) / 2
+    int offset_pos = n_implicit_zero;
+
+    // --- Count stored values != 0.0 per group ---
+    for (int i = threadIdx.x; i < nnz_stored; i += blockDim.x) {
+        if (i < neg_end || i >= pos_start) {  // skip stored zeros
+            int grp = group_codes[si[i]];
+            if (grp < n_groups) {
+                atomicAdd(&grp_nz_count[grp], 1.0);
+            }
+        }
+    }
+    __syncthreads();
+
+    // --- Zero-rank contribution per group ---
+    for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
+        double n_zero_in_g = group_sizes[g] - grp_nz_count[g];
+        grp_sums[g] = n_zero_in_g * zero_avg_rank;
+    }
+    __syncthreads();
+
+    // --- Walk ALL stored values, skip stored zeros, compute ranks ---
+    // Chunk over [0, nnz_stored), skip [neg_end, pos_start).
+    int chunk = (nnz_stored + blockDim.x - 1) / blockDim.x;
+    int my_start = threadIdx.x * chunk;
+    int my_end = my_start + chunk;
+    if (my_end > nnz_stored) my_end = nnz_stored;
+
+    double local_tie_sum = 0.0;
+
+    int i = my_start;
+    while (i < my_end) {
+        // Skip stored zeros
+        if (i >= neg_end && i < pos_start) {
+            i = pos_start;
+            continue;
+        }
+
+        float val = sv[i];
+
+        int tie_local_end = i + 1;
+        while (tie_local_end < my_end && sv[tie_local_end] == val)
+            ++tie_local_end;
+        // Don't let local tie range cross into stored-zero region
+        if (val < 0.0f && tie_local_end > neg_end) tie_local_end = neg_end;
+
+        int tie_global_start = i;
+        if (i == my_start && i > 0 && sv[i - 1] == val) {
+            // Binary search for first occurrence
+            int search_lo = (val < 0.0f) ? 0 : pos_start;
+            int lo = search_lo, hi = i;
+            while (lo < hi) {
+                int mid = (lo + hi) >> 1;
+                if (sv[mid] < val)
+                    lo = mid + 1;
+                else
+                    hi = mid;
+            }
+            tie_global_start = lo;
+        }
+        // Handle thread resuming at pos_start after skipping zeros
+        if (i == pos_start && i > 0 && pos_start > neg_end &&
+            val == sv[pos_start] && i != my_start) {
+            // Already at pos_start boundary, tie_global_start = pos_start
+            tie_global_start = pos_start;
+        }
+
+        int tie_global_end = tie_local_end;
+        if (tie_local_end == my_end && tie_local_end < nnz_stored &&
+            tie_local_end != neg_end && sv[tie_local_end] == val) {
+            int search_hi = (val < 0.0f) ? (neg_end - 1) : (nnz_stored - 1);
+            int lo = tie_local_end, hi = search_hi;
+            while (lo < hi) {
+                int mid = (lo + hi + 1) >> 1;
+                if (sv[mid] > val)
+                    hi = mid - 1;
+                else
+                    lo = mid;
+            }
+            tie_global_end = lo + 1;
+        }
+
+        int total_tie = tie_global_end - tie_global_start;
+
+        // Rank depends on sign:
+        //   negative (i < neg_end): full pos = stored pos (no shift)
+        //   positive (i >= pos_start): full pos = stored pos + n_implicit_zero
+        double avg_rank;
+        if (val < 0.0f) {
+            avg_rank = (double)(tie_global_start + tie_global_end + 1) / 2.0;
+        } else {
+            avg_rank = (double)offset_pos +
+                       (double)(tie_global_start + tie_global_end + 1) / 2.0;
+        }
+
+        for (int j = i; j < tie_local_end; ++j) {
+            int grp = group_codes[si[j]];
+            if (grp < n_groups) {
+                atomicAdd(&grp_sums[grp], avg_rank);
+            }
+        }
+
+        if (compute_tie_corr && tie_global_start >= my_start && total_tie > 1) {
+            double t = (double)total_tie;
+            local_tie_sum += t * t * t - t;
+        }
+
+        i = tie_local_end;
+    }
+
+    __syncthreads();
+
+    // Write rank sums to global output
+    for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
+        rank_sums[(size_t)g * sb_cols + col] = grp_sums[g];
+    }
+
+    // Tie correction: warp + block reduction
+    if (compute_tie_corr) {
+        // Zero tie group contribution (one thread only)
+        if (threadIdx.x == 0 && total_zero > 1) {
+            double tz = (double)total_zero;
+            local_tie_sum += tz * tz * tz - tz;
+        }
+
+        int warp_buf_off = 2 * n_groups;
+        double* warp_buf = smem + warp_buf_off;
+
+#pragma unroll
+        for (int off = 16; off > 0; off >>= 1)
+            local_tie_sum += __shfl_down_sync(0xffffffff, local_tie_sum, off);
+        int lane = threadIdx.x & 31;
+        int wid = threadIdx.x >> 5;
+        if (lane == 0) warp_buf[wid] = local_tie_sum;
+        __syncthreads();
+        if (threadIdx.x < 32) {
+            double v = (threadIdx.x < ((blockDim.x + 31) >> 5))
+                           ? warp_buf[threadIdx.x]
+                           : 0.0;
+#pragma unroll
+            for (int off = 16; off > 0; off >>= 1)
+                v += __shfl_down_sync(0xffffffff, v, off);
+            if (threadIdx.x == 0) {
+                double n = (double)n_rows;
+                double denom = n * n * n - n;
+                tie_corr[col] = (denom > 0.0) ? (1.0 - v / denom) : 1.0;
+            }
+        }
+    }
+}

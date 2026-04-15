@@ -282,11 +282,13 @@ def _wilcoxon_vs_rest(
         tie_corr_np = np.ones(n_total_genes, dtype=np.float64)
 
         if host_csc:
-            _ovr.ovr_streaming_csc_host(
+            group_sizes_np = group_sizes.astype(np.float64, copy=False)
+            _ovr.ovr_sparse_csc_host(
                 X.data.astype(np.float32, copy=False),
                 X.indices.astype(np.int32, copy=False),
                 X.indptr.astype(np.int32, copy=False),
                 group_codes,
+                group_sizes_np,
                 rank_sums_np,
                 tie_corr_np,
                 n_rows=n_cells,
@@ -323,12 +325,15 @@ def _wilcoxon_vs_rest(
         rank_sums = cp.empty((n_groups, n_total_genes), dtype=cp.float64)
         tie_corr = cp.ones(n_total_genes, dtype=cp.float64)
 
-        if cpsp.isspmatrix_csr(X_gpu):
-            _ovr.ovr_streaming_csr(
+        if cpsp.isspmatrix_csc(X_gpu):
+            # Sparse-aware path: sort only stored nonzeros,
+            # handle zeros analytically.
+            _ovr.ovr_sparse_csc(
                 X_gpu.data.astype(cp.float32, copy=False),
                 X_gpu.indices.astype(cp.int32, copy=False),
                 X_gpu.indptr.astype(cp.int32, copy=False),
                 group_codes_gpu,
+                group_sizes_dev,
                 rank_sums,
                 tie_corr,
                 n_rows=n_cells,
@@ -337,12 +342,13 @@ def _wilcoxon_vs_rest(
                 compute_tie_corr=tie_correct,
                 sub_batch_cols=STREAMING_SUB_BATCH,
             )
-        elif cpsp.isspmatrix_csc(X_gpu):
-            _ovr.ovr_streaming_csc(
+        elif cpsp.isspmatrix_csr(X_gpu):
+            _ovr.ovr_sparse_csr(
                 X_gpu.data.astype(cp.float32, copy=False),
                 X_gpu.indices.astype(cp.int32, copy=False),
                 X_gpu.indptr.astype(cp.int32, copy=False),
                 group_codes_gpu,
+                group_sizes_dev,
                 rank_sums,
                 tie_corr,
                 n_rows=n_cells,

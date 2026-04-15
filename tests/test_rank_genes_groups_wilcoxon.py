@@ -509,6 +509,103 @@ def test_format_matches_scanpy(reference, fmt):
 
 
 # ============================================================================
+# Negative values: centered/scaled data must match scanpy across all formats
+# ============================================================================
+
+
+def _make_centered_adata(n_obs=200, n_vars=8, n_centers=3, seed=42):
+    """Create AnnData with centered (mean-zero) data containing negatives."""
+    np.random.seed(seed)
+    adata = sc.datasets.blobs(
+        n_variables=n_vars, n_centers=n_centers, n_observations=n_obs
+    )
+    adata.obs["blobs"] = adata.obs["blobs"].astype("category")
+    # Center each gene to produce negative values
+    adata.X = adata.X - adata.X.mean(axis=0)
+    return adata
+
+
+@pytest.mark.parametrize("reference", ["rest", "1"])
+@pytest.mark.parametrize(
+    "fmt",
+    [
+        pytest.param("scipy_csc", id="scipy_csc"),
+        pytest.param("cupy_dense", id="cupy_dense"),
+        pytest.param("cupy_csr", id="cupy_csr"),
+        pytest.param("cupy_csc", id="cupy_csc"),
+    ],
+)
+def test_negative_values_match_scanpy(reference, fmt):
+    """Centered data (with negatives) matches scanpy across all formats."""
+    adata_gpu = _make_centered_adata()
+    adata_cpu = adata_gpu.copy()
+
+    # Verify data actually has negatives
+    assert adata_gpu.X.min() < 0
+
+    adata_gpu.X = _to_format(adata_gpu.X, fmt)
+
+    kw = {
+        "groupby": "blobs",
+        "method": "wilcoxon",
+        "use_raw": False,
+        "reference": reference,
+        "tie_correct": True,
+    }
+    rsc.tl.rank_genes_groups(adata_gpu, **kw)
+    sc.tl.rank_genes_groups(adata_cpu, **kw)
+
+    gpu_result = adata_gpu.uns["rank_genes_groups"]
+    cpu_result = adata_cpu.uns["rank_genes_groups"]
+
+    for group in gpu_result["names"].dtype.names:
+        assert list(gpu_result["names"][group]) == list(cpu_result["names"][group])
+
+    for field in ("scores", "pvals", "pvals_adj"):
+        for group in gpu_result[field].dtype.names:
+            np.testing.assert_allclose(
+                np.asarray(gpu_result[field][group], dtype=float),
+                np.asarray(cpu_result[field][group], dtype=float),
+                rtol=1e-13,
+                atol=1e-15,
+            )
+
+
+@pytest.mark.parametrize("reference", ["rest", "1"])
+def test_negative_sparse_matches_dense(reference):
+    """Sparse and dense paths give identical results for centered data."""
+    adata_dense = _make_centered_adata()
+    adata_csr = adata_dense.copy()
+    adata_csc = adata_dense.copy()
+
+    adata_csr.X = cpsp.csr_matrix(cp.asarray(adata_dense.X))
+    adata_csc.X = cpsp.csc_matrix(cp.asarray(adata_dense.X))
+
+    kw = {
+        "groupby": "blobs",
+        "method": "wilcoxon",
+        "use_raw": False,
+        "reference": reference,
+        "tie_correct": True,
+    }
+    rsc.tl.rank_genes_groups(adata_dense, **kw)
+    rsc.tl.rank_genes_groups(adata_csr, **kw)
+    rsc.tl.rank_genes_groups(adata_csc, **kw)
+
+    dense_result = adata_dense.uns["rank_genes_groups"]
+    csr_result = adata_csr.uns["rank_genes_groups"]
+    csc_result = adata_csc.uns["rank_genes_groups"]
+
+    for field in ("scores", "pvals"):
+        for group in dense_result[field].dtype.names:
+            dense_vals = np.asarray(dense_result[field][group], dtype=float)
+            csr_vals = np.asarray(csr_result[field][group], dtype=float)
+            csc_vals = np.asarray(csc_result[field][group], dtype=float)
+            np.testing.assert_allclose(csr_vals, dense_vals, rtol=1e-13, atol=1e-15)
+            np.testing.assert_allclose(csc_vals, dense_vals, rtol=1e-13, atol=1e-15)
+
+
+# ============================================================================
 # pre_load: GPU transfer before wilcoxon must match default (lazy transfer)
 # ============================================================================
 
