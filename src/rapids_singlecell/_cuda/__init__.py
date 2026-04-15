@@ -23,8 +23,6 @@ try:
 except (ImportError, OSError):
     pass
 
-_RMM_MODULES = {"_wilcoxon_ovo_cuda", "_wilcoxon_ovr_cuda"}
-
 __all__ = [
     "_aggr_cuda",
     "_aucell_cuda",

@@ -324,7 +324,6 @@ class _RankGenes:
         *,
         tie_correct: bool,
         use_continuity: bool = False,
-        chunk_size: int | None = None,
     ) -> list[tuple[int, NDArray, NDArray]]:
         """Compute Wilcoxon rank-sum test statistics."""
         from ._wilcoxon import wilcoxon
@@ -333,7 +332,6 @@ class _RankGenes:
             self,
             tie_correct=tie_correct,
             use_continuity=use_continuity,
-            chunk_size=chunk_size,
         )
 
     def wilcoxon_binned(
@@ -394,7 +392,6 @@ class _RankGenes:
             test_results = self.wilcoxon(
                 tie_correct=tie_correct,
                 use_continuity=use_continuity,
-                chunk_size=chunk_size,
             )
         elif method == "wilcoxon_binned":
             test_results = self.wilcoxon_binned(

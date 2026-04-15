@@ -102,16 +102,6 @@ def _select_top_n(scores: NDArray, n_top: int) -> NDArray:
     return global_indices
 
 
-DEFAULT_CHUNK_SIZE = 512
-
-
-def _choose_chunk_size(requested: int | None) -> int:
-    """Choose chunk size for gene processing."""
-    if requested is not None:
-        return int(requested)
-    return DEFAULT_CHUNK_SIZE
-
-
 def _csc_columns_to_gpu(X_csc, start: int, stop: int, n_rows: int) -> cp.ndarray:
     """
     Extract columns from a CSC matrix via direct indptr pointer slicing.

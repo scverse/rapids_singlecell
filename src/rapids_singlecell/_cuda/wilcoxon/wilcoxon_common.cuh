@@ -14,7 +14,7 @@
 constexpr int WARP_SIZE = 32;
 constexpr int MAX_THREADS_PER_BLOCK = 512;
 constexpr int N_STREAMS = 4;
-constexpr int SUB_BATCH_COLS = 32;
+constexpr int SUB_BATCH_COLS = 64;
 constexpr int BEGIN_BIT = 0;
 constexpr int END_BIT = 32;
 

@@ -193,7 +193,6 @@ def wilcoxon(
     *,
     tie_correct: bool,
     use_continuity: bool = False,
-    chunk_size: int | None = None,
 ) -> list[tuple[int, NDArray, NDArray]]:
     """Compute Wilcoxon rank-sum test statistics."""
     X = rg.X
@@ -212,7 +211,6 @@ def wilcoxon(
             group_sizes,
             tie_correct=tie_correct,
             use_continuity=use_continuity,
-            chunk_size=chunk_size,
         )
     return _wilcoxon_vs_rest(
         rg,
@@ -222,7 +220,6 @@ def wilcoxon(
         group_sizes,
         tie_correct=tie_correct,
         use_continuity=use_continuity,
-        chunk_size=chunk_size,
     )
 
 
@@ -240,7 +237,6 @@ def _wilcoxon_vs_rest(
     *,
     tie_correct: bool,
     use_continuity: bool,
-    chunk_size: int | None,
 ) -> list[tuple[int, NDArray, NDArray]]:
     """Wilcoxon test: each group vs rest of cells.
 
@@ -400,7 +396,6 @@ def _wilcoxon_with_reference(
     *,
     tie_correct: bool,
     use_continuity: bool,
-    chunk_size: int | None,
 ) -> list[tuple[int, NDArray, NDArray]]:
     """Wilcoxon test: each group vs a specific reference group.
 
