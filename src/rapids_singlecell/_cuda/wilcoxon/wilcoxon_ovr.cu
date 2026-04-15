@@ -53,10 +53,10 @@ __global__ void csr_scatter_to_csc_kernel(
     if (row >= n_rows) return;
     int rs = indptr[row];
     int re = indptr[row + 1];
-    // Binary search for col_start
+    // Binary search for col_start (overflow-safe midpoint)
     int lo = rs, hi = re;
     while (lo < hi) {
-        int m = (lo + hi) >> 1;
+        int m = lo + ((hi - lo) >> 1);
         if (indices[m] < col_start)
             lo = m + 1;
         else
@@ -239,8 +239,9 @@ static void ovr_streaming_impl(const float* block, const int* group_codes,
  * instead of extracting dense blocks.  GPU memory is O(max_batch_nnz) instead
  * of O(sub_batch * n_rows), and sort work is proportional to nnz, not n_rows.
  */
+template <typename IndptrT>
 static void ovr_sparse_csc_host_streaming_impl(
-    const float* h_data, const int* h_indices, const int* h_indptr,
+    const float* h_data, const int* h_indices, const IndptrT* h_indptr,
     const int* h_group_codes, const double* h_group_sizes, double* h_rank_sums,
     double* h_tie_corr, int n_rows, int n_cols, int n_groups,
     bool compute_tie_corr, int sub_batch_cols) {
@@ -307,12 +308,9 @@ static void ovr_sparse_csc_host_streaming_impl(
     size_t smem_bytes = (size_t)(2 * n_groups + 32) * sizeof(double);
 
     // Pin host memory for async transfers
-    cudaHostRegister(const_cast<float*>(h_data),
-                     (size_t)h_indptr[n_cols] * sizeof(float), 0);
-    cudaHostRegister(const_cast<int*>(h_indices),
-                     (size_t)h_indptr[n_cols] * sizeof(int), 0);
-    cudaHostRegister(const_cast<int*>(h_indptr),
-                     (size_t)(n_cols + 1) * sizeof(int), 0);
+    size_t total_nnz = (size_t)h_indptr[n_cols];
+    cudaHostRegister(const_cast<float*>(h_data), total_nnz * sizeof(float), 0);
+    cudaHostRegister(const_cast<int*>(h_indices), total_nnz * sizeof(int), 0);
     cudaHostRegister(h_rank_sums, (size_t)n_groups * n_cols * sizeof(double),
                      0);
     cudaHostRegister(h_tie_corr, n_cols * sizeof(double), 0);
@@ -327,9 +325,9 @@ static void ovr_sparse_csc_host_streaming_impl(
         auto stream = streams[s];
         auto& buf = bufs[s];
 
-        int ptr_start = h_indptr[col];
-        int ptr_end = h_indptr[col + sb_cols];
-        int batch_nnz = ptr_end - ptr_start;
+        IndptrT ptr_start = h_indptr[col];
+        IndptrT ptr_end = h_indptr[col + sb_cols];
+        int batch_nnz = (int)(ptr_end - ptr_start);
 
         // H2D: transfer sparse data for this column range
         if (batch_nnz > 0) {
@@ -341,12 +339,15 @@ static void ovr_sparse_csc_host_streaming_impl(
                             cudaMemcpyHostToDevice, stream);
         }
 
-        // Async transfer indptr slice, then rebase on GPU
-        cudaMemcpyAsync(buf.d_seg_offsets, h_indptr + col,
-                        (sb_cols + 1) * sizeof(int), cudaMemcpyHostToDevice,
-                        stream);
-        subtract_scalar_kernel<<<1, sb_cols + 1, 0, stream>>>(
-            buf.d_seg_offsets, ptr_start, sb_cols + 1);
+        // Rebase indptr slice on host → int32 per-batch offsets
+        {
+            std::vector<int> h_seg(sb_cols + 1);
+            for (int i = 0; i <= sb_cols; i++)
+                h_seg[i] = (int)(h_indptr[col + i] - ptr_start);
+            cudaMemcpyAsync(buf.d_seg_offsets, h_seg.data(),
+                            (sb_cols + 1) * sizeof(int), cudaMemcpyHostToDevice,
+                            stream);
+        }
 
         // CUB sort only stored nonzeros
         if (batch_nnz > 0) {
@@ -389,7 +390,6 @@ static void ovr_sparse_csc_host_streaming_impl(
 
     cudaHostUnregister(const_cast<float*>(h_data));
     cudaHostUnregister(const_cast<int*>(h_indices));
-    cudaHostUnregister(const_cast<int*>(h_indptr));
     cudaHostUnregister(h_rank_sums);
     cudaHostUnregister(h_tie_corr);
 
@@ -697,11 +697,10 @@ static void ovr_sparse_csr_streaming_impl(
     // Per-batch prefix sums on host
     int n_batches = (n_cols + sub_batch_cols - 1) / sub_batch_cols;
     size_t max_batch_nnz = 0;
-    size_t total_nnz = 0;
 
     // Flat array: n_batches × (sub_batch_cols + 1) offsets
     std::vector<int> h_all_offsets((size_t)n_batches * (sub_batch_cols + 1), 0);
-    std::vector<int> h_batch_nnz(n_batches);
+    std::vector<size_t> h_batch_nnz(n_batches);
 
     for (int b = 0; b < n_batches; b++) {
         int col_start = b * sub_batch_cols;
@@ -710,10 +709,8 @@ static void ovr_sparse_csr_streaming_impl(
         off[0] = 0;
         for (int i = 0; i < sb_cols; i++)
             off[i + 1] = off[i] + h_col_counts[col_start + i];
-        h_batch_nnz[b] = off[sb_cols];
-        total_nnz += h_batch_nnz[b];
-        if ((size_t)h_batch_nnz[b] > max_batch_nnz)
-            max_batch_nnz = h_batch_nnz[b];
+        h_batch_nnz[b] = (size_t)off[sb_cols];
+        if (h_batch_nnz[b] > max_batch_nnz) max_batch_nnz = h_batch_nnz[b];
     }
 
     // Upload all batch offsets to GPU in one shot (~20 KB)
@@ -734,6 +731,21 @@ static void ovr_sparse_csr_streaming_impl(
 
     int n_streams = N_STREAMS;
     if (n_batches < n_streams) n_streams = n_batches;
+
+    // CSR path needs 4 sort arrays per stream (scatter intermediates +
+    // CUB output).  Fit stream count to available GPU memory.
+    size_t per_stream_bytes =
+        max_batch_nnz * (2 * sizeof(float) + 2 * sizeof(int)) +
+        (sub_batch_cols + 1 + sub_batch_cols) * sizeof(int) + cub_temp_bytes +
+        (size_t)n_groups * sub_batch_cols * sizeof(double) +
+        sub_batch_cols * sizeof(double);
+
+    size_t free_mem = 0, total_mem = 0;
+    cudaMemGetInfo(&free_mem, &total_mem);
+    constexpr double MEM_BUDGET_FRAC = 0.8;
+    size_t budget = (size_t)(free_mem * MEM_BUDGET_FRAC);
+    while (n_streams > 1 && (size_t)n_streams * per_stream_bytes > budget)
+        n_streams--;
 
     std::vector<cudaStream_t> streams(n_streams);
     for (int i = 0; i < n_streams; i++) cudaStreamCreate(&streams[i]);
@@ -776,7 +788,7 @@ static void ovr_sparse_csr_streaming_impl(
         int s = b % n_streams;
         auto stream = streams[s];
         auto& buf = bufs[s];
-        int batch_nnz = h_batch_nnz[b];
+        int batch_nnz = (int)h_batch_nnz[b];
 
         // D2D copy pre-computed col_offsets for this batch
         int* src = d_all_offsets + (size_t)b * (sub_batch_cols + 1);
@@ -908,6 +920,25 @@ NB_MODULE(_wilcoxon_ovr_cuda, m) {
         "ovr_sparse_csc_host",
         [](host_array<const float> h_data, host_array<const int> h_indices,
            host_array<const int> h_indptr, host_array<const int> h_group_codes,
+           host_array<double> h_group_sizes, host_array_2d<double> h_rank_sums,
+           host_array<double> h_tie_corr, int n_rows, int n_cols, int n_groups,
+           bool compute_tie_corr, int sub_batch_cols) {
+            ovr_sparse_csc_host_streaming_impl(
+                h_data.data(), h_indices.data(), h_indptr.data(),
+                h_group_codes.data(), h_group_sizes.data(), h_rank_sums.data(),
+                h_tie_corr.data(), n_rows, n_cols, n_groups, compute_tie_corr,
+                sub_batch_cols);
+        },
+        "h_data"_a, "h_indices"_a, "h_indptr"_a, "h_group_codes"_a,
+        "h_group_sizes"_a, "h_rank_sums"_a, "h_tie_corr"_a, nb::kw_only(),
+        "n_rows"_a, "n_cols"_a, "n_groups"_a, "compute_tie_corr"_a,
+        "sub_batch_cols"_a = SUB_BATCH_COLS);
+
+    m.def(
+        "ovr_sparse_csc_host_i64",
+        [](host_array<const float> h_data, host_array<const int> h_indices,
+           host_array<const int64_t> h_indptr,
+           host_array<const int> h_group_codes,
            host_array<double> h_group_sizes, host_array_2d<double> h_rank_sums,
            host_array<double> h_tie_corr, int n_rows, int n_cols, int n_groups,
            bool compute_tie_corr, int sub_batch_cols) {

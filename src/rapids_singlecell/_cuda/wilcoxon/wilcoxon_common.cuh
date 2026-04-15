@@ -72,7 +72,7 @@ __global__ void csr_extract_dense_kernel(const T* __restrict__ data,
 
     int lo = rs, hi = re;
     while (lo < hi) {
-        int m = (lo + hi) >> 1;
+        int m = lo + ((hi - lo) >> 1);
         if (indices[m] < col_start)
             lo = m + 1;
         else

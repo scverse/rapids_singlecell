@@ -283,10 +283,15 @@ def _wilcoxon_vs_rest(
 
         if host_csc:
             group_sizes_np = group_sizes.astype(np.float64, copy=False)
-            _ovr.ovr_sparse_csc_host(
+            _csc_host_fn = (
+                _ovr.ovr_sparse_csc_host_i64
+                if X.indptr.dtype == np.int64
+                else _ovr.ovr_sparse_csc_host
+            )
+            _csc_host_fn(
                 X.data.astype(np.float32, copy=False),
                 X.indices.astype(np.int32, copy=False),
-                X.indptr.astype(np.int32, copy=False),
+                X.indptr,
                 group_codes,
                 group_sizes_np,
                 rank_sums_np,
@@ -474,10 +479,15 @@ def _wilcoxon_with_reference(
         tie_corr_np = np.ones((n_test, n_total_genes), dtype=np.float64)
 
         if host_sparse and X.format == "csc":
-            _wc.ovo_streaming_csc_host(
+            _csc_host_fn = (
+                _wc.ovo_streaming_csc_host_i64
+                if X.indptr.dtype == np.int64
+                else _wc.ovo_streaming_csc_host
+            )
+            _csc_host_fn(
                 X.data.astype(np.float32, copy=False),
                 X.indices.astype(np.int32, copy=False),
-                X.indptr.astype(np.int32, copy=False),
+                X.indptr,
                 ref_row_map_np,
                 grp_row_map_np,
                 offsets_np,
@@ -493,10 +503,15 @@ def _wilcoxon_with_reference(
             )
         elif host_sparse:
             csr = X.tocsr() if X.format != "csr" else X
-            _wc.ovo_streaming_csr_host(
+            _csr_host_fn = (
+                _wc.ovo_streaming_csr_host_i64
+                if csr.indptr.dtype == np.int64
+                else _wc.ovo_streaming_csr_host
+            )
+            _csr_host_fn(
                 csr.data.astype(np.float32, copy=False),
                 csr.indices.astype(np.int32, copy=False),
-                csr.indptr.astype(np.int32, copy=False),
+                csr.indptr,
                 ref_row_ids_np.astype(np.int32, copy=False),
                 all_grp_row_ids_np.astype(np.int32, copy=False),
                 offsets_np,
