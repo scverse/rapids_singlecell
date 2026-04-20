@@ -56,7 +56,7 @@ __device__ __forceinline__ void compute_tie_correction_parallel(
             // Count in ref: upper_bound from i+1
             int lo = i + 1, hi = n_ref;
             while (lo < hi) {
-                int m = (lo + hi) >> 1;
+                int m = lo + ((hi - lo) >> 1);
                 if (ref_col[m] <= v)
                     lo = m + 1;
                 else
@@ -68,7 +68,7 @@ __device__ __forceinline__ void compute_tie_correction_parallel(
             lo = grp_lb;
             hi = n_grp;
             while (lo < hi) {
-                int m = (lo + hi) >> 1;
+                int m = lo + ((hi - lo) >> 1);
                 if (grp_col[m] < v)
                     lo = m + 1;
                 else
@@ -80,7 +80,7 @@ __device__ __forceinline__ void compute_tie_correction_parallel(
             lo = (grp_ub > lb) ? grp_ub : lb;
             hi = n_grp;
             while (lo < hi) {
-                int m = (lo + hi) >> 1;
+                int m = lo + ((hi - lo) >> 1);
                 if (grp_col[m] <= v)
                     lo = m + 1;
                 else
@@ -106,7 +106,7 @@ __device__ __forceinline__ void compute_tie_correction_parallel(
             // Incremental lower_bound in ref
             int lo = ref_lb, hi = n_ref;
             while (lo < hi) {
-                int m = (lo + hi) >> 1;
+                int m = lo + ((hi - lo) >> 1);
                 if (ref_col[m] < v)
                     lo = m + 1;
                 else
@@ -119,7 +119,7 @@ __device__ __forceinline__ void compute_tie_correction_parallel(
                 lo = i + 1;
                 hi = n_grp;
                 while (lo < hi) {
-                    int m = (lo + hi) >> 1;
+                    int m = lo + ((hi - lo) >> 1);
                     if (grp_col[m] <= v)
                         lo = m + 1;
                     else
@@ -190,7 +190,7 @@ __global__ void batched_rank_sums_presorted_kernel(
         lo = ref_lb;
         hi = n_ref;
         while (lo < hi) {
-            int m = (lo + hi) >> 1;
+            int m = lo + ((hi - lo) >> 1);
             if (ref_col[m] < v)
                 lo = m + 1;
             else
@@ -203,7 +203,7 @@ __global__ void batched_rank_sums_presorted_kernel(
         lo = (ref_ub > n_lt_ref) ? ref_ub : n_lt_ref;
         hi = n_ref;
         while (lo < hi) {
-            int m = (lo + hi) >> 1;
+            int m = lo + ((hi - lo) >> 1);
             if (ref_col[m] <= v)
                 lo = m + 1;
             else
@@ -216,7 +216,7 @@ __global__ void batched_rank_sums_presorted_kernel(
         lo = grp_lb;
         hi = n_grp;
         while (lo < hi) {
-            int m = (lo + hi) >> 1;
+            int m = lo + ((hi - lo) >> 1);
             if (grp_col[m] < v)
                 lo = m + 1;
             else
@@ -229,7 +229,7 @@ __global__ void batched_rank_sums_presorted_kernel(
         lo = (grp_ub > n_lt_grp) ? grp_ub : n_lt_grp;
         hi = n_grp;
         while (lo < hi) {
-            int m = (lo + hi) >> 1;
+            int m = lo + ((hi - lo) >> 1);
             if (grp_col[m] <= v)
                 lo = m + 1;
             else
@@ -330,7 +330,7 @@ __global__ void ovo_fused_sort_rank_kernel(
         lo = ref_lb;
         hi = n_ref;
         while (lo < hi) {
-            int m = (lo + hi) >> 1;
+            int m = lo + ((hi - lo) >> 1);
             if (ref_col[m] < v)
                 lo = m + 1;
             else
@@ -342,7 +342,7 @@ __global__ void ovo_fused_sort_rank_kernel(
         lo = (ref_ub > n_lt_ref) ? ref_ub : n_lt_ref;
         hi = n_ref;
         while (lo < hi) {
-            int m = (lo + hi) >> 1;
+            int m = lo + ((hi - lo) >> 1);
             if (ref_col[m] <= v)
                 lo = m + 1;
             else
@@ -354,7 +354,7 @@ __global__ void ovo_fused_sort_rank_kernel(
         lo = grp_lb;
         hi = n_grp;
         while (lo < hi) {
-            int m = (lo + hi) >> 1;
+            int m = lo + ((hi - lo) >> 1);
             if (grp_smem[m] < v)
                 lo = m + 1;
             else
@@ -366,7 +366,7 @@ __global__ void ovo_fused_sort_rank_kernel(
         lo = (grp_ub > n_lt_grp) ? grp_ub : n_lt_grp;
         hi = n_grp;
         while (lo < hi) {
-            int m = (lo + hi) >> 1;
+            int m = lo + ((hi - lo) >> 1);
             if (grp_smem[m] <= v)
                 lo = m + 1;
             else

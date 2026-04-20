@@ -353,7 +353,7 @@ __global__ void occur_count_kernel_csr_catpairs_tiled(
                 // Binary search for threshold bin
                 int lo = 0, hi = l_val;
                 while (lo < hi) {
-                    int mid = (lo + hi) >> 1;
+                    int mid = lo + ((hi - lo) >> 1);
                     if (dist_sq <= thresholds[mid])
                         hi = mid;
                     else

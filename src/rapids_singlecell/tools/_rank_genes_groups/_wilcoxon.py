@@ -25,6 +25,102 @@ STREAMING_SUB_BATCH = 64
 # ---------------------------------------------------------------------------
 
 
+def _fill_basic_stats_from_accumulators(
+    rg: _RankGenes,
+    group_sums: cp.ndarray,
+    group_sq_sums: cp.ndarray,
+    group_nnz: cp.ndarray,
+    group_sizes: np.ndarray,
+    *,
+    n_cells: int,
+) -> None:
+    """Populate rg.means/vars/pts (+ *_rest) from streamed accumulators.
+
+    Mirrors the Aggregate-based path in :meth:`_RankGenes._basic_stats`
+    but consumes per-group sums/sum-of-squares/nnz that the host-streaming
+    kernels write directly into caller-provided CuPy buffers.  The math
+    runs on GPU and only the derived (means/vars/pts) arrays are
+    transferred to host, so the full matrix never round-trips.
+    """
+    n = cp.asarray(group_sizes, dtype=cp.float64)[:, None]
+    means = group_sums / n
+    group_ss = group_sq_sums - n * means**2
+    vars_ = cp.maximum(group_ss / cp.maximum(n - 1, 1), 0)
+
+    rg.means = cp.asnumpy(means)
+    rg.vars = cp.asnumpy(vars_)
+    rg.pts = cp.asnumpy(group_nnz / n) if rg.comp_pts else None
+
+    if rg.ireference is None:
+        n_rest = cp.float64(n_cells) - n
+        total_sum = group_sums.sum(axis=0, keepdims=True)
+        total_sq_sum = group_sq_sums.sum(axis=0, keepdims=True)
+        rest_sums = total_sum - group_sums
+        rest_means = rest_sums / n_rest
+        rest_ss = (total_sq_sum - group_sq_sums) - n_rest * rest_means**2
+        rg.means_rest = cp.asnumpy(rest_means)
+        rg.vars_rest = cp.asnumpy(cp.maximum(rest_ss / cp.maximum(n_rest - 1, 1), 0))
+        if rg.comp_pts:
+            total_nnz = group_nnz.sum(axis=0, keepdims=True)
+            rg.pts_rest = cp.asnumpy((total_nnz - group_nnz) / n_rest)
+        else:
+            rg.pts_rest = None
+    else:
+        rg.means_rest = None
+        rg.vars_rest = None
+        rg.pts_rest = None
+
+    rg._compute_stats_in_chunks = False
+
+
+def _fill_ovo_stats_from_accumulators(
+    rg: _RankGenes,
+    group_sums_slots: cp.ndarray,
+    group_sq_sums_slots: cp.ndarray,
+    group_nnz_slots: cp.ndarray,
+    *,
+    group_sizes: NDArray,
+    test_group_indices: list[int],
+    n_ref: int,
+) -> None:
+    """Populate rg.means/vars/pts from OVO stats slots.
+
+    Slot ordering: 0..n_test-1 are test groups (in ``test_group_indices``
+    order); slot n_test is the reference group.  Stats arrays arrive as
+    CuPy buffers; the math runs on GPU and only the per-group rows are
+    transferred to host as they're assigned onto rg.
+    """
+    n_test = len(test_group_indices)
+    n_genes = int(group_sums_slots.shape[1])
+    n_groups = len(rg.groups_order)
+
+    rg.means = np.zeros((n_groups, n_genes), dtype=np.float64)
+    rg.vars = np.zeros((n_groups, n_genes), dtype=np.float64)
+    rg.pts = np.zeros((n_groups, n_genes), dtype=np.float64) if rg.comp_pts else None
+
+    def _fill(slot: int, size: int, gi: int) -> None:
+        if size <= 0:
+            return
+        sums = group_sums_slots[slot]
+        sq = group_sq_sums_slots[slot]
+        mean = sums / size
+        rg.means[gi] = cp.asnumpy(mean)
+        if size > 1:
+            ss = sq - size * mean**2
+            rg.vars[gi] = cp.asnumpy(cp.maximum(ss / max(size - 1, 1), 0))
+        if rg.comp_pts:
+            rg.pts[gi] = cp.asnumpy(group_nnz_slots[slot] / size)
+
+    for i, gi in enumerate(test_group_indices):
+        _fill(i, int(group_sizes[gi]), gi)
+    _fill(n_test, int(n_ref), rg.ireference)
+
+    rg.means_rest = None
+    rg.vars_rest = None
+    rg.pts_rest = None
+    rg._compute_stats_in_chunks = False
+
+
 def _to_gpu_native(X, n_rows: int, n_cols: int):
     """Move *X* to GPU, preserving its format (CSR / CSC / dense)."""
     # Already on GPU
@@ -266,36 +362,44 @@ def _wilcoxon_vs_rest(
     host_dense = isinstance(X, np.ndarray)
 
     if host_csc or host_dense:
-        # Host-streaming: sort+rank stays on host→GPU per sub-batch.
-        # Stats still need Aggregate on GPU — cheap one-time transfer.
-        # _basic_stats was already called by wilcoxon() which set
-        # _compute_stats_in_chunks=True for host data.  Transfer a
-        # lightweight GPU copy just for Aggregate, then discard it.
-        if rg._compute_stats_in_chunks:
-            X_gpu_tmp = _to_gpu_native(X, n_cells, n_total_genes)
-            rg.X = X_gpu_tmp
-            rg._compute_stats_in_chunks = False
-            rg._basic_stats()
-            del X_gpu_tmp
-
-        rank_sums_np = np.empty((n_groups, n_total_genes), dtype=np.float64)
-        tie_corr_np = np.ones(n_total_genes, dtype=np.float64)
+        # Host-streaming: sort+rank stays on host→GPU per sub-batch.  The
+        # kernel also emits per-group sum, sum-of-squares, and nonzero
+        # counts into caller-provided CuPy buffers, so means/vars/pts can
+        # be derived without uploading the full matrix.  Outputs live on
+        # the GPU and feed directly into the z-score / p-value math below.
+        rank_sums = cp.empty((n_groups, n_total_genes), dtype=cp.float64)
+        tie_corr = cp.ones(n_total_genes, dtype=cp.float64)
+        group_sums = cp.empty((n_groups, n_total_genes), dtype=cp.float64)
+        group_sq_sums = cp.empty((n_groups, n_total_genes), dtype=cp.float64)
+        group_nnz = cp.empty((n_groups, n_total_genes), dtype=cp.float64)
 
         if host_csc:
             group_sizes_np = group_sizes.astype(np.float64, copy=False)
-            _csc_host_fn = (
-                _ovr.ovr_sparse_csc_host_i64
-                if X.indptr.dtype == np.int64
-                else _ovr.ovr_sparse_csc_host
-            )
+            # Native host dtype is preserved and uploaded once per sub-batch;
+            # a pre-sort kernel casts to float32 for the sort keys while
+            # accumulating stats in float64 from the original values.
+            is_f64 = X.data.dtype == np.float64
+            is_i64 = X.indptr.dtype == np.int64
+            if is_f64 and is_i64:
+                _csc_host_fn = _ovr.ovr_sparse_csc_host_f64_i64
+            elif is_f64:
+                _csc_host_fn = _ovr.ovr_sparse_csc_host_f64
+            elif is_i64:
+                _csc_host_fn = _ovr.ovr_sparse_csc_host_i64
+            else:
+                _csc_host_fn = _ovr.ovr_sparse_csc_host
+            data_arr = X.data if is_f64 else X.data.astype(np.float32, copy=False)
             _csc_host_fn(
-                X.data.astype(np.float32, copy=False),
+                data_arr,
                 X.indices.astype(np.int32, copy=False),
                 X.indptr,
                 group_codes,
                 group_sizes_np,
-                rank_sums_np,
-                tie_corr_np,
+                rank_sums,
+                tie_corr,
+                group_sums,
+                group_sq_sums,
+                group_nnz,
                 n_rows=n_cells,
                 n_cols=n_total_genes,
                 n_groups=n_groups,
@@ -303,11 +407,21 @@ def _wilcoxon_vs_rest(
                 sub_batch_cols=STREAMING_SUB_BATCH,
             )
         else:
-            _ovr.ovr_streaming_dense_host(
-                np.asfortranarray(X.astype(np.float32, copy=False)),
+            is_f64 = X.dtype == np.float64
+            _dense_host_fn = (
+                _ovr.ovr_streaming_dense_host_f64
+                if is_f64
+                else _ovr.ovr_streaming_dense_host
+            )
+            block = X if is_f64 else X.astype(np.float32, copy=False)
+            _dense_host_fn(
+                np.asfortranarray(block),
                 group_codes,
-                rank_sums_np,
-                tie_corr_np,
+                rank_sums,
+                tie_corr,
+                group_sums,
+                group_sq_sums,
+                group_nnz,
                 n_rows=n_cells,
                 n_cols=n_total_genes,
                 n_groups=n_groups,
@@ -315,8 +429,15 @@ def _wilcoxon_vs_rest(
                 sub_batch_cols=STREAMING_SUB_BATCH,
             )
 
-        rank_sums = cp.asarray(rank_sums_np)
-        tie_corr = cp.asarray(tie_corr_np)
+        if rg._compute_stats_in_chunks:
+            _fill_basic_stats_from_accumulators(
+                rg,
+                group_sums,
+                group_sq_sums,
+                group_nnz,
+                group_sizes.astype(np.float64, copy=False),
+                n_cells=n_cells,
+            )
     else:
         # GPU data or host CSR → transfer to GPU, use GPU kernels
         X_gpu = _to_gpu_native(X, n_cells, n_total_genes)
@@ -468,83 +589,134 @@ def _wilcoxon_with_reference(
     host_sparse = isinstance(X, sp.spmatrix | sp.sparray)
     host_dense = isinstance(X, np.ndarray)
     if host_sparse or host_dense:
-        if rg._compute_stats_in_chunks:
-            X_gpu_tmp = _to_gpu_native(X, n_cells, n_total_genes)
-            rg.X = X_gpu_tmp
-            rg._compute_stats_in_chunks = False
-            rg._basic_stats()
-            del X_gpu_tmp
+        # Output buffers live on the GPU (caller-provided CuPy memory);
+        # kernels write directly into them, and rank_sums / tie_corr
+        # feed the z-score math below without any H2D → H2D round-trip.
+        rank_sums = cp.empty((n_test, n_total_genes), dtype=cp.float64)
+        tie_corr_arr = cp.ones((n_test, n_total_genes), dtype=cp.float64)
 
-        rank_sums_np = np.empty((n_test, n_total_genes), dtype=np.float64)
-        tie_corr_np = np.ones((n_test, n_total_genes), dtype=np.float64)
+        # Stats slots: 0..n_test-1 = test groups, slot n_test = reference.
+        # Unselected cells carry the sentinel (n_groups_stats) which the
+        # kernel skips.
+        n_groups_stats = n_test + 1
+        stats_codes_np = np.full(n_cells, n_groups_stats, dtype=np.int32)
+        for i, gi in enumerate(test_group_indices):
+            stats_codes_np[codes == gi] = i
+        stats_codes_np[codes == ireference] = n_test
+
+        group_sums = cp.empty((n_groups_stats, n_total_genes), dtype=cp.float64)
+        group_sq_sums = cp.empty((n_groups_stats, n_total_genes), dtype=cp.float64)
+        group_nnz = cp.empty((n_groups_stats, n_total_genes), dtype=cp.float64)
 
         if host_sparse and X.format == "csc":
-            _csc_host_fn = (
-                _wc.ovo_streaming_csc_host_i64
-                if X.indptr.dtype == np.int64
-                else _wc.ovo_streaming_csc_host
-            )
+            is_f64 = X.data.dtype == np.float64
+            is_i64 = X.indptr.dtype == np.int64
+            if is_f64 and is_i64:
+                _csc_host_fn = _wc.ovo_streaming_csc_host_f64_i64
+            elif is_f64:
+                _csc_host_fn = _wc.ovo_streaming_csc_host_f64
+            elif is_i64:
+                _csc_host_fn = _wc.ovo_streaming_csc_host_i64
+            else:
+                _csc_host_fn = _wc.ovo_streaming_csc_host
+            data_arr = X.data if is_f64 else X.data.astype(np.float32, copy=False)
             _csc_host_fn(
-                X.data.astype(np.float32, copy=False),
+                data_arr,
                 X.indices.astype(np.int32, copy=False),
                 X.indptr,
                 ref_row_map_np,
                 grp_row_map_np,
                 offsets_np,
-                rank_sums_np,
-                tie_corr_np,
+                stats_codes_np,
+                rank_sums,
+                tie_corr_arr,
+                group_sums,
+                group_sq_sums,
+                group_nnz,
                 n_ref=n_ref,
                 n_all_grp=n_all_grp,
                 n_rows=n_cells,
                 n_cols=n_total_genes,
                 n_groups=n_test,
+                n_groups_stats=n_groups_stats,
                 compute_tie_corr=tie_correct,
                 sub_batch_cols=STREAMING_SUB_BATCH,
             )
         elif host_sparse:
             csr = X.tocsr() if X.format != "csr" else X
-            _csr_host_fn = (
-                _wc.ovo_streaming_csr_host_i64
-                if csr.indptr.dtype == np.int64
-                else _wc.ovo_streaming_csr_host
-            )
+            is_f64 = csr.data.dtype == np.float64
+            is_i64 = csr.indptr.dtype == np.int64
+            if is_f64 and is_i64:
+                _csr_host_fn = _wc.ovo_streaming_csr_host_f64_i64
+            elif is_f64:
+                _csr_host_fn = _wc.ovo_streaming_csr_host_f64
+            elif is_i64:
+                _csr_host_fn = _wc.ovo_streaming_csr_host_i64
+            else:
+                _csr_host_fn = _wc.ovo_streaming_csr_host
+            data_arr = csr.data if is_f64 else csr.data.astype(np.float32, copy=False)
             _csr_host_fn(
-                csr.data.astype(np.float32, copy=False),
+                data_arr,
                 csr.indices.astype(np.int32, copy=False),
                 csr.indptr,
                 ref_row_ids_np.astype(np.int32, copy=False),
                 all_grp_row_ids_np.astype(np.int32, copy=False),
                 offsets_np,
-                rank_sums_np,
-                tie_corr_np,
+                stats_codes_np,
+                rank_sums,
+                tie_corr_arr,
+                group_sums,
+                group_sq_sums,
+                group_nnz,
                 n_ref=n_ref,
                 n_all_grp=n_all_grp,
                 n_rows=n_cells,
                 n_cols=n_total_genes,
                 n_groups=n_test,
+                n_groups_stats=n_groups_stats,
                 nnz=csr.nnz,
                 compute_tie_corr=tie_correct,
                 sub_batch_cols=STREAMING_SUB_BATCH,
             )
         else:
-            _wc.ovo_streaming_dense_host(
-                np.asfortranarray(X.astype(np.float32, copy=False)),
+            is_f64 = X.dtype == np.float64
+            _dense_host_fn = (
+                _wc.ovo_streaming_dense_host_f64
+                if is_f64
+                else _wc.ovo_streaming_dense_host
+            )
+            block = X if is_f64 else X.astype(np.float32, copy=False)
+            _dense_host_fn(
+                np.asfortranarray(block),
                 ref_row_ids_np.astype(np.int32, copy=False),
                 all_grp_row_ids_np.astype(np.int32, copy=False),
                 offsets_np,
-                rank_sums_np,
-                tie_corr_np,
+                stats_codes_np,
+                rank_sums,
+                tie_corr_arr,
+                group_sums,
+                group_sq_sums,
+                group_nnz,
                 n_ref=n_ref,
                 n_all_grp=n_all_grp,
                 n_rows=n_cells,
                 n_cols=n_total_genes,
                 n_groups=n_test,
+                n_groups_stats=n_groups_stats,
                 compute_tie_corr=tie_correct,
                 sub_batch_cols=STREAMING_SUB_BATCH,
             )
 
-        rank_sums = cp.asarray(rank_sums_np)
-        tie_corr_arr = cp.asarray(tie_corr_np)
+        if rg._compute_stats_in_chunks:
+            _fill_ovo_stats_from_accumulators(
+                rg,
+                group_sums,
+                group_sq_sums,
+                group_nnz,
+                group_sizes=group_sizes,
+                test_group_indices=test_group_indices,
+                n_ref=n_ref,
+            )
 
     else:
         # ---- GPU path: transfer once, then dispatch ----
