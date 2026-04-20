@@ -11,12 +11,51 @@
 #include <rmm/mr/device/per_device_resource.hpp>  // rmm 25.x
 #endif
 
+#include "../nb_types.h"  // for CUDA_CHECK_LAST_ERROR
+
 constexpr int WARP_SIZE = 32;
 constexpr int MAX_THREADS_PER_BLOCK = 512;
 constexpr int N_STREAMS = 4;
 constexpr int SUB_BATCH_COLS = 64;
 constexpr int BEGIN_BIT = 0;
 constexpr int END_BIT = 32;
+// Default thread-per-block for utility kernels (extract, gather, offsets,
+// etc.).
+constexpr int UTIL_BLOCK_SIZE = 256;
+// Scratch slots for warp-level reduction (one slot per warp, 32 warps max).
+constexpr int WARP_REDUCE_BUF = 32;
+// Max group size for the fused smem-sort rank kernel (Tier 1 fast path).
+// Beyond this, fall back to CUB segmented sort + binary-search rank kernel.
+constexpr int TIER1_GROUP_THRESHOLD = 2500;
+
+// ---------------------------------------------------------------------------
+// RAII guard for cudaHostRegister.  Unregisters on scope exit even when an
+// exception unwinds — prevents leaked host pinning on stream-sync failures.
+// ---------------------------------------------------------------------------
+struct HostRegisterGuard {
+    void* ptr = nullptr;
+
+    HostRegisterGuard() = default;
+    HostRegisterGuard(void* p, size_t bytes, unsigned int flags = 0) : ptr(p) {
+        if (ptr) cudaHostRegister(ptr, bytes, flags);
+    }
+    ~HostRegisterGuard() {
+        if (ptr) cudaHostUnregister(ptr);
+    }
+    HostRegisterGuard(const HostRegisterGuard&) = delete;
+    HostRegisterGuard& operator=(const HostRegisterGuard&) = delete;
+    HostRegisterGuard(HostRegisterGuard&& other) noexcept : ptr(other.ptr) {
+        other.ptr = nullptr;
+    }
+    HostRegisterGuard& operator=(HostRegisterGuard&& other) noexcept {
+        if (this != &other) {
+            if (ptr) cudaHostUnregister(ptr);
+            ptr = other.ptr;
+            other.ptr = nullptr;
+        }
+        return *this;
+    }
+};
 
 // ---------------------------------------------------------------------------
 // RMM pool helper — allocate GPU buffers through the current RMM memory
@@ -42,14 +81,24 @@ static inline int round_up_to_warp(int n) {
     return (rounded < MAX_THREADS_PER_BLOCK) ? rounded : MAX_THREADS_PER_BLOCK;
 }
 
-/** Upload linear segment offsets [0, stride, 2*stride, ...] to device.
- *  Uses synchronous copy — the buffer is small (a few hundred bytes). */
+/** Fill linear segment offsets [0, stride, 2*stride, ..., n_segments*stride]
+ *  on-device.  One thread per output slot. */
+__global__ void fill_linear_offsets_kernel(int* __restrict__ out,
+                                           int n_segments, int stride) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i <= n_segments) out[i] = i * stride;
+}
+
+/** Fill linear segment offsets [0, stride, 2*stride, ...] on device.
+ *  Runs on the supplied stream so it doesn't serialize multi-stream pipelines.
+ */
 static inline void upload_linear_offsets(int* d_offsets, int n_segments,
                                          int stride, cudaStream_t stream) {
-    std::vector<int> h(n_segments + 1);
-    for (int i = 0; i <= n_segments; i++) h[i] = i * stride;
-    cudaMemcpy(d_offsets, h.data(), (n_segments + 1) * sizeof(int),
-               cudaMemcpyHostToDevice);
+    int count = n_segments + 1;
+    int blk = (count + UTIL_BLOCK_SIZE - 1) / UTIL_BLOCK_SIZE;
+    fill_linear_offsets_kernel<<<blk, UTIL_BLOCK_SIZE, 0, stream>>>(
+        d_offsets, n_segments, stride);
+    CUDA_CHECK_LAST_ERROR(fill_linear_offsets_kernel);
 }
 
 // ============================================================================

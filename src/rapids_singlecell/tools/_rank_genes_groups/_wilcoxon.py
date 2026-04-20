@@ -133,13 +133,12 @@ def _to_gpu_native(X, n_rows: int, n_cols: int):
     # Downcast indices to int32 on host before transfer (column indices
     # always fit in int32; scipy may use int64 when nnz > 2^31).
     if isinstance(X, sp.spmatrix | sp.sparray):
-        if sp.issparse(X) and X.format == "csc":
-            csc = X if X.format == "csc" else X.tocsc()
+        if X.format == "csc":
             return cpsp.csc_matrix(
                 (
-                    cp.asarray(csc.data),
-                    cp.asarray(csc.indices.astype(np.int32, copy=False)),
-                    cp.asarray(csc.indptr),
+                    cp.asarray(X.data),
+                    cp.asarray(X.indices.astype(np.int32, copy=False)),
+                    cp.asarray(X.indptr),
                 ),
                 shape=(n_rows, n_cols),
             )
@@ -805,7 +804,7 @@ def _wilcoxon_with_reference(
     if tie_correct:
         variance = variance[:, None] * tie_corr_arr
     else:
-        variance = cp.broadcast_to(variance[:, None], (n_test, n_total_genes)).copy()
+        variance = variance[:, None]
 
     diff = rank_sums - expected[:, None]
     if use_continuity:

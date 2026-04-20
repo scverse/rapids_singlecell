@@ -9,11 +9,12 @@
 
 using namespace nb::literals;
 
-/** Rebase a slice of indptr: out[i] = indptr[col + i] - indptr[col]. */
+/** Rebase a slice of indptr: out[i] = indptr[col + i] - indptr[col].
+ *  Grid-strided: supports arbitrary `count` (no single-block thread limit). */
 __global__ void rebase_indptr_kernel(const int* __restrict__ indptr,
                                      int* __restrict__ out, int col,
                                      int count) {
-    int i = threadIdx.x;
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < count) out[i] = indptr[col + i] - indptr[col];
 }
 
@@ -75,20 +76,38 @@ __global__ void csr_scatter_to_csc_kernel(
  * Decide whether to use shared or global memory for OVR rank accumulators.
  * Returns the smem size to request and sets use_gmem accordingly.
  */
-static size_t ovr_smem_config(int n_groups, bool& use_gmem) {
-    size_t need = (size_t)(4 * n_groups + 32) * sizeof(double);
-    static int max_smem = -1;
-    if (max_smem < 0) {
+static int query_max_smem_per_block() {
+    static int cached = -1;
+    if (cached < 0) {
         int device;
         cudaGetDevice(&device);
-        cudaDeviceGetAttribute(&max_smem, cudaDevAttrMaxSharedMemoryPerBlock,
+        cudaDeviceGetAttribute(&cached, cudaDevAttrMaxSharedMemoryPerBlock,
                                device);
     }
-    if ((int)need <= max_smem) {
+    return cached;
+}
+
+static size_t ovr_smem_config(int n_groups, bool& use_gmem) {
+    size_t need = (size_t)(n_groups + 32) * sizeof(double);
+    if ((int)need <= query_max_smem_per_block()) {
         use_gmem = false;
         return need;
     }
     // Fall back to global memory accumulators; only need warp buf in smem
+    use_gmem = true;
+    return 32 * sizeof(double);
+}
+
+/**
+ * Decide smem-vs-gmem for the sparse OVR rank kernel.  Two accumulator
+ * arrays (grp_sums + grp_nz_count) of size n_groups each plus warp buf.
+ */
+static size_t sparse_ovr_smem_config(int n_groups, bool& use_gmem) {
+    size_t need = (size_t)(2 * n_groups + 32) * sizeof(double);
+    if ((int)need <= query_max_smem_per_block()) {
+        use_gmem = false;
+        return need;
+    }
     use_gmem = true;
     return 32 * sizeof(double);
 }
@@ -180,8 +199,9 @@ static void ovr_streaming_impl(const float* block, const int* group_codes,
 
         // Fill segment offsets + row indices
         upload_linear_offsets(buf.seg_offsets, sb_cols, n_rows, stream);
-        fill_row_indices_kernel<<<sb_cols, 256, 0, stream>>>(buf.vals_in,
-                                                             n_rows, sb_cols);
+        fill_row_indices_kernel<<<sb_cols, UTIL_BLOCK_SIZE, 0, stream>>>(
+            buf.vals_in, n_rows, sb_cols);
+        CUDA_CHECK_LAST_ERROR(fill_row_indices_kernel);
 
         // Sort: keys = block columns [col, col+sb_cols), already F-order
         const float* keys_in = block + (long long)col * n_rows;
@@ -199,8 +219,9 @@ static void ovr_streaming_impl(const float* block, const int* group_codes,
         }
         rank_sums_from_sorted_kernel<<<sb_cols, tpb_rank, smem_rank, stream>>>(
             buf.keys_out, buf.vals_out, group_codes, buf.sub_rank_sums,
-            buf.sub_tie_corr, nullptr, nullptr, nullptr, n_rows, sb_cols,
-            n_groups, compute_tie_corr, false, use_gmem);
+            buf.sub_tie_corr, n_rows, sb_cols, n_groups, compute_tie_corr,
+            use_gmem);
+        CUDA_CHECK_LAST_ERROR(rank_sums_from_sorted_kernel);
 
         // Copy sub-batch results to global output (row-major scatter)
         // rank_sums is (n_groups, n_cols) row-major: group g, col c →
@@ -289,6 +310,7 @@ static void ovr_sparse_csc_host_streaming_impl(
         double* d_group_sums;
         double* d_group_sq_sums;
         double* d_group_nnz;
+        double* d_nz_scratch;  // gmem-only; non-null when rank_use_gmem
     };
     std::vector<StreamBuf> bufs(n_streams);
     for (int s = 0; s < n_streams; s++) {
@@ -316,14 +338,45 @@ static void ovr_sparse_csc_host_streaming_impl(
     cudaMemcpy(d_group_sizes, h_group_sizes, n_groups * sizeof(double),
                cudaMemcpyHostToDevice);
 
-    int tpb = 256;
-    size_t smem_bytes = (size_t)(2 * n_groups + 32) * sizeof(double);
+    // Pre-compute rebased per-batch offsets and upload once (avoids per-batch
+    // H2D copy from a transient host buffer).
+    int n_batches = (n_cols + sub_batch_cols - 1) / sub_batch_cols;
+    std::vector<int> h_all_offsets((size_t)n_batches * (sub_batch_cols + 1), 0);
+    for (int b = 0; b < n_batches; b++) {
+        int col_start = b * sub_batch_cols;
+        int sb = std::min(sub_batch_cols, n_cols - col_start);
+        IndptrT ptr_start = h_indptr[col_start];
+        int* off = &h_all_offsets[(size_t)b * (sub_batch_cols + 1)];
+        for (int i = 0; i <= sb; i++)
+            off[i] = (int)(h_indptr[col_start + i] - ptr_start);
+    }
+    int* d_all_offsets =
+        pool.alloc<int>((size_t)n_batches * (sub_batch_cols + 1));
+    cudaMemcpy(d_all_offsets, h_all_offsets.data(),
+               h_all_offsets.size() * sizeof(int), cudaMemcpyHostToDevice);
+
+    int tpb = UTIL_BLOCK_SIZE;
+    bool rank_use_gmem = false;
+    size_t smem_bytes = sparse_ovr_smem_config(n_groups, rank_use_gmem);
     size_t smem_cast = (size_t)(3 * n_groups) * sizeof(double);
+
+    // In gmem mode the sparse rank kernel accumulates into rank_sums directly
+    // and needs a per-stream nz_count scratch buffer sized (n_groups, sb_cols).
+    for (int s = 0; s < n_streams; s++) {
+        if (rank_use_gmem) {
+            bufs[s].d_nz_scratch =
+                pool.alloc<double>((size_t)n_groups * sub_batch_cols);
+        } else {
+            bufs[s].d_nz_scratch = nullptr;
+        }
+    }
 
     // Pin only the host input arrays; outputs live on the device.
     size_t total_nnz = (size_t)h_indptr[n_cols];
-    cudaHostRegister(const_cast<InT*>(h_data), total_nnz * sizeof(InT), 0);
-    cudaHostRegister(const_cast<int*>(h_indices), total_nnz * sizeof(int), 0);
+    HostRegisterGuard _pin_data(const_cast<InT*>(h_data),
+                                total_nnz * sizeof(InT));
+    HostRegisterGuard _pin_indices(const_cast<int*>(h_indices),
+                                   total_nnz * sizeof(int));
 
     cudaDeviceSynchronize();
 
@@ -349,15 +402,10 @@ static void ovr_sparse_csc_host_streaming_impl(
                             cudaMemcpyHostToDevice, stream);
         }
 
-        // Rebase indptr slice on host → int32 per-batch offsets
-        {
-            std::vector<int> h_seg(sb_cols + 1);
-            for (int i = 0; i <= sb_cols; i++)
-                h_seg[i] = (int)(h_indptr[col + i] - ptr_start);
-            cudaMemcpyAsync(buf.d_seg_offsets, h_seg.data(),
-                            (sb_cols + 1) * sizeof(int), cudaMemcpyHostToDevice,
-                            stream);
-        }
+        // D2D: copy this batch's rebased offsets from the pre-uploaded buffer
+        int* src = d_all_offsets + (size_t)batch_idx * (sub_batch_cols + 1);
+        cudaMemcpyAsync(buf.d_seg_offsets, src, (sb_cols + 1) * sizeof(int),
+                        cudaMemcpyDeviceToDevice, stream);
 
         // Cast to float32 for sort + accumulate stats in float64
         ovr_cast_and_accumulate_sparse_kernel<InT>
@@ -366,6 +414,7 @@ static void ovr_sparse_csc_host_streaming_impl(
                 buf.d_sparse_indices, buf.d_seg_offsets, d_group_codes,
                 buf.d_group_sums, buf.d_group_sq_sums, buf.d_group_nnz, sb_cols,
                 n_groups);
+        CUDA_CHECK_LAST_ERROR(ovr_cast_and_accumulate_sparse_kernel);
 
         // CUB sort only stored nonzeros (float32 keys)
         if (batch_nnz > 0) {
@@ -378,10 +427,19 @@ static void ovr_sparse_csc_host_streaming_impl(
         }
 
         // Sparse rank kernel (stats already captured above)
+        if (rank_use_gmem) {
+            cudaMemsetAsync(buf.d_rank_sums, 0,
+                            (size_t)n_groups * sb_cols * sizeof(double),
+                            stream);
+            cudaMemsetAsync(buf.d_nz_scratch, 0,
+                            (size_t)n_groups * sb_cols * sizeof(double),
+                            stream);
+        }
         rank_sums_sparse_ovr_kernel<<<sb_cols, tpb, smem_bytes, stream>>>(
             buf.keys_out, buf.vals_out, buf.d_seg_offsets, d_group_codes,
-            d_group_sizes, buf.d_rank_sums, buf.d_tie_corr, n_rows, sb_cols,
-            n_groups, compute_tie_corr);
+            d_group_sizes, buf.d_rank_sums, buf.d_tie_corr, buf.d_nz_scratch,
+            n_rows, sb_cols, n_groups, compute_tie_corr, rank_use_gmem);
+        CUDA_CHECK_LAST_ERROR(rank_sums_sparse_ovr_kernel);
 
         // D2D: scatter sub-batch results into caller's GPU buffers
         cudaMemcpy2DAsync(d_rank_sums + col, n_cols * sizeof(double),
@@ -417,9 +475,6 @@ static void ovr_sparse_csc_host_streaming_impl(
                 std::string("CUDA error in sparse host CSC streaming: ") +
                 cudaGetErrorString(err));
     }
-
-    cudaHostUnregister(const_cast<InT*>(h_data));
-    cudaHostUnregister(const_cast<int*>(h_indices));
 
     for (int s = 0; s < n_streams; s++) cudaStreamDestroy(streams[s]);
 }
@@ -509,12 +564,12 @@ static void ovr_streaming_dense_host_impl(
     int tpb_rank = round_up_to_warp(n_rows);
     bool use_gmem = false;
     size_t smem_rank = ovr_smem_config(n_groups, use_gmem);
-    int tpb_cast = 256;
+    int tpb_cast = UTIL_BLOCK_SIZE;
     size_t smem_cast = (size_t)(3 * n_groups) * sizeof(double);
 
     // Pin only the host input.  Outputs live on the device (caller-owned).
-    cudaHostRegister(const_cast<InT*>(h_block),
-                     (size_t)n_rows * n_cols * sizeof(InT), 0);
+    HostRegisterGuard _pin_block(const_cast<InT*>(h_block),
+                                 (size_t)n_rows * n_cols * sizeof(InT));
 
     int col = 0;
     int batch_idx = 0;
@@ -535,11 +590,13 @@ static void ovr_streaming_dense_host_impl(
                 buf.d_block_orig, buf.d_block_f32, d_group_codes,
                 buf.d_group_sums, buf.d_group_sq_sums, buf.d_group_nnz, n_rows,
                 sb_cols, n_groups);
+        CUDA_CHECK_LAST_ERROR(ovr_cast_and_accumulate_dense_kernel);
 
         // Fill segment offsets + row indices
         upload_linear_offsets(buf.seg_offsets, sb_cols, n_rows, stream);
-        fill_row_indices_kernel<<<sb_cols, 256, 0, stream>>>(buf.vals_in,
-                                                             n_rows, sb_cols);
+        fill_row_indices_kernel<<<sb_cols, UTIL_BLOCK_SIZE, 0, stream>>>(
+            buf.vals_in, n_rows, sb_cols);
+        CUDA_CHECK_LAST_ERROR(fill_row_indices_kernel);
 
         // Sort
         size_t temp = cub_temp_bytes;
@@ -556,8 +613,9 @@ static void ovr_streaming_dense_host_impl(
         }
         rank_sums_from_sorted_kernel<<<sb_cols, tpb_rank, smem_rank, stream>>>(
             buf.keys_out, buf.vals_out, d_group_codes, buf.d_rank_sums,
-            buf.d_tie_corr, nullptr, nullptr, nullptr, n_rows, sb_cols,
-            n_groups, compute_tie_corr, false, use_gmem);
+            buf.d_tie_corr, n_rows, sb_cols, n_groups, compute_tie_corr,
+            use_gmem);
+        CUDA_CHECK_LAST_ERROR(rank_sums_from_sorted_kernel);
 
         // D2D: scatter sub-batch results into the caller's GPU buffers
         cudaMemcpy2DAsync(d_rank_sums + col, n_cols * sizeof(double),
@@ -593,8 +651,6 @@ static void ovr_streaming_dense_host_impl(
                 std::string("CUDA error in wilcoxon streaming: ") +
                 cudaGetErrorString(err));
     }
-
-    cudaHostUnregister(const_cast<InT*>(h_block));
 
     for (int s = 0; s < n_streams; s++) cudaStreamDestroy(streams[s]);
 }
@@ -640,6 +696,10 @@ static void ovr_sparse_csc_streaming_impl(
     std::vector<cudaStream_t> streams(n_streams);
     for (int i = 0; i < n_streams; i++) cudaStreamCreate(&streams[i]);
 
+    int tpb = UTIL_BLOCK_SIZE;
+    bool rank_use_gmem = false;
+    size_t smem_bytes = sparse_ovr_smem_config(n_groups, rank_use_gmem);
+
     RmmPool pool;
     struct StreamBuf {
         float* keys_out;
@@ -648,6 +708,7 @@ static void ovr_sparse_csc_streaming_impl(
         uint8_t* cub_temp;
         double* sub_rank_sums;
         double* sub_tie_corr;
+        double* d_nz_scratch;  // gmem-only
     };
     std::vector<StreamBuf> bufs(n_streams);
     for (int s = 0; s < n_streams; s++) {
@@ -658,10 +719,11 @@ static void ovr_sparse_csc_streaming_impl(
         bufs[s].sub_rank_sums =
             pool.alloc<double>((size_t)n_groups * sub_batch_cols);
         bufs[s].sub_tie_corr = pool.alloc<double>(sub_batch_cols);
+        bufs[s].d_nz_scratch =
+            rank_use_gmem
+                ? pool.alloc<double>((size_t)n_groups * sub_batch_cols)
+                : nullptr;
     }
-
-    int tpb = 256;
-    size_t smem_bytes = (size_t)(2 * n_groups + 32) * sizeof(double);
 
     cudaDeviceSynchronize();
 
@@ -679,8 +741,13 @@ static void ovr_sparse_csc_streaming_impl(
 
         // Compute rebased segment offsets on GPU (avoids host pinned-buffer
         // race)
-        rebase_indptr_kernel<<<1, sb_cols + 1, 0, stream>>>(
-            csc_indptr, buf.seg_offsets, col, sb_cols + 1);
+        {
+            int count = sb_cols + 1;
+            int blk = (count + UTIL_BLOCK_SIZE - 1) / UTIL_BLOCK_SIZE;
+            rebase_indptr_kernel<<<blk, UTIL_BLOCK_SIZE, 0, stream>>>(
+                csc_indptr, buf.seg_offsets, col, count);
+            CUDA_CHECK_LAST_ERROR(rebase_indptr_kernel);
+        }
 
         // Sort only stored values (keys=data, vals=row_indices)
         if (batch_nnz > 0) {
@@ -693,10 +760,19 @@ static void ovr_sparse_csc_streaming_impl(
         }
 
         // Sparse rank kernel (handles implicit zeros analytically)
+        if (rank_use_gmem) {
+            cudaMemsetAsync(buf.sub_rank_sums, 0,
+                            (size_t)n_groups * sb_cols * sizeof(double),
+                            stream);
+            cudaMemsetAsync(buf.d_nz_scratch, 0,
+                            (size_t)n_groups * sb_cols * sizeof(double),
+                            stream);
+        }
         rank_sums_sparse_ovr_kernel<<<sb_cols, tpb, smem_bytes, stream>>>(
             buf.keys_out, buf.vals_out, buf.seg_offsets, group_codes,
-            group_sizes, buf.sub_rank_sums, buf.sub_tie_corr, n_rows, sb_cols,
-            n_groups, compute_tie_corr);
+            group_sizes, buf.sub_rank_sums, buf.sub_tie_corr, buf.d_nz_scratch,
+            n_rows, sb_cols, n_groups, compute_tie_corr, rank_use_gmem);
+        CUDA_CHECK_LAST_ERROR(rank_sums_sparse_ovr_kernel);
 
         // Scatter results to global output
         cudaMemcpy2DAsync(rank_sums + col, n_cols * sizeof(double),
@@ -751,10 +827,10 @@ static void ovr_sparse_csr_streaming_impl(
     int* d_col_counts = pool.alloc<int>(n_cols);
     cudaMemset(d_col_counts, 0, n_cols * sizeof(int));
     {
-        int tpb = 256;
-        int blocks = (n_rows + tpb - 1) / tpb;
-        csr_col_histogram_kernel<<<blocks, tpb>>>(csr_indices, csr_indptr,
-                                                  d_col_counts, n_rows, n_cols);
+        int blocks = (n_rows + UTIL_BLOCK_SIZE - 1) / UTIL_BLOCK_SIZE;
+        csr_col_histogram_kernel<<<blocks, UTIL_BLOCK_SIZE>>>(
+            csr_indices, csr_indptr, d_col_counts, n_rows, n_cols);
+        CUDA_CHECK_LAST_ERROR(csr_col_histogram_kernel);
     }
     std::vector<int> h_col_counts(n_cols);
     cudaMemcpy(h_col_counts.data(), d_col_counts, n_cols * sizeof(int),
@@ -816,6 +892,11 @@ static void ovr_sparse_csr_streaming_impl(
     std::vector<cudaStream_t> streams(n_streams);
     for (int i = 0; i < n_streams; i++) cudaStreamCreate(&streams[i]);
 
+    int tpb = UTIL_BLOCK_SIZE;
+    bool rank_use_gmem = false;
+    size_t smem_bytes = sparse_ovr_smem_config(n_groups, rank_use_gmem);
+    int scatter_blocks = (n_rows + tpb - 1) / tpb;
+
     struct StreamBuf {
         int* col_offsets;  // [sub_batch_cols + 1]  CSC-style offsets
         int* write_pos;    // [sub_batch_cols]      atomic write counters
@@ -826,6 +907,7 @@ static void ovr_sparse_csr_streaming_impl(
         uint8_t* cub_temp;
         double* sub_rank_sums;
         double* sub_tie_corr;
+        double* d_nz_scratch;  // gmem-only
     };
     std::vector<StreamBuf> bufs(n_streams);
     for (int s = 0; s < n_streams; s++) {
@@ -839,11 +921,11 @@ static void ovr_sparse_csr_streaming_impl(
         bufs[s].sub_rank_sums =
             pool.alloc<double>((size_t)n_groups * sub_batch_cols);
         bufs[s].sub_tie_corr = pool.alloc<double>(sub_batch_cols);
+        bufs[s].d_nz_scratch =
+            rank_use_gmem
+                ? pool.alloc<double>((size_t)n_groups * sub_batch_cols)
+                : nullptr;
     }
-
-    int tpb = 256;
-    size_t smem_bytes = (size_t)(2 * n_groups + 32) * sizeof(double);
-    int scatter_blocks = (n_rows + tpb - 1) / tpb;
 
     cudaDeviceSynchronize();
 
@@ -870,6 +952,7 @@ static void ovr_sparse_csr_streaming_impl(
             csr_scatter_to_csc_kernel<<<scatter_blocks, tpb, 0, stream>>>(
                 csr_data, csr_indices, csr_indptr, buf.write_pos, buf.csc_vals,
                 buf.csc_row_idx, n_rows, col, col + sb_cols);
+            CUDA_CHECK_LAST_ERROR(csr_scatter_to_csc_kernel);
 
             // CUB sort only the nonzeros
             size_t temp = cub_temp_bytes;
@@ -880,10 +963,19 @@ static void ovr_sparse_csr_streaming_impl(
         }
 
         // Sparse rank kernel (handles implicit zeros analytically)
+        if (rank_use_gmem) {
+            cudaMemsetAsync(buf.sub_rank_sums, 0,
+                            (size_t)n_groups * sb_cols * sizeof(double),
+                            stream);
+            cudaMemsetAsync(buf.d_nz_scratch, 0,
+                            (size_t)n_groups * sb_cols * sizeof(double),
+                            stream);
+        }
         rank_sums_sparse_ovr_kernel<<<sb_cols, tpb, smem_bytes, stream>>>(
             buf.keys_out, buf.vals_out, buf.col_offsets, group_codes,
-            group_sizes, buf.sub_rank_sums, buf.sub_tie_corr, n_rows, sb_cols,
-            n_groups, compute_tie_corr);
+            group_sizes, buf.sub_rank_sums, buf.sub_tie_corr, buf.d_nz_scratch,
+            n_rows, sb_cols, n_groups, compute_tie_corr, rank_use_gmem);
+        CUDA_CHECK_LAST_ERROR(rank_sums_sparse_ovr_kernel);
 
         // Scatter results to global output
         cudaMemcpy2DAsync(rank_sums + col, n_cols * sizeof(double),

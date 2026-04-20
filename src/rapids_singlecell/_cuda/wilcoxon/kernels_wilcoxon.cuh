@@ -10,57 +10,35 @@
  * tie groups by adjacent comparison (sequential access, no binary search).
  * Cross-boundary ties are resolved via binary search at chunk boundaries.
  *
- * When use_gmem is false (default), per-group accumulators live in shared
- * memory (fast atomics, limited to ~750 groups on 48 KB devices).
- * When use_gmem is true, accumulators write directly to the output arrays
- * in global memory, supporting an arbitrary number of groups.  The caller
- * must pre-zero rank_sums (and group_sums/group_sq_sums/group_nnz if
- * compute_stats) before launching.
+ * When use_gmem is false, per-group accumulators live in shared memory
+ * (fast atomics, limited to ~1500 groups on 48 KB devices).  When use_gmem
+ * is true, accumulators write directly to ``rank_sums`` in global memory,
+ * supporting an arbitrary number of groups.  The caller must pre-zero
+ * ``rank_sums`` before launching in the gmem path.
  *
  * Shared memory layout:
- *   use_gmem=false: (4 * n_groups + 32) doubles   (accumulators + warp buf)
- *   use_gmem=true:  32 doubles                     (warp buf only)
+ *   use_gmem=false: (n_groups + 32) doubles   (accumulators + warp buf)
+ *   use_gmem=true:  32 doubles                 (warp buf only)
  */
 __global__ void rank_sums_from_sorted_kernel(
     const float* __restrict__ sorted_vals,
     const int* __restrict__ sorted_row_idx, const int* __restrict__ group_codes,
-    double* __restrict__ rank_sums, double* __restrict__ tie_corr,
-    double* __restrict__ group_sums, double* __restrict__ group_sq_sums,
-    double* __restrict__ group_nnz, int n_rows, int n_cols, int n_groups,
-    bool compute_tie_corr, bool compute_stats, bool use_gmem) {
+    double* __restrict__ rank_sums, double* __restrict__ tie_corr, int n_rows,
+    int n_cols, int n_groups, bool compute_tie_corr, bool use_gmem) {
     int col = blockIdx.x;
     if (col >= n_cols) return;
 
     extern __shared__ double smem[];
 
-    // Accumulator pointers: shared memory (fast) or global memory (large
-    // groups)
     double* grp_sums;
-    double* s_sum;
-    double* s_sq;
-    double* s_nnz;
-
     if (use_gmem) {
-        // Global memory path: write directly to output arrays (must be
-        // pre-zeroed)
+        // Global memory path: write directly to output (must be pre-zeroed)
         grp_sums = rank_sums + (size_t)col;  // stride: n_cols
-        s_sum = group_sums ? group_sums + (size_t)col : nullptr;
-        s_sq = group_sq_sums ? group_sq_sums + (size_t)col : nullptr;
-        s_nnz = group_nnz ? group_nnz + (size_t)col : nullptr;
     } else {
         // Shared memory path: per-block accumulators
         grp_sums = smem;
-        s_sum = smem + n_groups;
-        s_sq = smem + 2 * n_groups;
-        s_nnz = smem + 3 * n_groups;
-
         for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
             grp_sums[g] = 0.0;
-            if (compute_stats) {
-                s_sum[g] = 0.0;
-                s_sq[g] = 0.0;
-                s_nnz[g] = 0.0;
-            }
         }
         __syncthreads();
     }
@@ -104,7 +82,7 @@ __global__ void rank_sums_from_sorted_kernel(
             sv[tie_local_end] == val) {
             int lo = tie_local_end, hi = n_rows - 1;
             while (lo < hi) {
-                int mid = (lo + hi + 1) / 2;
+                int mid = hi - ((hi - lo) >> 1);
                 if (sv[mid] > val)
                     hi = mid - 1;
                 else
@@ -120,12 +98,6 @@ __global__ void rank_sums_from_sorted_kernel(
             int grp = group_codes[si[j]];
             if (grp < n_groups) {
                 atomicAdd(&grp_sums[grp * acc_stride], avg_rank);
-                if (compute_stats) {
-                    double v = (double)sv[j];
-                    atomicAdd(&s_sum[grp * acc_stride], v);
-                    atomicAdd(&s_sq[grp * acc_stride], v * v);
-                    if (v != 0.0) atomicAdd(&s_nnz[grp * acc_stride], 1.0);
-                }
             }
         }
 
@@ -143,19 +115,14 @@ __global__ void rank_sums_from_sorted_kernel(
     if (!use_gmem) {
         for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
             rank_sums[(size_t)g * n_cols + col] = grp_sums[g];
-            if (compute_stats) {
-                group_sums[(size_t)g * n_cols + col] = s_sum[g];
-                group_sq_sums[(size_t)g * n_cols + col] = s_sq[g];
-                group_nnz[(size_t)g * n_cols + col] = s_nnz[g];
-            }
         }
     }
 
     if (compute_tie_corr) {
-        // Warp buf sits after all accumulator arrays in shared memory.
-        // gmem path: accumulators are in global mem, warp buf starts at
-        // smem[0]. smem path: 4 arrays of n_groups doubles, then warp buf.
-        int warp_buf_off = use_gmem ? 0 : (compute_stats ? 4 : 1) * n_groups;
+        // Warp buf sits after accumulator array in shared memory.
+        // gmem path: warp buf starts at smem[0].
+        // smem path: n_groups doubles, then warp buf.
+        int warp_buf_off = use_gmem ? 0 : n_groups;
         double* warp_buf = smem + warp_buf_off;
 #pragma unroll
         for (int off = 16; off > 0; off >>= 1)
@@ -209,8 +176,9 @@ __global__ void rank_sums_sparse_ovr_kernel(
     const int* __restrict__ sorted_row_idx,
     const int* __restrict__ col_seg_offsets,
     const int* __restrict__ group_codes, const double* __restrict__ group_sizes,
-    double* __restrict__ rank_sums, double* __restrict__ tie_corr, int n_rows,
-    int sb_cols, int n_groups, bool compute_tie_corr) {
+    double* __restrict__ rank_sums, double* __restrict__ tie_corr,
+    double* __restrict__ nz_count_scratch, int n_rows, int sb_cols,
+    int n_groups, bool compute_tie_corr, bool use_gmem) {
     int col = blockIdx.x;
     if (col >= sb_cols) return;
 
@@ -222,14 +190,27 @@ __global__ void rank_sums_sparse_ovr_kernel(
     const int* si = sorted_row_idx + seg_start;
 
     extern __shared__ double smem[];
-    double* grp_sums = smem;
-    double* grp_nz_count = smem + n_groups;
+    double* grp_sums;
+    double* grp_nz_count;
+    // Accumulator stride: 1 for shared mem (dense per-block), sb_cols for
+    // gmem (row-major layout (n_groups, sb_cols) shared across blocks).
+    int acc_stride;
 
-    for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
-        grp_sums[g] = 0.0;
-        grp_nz_count[g] = 0.0;
+    if (use_gmem) {
+        // Output rank_sums doubles as accumulator (pre-zeroed by caller).
+        grp_sums = rank_sums + (size_t)col;
+        grp_nz_count = nz_count_scratch + (size_t)col;
+        acc_stride = sb_cols;
+    } else {
+        grp_sums = smem;
+        grp_nz_count = smem + n_groups;
+        acc_stride = 1;
+        for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
+            grp_sums[g] = 0.0;
+            grp_nz_count[g] = 0.0;
+        }
+        __syncthreads();
     }
-    __syncthreads();
 
     // --- Find zero range: neg_end = first val >= 0, pos_start = first val > 0
     // ---
@@ -278,7 +259,7 @@ __global__ void rank_sums_sparse_ovr_kernel(
         if (i < neg_end || i >= pos_start) {  // skip stored zeros
             int grp = group_codes[si[i]];
             if (grp < n_groups) {
-                atomicAdd(&grp_nz_count[grp], 1.0);
+                atomicAdd(&grp_nz_count[grp * acc_stride], 1.0);
             }
         }
     }
@@ -286,8 +267,8 @@ __global__ void rank_sums_sparse_ovr_kernel(
 
     // --- Zero-rank contribution per group ---
     for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
-        double n_zero_in_g = group_sizes[g] - grp_nz_count[g];
-        grp_sums[g] = n_zero_in_g * zero_avg_rank;
+        double n_zero_in_g = group_sizes[g] - grp_nz_count[g * acc_stride];
+        grp_sums[g * acc_stride] = n_zero_in_g * zero_avg_rank;
     }
     __syncthreads();
 
@@ -343,7 +324,7 @@ __global__ void rank_sums_sparse_ovr_kernel(
             int search_hi = (val < 0.0f) ? (neg_end - 1) : (nnz_stored - 1);
             int lo = tie_local_end, hi = search_hi;
             while (lo < hi) {
-                int mid = (lo + hi + 1) >> 1;
+                int mid = hi - ((hi - lo) >> 1);
                 if (sv[mid] > val)
                     hi = mid - 1;
                 else
@@ -368,7 +349,7 @@ __global__ void rank_sums_sparse_ovr_kernel(
         for (int j = i; j < tie_local_end; ++j) {
             int grp = group_codes[si[j]];
             if (grp < n_groups) {
-                atomicAdd(&grp_sums[grp], avg_rank);
+                atomicAdd(&grp_sums[grp * acc_stride], avg_rank);
             }
         }
 
@@ -382,9 +363,11 @@ __global__ void rank_sums_sparse_ovr_kernel(
 
     __syncthreads();
 
-    // Write rank sums to global output
-    for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
-        rank_sums[(size_t)g * sb_cols + col] = grp_sums[g];
+    // Write rank sums to global output (smem path only — gmem path is direct)
+    if (!use_gmem) {
+        for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
+            rank_sums[(size_t)g * sb_cols + col] = grp_sums[g];
+        }
     }
 
     // Tie correction: warp + block reduction
@@ -395,7 +378,9 @@ __global__ void rank_sums_sparse_ovr_kernel(
             local_tie_sum += tz * tz * tz - tz;
         }
 
-        int warp_buf_off = 2 * n_groups;
+        // smem path: warp buf after both accumulator arrays (2 * n_groups).
+        // gmem path: accumulators are in gmem, warp buf starts at smem[0].
+        int warp_buf_off = use_gmem ? 0 : 2 * n_groups;
         double* warp_buf = smem + warp_buf_off;
 
 #pragma unroll
