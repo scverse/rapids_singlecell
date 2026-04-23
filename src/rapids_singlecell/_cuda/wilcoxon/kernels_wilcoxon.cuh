@@ -423,7 +423,8 @@ __global__ void ovr_cast_and_accumulate_dense_kernel(
     const InT* __restrict__ block_in, float* __restrict__ block_f32_out,
     const int* __restrict__ group_codes, double* __restrict__ group_sums,
     double* __restrict__ group_sq_sums, double* __restrict__ group_nnz,
-    int n_rows, int sb_cols, int n_groups) {
+    int n_rows, int sb_cols, int n_groups, bool compute_sq_sums = true,
+    bool compute_nnz = true) {
     int col = blockIdx.x;
     if (col >= sb_cols) return;
 
@@ -434,8 +435,8 @@ __global__ void ovr_cast_and_accumulate_dense_kernel(
 
     for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
         s_sum[g] = 0.0;
-        s_sq[g] = 0.0;
-        s_nnz[g] = 0.0;
+        if (compute_sq_sums) s_sq[g] = 0.0;
+        if (compute_nnz) s_nnz[g] = 0.0;
     }
     __syncthreads();
 
@@ -449,55 +450,19 @@ __global__ void ovr_cast_and_accumulate_dense_kernel(
         int g = group_codes[r];
         if (g < n_groups) {
             atomicAdd(&s_sum[g], v);
-            atomicAdd(&s_sq[g], v * v);
-            if (v != 0.0) atomicAdd(&s_nnz[g], 1.0);
+            if (compute_sq_sums) atomicAdd(&s_sq[g], v * v);
+            if (compute_nnz && v != 0.0) atomicAdd(&s_nnz[g], 1.0);
         }
     }
     __syncthreads();
 
     for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
         group_sums[(size_t)g * sb_cols + col] = s_sum[g];
-        group_sq_sums[(size_t)g * sb_cols + col] = s_sq[g];
-        group_nnz[(size_t)g * sb_cols + col] = s_nnz[g];
-    }
-}
-
-/**
- * One-shot cast-and-accumulate kernel for CSR-layout host streaming.
- *
- * The OVO CSR host path uploads the full CSR once; this kernel walks the
- * uploaded data row-by-row, writes a float32 copy of the values, and
- * accumulates per-group sum/sum-sq/nnz directly into a full-size
- * (n_groups_stats, n_cols) output using global atomics.  stats_codes[row]
- * must be in [0, n_groups_stats) to contribute; other values (e.g. the
- * sentinel for unselected cells) are skipped.
- *
- * Grid: (ceil(n_rows/tpb),), Block: (tpb,).
- */
-template <typename InT>
-__global__ void cast_and_accumulate_csr_kernel(
-    const InT* __restrict__ data_in, float* __restrict__ data_f32_out,
-    const int* __restrict__ indices, const int* __restrict__ indptr,
-    const int* __restrict__ stats_codes, double* __restrict__ group_sums,
-    double* __restrict__ group_sq_sums, double* __restrict__ group_nnz,
-    int n_rows, int n_cols, int n_groups_stats) {
-    int row = blockIdx.x * blockDim.x + threadIdx.x;
-    if (row >= n_rows) return;
-    int slot = stats_codes[row];
-    int rs = indptr[row];
-    int re = indptr[row + 1];
-    bool accumulate = (slot >= 0 && slot < n_groups_stats);
-    for (int p = rs; p < re; p++) {
-        InT v_in = data_in[p];
-        double v = (double)v_in;
-        data_f32_out[p] = (float)v_in;
-        if (accumulate) {
-            int c = indices[p];
-            atomicAdd(&group_sums[(size_t)slot * n_cols + c], v);
-            atomicAdd(&group_sq_sums[(size_t)slot * n_cols + c], v * v);
-            if (v != 0.0) {
-                atomicAdd(&group_nnz[(size_t)slot * n_cols + c], 1.0);
-            }
+        if (compute_sq_sums) {
+            group_sq_sums[(size_t)g * sb_cols + col] = s_sq[g];
+        }
+        if (compute_nnz) {
+            group_nnz[(size_t)g * sb_cols + col] = s_nnz[g];
         }
     }
 }
@@ -514,13 +479,14 @@ __global__ void cast_and_accumulate_csr_kernel(
  * Block-per-column layout (grid: (sb_cols,), block: (tpb,)).
  * Shared memory: 3 * n_groups doubles.
  */
-template <typename InT>
+template <typename InT, typename IndexT = int>
 __global__ void ovr_cast_and_accumulate_sparse_kernel(
     const InT* __restrict__ data_in, float* __restrict__ data_f32_out,
-    const int* __restrict__ indices, const int* __restrict__ col_seg_offsets,
+    const IndexT* __restrict__ indices, const int* __restrict__ col_seg_offsets,
     const int* __restrict__ group_codes, double* __restrict__ group_sums,
     double* __restrict__ group_sq_sums, double* __restrict__ group_nnz,
-    int sb_cols, int n_groups) {
+    int sb_cols, int n_groups, bool compute_sq_sums = true,
+    bool compute_nnz = true) {
     int col = blockIdx.x;
     if (col >= sb_cols) return;
 
@@ -534,8 +500,8 @@ __global__ void ovr_cast_and_accumulate_sparse_kernel(
 
     for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
         s_sum[g] = 0.0;
-        s_sq[g] = 0.0;
-        s_nnz[g] = 0.0;
+        if (compute_sq_sums) s_sq[g] = 0.0;
+        if (compute_nnz) s_nnz[g] = 0.0;
     }
     __syncthreads();
 
@@ -543,19 +509,23 @@ __global__ void ovr_cast_and_accumulate_sparse_kernel(
         InT v_in = data_in[i];
         double v = (double)v_in;
         data_f32_out[i] = (float)v_in;
-        int row = indices[i];
+        int row = (int)indices[i];
         int g = group_codes[row];
         if (g < n_groups) {
             atomicAdd(&s_sum[g], v);
-            atomicAdd(&s_sq[g], v * v);
-            if (v != 0.0) atomicAdd(&s_nnz[g], 1.0);
+            if (compute_sq_sums) atomicAdd(&s_sq[g], v * v);
+            if (compute_nnz && v != 0.0) atomicAdd(&s_nnz[g], 1.0);
         }
     }
     __syncthreads();
 
     for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
         group_sums[(size_t)g * sb_cols + col] = s_sum[g];
-        group_sq_sums[(size_t)g * sb_cols + col] = s_sq[g];
-        group_nnz[(size_t)g * sb_cols + col] = s_nnz[g];
+        if (compute_sq_sums) {
+            group_sq_sums[(size_t)g * sb_cols + col] = s_sq[g];
+        }
+        if (compute_nnz) {
+            group_nnz[(size_t)g * sb_cols + col] = s_nnz[g];
+        }
     }
 }

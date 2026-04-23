@@ -1,26 +1,30 @@
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
-import cupy as cp
-import cupyx.scipy.sparse as cpsp
 import numpy as np
-import scipy.sparse as sp
-
-from rapids_singlecell.preprocessing._utils import _sparse_to_dense
 
 if TYPE_CHECKING:
     import pandas as pd
     from numpy.typing import NDArray
 
 EPS = 1e-9
-WARP_SIZE = 32
-MAX_THREADS_PER_BLOCK = 512
+
+
+class NoTestGroupsError(ValueError):
+    """Raised when skip_empty_groups=True and no test groups remain after
+    filtering.  The public ``rank_genes_groups`` catches this and returns
+    quietly (after emitting a ``RuntimeWarning``) so callers can iterate
+    over data subsets without wrapping each call in try/except."""
 
 
 def _select_groups(
     labels: pd.Series,
     selected: list | None,
+    *,
+    skip_empty_groups: bool = False,
+    reference: str | None = None,
 ) -> tuple[NDArray, NDArray[np.int32], NDArray[np.int64]]:
     """Build integer group codes from a categorical Series.
 
@@ -31,6 +35,17 @@ def _select_groups(
     selected
         Group names to keep, or ``None`` for all groups.
         Must already include the reference group if applicable.
+    skip_empty_groups
+        If ``True``, drop groups with fewer than 2 cells instead of raising,
+        emitting a ``RuntimeWarning`` that lists the dropped groups.  Useful
+        when iterating over data subsets (e.g. per cell type) where some
+        categorical levels have no cells.  The reference group is never
+        silently dropped — if it has <2 cells, a ``ValueError`` is raised.
+    reference
+        Name of the reference group (``None`` or ``"rest"`` if there is
+        no fixed reference).  Only used when ``skip_empty_groups`` is
+        ``True`` to validate that the reference is not the one being
+        dropped.
 
     Returns
     -------
@@ -51,27 +66,65 @@ def _select_groups(
         cat_order = {str(c): i for i, c in enumerate(all_categories)}
         selected.sort(key=lambda x: cat_order.get(str(x), len(all_categories)))
 
+    # First pass: compute sizes for the currently-selected groups so we can
+    # optionally drop empty/singleton ones before assigning final codes.
+    orig_codes_all = labels.cat.codes.to_numpy()
+
+    def _compute_codes_and_sizes(
+        sel: list,
+    ) -> tuple[NDArray[np.int32], NDArray[np.int64]]:
+        n = len(sel)
+        str_to_sel = {str(name): idx for idx, name in enumerate(sel)}
+        lookup = np.full(len(all_categories) + 1, n, dtype=np.int32)
+        for cat_idx, cat_name in enumerate(all_categories):
+            sel_idx = str_to_sel.get(str(cat_name))
+            if sel_idx is not None:
+                lookup[cat_idx] = sel_idx
+        codes = lookup[orig_codes_all]
+        sizes = np.bincount(codes, minlength=n + 1)[:n].astype(np.int64)
+        return codes, sizes
+
+    _, preview_sizes = _compute_codes_and_sizes(selected)
+
+    if skip_empty_groups:
+        ref_str = str(reference) if reference not in (None, "rest") else None
+        empty_idx = [i for i, s in enumerate(preview_sizes) if s < 2]
+        if empty_idx:
+            empty_names = [str(selected[i]) for i in empty_idx]
+            if ref_str is not None and ref_str in empty_names:
+                msg = (
+                    f"Reference group {ref_str!r} has <2 cells; cannot run "
+                    "with skip_empty_groups=True."
+                )
+                raise ValueError(msg)
+            warnings.warn(
+                f"Dropping {len(empty_names)} group(s) with <2 cells: "
+                f"{', '.join(empty_names)}",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+            selected = [g for i, g in enumerate(selected) if i not in set(empty_idx)]
+
+        # Need at least one test group once the reference is excluded.
+        ref_str = str(reference) if reference not in (None, "rest") else None
+        n_test = sum(1 for g in selected if str(g) != ref_str)
+        if n_test == 0:
+            msg = (
+                "No test groups with >=2 cells remain after filtering "
+                "(only the reference has enough cells)."
+            )
+            raise NoTestGroupsError(msg)
+
     n_groups = len(selected)
     groups_order = np.array(selected)
 
-    # Map original category index → selected group index
-    str_to_sel = {str(name): idx for idx, name in enumerate(selected)}
-    orig_to_sel: dict[int, int] = {}
-    for cat_idx, cat_name in enumerate(all_categories):
-        sel_idx = str_to_sel.get(str(cat_name))
-        if sel_idx is not None:
-            orig_to_sel[cat_idx] = sel_idx
+    if n_groups == 0:
+        msg = "No groups with >=2 cells remain after filtering."
+        raise ValueError(msg)
 
-    orig_codes = labels.cat.codes.to_numpy()
-    group_codes = np.full(len(orig_codes), n_groups, dtype=np.int32)
-    for orig_idx, sel_idx in orig_to_sel.items():
-        group_codes[orig_codes == orig_idx] = sel_idx
+    group_codes, group_sizes = _compute_codes_and_sizes(selected)
 
-    group_sizes = np.bincount(group_codes, minlength=n_groups + 1)[:n_groups].astype(
-        np.int64
-    )
-
-    # Validate singlet groups
+    # Validate singlet groups (only triggers when skip_empty_groups=False).
     invalid_groups = {str(selected[i]) for i in range(n_groups) if group_sizes[i] < 2}
     if invalid_groups:
         msg = (
@@ -83,56 +136,31 @@ def _select_groups(
     return groups_order, group_codes, group_sizes
 
 
-def _round_up_to_warp(n: int) -> int:
-    """Round up to nearest multiple of WARP_SIZE, capped at MAX_THREADS_PER_BLOCK."""
-    return min(MAX_THREADS_PER_BLOCK, ((n + WARP_SIZE - 1) // WARP_SIZE) * WARP_SIZE)
-
-
 def _select_top_n(scores: NDArray, n_top: int) -> NDArray:
     """Select indices of top n scores.
 
     Uses argpartition + argsort for O(n + k log k) complexity where k = n_top.
     This is faster than full sorting when k << n.
     """
-    n_from = scores.shape[0]
-    reference_indices = np.arange(n_from, dtype=int)
+    if n_top >= scores.shape[0]:
+        return np.argsort(scores)[::-1]
     partition = np.argpartition(scores, -n_top)[-n_top:]
-    partial_indices = np.argsort(scores[partition])[::-1]
-    global_indices = reference_indices[partition][partial_indices]
-    return global_indices
+    return partition[np.argsort(scores[partition])[::-1]]
 
 
-def _csc_columns_to_gpu(X_csc, start: int, stop: int, n_rows: int) -> cp.ndarray:
-    """
-    Extract columns from a CSC matrix via direct indptr pointer slicing.
+def _benjamini_hochberg(pvals: NDArray) -> NDArray:
+    """Adjust p-values with the Benjamini-Hochberg FDR procedure."""
+    pvals_clean = np.array(pvals, copy=True)
+    pvals_clean[np.isnan(pvals_clean)] = 1.0
 
-    Works for both scipy and CuPy CSC matrices. Much faster than
-    ``X[:, start:stop]`` which rebuilds index arrays internally.
-    """
-    s_ptr = int(X_csc.indptr[start])
-    e_ptr = int(X_csc.indptr[stop])
-    chunk_data = cp.asarray(X_csc.data[s_ptr:e_ptr])
-    chunk_indices = cp.asarray(X_csc.indices[s_ptr:e_ptr])
-    chunk_indptr = cp.asarray(X_csc.indptr[start : stop + 1] - s_ptr)
-    csc_chunk = cpsp.csc_matrix(
-        (chunk_data, chunk_indices, chunk_indptr), shape=(n_rows, stop - start)
-    )
-    return _sparse_to_dense(csc_chunk, order="F")
+    n_tests = pvals_clean.size
+    order = np.argsort(pvals_clean)
+    ordered = pvals_clean[order]
+    ranks = np.arange(1, n_tests + 1, dtype=ordered.dtype) / n_tests
+    adjusted = ordered / ranks
+    np.minimum.accumulate(adjusted[::-1], out=adjusted[::-1])
+    np.minimum(adjusted, 1.0, out=adjusted)
 
-
-def _get_column_block(X, start: int, stop: int) -> cp.ndarray:
-    """Extract a column block as a dense F-order CuPy array (native dtype)."""
-    match X:
-        case sp.csc_matrix() | sp.csc_array():
-            return _csc_columns_to_gpu(X, start, stop, X.shape[0])
-        case sp.spmatrix() | sp.sparray():
-            chunk = cpsp.csc_matrix(X[:, start:stop].tocsc())
-            return _sparse_to_dense(chunk, order="F")
-        case cpsp.csc_matrix():
-            return _csc_columns_to_gpu(X, start, stop, X.shape[0])
-        case cpsp.spmatrix():
-            return _sparse_to_dense(X[:, start:stop], order="F")
-        case np.ndarray() | cp.ndarray():
-            return cp.asfortranarray(cp.asarray(X[:, start:stop]))
-        case _:
-            raise ValueError(f"Unsupported matrix type: {type(X)}")
+    out = np.empty_like(adjusted)
+    out[order] = adjusted
+    return out

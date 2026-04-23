@@ -6,6 +6,7 @@ __pycache__/
 /data/
 test-data/
 .vscode/
+.codex
 
 # Distribution / packaging
 /dist/

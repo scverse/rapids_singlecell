@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import warnings
 from functools import partial
 from typing import TYPE_CHECKING, Literal
 
@@ -8,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from ._core import _RankGenes
+from ._utils import NoTestGroupsError
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -42,6 +44,7 @@ def rank_genes_groups(
     pre_load: bool = False,
     n_bins: int | None = None,
     bin_range: Literal["log1p", "auto"] | None = None,
+    skip_empty_groups: bool = False,
     **kwds,
 ) -> None:
     """
@@ -121,6 +124,14 @@ def rank_genes_groups(
         ``'log1p'`` uses a fixed [0, 15] range suitable for most log1p-normalized data.
         ``'auto'`` computes the actual data range. Use this for z-scored
         or unnormalized data.
+    skip_empty_groups
+        If ``True``, silently drop groups with fewer than 2 cells (issuing
+        a ``RuntimeWarning``) instead of raising a ``ValueError``.  Useful
+        when iterating over data subsets (e.g. per cell type) where some
+        categorical levels may be empty.  If no test groups remain after
+        filtering (only the reference has >=2 cells), the call returns
+        without updating ``adata.uns``.  The reference group is never
+        dropped — if it has <2 cells the call still fails.
     **kwds
         Additional arguments passed to the method. For `'logreg'`, these are
         passed to :class:`cuml.linear_model.LogisticRegression`.
@@ -187,17 +198,29 @@ def rank_genes_groups(
                 msg = f"mask_var has wrong shape: {mask_var_array.shape[0]} != {adata.n_vars}"
                 raise ValueError(msg)
 
-    test_obj = _RankGenes(
-        adata,
-        groups,
-        groupby,
-        mask_var=mask_var_array,
-        reference=reference,
-        use_raw=use_raw,
-        layer=layer,
-        comp_pts=pts,
-        pre_load=pre_load,
-    )
+    try:
+        test_obj = _RankGenes(
+            adata,
+            groups,
+            groupby,
+            mask_var=mask_var_array,
+            reference=reference,
+            use_raw=use_raw,
+            layer=layer,
+            comp_pts=pts,
+            pre_load=pre_load,
+            skip_empty_groups=skip_empty_groups,
+        )
+    except NoTestGroupsError as e:
+        # skip_empty_groups=True contract: no test groups left → no-op.
+        # Do not write to adata.uns so downstream loops can detect the
+        # missing key and skip this subset.
+        warnings.warn(
+            f"rank_genes_groups: skipping — {e}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return
 
     # Determine n_genes_user
     n_genes_user = n_genes
@@ -217,11 +240,21 @@ def rank_genes_groups(
         **kwds,
     )
 
-    # Build output
-    test_obj.stats.columns = test_obj.stats.columns.swaplevel()
-
+    # Use a U-width tight to the actual gene names rather than the scanpy
+    # default of U50.  For a 1948-group × 18k-gene workload this cuts the
+    # names structured array from ~7 GB → ~3 GB.  Must match the width that
+    # compute_statistics used when converting var_names (see _core.py), so
+    # the final stack → structured-array view is a pure memcpy.
+    _vn = np.asarray(test_obj.var_names)
+    if _vn.dtype.kind == "U":
+        max_name_len = _vn.dtype.itemsize // 4
+    elif len(_vn):
+        max_name_len = max(len(str(n)) for n in _vn)
+    else:
+        max_name_len = 50
+    names_dtype = f"U{max(max_name_len, 1)}"
     dtypes = {
-        "names": "U50",
+        "names": names_dtype,
         "scores": "float32",
         "logfoldchanges": "float32",
         "pvals": "float64",
@@ -252,11 +285,45 @@ def rank_genes_groups(
     if method == "wilcoxon":
         adata.uns[key_added]["params"]["tie_correct"] = tie_correct
 
-    for col in test_obj.stats.columns.levels[0]:
-        if col in dtypes:
-            adata.uns[key_added][col] = test_obj.stats[col].to_records(
-                index=False, column_dtypes=dtypes[col]
+    # Assemble scanpy-compatible structured arrays directly from per-group
+    # arrays, without going through a wide pandas DataFrame + to_records —
+    # that pipeline was ~4 s of pure Python overhead on workloads with
+    # thousands of groups.
+    group_names = test_obj.group_names
+    if group_names:
+        for stat, per_group_arrays in test_obj.results.items():
+            if per_group_arrays is None or stat not in dtypes:
+                continue
+            adata.uns[key_added][stat] = _build_structured(
+                group_names, per_group_arrays, dtypes[stat]
             )
+
+
+def _build_structured(
+    group_names: list[str],
+    per_group_arrays: list[np.ndarray],
+    field_dtype: str,
+) -> np.ndarray:
+    """Build a scanpy-style structured array with one field per group.
+
+    Equivalent to assigning ``sa[name] = arr`` in a loop, but ~20× faster
+    on wide workloads (1000+ groups): fills a contiguous 2-D (n, n_groups)
+    buffer row-by-row and reinterprets it as a structured view, so the
+    bulk write pattern matches the structured-array memory layout.
+    """
+    n = per_group_arrays[0].shape[0]
+    # Stack directly into the target dtype — np.stack with `dtype=` avoids
+    # the separate astype pass.  axis=1 produces (n, n_groups) C-contig
+    # exactly matching the structured memory layout below, so .view() is
+    # zero-copy.  Use 'unsafe' casting for string targets (object→U50).
+    if np.dtype(field_dtype).kind == "U":
+        stacked = np.stack(
+            per_group_arrays, axis=1, casting="unsafe", dtype=field_dtype
+        )
+    else:
+        stacked = np.stack(per_group_arrays, axis=1, dtype=field_dtype)
+    dtype = np.dtype([(name, field_dtype) for name in group_names])
+    return stacked.view(dtype).reshape(n)
 
 
 if TYPE_CHECKING:

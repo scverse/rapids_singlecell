@@ -24,9 +24,26 @@ constexpr int END_BIT = 32;
 constexpr int UTIL_BLOCK_SIZE = 256;
 // Scratch slots for warp-level reduction (one slot per warp, 32 warps max).
 constexpr int WARP_REDUCE_BUF = 32;
+// Max group size for the super-fast "warp-per-(col,group)" fused kernel
+// (Tier 0).  Each warp sorts and ranks one (col, group) pair entirely in
+// registers via warp-shuffle bitonic sort — no smem sort buffer, no
+// __syncthreads().  Blocks pack 8 warps so block launch overhead is
+// amortised 8× across (col, group) work items.  This path is the fast
+// route for per-celltype perturbation-style workloads where most test
+// groups have only a few dozen cells.
+constexpr int TIER0_GROUP_THRESHOLD = 32;
+// Medium-group cutoff for the unsorted direct-rank kernel.  For perturbation
+// workloads most groups sit below this range, where avoiding a full smem
+// bitonic sort wins despite the O(n^2) in-group count.
+constexpr int TIER2_GROUP_THRESHOLD = 512;
 // Max group size for the fused smem-sort rank kernel (Tier 1 fast path).
 // Beyond this, fall back to CUB segmented sort + binary-search rank kernel.
 constexpr int TIER1_GROUP_THRESHOLD = 2500;
+// Per-stream dense slab budget (float32 items).  Dynamic sub-batching sizes
+// each group's column batch so that (n_g × eff_sb_cols) ≤ this.  Bigger =
+// fewer kernel launches; smaller = less per-stream memory.  64M items × 4B =
+// 256 MB per stream dense slab + same for sorted copy ≈ 512 MB / stream.
+constexpr size_t GROUP_DENSE_BUDGET_ITEMS = 64 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // RAII guard for cudaHostRegister.  Unregisters on scope exit even when an
@@ -37,7 +54,24 @@ struct HostRegisterGuard {
 
     HostRegisterGuard() = default;
     HostRegisterGuard(void* p, size_t bytes, unsigned int flags = 0) : ptr(p) {
-        if (ptr) cudaHostRegister(ptr, bytes, flags);
+        if (ptr) {
+            cudaError_t err = cudaHostRegister(ptr, bytes, flags);
+            if (err != cudaSuccess) {
+                // Already-registered memory is fine; anything else means the
+                // subsequent kernels would read garbage from an unmapped
+                // pointer, so surface the error immediately.
+                if (err == cudaErrorHostMemoryAlreadyRegistered) {
+                    cudaGetLastError();  // clear sticky error flag
+                } else {
+                    ptr = nullptr;  // don't unregister in dtor
+                    throw std::runtime_error(
+                        std::string("cudaHostRegister failed (") +
+                        std::to_string((size_t)bytes) +
+                        " bytes, flags=" + std::to_string(flags) +
+                        "): " + cudaGetErrorString(err));
+                }
+            }
+        }
     }
     ~HostRegisterGuard() {
         if (ptr) cudaHostUnregister(ptr);
@@ -87,6 +121,95 @@ __global__ void fill_linear_offsets_kernel(int* __restrict__ out,
                                            int n_segments, int stride) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i <= n_segments) out[i] = i * stride;
+}
+
+/** Fill per-row stats codes for a pack of K groups.
+ *  Given pack_grp_offsets (size K+1, relative to pack start), write
+ *  stats_codes[r] = base_slot + group_idx_of_row_r for r in [0, pack_n_rows).
+ *  Binary search within the K+1 offsets. */
+__global__ void fill_pack_stats_codes_kernel(
+    const int* __restrict__ pack_grp_offsets, int* __restrict__ stats_codes,
+    int K, int base_slot) {
+    int r = blockIdx.x * blockDim.x + threadIdx.x;
+    int pack_n_rows = pack_grp_offsets[K];
+    if (r >= pack_n_rows) return;
+    int lo = 0, hi = K;
+    while (lo < hi) {
+        int m = lo + ((hi - lo) >> 1);
+        if (pack_grp_offsets[m + 1] <= r)
+            lo = m + 1;
+        else
+            hi = m;
+    }
+    stats_codes[r] = base_slot + lo;
+}
+
+/** Rebase a slice of indptr: out[i] = indptr[col + i] - indptr[col].
+ *  Grid-strided: supports arbitrary `count` (no single-block thread limit).
+ *  Templated so that 64-bit global indptrs can produce 32-bit pack-local
+ *  indptrs (per-pack nnz always fits in int32 thanks to the memory budget).
+ */
+template <typename IdxIn, typename IdxOut>
+__global__ void rebase_indptr_kernel(const IdxIn* __restrict__ indptr,
+                                     IdxOut* __restrict__ out, int col,
+                                     int count) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < count) out[i] = (IdxOut)(indptr[col + i] - indptr[col]);
+}
+
+/** Fused gather + cast-to-float32 + stats accumulation, reading from mapped
+ *  pinned host memory.  Block-per-row; threads in the block cooperate on the
+ *  row's nnz.  Each nnz is read from host over PCIe exactly once — no
+ *  intermediate native-dtype GPU buffer, no second GPU pass.
+ *
+ *  h_data / h_indices: device-accessible pointers into mapped pinned host
+ *                     memory (cudaHostRegisterMapped).
+ *  d_indptr_full: full-matrix indptr on device.
+ *  d_row_ids:    rows to gather (size n_target_rows).
+ *  d_out_indptr: pre-computed compacted indptr, size n_target_rows+1 with
+ *                out_indptr[i+1] - out_indptr[i] equal to the source row's
+ *                nnz.
+ *
+ *  Slot dispatch:
+ *    d_stats_codes != nullptr → slot = d_stats_codes[r]; otherwise slot =
+ *    fixed_slot (used for the Ref phase where every row maps to the same
+ *    slot).  slot ∉ [0, n_groups_stats) skips accumulation.
+ */
+template <typename InT, typename IndexT, typename IndptrT>
+__global__ void csr_gather_cast_accumulate_mapped_kernel(
+    const InT* __restrict__ h_data, const IndexT* __restrict__ h_indices,
+    const IndptrT* __restrict__ d_indptr_full,
+    const int* __restrict__ d_row_ids, const int* __restrict__ d_out_indptr,
+    const int* __restrict__ d_stats_codes, int fixed_slot,
+    float* __restrict__ d_out_data_f32, int* __restrict__ d_out_indices,
+    double* __restrict__ group_sums, double* __restrict__ group_sq_sums,
+    double* __restrict__ group_nnz, int n_target_rows, int n_cols,
+    int n_groups_stats, bool compute_sq_sums, bool compute_nnz) {
+    int r = blockIdx.x;
+    if (r >= n_target_rows) return;
+    int src_row = d_row_ids[r];
+    IndptrT rs = d_indptr_full[src_row];
+    IndptrT re = d_indptr_full[src_row + 1];
+    int row_nnz = (int)(re - rs);
+    int ds = d_out_indptr[r];
+    int slot = (d_stats_codes != nullptr) ? d_stats_codes[r] : fixed_slot;
+    bool accumulate = (slot >= 0 && slot < n_groups_stats);
+    for (int i = threadIdx.x; i < row_nnz; i += blockDim.x) {
+        InT v_in = h_data[rs + i];
+        int c = (int)h_indices[rs + i];
+        double v = (double)v_in;
+        d_out_data_f32[ds + i] = (float)v_in;
+        d_out_indices[ds + i] = c;
+        if (accumulate) {
+            atomicAdd(&group_sums[(size_t)slot * n_cols + c], v);
+            if (compute_sq_sums) {
+                atomicAdd(&group_sq_sums[(size_t)slot * n_cols + c], v * v);
+            }
+            if (compute_nnz && v != 0.0) {
+                atomicAdd(&group_nnz[(size_t)slot * n_cols + c], 1.0);
+            }
+        }
+    }
 }
 
 /** Fill linear segment offsets [0, stride, 2*stride, ...] on device.

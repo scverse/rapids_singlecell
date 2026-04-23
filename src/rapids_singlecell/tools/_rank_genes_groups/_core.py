@@ -1,18 +1,28 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from os import cpu_count
 from typing import TYPE_CHECKING, Literal, assert_never
 
 import cupy as cp
 import numpy as np
 import pandas as pd
-from statsmodels.stats.multitest import multipletests
 
 from rapids_singlecell._compat import DaskArray
 from rapids_singlecell.get import X_to_GPU
 from rapids_singlecell.get._aggregated import Aggregate
 from rapids_singlecell.preprocessing._utils import _check_gpu_X
 
-from ._utils import EPS, _select_groups, _select_top_n
+from ._utils import (
+    EPS,
+    _benjamini_hochberg,
+    _select_groups,
+    _select_top_n,
+)
+
+POSTPROCESS_PARALLEL_GROUPS = 256
+POSTPROCESS_PARALLEL_GENES = 1024
+POSTPROCESS_MAX_WORKERS = 8
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -38,6 +48,7 @@ class _RankGenes:
         layer: str | None = None,
         comp_pts: bool = False,
         pre_load: bool = False,
+        skip_empty_groups: bool = False,
     ) -> None:
         # Handle groups parameter
         if groups == "all" or groups is None:
@@ -63,7 +74,10 @@ class _RankGenes:
             raise ValueError(msg)
 
         self.groups_order, self.group_codes, self.group_sizes = _select_groups(
-            self.labels, selected
+            self.labels,
+            selected,
+            skip_empty_groups=skip_empty_groups,
+            reference=reference,
         )
 
         # Get data matrix
@@ -114,9 +128,19 @@ class _RankGenes:
         self.vars_rest: np.ndarray | None = None
         self.pts_rest: np.ndarray | None = None
 
-        self.stats: pd.DataFrame | None = None
+        # Per-stat × per-group arrays.  results[stat] is either None (stat not
+        # computed) or a list of 1-D numpy arrays in group_names order.  This
+        # replaces the old DataFrame-based pipeline, which burned ~4 s per call
+        # on wide workloads (1000+ groups) in pandas DataFrame + to_records.
+        self.results: dict[str, list[np.ndarray] | None] = {
+            "names": None,
+            "scores": None,
+            "pvals": None,
+            "pvals_adj": None,
+            "logfoldchanges": None,
+        }
+        self.group_names: list[str] = []
         self._compute_stats_in_chunks: bool = False
-        self._ref_chunk_computed: set[int] = set()
 
     def _init_stats_arrays(self, n_genes: int) -> None:
         """Pre-allocate stats arrays before chunk loop."""
@@ -212,104 +236,6 @@ class _RankGenes:
         self.means = cp.asnumpy(means)
         self.vars = cp.asnumpy(vars_)
         self.pts = cp.asnumpy(pts) if pts is not None else None
-
-    def _accumulate_chunk_stats_vs_rest(
-        self,
-        block: cp.ndarray,
-        start: int,
-        stop: int,
-        *,
-        group_matrix: cp.ndarray,
-        group_sizes_dev: cp.ndarray,
-        n_cells: int,
-    ) -> None:
-        """Compute and store stats for one gene chunk (vs rest mode)."""
-        if not self._compute_stats_in_chunks:
-            return  # Stats already computed via Aggregate
-
-        rest_sizes = n_cells - group_sizes_dev
-
-        # Group sums and sum of squares
-        group_sums = group_matrix.T @ block
-        group_sum_sq = group_matrix.T @ (block**2)
-
-        # Means
-        chunk_means = group_sums / group_sizes_dev[:, None]
-        self.means[:, start:stop] = cp.asnumpy(chunk_means)
-
-        # Variances (with Bessel correction)
-        chunk_vars = group_sum_sq / group_sizes_dev[:, None] - chunk_means**2
-        chunk_vars *= group_sizes_dev[:, None] / (group_sizes_dev[:, None] - 1)
-        self.vars[:, start:stop] = cp.asnumpy(chunk_vars)
-
-        # Pts (fraction expressing)
-        if self.comp_pts:
-            group_nnz = group_matrix.T @ (block != 0).astype(cp.float64)
-            self.pts[:, start:stop] = cp.asnumpy(group_nnz / group_sizes_dev[:, None])
-
-        # Rest statistics
-        if self.ireference is None:
-            total_sum = block.sum(axis=0)
-            total_sum_sq = (block**2).sum(axis=0)
-
-            rest_sums = total_sum[None, :] - group_sums
-            rest_means = rest_sums / rest_sizes[:, None]
-            self.means_rest[:, start:stop] = cp.asnumpy(rest_means)
-
-            rest_sum_sq = total_sum_sq[None, :] - group_sum_sq
-            rest_vars = rest_sum_sq / rest_sizes[:, None] - rest_means**2
-            rest_vars *= rest_sizes[:, None] / (rest_sizes[:, None] - 1)
-            self.vars_rest[:, start:stop] = cp.asnumpy(rest_vars)
-
-            if self.comp_pts:
-                total_nnz = (block != 0).sum(axis=0)
-                rest_nnz = total_nnz[None, :] - group_nnz
-                self.pts_rest[:, start:stop] = cp.asnumpy(
-                    rest_nnz / rest_sizes[:, None]
-                )
-
-    def _accumulate_chunk_stats_with_ref(
-        self,
-        block: cp.ndarray,
-        start: int,
-        stop: int,
-        *,
-        group_index: int,
-        group_mask_gpu: cp.ndarray,
-        n_group: int,
-        n_ref: int,
-    ) -> None:
-        """Compute and store stats for one gene chunk (with reference mode)."""
-        if not self._compute_stats_in_chunks:
-            return  # Stats already computed via Aggregate
-
-        # Group stats
-        group_data = block[group_mask_gpu]
-        group_mean = group_data.mean(axis=0)
-        self.means[group_index, start:stop] = cp.asnumpy(group_mean)
-
-        if n_group > 1:
-            group_var = group_data.var(axis=0, ddof=1)
-            self.vars[group_index, start:stop] = cp.asnumpy(group_var)
-
-        if self.comp_pts:
-            group_nnz = (group_data != 0).sum(axis=0)
-            self.pts[group_index, start:stop] = cp.asnumpy(group_nnz / n_group)
-
-        # Reference stats (only compute once, on first non-reference group)
-        if start not in self._ref_chunk_computed:
-            self._ref_chunk_computed.add(start)
-            ref_data = block[~group_mask_gpu]
-            ref_mean = ref_data.mean(axis=0)
-            self.means[self.ireference, start:stop] = cp.asnumpy(ref_mean)
-
-            if n_ref > 1:
-                ref_var = ref_data.var(axis=0, ddof=1)
-                self.vars[self.ireference, start:stop] = cp.asnumpy(ref_var)
-
-            if self.comp_pts:
-                ref_nnz = (ref_data != 0).sum(axis=0)
-                self.pts[self.ireference, start:stop] = cp.asnumpy(ref_nnz / n_ref)
 
     def t_test(
         self, method: Literal["t-test", "t-test_overestim_var"]
@@ -408,56 +334,136 @@ class _RankGenes:
 
         n_genes = self.X.shape[1]
 
-        # Collect all stats data first to avoid DataFrame fragmentation
-        stats_data: dict[tuple[str, str], np.ndarray] = {}
+        if not test_results:
+            self.group_names = []
+            return
 
-        for group_index, scores, pvals in test_results:
-            group_name = str(self.groups_order[group_index])
+        group_indices = np.array([gi for gi, _, _ in test_results], dtype=np.int64)
+        self.group_names = [str(self.groups_order[gi]) for gi in group_indices]
+        has_lfc = self.means is not None
 
+        # Vectorised log-fold-change across all test groups — avoids 1948
+        # individual numpy ops in the hot path (was ~1.5 s of Python
+        # overhead on wide workloads).  Cast to the output dtype here so
+        # _build_structured never needs a full-array astype pass.
+        lfc_all: np.ndarray | None = None
+        if has_lfc:
+            mean_groups = self.means[group_indices]
+            if self.ireference is None:
+                mean_rests = self.means_rest[group_indices]
+            else:
+                mean_rests = self.means[self.ireference][None, :]
+            foldchanges = (self.expm1_func(mean_groups) + EPS) / (
+                self.expm1_func(mean_rests) + EPS
+            )
+            lfc_all = np.log2(foldchanges).astype(np.float32, copy=False)
+
+        names_list: list[np.ndarray] = []
+        scores_list: list[np.ndarray] = []
+        pvals_list: list[np.ndarray] = []
+        pvals_adj_list: list[np.ndarray] = []
+        lfc_list: list[np.ndarray] = []
+        has_pvals = False
+        # Pre-convert var_names to fixed-width unicode ONCE.  Without this,
+        # per-group indexing returns object arrays, and np.stack(..., dtype='U')
+        # ends up doing ~35 M object→string conversions inside the hot loop —
+        # that was ~1.5 s on the 1948-group / 18k-gene workload.  Using the
+        # target width directly turns the final stack into a pure memcpy.
+        _vn = np.asarray(self.var_names)
+        if _vn.dtype.kind == "U":
+            var_names_arr = _vn
+        else:
+            max_len = max((len(str(n)) for n in _vn), default=1)
+            var_names_arr = _vn.astype(f"U{max_len}")
+
+        def _process_result(
+            ti: int,
+        ) -> tuple[
+            int,
+            np.ndarray | None,
+            np.ndarray,
+            np.ndarray | None,
+            np.ndarray | None,
+            np.ndarray | None,
+        ]:
+            _, scores, pvals = test_results[ti]
             if n_genes_user is not None:
                 scores_sort = np.abs(scores) if rankby_abs else scores
                 global_indices = _select_top_n(scores_sort, n_genes_user)
+                names = var_names_arr[global_indices]
             else:
                 global_indices = slice(None)
+                names = None
 
-            if n_genes_user is not None:
-                stats_data[group_name, "names"] = np.asarray(self.var_names)[
-                    global_indices
-                ]
-
-            stats_data[group_name, "scores"] = scores[global_indices]
+            scores_out = scores[global_indices]
+            pvals_out = None
+            pvals_adj_out = None
 
             if pvals is not None:
-                stats_data[group_name, "pvals"] = pvals[global_indices]
+                pvals_out = pvals[global_indices]
                 if corr_method == "benjamini-hochberg":
-                    pvals_clean = np.array(pvals, copy=True)
-                    pvals_clean[np.isnan(pvals_clean)] = 1.0
-                    _, pvals_adj, _, _ = multipletests(
-                        pvals_clean, alpha=0.05, method="fdr_bh"
-                    )
+                    pvals_adj = _benjamini_hochberg(pvals)
                 elif corr_method == "bonferroni":
                     pvals_adj = np.minimum(pvals * n_genes, 1.0)
-                stats_data[group_name, "pvals_adj"] = pvals_adj[global_indices]
+                pvals_adj_out = pvals_adj[global_indices]
 
-            # Compute logfoldchanges
-            if self.means is not None:
-                mean_group = self.means[group_index]
-                if self.ireference is None:
-                    mean_rest = self.means_rest[group_index]
-                else:
-                    mean_rest = self.means[self.ireference]
-                foldchanges = (self.expm1_func(mean_group) + EPS) / (
-                    self.expm1_func(mean_rest) + EPS
-                )
-                stats_data[group_name, "logfoldchanges"] = np.log2(
-                    foldchanges[global_indices]
-                )
+            lfc_out = None
+            if lfc_all is not None:
+                lfc_out = lfc_all[ti][global_indices]
 
-        # Create DataFrame all at once to avoid fragmentation
-        if stats_data:
-            self.stats = pd.DataFrame(stats_data)
-            self.stats.columns = pd.MultiIndex.from_tuples(self.stats.columns)
-            if n_genes_user is None:
-                self.stats.index = self.var_names
+            return ti, names, scores_out, pvals_out, pvals_adj_out, lfc_out
+
+        def _process_range(
+            start: int, stop: int
+        ) -> list[
+            tuple[
+                int,
+                np.ndarray | None,
+                np.ndarray,
+                np.ndarray | None,
+                np.ndarray | None,
+                np.ndarray | None,
+            ]
+        ]:
+            return [_process_result(ti) for ti in range(start, stop)]
+
+        n_results = len(test_results)
+        use_parallel_post = (
+            n_results >= POSTPROCESS_PARALLEL_GROUPS
+            and n_genes >= POSTPROCESS_PARALLEL_GENES
+        )
+        if use_parallel_post:
+            workers = min(POSTPROCESS_MAX_WORKERS, cpu_count() or 1, n_results)
+            chunk = (n_results + workers - 1) // workers
+            ranges = [
+                (start, min(start + chunk, n_results))
+                for start in range(0, n_results, chunk)
+            ]
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                processed_chunks = executor.map(lambda r: _process_range(*r), ranges)
+                processed = [
+                    item for chunk_out in processed_chunks for item in chunk_out
+                ]
         else:
-            self.stats = None
+            processed = _process_range(0, n_results)
+
+        for _, names, scores_out, pvals_out, pvals_adj_out, lfc_out in processed:
+            if names is not None:
+                names_list.append(names)
+            scores_list.append(scores_out)
+            if pvals_out is not None and pvals_adj_out is not None:
+                has_pvals = True
+                pvals_list.append(pvals_out)
+                pvals_adj_list.append(pvals_adj_out)
+            if lfc_out is not None:
+                lfc_list.append(lfc_out)
+
+        if self.group_names:
+            self.results["scores"] = scores_list
+            if n_genes_user is not None:
+                self.results["names"] = names_list
+            if has_pvals:
+                self.results["pvals"] = pvals_list
+                self.results["pvals_adj"] = pvals_adj_list
+            if lfc_all is not None:
+                self.results["logfoldchanges"] = lfc_list
