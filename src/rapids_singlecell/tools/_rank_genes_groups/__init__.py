@@ -21,100 +21,31 @@ type _Method = Literal[
 ]
 
 
-class _LazyRankGenesColumn:
-    def __init__(
-        self,
-        values: np.ndarray | None = None,
-        *,
-        var_names: np.ndarray | None = None,
-        gene_indices: np.ndarray | None = None,
-        dtype: str | np.dtype,
-    ) -> None:
-        self._values = values
-        self._var_names = var_names
-        self._gene_indices = gene_indices
-        self._dtype = np.dtype(dtype)
-
-    def __len__(self) -> int:
-        if self._values is not None:
-            return int(self._values.shape[0])
-        return int(self._gene_indices.shape[0])
-
-    def __getitem__(self, key):
-        if self._values is not None:
-            return self._values[key]
-        return self._var_names[self._gene_indices[key]]
-
-    def __iter__(self):
-        for idx in range(len(self)):
-            yield self[idx]
-
-    def __array__(self, dtype=None, copy=None) -> np.ndarray:
-        if self._values is not None:
-            arr = np.asarray(self._values, dtype=self._dtype)
-        else:
-            arr = np.asarray(self._var_names[self._gene_indices], dtype=self._dtype)
-        if dtype is not None:
-            arr = np.asarray(arr, dtype=dtype)
-        if copy:
-            arr = arr.copy()
-        return arr
-
-
-class _LazyRankGenesRecords(dict):
-    def __init__(
-        self, group_names: np.ndarray, columns: dict[str, object], dtype: str | np.dtype
-    ) -> None:
-        super().__init__(columns)
-        self._group_names = tuple(str(name) for name in group_names)
-        self._dtype = np.dtype([(name, np.dtype(dtype)) for name in self._group_names])
-
-    @property
-    def dtype(self) -> np.dtype:
-        return self._dtype
-
-    def __getitem__(self, key):
-        if isinstance(key, str):
-            return super().__getitem__(key)
-        return np.asarray(self)[key]
-
-    def __array__(self, dtype=None, copy=None) -> np.ndarray:
-        out = np.empty(len(next(iter(self.values()))) if self else 0, dtype=self._dtype)
-        for name in self._group_names:
-            out[name] = np.asarray(super().__getitem__(name))
-        if dtype is not None:
-            out = np.asarray(out, dtype=dtype)
-        if copy:
-            out = out.copy()
-        return out
-
-    def copy(self) -> np.ndarray:
-        return np.asarray(self).copy()
-
-
-def _array_result_to_lazy_records(
+def _array_result_to_records(
     arrays: dict[str, object], field: str, dtype: str | np.dtype
-) -> _LazyRankGenesRecords:
-    group_names = arrays["group_names"]
-    values = arrays[field]
-    columns = {
-        str(group_name): _LazyRankGenesColumn(values[row], dtype=dtype)
-        for row, group_name in enumerate(group_names)
-    }
-    return _LazyRankGenesRecords(group_names, columns, dtype)
+) -> np.ndarray:
+    group_names = tuple(str(name) for name in arrays["group_names"])
+    values = np.asarray(arrays[field])
+    out = np.empty(
+        values.shape[1],
+        dtype=[(group_name, np.dtype(dtype)) for group_name in group_names],
+    )
+    for row, group_name in enumerate(group_names):
+        out[group_name] = values[row]
+    return out
 
 
-def _array_result_to_lazy_names(arrays: dict[str, object]) -> _LazyRankGenesRecords:
-    group_names = arrays["group_names"]
-    var_names = arrays["var_names"]
-    gene_indices = arrays["gene_indices"]
-    columns = {
-        str(group_name): _LazyRankGenesColumn(
-            var_names=var_names, gene_indices=gene_indices[row], dtype=object
-        )
-        for row, group_name in enumerate(group_names)
-    }
-    return _LazyRankGenesRecords(group_names, columns, object)
+def _array_result_to_names(arrays: dict[str, object]) -> np.ndarray:
+    group_names = tuple(str(name) for name in arrays["group_names"])
+    var_names = np.asarray(arrays["var_names"])
+    gene_indices = np.asarray(arrays["gene_indices"], dtype=np.intp)
+    out = np.empty(
+        gene_indices.shape[1],
+        dtype=[(group_name, object) for group_name in group_names],
+    )
+    for row, group_name in enumerate(group_names):
+        out[group_name] = var_names[gene_indices[row]]
+    return out
 
 
 def rank_genes_groups(
@@ -146,8 +77,8 @@ def rank_genes_groups(
     Rank genes for characterizing groups using GPU acceleration.
 
     Expects nonnegative expression data. Log1p/log-normalized data is expected
-    for biologically meaningful log fold changes; sparse inputs with explicit
-    negative values are rejected.
+    for biologically meaningful log fold changes; negative values are rejected
+    for eager in-memory inputs.
 
     .. note::
         **Dask support:** `'t-test'`, `'t-test_overestim_var'`, and
@@ -235,10 +166,8 @@ def rank_genes_groups(
 
     Returns
     -------
-    Updates `adata` with the following fields. Rank result fields are lazy
-    Scanpy-compatible record objects: group fields can be indexed like
-    structured arrays, while full structured arrays are materialized only when
-    requested through NumPy conversion or `.copy()`.
+    Updates `adata` with the following fields. Rank result fields are
+    Scanpy-compatible structured arrays.
 
     `adata.uns['rank_genes_groups' | key_added]['names']`
         Structured array to be indexed by group id storing the gene
@@ -269,7 +198,7 @@ def rank_genes_groups(
     if "return_format" in kwds:
         msg = (
             "return_format has been removed; rank_genes_groups always writes "
-            "lazy Scanpy-compatible results to adata.uns."
+            "Scanpy-compatible structured results to adata.uns."
         )
         raise TypeError(msg)
 
@@ -357,23 +286,15 @@ def rank_genes_groups(
     arrays = test_obj.stats_arrays or {}
     adata.uns[key_added] = {"params": params}
     if arrays and len(arrays.get("group_names", ())) > 0:
-        adata.uns[key_added]["names"] = _array_result_to_lazy_names(arrays)
-        for col, dtype in {
-            "scores": "float32",
-            "logfoldchanges": "float32",
-            "pvals": "float64",
-            "pvals_adj": "float64",
-        }.items():
+        adata.uns[key_added]["names"] = _array_result_to_names(arrays)
+        for col in ("scores", "logfoldchanges", "pvals", "pvals_adj"):
             if col in arrays:
                 values = arrays[col]
-                if hasattr(values, "dtype"):
-                    dtype = values.dtype
-                adata.uns[key_added][col] = _array_result_to_lazy_records(
-                    arrays, col, dtype
-                )
+                dtype = values.dtype
+                adata.uns[key_added][col] = _array_result_to_records(arrays, col, dtype)
 
+    groups_names = [str(name) for name in test_obj.groups_order]
     if test_obj.pts is not None:
-        groups_names = [str(name) for name in test_obj.groups_order]
         adata.uns[key_added]["pts"] = pd.DataFrame(
             test_obj.pts.T, index=test_obj.var_names, columns=groups_names
         )

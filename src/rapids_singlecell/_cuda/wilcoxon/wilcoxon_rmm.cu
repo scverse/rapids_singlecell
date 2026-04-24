@@ -10,8 +10,8 @@ void* wilcoxon_rmm_allocate(size_t bytes) {
         return rmm::mr::get_current_device_resource()->allocate_sync(bytes);
     } catch (std::exception const& e) {
         throw std::runtime_error(
-            std::string("RMM allocation failed in Wilcoxon scratch: ") +
-            e.what());
+            std::string("RMM allocation failed in Wilcoxon scratch (") +
+            std::to_string(bytes) + " bytes): " + e.what());
     }
 }
 

@@ -35,6 +35,41 @@ extern "C" __global__ void fdr_bh_reverse_cummin(double* values, const int n_col
 """,
     "fdr_bh_reverse_cummin",
 )
+_GROUP_CHUNK_STATS_KERNEL = cp.RawKernel(
+    r"""
+extern "C" __global__ void group_chunk_stats(
+    const double* block,
+    const int* group_codes,
+    double* group_sums,
+    double* group_sum_sq,
+    double* group_nnz,
+    const int n_rows,
+    const int n_cols,
+    const int n_groups,
+    const bool compute_nnz
+) {
+    const long long idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const long long total = static_cast<long long>(n_rows) * n_cols;
+    if (idx >= total) {
+        return;
+    }
+    const int row = idx % n_rows;
+    const int col = idx / n_rows;
+    const int group = group_codes[row];
+    if (group < 0 || group >= n_groups) {
+        return;
+    }
+    const double value = block[idx];
+    const long long out = static_cast<long long>(group) * n_cols + col;
+    atomicAdd(group_sums + out, value);
+    atomicAdd(group_sum_sq + out, value * value);
+    if (compute_nnz && value != 0.0) {
+        atomicAdd(group_nnz + out, 1.0);
+    }
+}
+""",
+    "group_chunk_stats",
+)
 _RANK_SORT_MIN_ELEMENTS = 1_000_000
 _RANK_SORT_MAX_WORKERS = 64
 
@@ -258,7 +293,7 @@ class _RankGenes:
         start: int,
         stop: int,
         *,
-        group_matrix: cp.ndarray,
+        group_codes_dev: cp.ndarray,
         group_sizes_dev: cp.ndarray,
         n_cells: int,
     ) -> None:
@@ -268,9 +303,31 @@ class _RankGenes:
 
         rest_sizes = n_cells - group_sizes_dev
 
-        # Group sums and sum of squares
-        group_sums = group_matrix.T @ block
-        group_sum_sq = group_matrix.T @ (block**2)
+        n_groups = len(self.groups_order)
+        n_cols = stop - start
+        group_sums = cp.zeros((n_groups, n_cols), dtype=cp.float64)
+        group_sum_sq = cp.zeros((n_groups, n_cols), dtype=cp.float64)
+        group_nnz = (
+            cp.zeros((n_groups, n_cols), dtype=cp.float64) if self.comp_pts else None
+        )
+        n_items = n_cells * n_cols
+        threads = 256
+        blocks = (n_items + threads - 1) // threads
+        _GROUP_CHUNK_STATS_KERNEL(
+            (blocks,),
+            (threads,),
+            (
+                block,
+                group_codes_dev,
+                group_sums,
+                group_sum_sq,
+                group_nnz if group_nnz is not None else group_sums,
+                np.int32(n_cells),
+                np.int32(n_cols),
+                np.int32(n_groups),
+                self.comp_pts,
+            ),
+        )
 
         # Means
         chunk_means = group_sums / group_sizes_dev[:, None]
@@ -283,7 +340,6 @@ class _RankGenes:
 
         # Pts (fraction expressing)
         if self.comp_pts:
-            group_nnz = group_matrix.T @ (block != 0).astype(cp.float64)
             self.pts[:, start:stop] = cp.asnumpy(group_nnz / group_sizes_dev[:, None])
 
         # Rest statistics
@@ -439,7 +495,7 @@ class _RankGenes:
                 raise ValueError(msg)
             self._score_dtype = np.dtype(np.float64 if return_u_values else np.float32)
             self._wilcoxon_gpu_result = None
-            self._store_wilcoxon_gpu_result = n_genes_user is not None
+            self._store_wilcoxon_gpu_result = True
             try:
                 test_results = self.wilcoxon(
                     tie_correct=tie_correct,

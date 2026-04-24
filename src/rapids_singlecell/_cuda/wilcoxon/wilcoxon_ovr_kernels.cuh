@@ -4,7 +4,7 @@
 template <typename IndexT, typename IndptrT>
 __global__ void csr_col_histogram_kernel(const IndexT* __restrict__ indices,
                                          const IndptrT* __restrict__ indptr,
-                                         int* __restrict__ col_counts,
+                                         unsigned int* __restrict__ col_counts,
                                          int n_rows, int n_cols) {
     int row = blockIdx.x * blockDim.x + threadIdx.x;
     if (row >= n_rows) return;
@@ -12,7 +12,7 @@ __global__ void csr_col_histogram_kernel(const IndexT* __restrict__ indices,
     IndptrT re = indptr[row + 1];
     for (IndptrT p = rs; p < re; ++p) {
         int c = (int)indices[p];
-        if (c < n_cols) atomicAdd(&col_counts[c], 1);
+        if (c < n_cols) atomicAdd(&col_counts[c], 1u);
     }
 }
 
@@ -49,24 +49,9 @@ __global__ void csr_scatter_to_csc_kernel(
     }
 }
 
-/**
- * Decide whether to use shared or global memory for OVR rank accumulators.
- * Returns the smem size to request and sets use_gmem accordingly.
- */
-static int query_max_smem_per_block() {
-    static int cached = -1;
-    if (cached < 0) {
-        int device;
-        cudaGetDevice(&device);
-        cudaDeviceGetAttribute(&cached, cudaDevAttrMaxSharedMemoryPerBlock,
-                               device);
-    }
-    return cached;
-}
-
 static size_t ovr_smem_config(int n_groups, bool& use_gmem) {
     size_t need = (size_t)(n_groups + 32) * sizeof(double);
-    if ((int)need <= query_max_smem_per_block()) {
+    if (need <= wilcoxon_max_smem_per_block()) {
         use_gmem = false;
         return need;
     }
@@ -81,7 +66,7 @@ static size_t ovr_smem_config(int n_groups, bool& use_gmem) {
  */
 static size_t sparse_ovr_smem_config(int n_groups, bool& use_gmem) {
     size_t need = (size_t)(2 * n_groups + 32) * sizeof(double);
-    if ((int)need <= query_max_smem_per_block()) {
+    if (need <= wilcoxon_max_smem_per_block()) {
         use_gmem = false;
         return need;
     }

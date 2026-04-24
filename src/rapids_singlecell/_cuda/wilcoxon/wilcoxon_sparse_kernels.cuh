@@ -25,6 +25,10 @@
  *   grp_nz_count[n_groups]  nonzero-per-group counters
  *   warp_buf[32]            tie-correction reduction scratch
  *
+ * n_rows is the ranking population, including rows whose group code is the
+ * n_groups sentinel. Sentinel rows contribute to the "rest" distribution and
+ * tie-correction denominator but do not receive rank-sum accumulation.
+ *
  * Grid: (sb_cols,)   Block: (tpb,)
  */
 template <typename IndexT = int>
@@ -223,28 +227,11 @@ __global__ void rank_sums_sparse_ovr_kernel(
     }
 }
 
-/**
- * Decide whether the host cast+stats kernels can use per-block shared memory
- * accumulators.  Large group counts exceed the dynamic smem launch limit, so
- * those cases fall back to direct global-memory atomics after zeroing the
- * per-stream output buffers.
- */
-static int wilcoxon_cast_max_smem_per_block() {
-    static int cached = -1;
-    if (cached < 0) {
-        int device;
-        cudaGetDevice(&device);
-        cudaDeviceGetAttribute(&cached, cudaDevAttrMaxSharedMemoryPerBlock,
-                               device);
-    }
-    return cached;
-}
-
 static size_t cast_accumulate_smem_config(int n_groups, bool compute_sq_sums,
                                           bool compute_nnz, bool& use_gmem) {
     int n_arrays = 1 + (compute_sq_sums ? 1 : 0) + (compute_nnz ? 1 : 0);
     size_t need = (size_t)n_arrays * n_groups * sizeof(double);
-    if (need <= (size_t)wilcoxon_cast_max_smem_per_block()) {
+    if (need <= wilcoxon_max_smem_per_block()) {
         use_gmem = false;
         return need;
     }

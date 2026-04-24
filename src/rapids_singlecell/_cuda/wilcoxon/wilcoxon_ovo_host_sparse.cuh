@@ -40,6 +40,10 @@ static void ovo_streaming_csc_host_impl(
 
     size_t sub_ref_items = (size_t)n_ref * sub_batch_cols;
     size_t sub_grp_items = (size_t)n_all_grp * sub_batch_cols;
+    int sub_ref_items_i32 =
+        checked_cub_items(sub_ref_items, "OVO host CSC reference sub-batch");
+    int sub_grp_items_i32 =
+        checked_cub_items(sub_grp_items, "OVO host CSC group sub-batch");
 
     // CUB temp
     size_t cub_ref_bytes = 0;
@@ -47,17 +51,19 @@ static void ovo_streaming_csc_host_impl(
         auto* fk = reinterpret_cast<float*>(1);
         auto* doff = reinterpret_cast<int*>(1);
         cub::DeviceSegmentedRadixSort::SortKeys(
-            nullptr, cub_ref_bytes, fk, fk, (int)sub_ref_items, sub_batch_cols,
+            nullptr, cub_ref_bytes, fk, fk, sub_ref_items_i32, sub_batch_cols,
             doff, doff + 1, BEGIN_BIT, END_BIT);
     }
     size_t cub_temp_bytes = cub_ref_bytes;
     if (needs_tier3) {
         size_t cub_grp_bytes = 0;
-        int max_grp_seg = n_sort_groups * sub_batch_cols;
+        int max_grp_seg =
+            checked_int_product((size_t)n_sort_groups, (size_t)sub_batch_cols,
+                                "OVO host CSC group segment count");
         auto* fk = reinterpret_cast<float*>(1);
         auto* doff = reinterpret_cast<int*>(1);
         cub::DeviceSegmentedRadixSort::SortKeys(
-            nullptr, cub_grp_bytes, fk, fk, (int)sub_grp_items, max_grp_seg,
+            nullptr, cub_grp_bytes, fk, fk, sub_grp_items_i32, max_grp_seg,
             doff, doff + 1, BEGIN_BIT, END_BIT);
         cub_temp_bytes = std::max(cub_ref_bytes, cub_grp_bytes);
     }
@@ -82,8 +88,11 @@ static void ovo_streaming_csc_host_impl(
         int sb = std::min(sub_batch_cols, n_cols - col_start);
         IndptrT ptr_start = h_indptr[col_start];
         int* off = &h_all_offsets[(size_t)b * (sub_batch_cols + 1)];
-        for (int i = 0; i <= sb; i++)
-            off[i] = (int)(h_indptr[col_start + i] - ptr_start);
+        for (int i = 0; i <= sb; i++) {
+            off[i] =
+                checked_int_span((size_t)(h_indptr[col_start + i] - ptr_start),
+                                 "OVO host CSC rebased column offsets");
+        }
     }
     int* d_all_offsets =
         pool.alloc<int>((size_t)n_batches * (sub_batch_cols + 1));
@@ -159,7 +168,9 @@ static void ovo_streaming_csc_host_impl(
             compute_nnz ? (size_t)n_groups_stats * sub_batch_cols : 1);
         if (needs_tier3) {
             bufs[s].grp_sorted = pool.alloc<float>(sub_grp_items);
-            int max_grp_seg = n_sort_groups * sub_batch_cols;
+            int max_grp_seg = checked_int_product(
+                (size_t)n_sort_groups, (size_t)sub_batch_cols,
+                "OVO host CSC stream group segment count");
             bufs[s].grp_seg_offsets = pool.alloc<int>(max_grp_seg);
             bufs[s].grp_seg_ends = pool.alloc<int>(max_grp_seg);
         } else {
@@ -186,8 +197,12 @@ static void ovo_streaming_csc_host_impl(
     int batch_idx = 0;
     while (col < n_cols) {
         int sb_cols = std::min(sub_batch_cols, n_cols - col);
-        int sb_ref_actual = n_ref * sb_cols;
-        int sb_grp_actual = n_all_grp * sb_cols;
+        int sb_ref_actual =
+            checked_int_product((size_t)n_ref, (size_t)sb_cols,
+                                "OVO host CSC active reference sub-batch");
+        int sb_grp_actual =
+            checked_int_product((size_t)n_all_grp, (size_t)sb_cols,
+                                "OVO host CSC active group sub-batch");
         int s = batch_idx % n_streams;
         auto stream = streams[s];
         auto& buf = bufs[s];
@@ -196,6 +211,7 @@ static void ovo_streaming_csc_host_impl(
         IndptrT ptr_start = h_indptr[col];
         IndptrT ptr_end = h_indptr[col + sb_cols];
         size_t nnz = (size_t)(ptr_end - ptr_start);
+        checked_int_span(nnz, "OVO host CSC active batch nnz");
         cudaMemcpyAsync(buf.d_sparse_data_orig, h_data + ptr_start,
                         nnz * sizeof(InT), cudaMemcpyHostToDevice, stream);
         cudaMemcpyAsync(buf.d_sparse_indices, h_indices + ptr_start,
@@ -276,7 +292,9 @@ static void ovo_streaming_csc_host_impl(
                 compute_tie_corr, padded_grp_size, upper_skip_le);
             CUDA_CHECK_LAST_ERROR(ovo_fused_sort_rank_kernel);
         } else if (needs_tier3) {
-            int sb_grp_seg = n_sort_groups * sb_cols;
+            int sb_grp_seg =
+                checked_int_product((size_t)n_sort_groups, (size_t)sb_cols,
+                                    "OVO host CSC active group segment count");
             {
                 int blk = (sb_grp_seg + UTIL_BLOCK_SIZE - 1) / UTIL_BLOCK_SIZE;
                 build_tier3_seg_begin_end_offsets_kernel<<<blk, UTIL_BLOCK_SIZE,
@@ -388,7 +406,17 @@ static void ovo_streaming_csr_host_impl(
     h_ref_indptr_compact[0] = 0;
     for (int i = 0; i < n_ref; i++) {
         int r = h_ref_row_ids[i];
-        int nnz_i = (int)(h_indptr[r + 1] - h_indptr[r]);
+        IndptrT row_nnz = h_indptr[r + 1] - h_indptr[r];
+        if ((size_t)row_nnz > (size_t)std::numeric_limits<int>::max()) {
+            throw std::runtime_error(
+                "OVO host CSR reference row exceeds int32 compacted nnz limit");
+        }
+        int nnz_i = (int)row_nnz;
+        if ((size_t)h_ref_indptr_compact[i] + (size_t)nnz_i >
+            (size_t)std::numeric_limits<int>::max()) {
+            throw std::runtime_error(
+                "OVO host CSR reference compacted nnz exceeds int32 limit");
+        }
         h_ref_indptr_compact[i + 1] = h_ref_indptr_compact[i] + nnz_i;
     }
     int ref_nnz = h_ref_indptr_compact[n_ref];
@@ -462,8 +490,11 @@ static void ovo_streaming_csr_host_impl(
         if (pk.n_rows > max_pack_rows) max_pack_rows = pk.n_rows;
         if (pk.nnz > max_pack_nnz) max_pack_nnz = pk.nnz;
         if (K > max_pack_K) max_pack_K = K;
-        int pack_items = pk.n_rows * pk.sb_cols;
+        int pack_items =
+            checked_int_product((size_t)pk.n_rows, (size_t)pk.sb_cols,
+                                "OVO host CSR pack dense slab");
         if (pack_items > max_pack_items) max_pack_items = pack_items;
+        checked_int_span(pk.nnz, "OVO host CSR pack compacted nnz");
         if (pk.sb_cols > max_pack_sb_cols) max_pack_sb_cols = pk.sb_cols;
     }
     int max_group_rows = max_pack_rows;
@@ -530,12 +561,37 @@ static void ovo_streaming_csr_host_impl(
                cudaMemcpyHostToDevice);
 
     // ---- Phase 1: Ref setup (scoped scratch, ref_sorted persists) ----
-    float* d_ref_sorted = pool.alloc<float>((size_t)n_ref * n_cols);
+    size_t ref_items = (size_t)n_ref * (size_t)n_cols;
+    if (n_ref > 0 && (size_t)n_cols > (size_t)std::numeric_limits<int>::max() /
+                                          (size_t)n_ref) {
+        throw std::runtime_error(
+            "OVO host CSR dense reference cache exceeds CUB int item limit; "
+            "use native CSC/device sparse input or reduce genes/reference "
+            "size");
+    }
+    if (ref_items > std::numeric_limits<size_t>::max() / (2 * sizeof(float))) {
+        throw std::runtime_error(
+            "OVO host CSR dense reference cache size overflows size_t");
+    }
+    size_t free_bytes = 0;
+    size_t total_bytes = 0;
+    if (cudaMemGetInfo(&free_bytes, &total_bytes) == cudaSuccess &&
+        total_bytes > 0 && ref_items * 2 * sizeof(float) > total_bytes) {
+        throw std::runtime_error(
+            "OVO host CSR dense reference cache requires more GPU memory than "
+            "the device provides; use native CSC/device sparse input or reduce "
+            "genes/reference size");
+    }
+    int ref_items_i32 =
+        checked_cub_items(ref_items, "OVO host CSR dense reference cache");
+    float* d_ref_sorted = pool.alloc<float>(ref_items);
+    cudaStream_t ref_stream;
+    cudaStreamCreateWithFlags(&ref_stream, cudaStreamNonBlocking);
     {
         ScopedCudaBuffer ref_data_f32_buf(ref_nnz * sizeof(float));
         ScopedCudaBuffer ref_indices_buf(ref_nnz * sizeof(int));
         ScopedCudaBuffer ref_indptr_buf((n_ref + 1) * sizeof(int));
-        ScopedCudaBuffer ref_dense_buf((size_t)n_ref * n_cols * sizeof(float));
+        ScopedCudaBuffer ref_dense_buf(ref_items * sizeof(float));
         ScopedCudaBuffer ref_seg_buf((n_cols + 1) * sizeof(int));
 
         float* d_ref_data_f32 = (float*)ref_data_f32_buf.data();
@@ -552,7 +608,7 @@ static void ovo_streaming_csr_host_impl(
         // pass over PCIe, no intermediate native-dtype GPU buffer.
         if (n_ref > 0 && ref_nnz > 0) {
             csr_gather_cast_accumulate_mapped_kernel<InT, IndexT, IndptrT>
-                <<<n_ref, UTIL_BLOCK_SIZE>>>(
+                <<<n_ref, UTIL_BLOCK_SIZE, 0, ref_stream>>>(
                     d_data_zc, d_indices_zc, d_indptr_full, d_ref_row_ids,
                     d_ref_indptr, /*d_stats_codes=*/nullptr,
                     /*fixed_slot=*/n_test, d_ref_data_f32, d_ref_indices,
@@ -562,12 +618,12 @@ static void ovo_streaming_csr_host_impl(
         }
 
         // Extract ref dense (F-order) from compacted CSR.
-        cudaMemsetAsync(d_ref_dense, 0, (size_t)n_ref * n_cols * sizeof(float));
+        cudaMemsetAsync(d_ref_dense, 0, ref_items * sizeof(float), ref_stream);
         {
             csr_extract_dense_identity_rows_unsorted_kernel<float>
-                <<<n_ref, UTIL_BLOCK_SIZE>>>(d_ref_data_f32, d_ref_indices,
-                                             d_ref_indptr, d_ref_dense, n_ref,
-                                             0, n_cols);
+                <<<n_ref, UTIL_BLOCK_SIZE, 0, ref_stream>>>(
+                    d_ref_data_f32, d_ref_indices, d_ref_indptr, d_ref_dense,
+                    n_ref, 0, n_cols);
             CUDA_CHECK_LAST_ERROR(
                 csr_extract_dense_identity_rows_unsorted_kernel);
         }
@@ -578,18 +634,18 @@ static void ovo_streaming_csr_host_impl(
             auto* fk = reinterpret_cast<float*>(1);
             auto* doff = reinterpret_cast<int*>(1);
             cub::DeviceSegmentedRadixSort::SortKeys(
-                nullptr, ref_cub_bytes, fk, fk, (int)((size_t)n_ref * n_cols),
-                n_cols, doff, doff + 1, BEGIN_BIT, END_BIT);
+                nullptr, ref_cub_bytes, fk, fk, ref_items_i32, n_cols, doff,
+                doff + 1, BEGIN_BIT, END_BIT);
         }
         ScopedCudaBuffer cub_temp_buf(ref_cub_bytes);
-        upload_linear_offsets(d_ref_seg, n_cols, n_ref, 0);
+        upload_linear_offsets(d_ref_seg, n_cols, n_ref, ref_stream);
         size_t temp = ref_cub_bytes;
         cub::DeviceSegmentedRadixSort::SortKeys(
-            cub_temp_buf.data(), temp, d_ref_dense, d_ref_sorted,
-            (int)((size_t)n_ref * n_cols), n_cols, d_ref_seg, d_ref_seg + 1,
-            BEGIN_BIT, END_BIT);
-        cudaDeviceSynchronize();
+            cub_temp_buf.data(), temp, d_ref_dense, d_ref_sorted, ref_items_i32,
+            n_cols, d_ref_seg, d_ref_seg + 1, BEGIN_BIT, END_BIT, ref_stream);
+        cudaStreamSynchronize(ref_stream);
     }  // ref scratch drops here
+    cudaStreamDestroy(ref_stream);
 
     // ---- Phase 2: Per-pack streaming ----
     auto t1 = make_tier1_config(h_grp_offsets, n_test);
@@ -604,11 +660,15 @@ static void ovo_streaming_csr_host_impl(
 
     size_t cub_grp_bytes = 0;
     if (may_need_cub && max_sub_items > 0) {
+        int max_sub_items_i32 =
+            checked_cub_items(max_sub_items, "OVO host CSR group pack");
         auto* fk = reinterpret_cast<float*>(1);
         auto* doff = reinterpret_cast<int*>(1);
-        int max_segments = max_pack_K * max_pack_sb_cols;
+        int max_segments =
+            checked_int_product((size_t)max_pack_K, (size_t)max_pack_sb_cols,
+                                "OVO host CSR max group segment count");
         cub::DeviceSegmentedRadixSort::SortKeys(
-            nullptr, cub_grp_bytes, fk, fk, (int)max_sub_items, max_segments,
+            nullptr, cub_grp_bytes, fk, fk, max_sub_items_i32, max_segments,
             doff, doff + 1, BEGIN_BIT, END_BIT);
     }
 
@@ -632,7 +692,9 @@ static void ovo_streaming_csr_host_impl(
         double* d_tie_corr;
     };
     std::vector<StreamBuf> bufs(n_streams);
-    int max_pack_kernel_seg = max_pack_K * max_pack_sb_cols;
+    int max_pack_kernel_seg =
+        checked_int_product((size_t)max_pack_K, (size_t)max_pack_sb_cols,
+                            "OVO host CSR pack segment buffer");
     for (int s = 0; s < n_streams; s++) {
         bufs[s].d_grp_data_f32 = pool.alloc<float>(max_pack_nnz);
         bufs[s].d_grp_indices = pool.alloc<int>(max_pack_nnz);
@@ -659,8 +721,6 @@ static void ovo_streaming_csr_host_impl(
             bufs[s].cub_temp = nullptr;
         }
     }
-
-    cudaDeviceSynchronize();  // ensure Phase 1 done before Phase 2 streams
 
     for (int p = 0; p < (int)packs.size(); p++) {
         const Pack& pack = packs[p];
@@ -742,7 +802,9 @@ static void ovo_streaming_csr_host_impl(
         int col = 0;
         while (col < n_cols) {
             int sb_cols = std::min(pack_sb, n_cols - col);
-            int sb_items = pack_rows * sb_cols;
+            int sb_items =
+                checked_int_product((size_t)pack_rows, (size_t)sb_cols,
+                                    "OVO host CSR active group sub-batch");
 
             cudaMemsetAsync(buf.d_grp_dense, 0, sb_items * sizeof(float),
                             stream);
@@ -798,7 +860,9 @@ static void ovo_streaming_csr_host_impl(
                     upper_skip_le);
                 CUDA_CHECK_LAST_ERROR(ovo_fused_sort_rank_kernel);
             } else if (pack_has_above_t2) {
-                int n_seg = pack_n_sort_groups * sb_cols;
+                int n_seg = checked_int_product(
+                    (size_t)pack_n_sort_groups, (size_t)sb_cols,
+                    "OVO host CSR active group segment count");
                 {
                     int blk = (n_seg + UTIL_BLOCK_SIZE - 1) / UTIL_BLOCK_SIZE;
                     build_tier3_seg_begin_end_offsets_kernel<<<

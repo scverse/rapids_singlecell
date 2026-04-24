@@ -2,6 +2,8 @@
 
 #include <cuda_runtime.h>
 
+#include "wilcoxon_fast_common.cuh"
+
 // ============================================================================
 // Warp reduction helper (sum doubles across block via warp_buf)
 // ============================================================================

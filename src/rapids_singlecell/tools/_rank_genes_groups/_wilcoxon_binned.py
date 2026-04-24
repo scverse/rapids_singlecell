@@ -11,6 +11,8 @@ import numpy as np
 from rapids_singlecell._compat import DaskArray
 from rapids_singlecell._cuda import _wilcoxon_binned_cuda as _wb
 
+from ._utils import MIN_GROUP_SIZE_WARNING
+
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
@@ -159,7 +161,7 @@ def wilcoxon_binned(
         ):
             if gi == ireference:
                 continue
-            if size <= 25 or n_ref <= 25:
+            if size <= MIN_GROUP_SIZE_WARNING or n_ref <= MIN_GROUP_SIZE_WARNING:
                 warnings.warn(
                     f"Group {name} has size {size} (reference {n_ref}); normal "
                     "approximation of the Wilcoxon statistic may be inaccurate.",
@@ -169,7 +171,7 @@ def wilcoxon_binned(
     else:
         for name, size in zip(rg.groups_order, group_sizes, strict=True):
             rest = n_cells - size
-            if size <= 25 or rest <= 25:
+            if size <= MIN_GROUP_SIZE_WARNING or rest <= MIN_GROUP_SIZE_WARNING:
                 warnings.warn(
                     f"Group {name} has size {size} (rest {rest}); normal "
                     "approximation of the Wilcoxon statistic may be inaccurate.",

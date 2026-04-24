@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -48,6 +49,39 @@ constexpr int TIER1_GROUP_THRESHOLD = 2500;
 // 512 MB per stream dense slab + same for sorted copy ≈ 1 GB / stream.
 constexpr size_t GROUP_DENSE_BUDGET_ITEMS = 128 * 1024 * 1024;
 
+static inline size_t wilcoxon_max_smem_per_block() {
+    int device = 0;
+    int max_smem = 0;
+    cudaGetDevice(&device);
+    cudaDeviceGetAttribute(&max_smem, cudaDevAttrMaxSharedMemoryPerBlock,
+                           device);
+    return (size_t)max_smem;
+}
+
+static inline int checked_cub_items(size_t count, const char* context) {
+    if (count > (size_t)std::numeric_limits<int>::max()) {
+        throw std::runtime_error(std::string(context) +
+                                 " exceeds CUB int item limit");
+    }
+    return (int)count;
+}
+
+static inline int checked_int_span(size_t count, const char* context) {
+    if (count > (size_t)std::numeric_limits<int>::max()) {
+        throw std::runtime_error(std::string(context) +
+                                 " exceeds int32 offset limit");
+    }
+    return (int)count;
+}
+
+static inline int checked_int_product(size_t a, size_t b, const char* context) {
+    if (a != 0 && b > (size_t)std::numeric_limits<int>::max() / a) {
+        throw std::runtime_error(std::string(context) +
+                                 " exceeds int32 item limit");
+    }
+    return (int)(a * b);
+}
+
 // ---------------------------------------------------------------------------
 // RAII guard for cudaHostRegister.  Unregisters on scope exit even when an
 // exception unwinds — prevents leaked host pinning on stream-sync failures.
@@ -60,9 +94,9 @@ struct HostRegisterGuard {
         if (p && bytes > 0) {
             cudaError_t err = cudaHostRegister(p, bytes, flags);
             if (err != cudaSuccess) {
-                // Already-registered memory is fine; anything else means the
-                // subsequent kernels would read garbage from an unmapped
-                // pointer, so surface the error immediately.
+                // Already-registered memory belongs to another owner; use it
+                // without unregistering here. Other failures mean mapped reads
+                // would be unsafe, so surface them immediately.
                 if (err == cudaErrorHostMemoryAlreadyRegistered) {
                     cudaGetLastError();  // clear sticky error flag
                 } else {
@@ -116,6 +150,10 @@ struct RmmScratchPool {
     template <typename T>
     T* alloc(size_t count) {
         if (count == 0) count = 1;
+        if (count > std::numeric_limits<size_t>::max() / sizeof(T)) {
+            throw std::runtime_error(
+                "Wilcoxon scratch allocation size overflow");
+        }
         size_t bytes = count * sizeof(T);
         void* ptr = wilcoxon_rmm_allocate(bytes);
         bufs.push_back({ptr, bytes});

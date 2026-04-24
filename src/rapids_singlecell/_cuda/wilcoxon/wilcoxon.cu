@@ -41,17 +41,14 @@ static void launch_ovr_rank_dense_streaming(
     }
 
     size_t sub_items = (size_t)n_rows * sub_batch_cols;
-    if (sub_items > (size_t)std::numeric_limits<int>::max()) {
-        throw std::runtime_error(
-            "Dense OVR sub-batch exceeds CUB int item limit");
-    }
+    int sub_items_i32 = checked_cub_items(sub_items, "Dense OVR sub-batch");
 
     size_t cub_temp_bytes = 0;
     {
         auto* fk = reinterpret_cast<float*>(1);
         auto* iv = reinterpret_cast<int*>(1);
         cub::DeviceSegmentedRadixSort::SortPairs(
-            nullptr, cub_temp_bytes, fk, fk, iv, iv, (int)sub_items,
+            nullptr, cub_temp_bytes, fk, fk, iv, iv, sub_items_i32,
             sub_batch_cols, iv, iv + 1, BEGIN_BIT, END_BIT);
     }
 
@@ -97,7 +94,8 @@ static void launch_ovr_rank_dense_streaming(
     int batch_idx = 0;
     while (col < n_cols) {
         int sb_cols = std::min(sub_batch_cols, n_cols - col);
-        int sb_items = n_rows * sb_cols;
+        int sb_items = checked_int_product((size_t)n_rows, (size_t)sb_cols,
+                                           "Dense OVR active sub-batch");
         int s = batch_idx % n_streams;
         cudaStream_t stream = streams[s];
         auto& buf = bufs[s];
@@ -184,32 +182,30 @@ static void launch_ovo_rank_dense_tiered_impl(
         n_streams = (n_cols + sub_batch_cols - 1) / sub_batch_cols;
 
     size_t sub_ref_items = (size_t)n_ref * sub_batch_cols;
-    if (sub_ref_items > (size_t)std::numeric_limits<int>::max()) {
-        throw std::runtime_error(
-            "Dense OVO reference sub-batch exceeds CUB int item limit");
-    }
+    int sub_ref_items_i32 =
+        checked_cub_items(sub_ref_items, "Dense OVO reference sub-batch");
 
     size_t sub_grp_items = (size_t)n_all_grp * sub_batch_cols;
-    if (sub_grp_items > (size_t)std::numeric_limits<int>::max()) {
-        throw std::runtime_error(
-            "Dense OVO sub-batch exceeds CUB int item limit");
-    }
+    int sub_grp_items_i32 =
+        checked_cub_items(sub_grp_items, "Dense OVO group sub-batch");
 
     size_t grp_cub_temp_bytes = 0;
     if (needs_tier3) {
-        int max_grp_seg = n_sort_groups * sub_batch_cols;
+        int max_grp_seg =
+            checked_int_product((size_t)n_sort_groups, (size_t)sub_batch_cols,
+                                "Dense OVO group segment count");
         auto* fk = reinterpret_cast<float*>(1);
         auto* doff = reinterpret_cast<int*>(1);
         cub::DeviceSegmentedRadixSort::SortKeys(
-            nullptr, grp_cub_temp_bytes, fk, fk, (int)sub_grp_items,
-            max_grp_seg, doff, doff + 1, BEGIN_BIT, END_BIT);
+            nullptr, grp_cub_temp_bytes, fk, fk, sub_grp_items_i32, max_grp_seg,
+            doff, doff + 1, BEGIN_BIT, END_BIT);
     }
     size_t ref_cub_temp_bytes = 0;
     if (!ref_is_sorted) {
         auto* fk = reinterpret_cast<float*>(1);
         auto* doff = reinterpret_cast<int*>(1);
         cub::DeviceSegmentedRadixSort::SortKeys(
-            nullptr, ref_cub_temp_bytes, fk, fk, (int)sub_ref_items,
+            nullptr, ref_cub_temp_bytes, fk, fk, sub_ref_items_i32,
             sub_batch_cols, doff, doff + 1, BEGIN_BIT, END_BIT);
     }
 
@@ -270,7 +266,9 @@ static void launch_ovo_rank_dense_tiered_impl(
             pool.alloc<double>((size_t)n_groups * sub_batch_cols);
         if (needs_tier3) {
             bufs[s].grp_sorted = pool.alloc<float>(sub_grp_items);
-            int max_seg = n_sort_groups * sub_batch_cols;
+            int max_seg = checked_int_product((size_t)n_sort_groups,
+                                              (size_t)sub_batch_cols,
+                                              "Dense OVO group segment buffer");
             bufs[s].grp_seg_offsets = pool.alloc<int>(max_seg);
             bufs[s].grp_seg_ends = pool.alloc<int>(max_seg);
         } else {
@@ -287,8 +285,12 @@ static void launch_ovo_rank_dense_tiered_impl(
     int batch_idx = 0;
     while (col < n_cols) {
         int sb_cols = std::min(sub_batch_cols, n_cols - col);
-        int sb_ref_items_actual = n_ref * sb_cols;
-        int sb_grp_items_actual = n_all_grp * sb_cols;
+        int sb_ref_items_actual =
+            checked_int_product((size_t)n_ref, (size_t)sb_cols,
+                                "Dense OVO active reference sub-batch");
+        int sb_grp_items_actual =
+            checked_int_product((size_t)n_all_grp, (size_t)sb_cols,
+                                "Dense OVO active group sub-batch");
         int s = batch_idx % n_streams;
         cudaStream_t stream = streams[s];
         auto& buf = bufs[s];
@@ -343,7 +345,9 @@ static void launch_ovo_rank_dense_tiered_impl(
                 compute_tie_corr, padded_grp_size, upper_skip_le);
             CUDA_CHECK_LAST_ERROR(ovo_fused_sort_rank_kernel);
         } else if (needs_tier3) {
-            int sb_grp_seg = n_sort_groups * sb_cols;
+            int sb_grp_seg =
+                checked_int_product((size_t)n_sort_groups, (size_t)sb_cols,
+                                    "Dense OVO active group segment count");
             int blk = (sb_grp_seg + UTIL_BLOCK_SIZE - 1) / UTIL_BLOCK_SIZE;
             build_tier3_seg_begin_end_offsets_kernel<<<blk, UTIL_BLOCK_SIZE, 0,
                                                        stream>>>(

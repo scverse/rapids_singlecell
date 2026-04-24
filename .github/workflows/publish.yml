@@ -147,6 +147,8 @@ jobs:
             LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
             PATH=/usr/local/cuda/bin:$PATH
           CIBW_BEFORE_BUILD: >
+            rm -f build/.librmm_dir &&
+            mkdir -p build &&
             python -m pip install -U pip
             scikit-build-core cmake ninja nanobind
             librmm-cu${{ matrix.cuda_major }} &&
@@ -157,8 +159,8 @@ jobs:
             ln -sf "$RMM_ROOT/lib64/librmm.so" /usr/local/lib/librmm.so &&
             ln -sf "$LOG_ROOT/lib64/librapids_logger.so" /usr/local/lib/librapids_logger.so &&
             ldconfig &&
-            python -c "import librmm; print(librmm.__path__[0])" > /tmp/.librmm_dir &&
-            echo "[rsc-build] marker=$(cat /tmp/.librmm_dir)"
+            python -c "import librmm; print(librmm.__path__[0])" > build/.librmm_dir &&
+            echo "[rsc-build] marker=$(cat build/.librmm_dir)"
           CIBW_TEST_SKIP: "*"
           CIBW_TEST_COMMAND: ""
           CIBW_REPAIR_WHEEL_COMMAND: "auditwheel repair --exclude libcublas.so.${{ matrix.cuda_major }} --exclude libcublasLt.so.${{ matrix.cuda_major }} --exclude libcudart.so.${{ matrix.cuda_major }} --exclude librmm.so --exclude librapids_logger.so -w {dest_dir} {wheel}"

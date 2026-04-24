@@ -12,14 +12,13 @@ import scipy.sparse as sp
 from rapids_singlecell._cuda import _wilcoxon_cuda as _wc
 from rapids_singlecell._cuda import _wilcoxon_sparse_cuda as _wcs
 
-from ._utils import EPS, _choose_chunk_size, _get_column_block
+from ._utils import EPS, MIN_GROUP_SIZE_WARNING, _choose_chunk_size, _get_column_block
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from ._core import _RankGenes
 
-MIN_GROUP_SIZE_WARNING = 25
 DEFAULT_WILCOXON_CHUNK_SIZE = 512
 OVR_HOST_CSC_SUB_BATCH = 512
 OVR_HOST_CSR_SUB_BATCH = 2048
@@ -29,10 +28,11 @@ OVO_HOST_SPARSE_SUB_BATCH = 256
 OVO_DEVICE_SPARSE_SUB_BATCH = 128
 OVR_DENSE_SUB_BATCH = 64
 OVO_DENSE_TIERED_SUB_BATCH = 256
-DENSE_HOST_PRELOAD_MAX_GPU_FRACTION = 0.55
+DENSE_HOST_PRELOAD_MAX_GPU_FRACTION = 0.55  # leave headroom for rank buffers
 
 
 def _maybe_preload_host_dense(rg: _RankGenes) -> None:
+    """Preload moderate host-dense matrices to avoid repeated chunk transfers."""
     X = rg.X
     if not isinstance(X, np.ndarray) or X.size == 0:
         return
@@ -259,7 +259,20 @@ def _wilcoxon_scores(
 
 
 def _host_sparse_fn_and_arrays(module, base_name: str, X, *, support_idx64: bool):
-    is_f64 = X.data.dtype == np.float64
+    data_dtype = np.dtype(X.data.dtype)
+    if data_dtype == np.float64:
+        is_f64 = True
+        data_arr = X.data
+    elif data_dtype == np.float32 or data_dtype.kind in {"b", "i", "u"}:
+        is_f64 = False
+        data_arr = X.data.astype(np.float32, copy=False)
+    else:
+        msg = (
+            "Wilcoxon sparse input data dtype must be float32, float64, bool, "
+            f"or integer; got {data_dtype}."
+        )
+        raise TypeError(msg)
+
     is_idx64 = support_idx64 and X.indices.dtype == np.int64
     is_i64 = X.indptr.dtype == np.int64
     suffix = ""
@@ -270,15 +283,33 @@ def _host_sparse_fn_and_arrays(module, base_name: str, X, *, support_idx64: bool
     if is_i64:
         suffix += "_i64"
     fn = getattr(module, base_name + suffix)
-    data_arr = X.data if is_f64 else X.data.astype(np.float32, copy=False)
     indices_arr = X.indices if is_idx64 else X.indices.astype(np.int32, copy=False)
     return fn, data_arr, indices_arr
 
 
 def _device_sparse_arrays_i32_f32(X):
+    data_dtype = np.dtype(X.data.dtype)
+    if data_dtype == np.float32 or data_dtype == np.float64:
+        pass
+    elif data_dtype.kind in {"b", "i", "u"}:
+        pass
+    else:
+        msg = (
+            "Wilcoxon device sparse input data dtype must be float32, float64, "
+            f"bool, or integer; got {data_dtype}."
+        )
+        raise TypeError(msg)
+
     if X.indptr.dtype != cp.int32:
         max_indptr = int(cp.asnumpy(X.indptr[-1]))
         if max_indptr > np.iinfo(np.int32).max:
+            warnings.warn(
+                "Wilcoxon device sparse path requires int32 indptr for CUDA "
+                "kernels; falling back to the bounded dense chunk path because "
+                f"nnz={max_indptr} exceeds int32.",
+                RuntimeWarning,
+                stacklevel=3,
+            )
             return None
     data = X.data.astype(cp.float32, copy=False)
     indices = X.indices.astype(cp.int32, copy=False)
@@ -620,12 +651,6 @@ def _wilcoxon_vs_rest(
             return [(gi, scores_host[gi], p_host[gi]) for gi in range(n_groups)]
 
     group_codes_gpu = cp.asarray(rg.group_codes, dtype=cp.int32)
-    group_matrix = None
-    if rg._compute_stats_in_chunks:
-        codes_gpu = cp.asarray(rg.group_codes, dtype=cp.int64)
-        group_matrix = cp.zeros((n_cells, n_groups), dtype=cp.float64)
-        valid_idx = cp.where(codes_gpu < n_groups)[0]
-        group_matrix[valid_idx, codes_gpu[valid_idx]] = 1.0
 
     group_sizes_dev = cp.asarray(group_sizes, dtype=cp.float64)
     rest_sizes = n_cells - group_sizes_dev
@@ -645,7 +670,7 @@ def _wilcoxon_vs_rest(
                 block,
                 start,
                 stop,
-                group_matrix=group_matrix,
+                group_codes_dev=group_codes_gpu,
                 group_sizes_dev=group_sizes_dev,
                 n_cells=n_cells,
             )
@@ -838,6 +863,8 @@ def _wilcoxon_with_reference(
             )
         else:
             csr = X
+            # Host CSR gather scans each row's native index list and tolerates
+            # unsorted row indices; avoid a full CSR copy just to sort.
             csr_host_fn, data_arr, indices_arr = _host_sparse_fn_and_arrays(
                 _wcs, "ovo_streaming_csr_host", csr, support_idx64=True
             )

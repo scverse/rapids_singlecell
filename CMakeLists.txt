@@ -50,9 +50,19 @@ if (RSC_BUILD_EXTENSIONS)
   if (RSC_PYTHON_RMM_DIR AND EXISTS "${RSC_PYTHON_RMM_DIR}/rmm-config.cmake")
     list(APPEND RSC_RMM_HINTS "${RSC_PYTHON_RMM_DIR}")
   endif()
-  if(EXISTS "/tmp/.librmm_dir")
-    file(READ "/tmp/.librmm_dir" _rsc_librmm_marker)
+  # Wheel builds install librmm/rapids_logger into the isolated build env and
+  # write build/.librmm_dir from CIBW_BEFORE_BUILD.  publish.yml also symlinks
+  # those shared libraries into /usr/local/lib so auditwheel can see and exclude
+  # them instead of bundling RAPIDS runtime libraries into the wheel.
+  if(DEFINED ENV{RSC_LIBRMM_DIR} AND EXISTS "$ENV{RSC_LIBRMM_DIR}/lib64/cmake/rmm/rmm-config.cmake")
+    set(_rsc_librmm_marker "$ENV{RSC_LIBRMM_DIR}")
+  elseif(EXISTS "${CMAKE_SOURCE_DIR}/build/.librmm_dir")
+    file(READ "${CMAKE_SOURCE_DIR}/build/.librmm_dir" _rsc_librmm_marker)
     string(STRIP "${_rsc_librmm_marker}" _rsc_librmm_marker)
+  else()
+    set(_rsc_librmm_marker "")
+  endif()
+  if(NOT "${_rsc_librmm_marker}" STREQUAL "" AND EXISTS "${_rsc_librmm_marker}/lib64/cmake/rmm/rmm-config.cmake")
     file(GLOB _rsc_marker_rmm_dirs "${_rsc_librmm_marker}/lib64/cmake/rmm")
     file(GLOB _rsc_marker_rapids_prefixes
       "${_rsc_librmm_marker}/lib64"
