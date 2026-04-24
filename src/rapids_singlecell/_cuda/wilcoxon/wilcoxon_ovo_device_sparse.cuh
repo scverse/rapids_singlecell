@@ -59,7 +59,7 @@ static void ovo_streaming_csr_impl(
     }
     if (ref_cache_cols < 1) ref_cache_cols = 1;
 
-    RmmPool pool;
+    RmmScratchPool pool;
 
     size_t cub_temp_bytes = 0;
     if (needs_tier3) {
@@ -340,7 +340,7 @@ static void ovo_streaming_csc_impl(
     std::vector<cudaStream_t> streams(n_streams);
     for (int i = 0; i < n_streams; i++) cudaStreamCreate(&streams[i]);
 
-    RmmPool pool;
+    RmmScratchPool pool;
     int* d_sort_group_ids = nullptr;
     if (needs_tier3) {
         d_sort_group_ids = pool.alloc<int>(h_sort_group_ids.size());

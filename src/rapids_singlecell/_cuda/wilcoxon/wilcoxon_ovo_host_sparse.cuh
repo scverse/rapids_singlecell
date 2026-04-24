@@ -73,7 +73,7 @@ static void ovo_streaming_csc_host_impl(
     std::vector<cudaStream_t> streams(n_streams);
     for (int i = 0; i < n_streams; i++) cudaStreamCreate(&streams[i]);
 
-    RmmPool pool;
+    RmmScratchPool pool;
 
     int n_batches = (n_cols + sub_batch_cols - 1) / sub_batch_cols;
     std::vector<int> h_all_offsets((size_t)n_batches * (sub_batch_cols + 1), 0);
@@ -470,7 +470,7 @@ static void ovo_streaming_csr_host_impl(
     size_t max_sub_items = (size_t)max_pack_items;
     if (max_pack_rows == 0) return;
 
-    RmmPool pool;
+    RmmScratchPool pool;
 
     // Zero stats outputs.
     if (compute_sums) {

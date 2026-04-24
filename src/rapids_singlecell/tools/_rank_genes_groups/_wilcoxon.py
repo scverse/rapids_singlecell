@@ -489,7 +489,7 @@ def _wilcoxon_vs_rest(
                 csc = csc.copy()
                 csc.sort_indices()
             csc_host_fn, data_arr, indices_arr = _host_sparse_fn_and_arrays(
-                _wcs, "ovr_sparse_csc_host", csc, support_idx64=False
+                _wcs, "ovr_sparse_csc_host", csc, support_idx64=True
             )
             csc_host_fn(
                 data_arr,

@@ -61,10 +61,10 @@ void register_sparse_bindings(nb::module_& m) {
         "n_cols"_a, "n_groups"_a, "compute_tie_corr"_a,
         "sub_batch_cols"_a = SUB_BATCH_COLS);
 
-#define RSC_OVR_SPARSE_CSC_HOST_BINDING(NAME, InT, IndptrT)                   \
+#define RSC_OVR_SPARSE_CSC_HOST_BINDING(NAME, InT, IndexT, IndptrT)           \
     m.def(                                                                    \
         NAME,                                                                 \
-        [](host_array<const InT> h_data, host_array<const int> h_indices,     \
+        [](host_array<const InT> h_data, host_array<const IndexT> h_indices,  \
            host_array<const IndptrT> h_indptr,                                \
            host_array<const int> h_group_codes,                               \
            host_array<double> h_group_sizes,                                  \
@@ -75,7 +75,7 @@ void register_sparse_bindings(nb::module_& m) {
            gpu_array_c<double, Device> d_group_nnz, int n_rows, int n_cols,   \
            int n_groups, bool compute_tie_corr, bool compute_sq_sums,         \
            bool compute_nnz, int sub_batch_cols) {                            \
-            ovr_sparse_csc_host_streaming_impl<InT, IndptrT>(                 \
+            ovr_sparse_csc_host_streaming_impl<InT, IndexT, IndptrT>(         \
                 h_data.data(), h_indices.data(), h_indptr.data(),             \
                 h_group_codes.data(), h_group_sizes.data(),                   \
                 d_rank_sums.data(), d_tie_corr.data(), d_group_sums.data(),   \
@@ -90,11 +90,21 @@ void register_sparse_bindings(nb::module_& m) {
         "compute_sq_sums"_a = true, "compute_nnz"_a = true,                   \
         "sub_batch_cols"_a = SUB_BATCH_COLS)
 
-    RSC_OVR_SPARSE_CSC_HOST_BINDING("ovr_sparse_csc_host", float, int);
-    RSC_OVR_SPARSE_CSC_HOST_BINDING("ovr_sparse_csc_host_i64", float, int64_t);
-    RSC_OVR_SPARSE_CSC_HOST_BINDING("ovr_sparse_csc_host_f64", double, int);
-    RSC_OVR_SPARSE_CSC_HOST_BINDING("ovr_sparse_csc_host_f64_i64", double,
+    RSC_OVR_SPARSE_CSC_HOST_BINDING("ovr_sparse_csc_host", float, int, int);
+    RSC_OVR_SPARSE_CSC_HOST_BINDING("ovr_sparse_csc_host_i64", float, int,
                                     int64_t);
+    RSC_OVR_SPARSE_CSC_HOST_BINDING("ovr_sparse_csc_host_idx64", float, int64_t,
+                                    int);
+    RSC_OVR_SPARSE_CSC_HOST_BINDING("ovr_sparse_csc_host_idx64_i64", float,
+                                    int64_t, int64_t);
+    RSC_OVR_SPARSE_CSC_HOST_BINDING("ovr_sparse_csc_host_f64", double, int,
+                                    int);
+    RSC_OVR_SPARSE_CSC_HOST_BINDING("ovr_sparse_csc_host_f64_i64", double, int,
+                                    int64_t);
+    RSC_OVR_SPARSE_CSC_HOST_BINDING("ovr_sparse_csc_host_f64_idx64", double,
+                                    int64_t, int);
+    RSC_OVR_SPARSE_CSC_HOST_BINDING("ovr_sparse_csc_host_f64_idx64_i64", double,
+                                    int64_t, int64_t);
 #undef RSC_OVR_SPARSE_CSC_HOST_BINDING
 
 #define RSC_OVR_SPARSE_CSR_HOST_BINDING(NAME, InT, IndexT, IndptrT)           \

@@ -7,9 +7,9 @@
  * instead of extracting dense blocks.  GPU memory is O(max_batch_nnz) instead
  * of O(sub_batch * n_rows), and sort work is proportional to nnz, not n_rows.
  */
-template <typename InT, typename IndptrT>
+template <typename InT, typename IndexT, typename IndptrT>
 static void ovr_sparse_csc_host_streaming_impl(
-    const InT* h_data, const int* h_indices, const IndptrT* h_indptr,
+    const InT* h_data, const IndexT* h_indices, const IndptrT* h_indptr,
     const int* h_group_codes, const double* h_group_sizes, double* d_rank_sums,
     double* d_tie_corr, double* d_group_sums, double* d_group_sq_sums,
     double* d_group_nnz, int n_rows, int n_cols, int n_groups,
@@ -33,7 +33,7 @@ static void ovr_sparse_csc_host_streaming_impl(
     size_t cub_temp_bytes = 0;
     if (max_nnz > 0) {
         auto* fk = reinterpret_cast<float*>(1);
-        auto* iv = reinterpret_cast<int*>(1);
+        auto* iv = reinterpret_cast<IndexT*>(1);
         cub::DeviceSegmentedRadixSort::SortPairs(
             nullptr, cub_temp_bytes, fk, fk, iv, iv, (int)max_nnz,
             sub_batch_cols, iv, iv + 1, BEGIN_BIT, END_BIT);
@@ -42,16 +42,16 @@ static void ovr_sparse_csc_host_streaming_impl(
     std::vector<cudaStream_t> streams(n_streams);
     for (int i = 0; i < n_streams; i++) cudaStreamCreate(&streams[i]);
 
-    RmmPool pool;
+    RmmScratchPool pool;
     int* d_group_codes = pool.alloc<int>(n_rows);
     double* d_group_sizes = pool.alloc<double>(n_groups);
     struct StreamBuf {
         InT* d_sparse_data_orig;
         float* d_sparse_data_f32;
-        int* d_sparse_indices;
+        IndexT* d_sparse_indices;
         int* d_seg_offsets;
         float* keys_out;
-        int* vals_out;
+        IndexT* vals_out;
         uint8_t* cub_temp;
         double* d_rank_sums;
         double* d_tie_corr;
@@ -64,10 +64,10 @@ static void ovr_sparse_csc_host_streaming_impl(
     for (int s = 0; s < n_streams; s++) {
         bufs[s].d_sparse_data_orig = pool.alloc<InT>(max_nnz);
         bufs[s].d_sparse_data_f32 = pool.alloc<float>(max_nnz);
-        bufs[s].d_sparse_indices = pool.alloc<int>(max_nnz);
+        bufs[s].d_sparse_indices = pool.alloc<IndexT>(max_nnz);
         bufs[s].d_seg_offsets = pool.alloc<int>(sub_batch_cols + 1);
         bufs[s].keys_out = pool.alloc<float>(max_nnz);
-        bufs[s].vals_out = pool.alloc<int>(max_nnz);
+        bufs[s].vals_out = pool.alloc<IndexT>(max_nnz);
         bufs[s].cub_temp = pool.alloc<uint8_t>(cub_temp_bytes);
         bufs[s].d_rank_sums =
             pool.alloc<double>((size_t)n_groups * sub_batch_cols);
@@ -128,8 +128,8 @@ static void ovr_sparse_csc_host_streaming_impl(
     size_t total_nnz = (size_t)h_indptr[n_cols];
     HostRegisterGuard _pin_data(const_cast<InT*>(h_data),
                                 total_nnz * sizeof(InT));
-    HostRegisterGuard _pin_indices(const_cast<int*>(h_indices),
-                                   total_nnz * sizeof(int));
+    HostRegisterGuard _pin_indices(const_cast<IndexT*>(h_indices),
+                                   total_nnz * sizeof(IndexT));
 
     cudaDeviceSynchronize();
 
@@ -151,7 +151,7 @@ static void ovr_sparse_csc_host_streaming_impl(
                             (size_t)batch_nnz * sizeof(InT),
                             cudaMemcpyHostToDevice, stream);
             cudaMemcpyAsync(buf.d_sparse_indices, h_indices + ptr_start,
-                            (size_t)batch_nnz * sizeof(int),
+                            (size_t)batch_nnz * sizeof(IndexT),
                             cudaMemcpyHostToDevice, stream);
         }
 
@@ -161,7 +161,7 @@ static void ovr_sparse_csc_host_streaming_impl(
                         cudaMemcpyDeviceToDevice, stream);
 
         // Cast to float32 for sort + accumulate stats in float64
-        launch_ovr_cast_and_accumulate_sparse<InT>(
+        launch_ovr_cast_and_accumulate_sparse<InT, IndexT>(
             buf.d_sparse_data_orig, buf.d_sparse_data_f32, buf.d_sparse_indices,
             buf.d_seg_offsets, d_group_codes, buf.d_group_sums,
             buf.d_group_sq_sums, buf.d_group_nnz, sb_cols, n_groups,
@@ -187,10 +187,12 @@ static void ovr_sparse_csc_host_streaming_impl(
                             (size_t)n_groups * sb_cols * sizeof(double),
                             stream);
         }
-        rank_sums_sparse_ovr_kernel<<<sb_cols, tpb, smem_bytes, stream>>>(
-            buf.keys_out, buf.vals_out, buf.d_seg_offsets, d_group_codes,
-            d_group_sizes, buf.d_rank_sums, buf.d_tie_corr, buf.d_nz_scratch,
-            n_rows, sb_cols, n_groups, compute_tie_corr, rank_use_gmem);
+        rank_sums_sparse_ovr_kernel<IndexT>
+            <<<sb_cols, tpb, smem_bytes, stream>>>(
+                buf.keys_out, buf.vals_out, buf.d_seg_offsets, d_group_codes,
+                d_group_sizes, buf.d_rank_sums, buf.d_tie_corr,
+                buf.d_nz_scratch, n_rows, sb_cols, n_groups, compute_tie_corr,
+                rank_use_gmem);
         CUDA_CHECK_LAST_ERROR(rank_sums_sparse_ovr_kernel);
 
         // D2D: scatter sub-batch results into caller's GPU buffers
@@ -257,7 +259,7 @@ static void ovr_sparse_csr_host_streaming_impl(
     int sub_batch_cols) {
     if (n_rows == 0 || n_cols == 0) return;
 
-    RmmPool pool;
+    RmmScratchPool pool;
     size_t total_nnz = (size_t)h_indptr[n_rows];
 
     // ---- Phase 0: CPU planning in native CSR order ----
@@ -466,7 +468,7 @@ static void ovr_sparse_csr_host_streaming_impl(
                             (size_t)n_groups * sb_cols * sizeof(double),
                             stream);
         }
-        rank_sums_sparse_ovr_kernel<<<sb_cols, tpb, smem_bytes, stream>>>(
+        rank_sums_sparse_ovr_kernel<int><<<sb_cols, tpb, smem_bytes, stream>>>(
             buf.keys_out, buf.vals_out, buf.col_offsets, d_group_codes,
             d_group_sizes, buf.sub_rank_sums, buf.sub_tie_corr,
             buf.d_nz_scratch, n_rows, sb_cols, n_groups, compute_tie_corr,
@@ -558,7 +560,7 @@ static void ovr_sparse_csc_streaming_impl(
     bool rank_use_gmem = false;
     size_t smem_bytes = sparse_ovr_smem_config(n_groups, rank_use_gmem);
 
-    RmmPool pool;
+    RmmScratchPool pool;
     struct StreamBuf {
         float* keys_out;
         int* vals_out;
@@ -626,7 +628,7 @@ static void ovr_sparse_csc_streaming_impl(
                             (size_t)n_groups * sb_cols * sizeof(double),
                             stream);
         }
-        rank_sums_sparse_ovr_kernel<<<sb_cols, tpb, smem_bytes, stream>>>(
+        rank_sums_sparse_ovr_kernel<int><<<sb_cols, tpb, smem_bytes, stream>>>(
             buf.keys_out, buf.vals_out, buf.seg_offsets, group_codes,
             group_sizes, buf.sub_rank_sums, buf.sub_tie_corr, buf.d_nz_scratch,
             n_rows, sb_cols, n_groups, compute_tie_corr, rank_use_gmem);
@@ -681,7 +683,7 @@ static void ovr_sparse_csr_streaming_impl(
     if (n_rows == 0 || n_cols == 0) return;
 
     // ---- Phase 0: Planning — count nnz per column via histogram ----
-    RmmPool pool;
+    RmmScratchPool pool;
     int* d_col_counts = pool.alloc<int>(n_cols);
     cudaMemset(d_col_counts, 0, n_cols * sizeof(int));
     {
@@ -829,7 +831,7 @@ static void ovr_sparse_csr_streaming_impl(
                             (size_t)n_groups * sb_cols * sizeof(double),
                             stream);
         }
-        rank_sums_sparse_ovr_kernel<<<sb_cols, tpb, smem_bytes, stream>>>(
+        rank_sums_sparse_ovr_kernel<int><<<sb_cols, tpb, smem_bytes, stream>>>(
             buf.keys_out, buf.vals_out, buf.col_offsets, group_codes,
             group_sizes, buf.sub_rank_sums, buf.sub_tie_corr, buf.d_nz_scratch,
             n_rows, sb_cols, n_groups, compute_tie_corr, rank_use_gmem);

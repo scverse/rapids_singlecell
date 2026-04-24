@@ -172,9 +172,10 @@ __global__ void rank_sums_from_sorted_kernel(
  *
  * Grid: (sb_cols,)   Block: (tpb,)
  */
+template <typename IndexT = int>
 __global__ void rank_sums_sparse_ovr_kernel(
     const float* __restrict__ sorted_vals,
-    const int* __restrict__ sorted_row_idx,
+    const IndexT* __restrict__ sorted_row_idx,
     const int* __restrict__ col_seg_offsets,
     const int* __restrict__ group_codes, const double* __restrict__ group_sizes,
     double* __restrict__ rank_sums, double* __restrict__ tie_corr,
@@ -188,7 +189,7 @@ __global__ void rank_sums_sparse_ovr_kernel(
     int nnz_stored = seg_end - seg_start;
 
     const float* sv = sorted_vals + seg_start;
-    const int* si = sorted_row_idx + seg_start;
+    const IndexT* si = sorted_row_idx + seg_start;
 
     extern __shared__ double smem[];
     double* grp_sums;

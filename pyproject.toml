@@ -32,8 +32,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-rapids-cu13 = [ "cupy-cuda13x", "cudf-cu13>=25.10", "cuml-cu13>=25.10", "cugraph-cu13>=25.10", "cuvs-cu13>=25.10" ]
-rapids-cu12 = [ "cupy-cuda12x", "cudf-cu12>=25.10", "cuml-cu12>=25.10", "cugraph-cu12>=25.10", "cuvs-cu12>=25.10" ]
+rapids-cu13 = [
+    "cupy-cuda13x",
+    "cudf-cu13>=25.10",
+    "cuml-cu13>=25.10",
+    "cugraph-cu13>=25.10",
+    "cuvs-cu13>=25.10",
+    "rmm-cu13>=25.10",
+]
+rapids-cu12 = [
+    "cupy-cuda12x",
+    "cudf-cu12>=25.10",
+    "cuml-cu12>=25.10",
+    "cugraph-cu12>=25.10",
+    "cuvs-cu12>=25.10",
+    "rmm-cu12>=25.10",
+]
 
 doc = [
     "sphinx>=4.5.0",

@@ -9,6 +9,9 @@
 
 #include "../nb_types.h"  // for CUDA_CHECK_LAST_ERROR
 
+void* wilcoxon_rmm_allocate(size_t bytes);
+void wilcoxon_rmm_deallocate(void* ptr, size_t bytes);
+
 constexpr int WARP_SIZE = 32;
 constexpr int MAX_THREADS_PER_BLOCK = 512;
 constexpr int N_STREAMS = 4;
@@ -93,50 +96,45 @@ struct HostRegisterGuard {
 };
 
 // ---------------------------------------------------------------------------
-// Small allocation pool for temporary CUDA buffers.  The previous PR used RMM
-// here, but these sparse Wilcoxon kernels only need scoped scratch memory;
-// using cudaMalloc keeps this module independent of an extra build-time
-// dependency.
+// Small allocation pool for temporary CUDA buffers. Uses the current RMM device
+// resource so scratch participates in the same pool as CuPy/RAPIDS allocations.
 // ---------------------------------------------------------------------------
-struct RmmPool {
-    std::vector<void*> bufs;
+struct RmmScratchPool {
+    struct Allocation {
+        void* ptr = nullptr;
+        size_t bytes = 0;
+    };
+    std::vector<Allocation> bufs;
 
-    ~RmmPool() {
-        for (void* ptr : bufs) {
-            if (ptr) cudaFree(ptr);
+    ~RmmScratchPool() {
+        for (Allocation alloc : bufs) {
+            if (!alloc.ptr) continue;
+            wilcoxon_rmm_deallocate(alloc.ptr, alloc.bytes);
         }
     }
 
     template <typename T>
     T* alloc(size_t count) {
         if (count == 0) count = 1;
-        void* ptr = nullptr;
-        cudaError_t err = cudaMalloc(&ptr, count * sizeof(T));
-        if (err != cudaSuccess) {
-            throw std::runtime_error(
-                std::string("cudaMalloc failed in Wilcoxon scratch pool: ") +
-                cudaGetErrorString(err));
-        }
-        bufs.push_back(ptr);
+        size_t bytes = count * sizeof(T);
+        void* ptr = wilcoxon_rmm_allocate(bytes);
+        bufs.push_back({ptr, bytes});
         return static_cast<T*>(ptr);
     }
 };
 
 struct ScopedCudaBuffer {
     void* ptr = nullptr;
+    size_t bytes = 0;
 
-    explicit ScopedCudaBuffer(size_t bytes) {
-        if (bytes == 0) bytes = 1;
-        cudaError_t err = cudaMalloc(&ptr, bytes);
-        if (err != cudaSuccess) {
-            throw std::runtime_error(
-                std::string("cudaMalloc failed in Wilcoxon scoped buffer: ") +
-                cudaGetErrorString(err));
-        }
+    explicit ScopedCudaBuffer(size_t requested_bytes) {
+        bytes = requested_bytes == 0 ? 1 : requested_bytes;
+        ptr = wilcoxon_rmm_allocate(bytes);
     }
 
     ~ScopedCudaBuffer() {
-        if (ptr) cudaFree(ptr);
+        if (!ptr) return;
+        wilcoxon_rmm_deallocate(ptr, bytes);
     }
 
     void* data() {
