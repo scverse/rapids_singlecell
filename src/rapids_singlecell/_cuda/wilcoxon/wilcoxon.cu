@@ -1,43 +1,19 @@
 #include <cuda_runtime.h>
+#include <cub/device/device_segmented_radix_sort.cuh>
+
+#include <algorithm>
+#include <limits>
+#include <vector>
+
 #include "../nb_types.h"
 
 #include "kernels_wilcoxon.cuh"
+#include "wilcoxon_fast_common.cuh"
+#include "kernels_wilcoxon_ovo.cuh"
+#include "wilcoxon_ovr_kernels.cuh"
+#include "wilcoxon_ovo_kernels.cuh"
 
 using namespace nb::literals;
-
-// Constants for kernel launch configuration
-constexpr int WARP_SIZE = 32;
-constexpr int MAX_THREADS_PER_BLOCK = 512;
-constexpr int OVO_THREADS_PER_BLOCK = 256;
-
-static inline int round_up_to_warp(int n) {
-    int rounded = ((n + WARP_SIZE - 1) / WARP_SIZE) * WARP_SIZE;
-    return (rounded < MAX_THREADS_PER_BLOCK) ? rounded : MAX_THREADS_PER_BLOCK;
-}
-
-static inline void launch_ovo_rank_dense(
-    const float* ref_sorted, const float* grp_data, const int* grp_offsets,
-    double* rank_sums, double* tie_corr, int n_ref, int n_all_grp, int n_cols,
-    int n_groups, bool compute_tie_corr, cudaStream_t stream) {
-    dim3 block(OVO_THREADS_PER_BLOCK);
-    dim3 grid(n_cols, n_groups);
-    ovo_rank_dense_kernel<<<grid, block, 0, stream>>>(
-        ref_sorted, grp_data, grp_offsets, rank_sums, tie_corr, n_ref,
-        n_all_grp, n_cols, n_groups, compute_tie_corr);
-    CUDA_CHECK_LAST_ERROR(ovo_rank_dense_kernel);
-}
-
-static inline void launch_ovo_rank_presorted(
-    const float* ref_sorted, const float* grp_sorted, const int* grp_offsets,
-    double* rank_sums, double* tie_corr, int n_ref, int n_all_grp, int n_cols,
-    int n_groups, bool compute_tie_corr, cudaStream_t stream) {
-    dim3 block(OVO_THREADS_PER_BLOCK);
-    dim3 grid(n_cols, n_groups);
-    ovo_rank_presorted_kernel<<<grid, block, 0, stream>>>(
-        ref_sorted, grp_sorted, grp_offsets, rank_sums, tie_corr, n_ref,
-        n_all_grp, n_cols, n_groups, compute_tie_corr);
-    CUDA_CHECK_LAST_ERROR(ovo_rank_presorted_kernel);
-}
 
 static inline void launch_ovr_rank_dense(
     const float* sorted_vals, const int* sorter, const int* group_codes,
@@ -52,45 +28,435 @@ static inline void launch_ovr_rank_dense(
     CUDA_CHECK_LAST_ERROR(ovr_rank_dense_kernel);
 }
 
+static void launch_ovr_rank_dense_streaming(
+    const float* block, const int* group_codes, double* rank_sums,
+    double* tie_corr, int n_rows, int n_cols, int n_groups,
+    bool compute_tie_corr, int sub_batch_cols, cudaStream_t upstream_stream) {
+    if (n_rows == 0 || n_cols == 0 || n_groups == 0) return;
+    if (sub_batch_cols <= 0) sub_batch_cols = SUB_BATCH_COLS;
+
+    int n_streams = N_STREAMS;
+    if (n_cols < n_streams * sub_batch_cols) {
+        n_streams = (n_cols + sub_batch_cols - 1) / sub_batch_cols;
+    }
+
+    size_t sub_items = (size_t)n_rows * sub_batch_cols;
+    if (sub_items > (size_t)std::numeric_limits<int>::max()) {
+        throw std::runtime_error(
+            "Dense OVR sub-batch exceeds CUB int item limit");
+    }
+
+    size_t cub_temp_bytes = 0;
+    {
+        auto* fk = reinterpret_cast<float*>(1);
+        auto* iv = reinterpret_cast<int*>(1);
+        cub::DeviceSegmentedRadixSort::SortPairs(
+            nullptr, cub_temp_bytes, fk, fk, iv, iv, (int)sub_items,
+            sub_batch_cols, iv, iv + 1, BEGIN_BIT, END_BIT);
+    }
+
+    std::vector<cudaStream_t> streams(n_streams);
+    for (int i = 0; i < n_streams; ++i) {
+        cudaStreamCreateWithFlags(&streams[i], cudaStreamNonBlocking);
+    }
+
+    cudaEvent_t inputs_ready;
+    cudaEventCreateWithFlags(&inputs_ready, cudaEventDisableTiming);
+    cudaEventRecord(inputs_ready, upstream_stream);
+    for (int i = 0; i < n_streams; ++i) {
+        cudaStreamWaitEvent(streams[i], inputs_ready, 0);
+    }
+
+    RmmScratchPool pool;
+    struct StreamBuf {
+        float* keys_out;
+        int* vals_in;
+        int* vals_out;
+        int* seg_offsets;
+        uint8_t* cub_temp;
+        double* sub_rank_sums;
+        double* sub_tie_corr;
+    };
+    std::vector<StreamBuf> bufs(n_streams);
+    for (int s = 0; s < n_streams; ++s) {
+        bufs[s].keys_out = pool.alloc<float>(sub_items);
+        bufs[s].vals_in = pool.alloc<int>(sub_items);
+        bufs[s].vals_out = pool.alloc<int>(sub_items);
+        bufs[s].seg_offsets = pool.alloc<int>(sub_batch_cols + 1);
+        bufs[s].cub_temp = pool.alloc<uint8_t>(cub_temp_bytes);
+        bufs[s].sub_rank_sums =
+            pool.alloc<double>((size_t)n_groups * sub_batch_cols);
+        bufs[s].sub_tie_corr = pool.alloc<double>(sub_batch_cols);
+    }
+
+    int tpb_rank = round_up_to_warp(n_rows);
+    bool use_gmem = false;
+    size_t smem_rank = ovr_smem_config(n_groups, use_gmem);
+
+    int col = 0;
+    int batch_idx = 0;
+    while (col < n_cols) {
+        int sb_cols = std::min(sub_batch_cols, n_cols - col);
+        int sb_items = n_rows * sb_cols;
+        int s = batch_idx % n_streams;
+        cudaStream_t stream = streams[s];
+        auto& buf = bufs[s];
+
+        upload_linear_offsets(buf.seg_offsets, sb_cols, n_rows, stream);
+        fill_row_indices_kernel<<<sb_cols, UTIL_BLOCK_SIZE, 0, stream>>>(
+            buf.vals_in, n_rows, sb_cols);
+        CUDA_CHECK_LAST_ERROR(fill_row_indices_kernel);
+
+        const float* keys_in = block + (size_t)col * n_rows;
+        size_t temp = cub_temp_bytes;
+        cub::DeviceSegmentedRadixSort::SortPairs(
+            buf.cub_temp, temp, keys_in, buf.keys_out, buf.vals_in,
+            buf.vals_out, sb_items, sb_cols, buf.seg_offsets,
+            buf.seg_offsets + 1, BEGIN_BIT, END_BIT, stream);
+
+        if (use_gmem) {
+            cudaMemsetAsync(buf.sub_rank_sums, 0,
+                            (size_t)n_groups * sb_cols * sizeof(double),
+                            stream);
+        }
+        rank_sums_from_sorted_kernel<<<sb_cols, tpb_rank, smem_rank, stream>>>(
+            buf.keys_out, buf.vals_out, group_codes, buf.sub_rank_sums,
+            buf.sub_tie_corr, n_rows, sb_cols, n_groups, compute_tie_corr,
+            use_gmem);
+        CUDA_CHECK_LAST_ERROR(rank_sums_from_sorted_kernel);
+
+        cudaMemcpy2DAsync(rank_sums + col, n_cols * sizeof(double),
+                          buf.sub_rank_sums, sb_cols * sizeof(double),
+                          sb_cols * sizeof(double), n_groups,
+                          cudaMemcpyDeviceToDevice, stream);
+        if (compute_tie_corr) {
+            cudaMemcpyAsync(tie_corr + col, buf.sub_tie_corr,
+                            sb_cols * sizeof(double), cudaMemcpyDeviceToDevice,
+                            stream);
+        }
+
+        col += sb_cols;
+        ++batch_idx;
+    }
+
+    for (int s = 0; s < n_streams; ++s) {
+        cudaError_t err = cudaStreamSynchronize(streams[s]);
+        if (err != cudaSuccess) {
+            throw std::runtime_error(
+                std::string("CUDA error in dense OVR streaming rank: ") +
+                cudaGetErrorString(err));
+        }
+    }
+    cudaEventDestroy(inputs_ready);
+    for (int s = 0; s < n_streams; ++s) cudaStreamDestroy(streams[s]);
+}
+
+static void launch_ovo_rank_dense_tiered_impl(
+    const float* ref_data, bool ref_is_sorted, const float* grp_data,
+    const int* grp_offsets, double* rank_sums, double* tie_corr, int n_ref,
+    int n_all_grp, int n_cols, int n_groups, bool compute_tie_corr,
+    int sub_batch_cols, cudaStream_t upstream_stream) {
+    if (n_cols == 0 || n_ref == 0 || n_all_grp == 0 || n_groups == 0) return;
+    if (sub_batch_cols <= 0) sub_batch_cols = SUB_BATCH_COLS;
+
+    std::vector<int> h_offsets(n_groups + 1);
+    cudaStreamSynchronize(upstream_stream);
+    cudaMemcpy(h_offsets.data(), grp_offsets, (n_groups + 1) * sizeof(int),
+               cudaMemcpyDeviceToHost);
+    auto t1 = make_tier1_config(h_offsets.data(), n_groups);
+    int max_grp_size = t1.max_grp_size;
+    bool use_tier1 = t1.any_above_t2 && t1.use_tier1;
+    bool needs_tier3 = t1.any_above_t2 && !use_tier1;
+    int padded_grp_size = t1.padded_grp_size;
+    int tier1_tpb = t1.tier1_tpb;
+    size_t tier1_smem = t1.tier1_smem;
+
+    std::vector<int> h_sort_group_ids;
+    int n_sort_groups = n_groups;
+    if (needs_tier3) {
+        h_sort_group_ids = make_sort_group_ids(h_offsets.data(), n_groups,
+                                               TIER2_GROUP_THRESHOLD);
+        n_sort_groups = (int)h_sort_group_ids.size();
+    }
+
+    int n_streams = N_STREAMS;
+    if (n_cols < n_streams * sub_batch_cols)
+        n_streams = (n_cols + sub_batch_cols - 1) / sub_batch_cols;
+
+    size_t sub_ref_items = (size_t)n_ref * sub_batch_cols;
+    if (sub_ref_items > (size_t)std::numeric_limits<int>::max()) {
+        throw std::runtime_error(
+            "Dense OVO reference sub-batch exceeds CUB int item limit");
+    }
+
+    size_t sub_grp_items = (size_t)n_all_grp * sub_batch_cols;
+    if (sub_grp_items > (size_t)std::numeric_limits<int>::max()) {
+        throw std::runtime_error(
+            "Dense OVO sub-batch exceeds CUB int item limit");
+    }
+
+    size_t grp_cub_temp_bytes = 0;
+    if (needs_tier3) {
+        int max_grp_seg = n_sort_groups * sub_batch_cols;
+        auto* fk = reinterpret_cast<float*>(1);
+        auto* doff = reinterpret_cast<int*>(1);
+        cub::DeviceSegmentedRadixSort::SortKeys(
+            nullptr, grp_cub_temp_bytes, fk, fk, (int)sub_grp_items,
+            max_grp_seg, doff, doff + 1, BEGIN_BIT, END_BIT);
+    }
+    size_t ref_cub_temp_bytes = 0;
+    if (!ref_is_sorted) {
+        auto* fk = reinterpret_cast<float*>(1);
+        auto* doff = reinterpret_cast<int*>(1);
+        cub::DeviceSegmentedRadixSort::SortKeys(
+            nullptr, ref_cub_temp_bytes, fk, fk, (int)sub_ref_items,
+            sub_batch_cols, doff, doff + 1, BEGIN_BIT, END_BIT);
+    }
+
+    std::vector<cudaStream_t> streams(n_streams);
+    for (int i = 0; i < n_streams; ++i) {
+        cudaStreamCreateWithFlags(&streams[i], cudaStreamNonBlocking);
+    }
+
+    cudaEvent_t inputs_ready;
+    cudaEventCreateWithFlags(&inputs_ready, cudaEventDisableTiming);
+    cudaEventRecord(inputs_ready, upstream_stream);
+    for (int i = 0; i < n_streams; ++i) {
+        cudaStreamWaitEvent(streams[i], inputs_ready, 0);
+    }
+
+    RmmScratchPool pool;
+    int* d_sort_group_ids = nullptr;
+    if (needs_tier3) {
+        d_sort_group_ids = pool.alloc<int>(h_sort_group_ids.size());
+        cudaMemcpy(d_sort_group_ids, h_sort_group_ids.data(),
+                   h_sort_group_ids.size() * sizeof(int),
+                   cudaMemcpyHostToDevice);
+    }
+
+    struct StreamBuf {
+        float* ref_sorted;
+        int* ref_seg_offsets;
+        uint8_t* ref_cub_temp;
+        float* grp_sorted;
+        int* grp_seg_offsets;
+        int* grp_seg_ends;
+        uint8_t* grp_cub_temp;
+        double* ref_tie_sums;
+        double* sub_rank_sums;
+        double* sub_tie_corr;
+    };
+    std::vector<StreamBuf> bufs(n_streams);
+    for (int s = 0; s < n_streams; ++s) {
+        if (ref_is_sorted) {
+            bufs[s].ref_sorted = nullptr;
+            bufs[s].ref_seg_offsets = nullptr;
+            bufs[s].ref_cub_temp = nullptr;
+        } else {
+            bufs[s].ref_sorted = pool.alloc<float>(sub_ref_items);
+            bufs[s].ref_seg_offsets = pool.alloc<int>(sub_batch_cols + 1);
+            bufs[s].ref_cub_temp = pool.alloc<uint8_t>(ref_cub_temp_bytes);
+        }
+        bufs[s].grp_cub_temp =
+            needs_tier3 ? pool.alloc<uint8_t>(grp_cub_temp_bytes) : nullptr;
+        bufs[s].ref_tie_sums =
+            (compute_tie_corr &&
+             (t1.use_tier0 || t1.any_tier0_64 || t1.any_tier2))
+                ? pool.alloc<double>(sub_batch_cols)
+                : nullptr;
+        bufs[s].sub_rank_sums =
+            pool.alloc<double>((size_t)n_groups * sub_batch_cols);
+        bufs[s].sub_tie_corr =
+            pool.alloc<double>((size_t)n_groups * sub_batch_cols);
+        if (needs_tier3) {
+            bufs[s].grp_sorted = pool.alloc<float>(sub_grp_items);
+            int max_seg = n_sort_groups * sub_batch_cols;
+            bufs[s].grp_seg_offsets = pool.alloc<int>(max_seg);
+            bufs[s].grp_seg_ends = pool.alloc<int>(max_seg);
+        } else {
+            bufs[s].grp_sorted = nullptr;
+            bufs[s].grp_seg_offsets = nullptr;
+            bufs[s].grp_seg_ends = nullptr;
+        }
+    }
+
+    int tpb_rank =
+        round_up_to_warp(std::min(max_grp_size, MAX_THREADS_PER_BLOCK));
+
+    int col = 0;
+    int batch_idx = 0;
+    while (col < n_cols) {
+        int sb_cols = std::min(sub_batch_cols, n_cols - col);
+        int sb_ref_items_actual = n_ref * sb_cols;
+        int sb_grp_items_actual = n_all_grp * sb_cols;
+        int s = batch_idx % n_streams;
+        cudaStream_t stream = streams[s];
+        auto& buf = bufs[s];
+        const float* ref_sub = ref_data + (size_t)col * n_ref;
+        const float* grp_sub = grp_data + (size_t)col * n_all_grp;
+        if (!ref_is_sorted) {
+            upload_linear_offsets(buf.ref_seg_offsets, sb_cols, n_ref, stream);
+            size_t temp = ref_cub_temp_bytes;
+            cub::DeviceSegmentedRadixSort::SortKeys(
+                buf.ref_cub_temp, temp, ref_sub, buf.ref_sorted,
+                sb_ref_items_actual, sb_cols, buf.ref_seg_offsets,
+                buf.ref_seg_offsets + 1, BEGIN_BIT, END_BIT, stream);
+            ref_sub = buf.ref_sorted;
+        }
+
+        int skip_le = 0;
+        bool run_tier0 = t1.use_tier0;
+        bool run_tier0_64 = t1.any_tier0_64;
+        bool run_tier2 = t1.any_tier2;
+        if (compute_tie_corr && (run_tier0 || run_tier0_64 || run_tier2)) {
+            launch_ref_tie_sums(ref_sub, buf.ref_tie_sums, n_ref, sb_cols,
+                                stream);
+        }
+        if (run_tier0) {
+            launch_tier0(ref_sub, grp_sub, grp_offsets, buf.ref_tie_sums,
+                         buf.sub_rank_sums, buf.sub_tie_corr, n_ref, n_all_grp,
+                         sb_cols, n_groups, compute_tie_corr, stream);
+            if (t1.any_above_t0) skip_le = TIER0_GROUP_THRESHOLD;
+        }
+        if (run_tier0_64) {
+            launch_tier0_64(ref_sub, grp_sub, grp_offsets, buf.ref_tie_sums,
+                            buf.sub_rank_sums, buf.sub_tie_corr, n_ref,
+                            n_all_grp, sb_cols, n_groups, compute_tie_corr,
+                            skip_le, stream);
+            if (t1.max_grp_size > TIER0_64_GROUP_THRESHOLD) {
+                skip_le = TIER0_64_GROUP_THRESHOLD;
+            }
+        }
+        if (run_tier2) {
+            launch_tier2_medium(ref_sub, grp_sub, grp_offsets, buf.ref_tie_sums,
+                                buf.sub_rank_sums, buf.sub_tie_corr, n_ref,
+                                n_all_grp, sb_cols, n_groups, compute_tie_corr,
+                                skip_le, stream);
+        }
+
+        int upper_skip_le = t1.any_above_t2 ? TIER2_GROUP_THRESHOLD : skip_le;
+        if (t1.any_above_t2 && use_tier1) {
+            dim3 grid(sb_cols, n_groups);
+            ovo_fused_sort_rank_kernel<<<grid, tier1_tpb, tier1_smem, stream>>>(
+                ref_sub, grp_sub, grp_offsets, buf.sub_rank_sums,
+                buf.sub_tie_corr, n_ref, n_all_grp, sb_cols, n_groups,
+                compute_tie_corr, padded_grp_size, upper_skip_le);
+            CUDA_CHECK_LAST_ERROR(ovo_fused_sort_rank_kernel);
+        } else if (needs_tier3) {
+            int sb_grp_seg = n_sort_groups * sb_cols;
+            int blk = (sb_grp_seg + UTIL_BLOCK_SIZE - 1) / UTIL_BLOCK_SIZE;
+            build_tier3_seg_begin_end_offsets_kernel<<<blk, UTIL_BLOCK_SIZE, 0,
+                                                       stream>>>(
+                grp_offsets, d_sort_group_ids, buf.grp_seg_offsets,
+                buf.grp_seg_ends, n_all_grp, n_sort_groups, sb_cols);
+            CUDA_CHECK_LAST_ERROR(build_tier3_seg_begin_end_offsets_kernel);
+
+            size_t temp = grp_cub_temp_bytes;
+            cub::DeviceSegmentedRadixSort::SortKeys(
+                buf.grp_cub_temp, temp, grp_sub, buf.grp_sorted,
+                sb_grp_items_actual, sb_grp_seg, buf.grp_seg_offsets,
+                buf.grp_seg_ends, BEGIN_BIT, END_BIT, stream);
+
+            dim3 grid(sb_cols, n_groups);
+            batched_rank_sums_presorted_kernel<<<grid, tpb_rank, 0, stream>>>(
+                ref_sub, buf.grp_sorted, grp_offsets, buf.sub_rank_sums,
+                buf.sub_tie_corr, n_ref, n_all_grp, sb_cols, n_groups,
+                compute_tie_corr, upper_skip_le);
+            CUDA_CHECK_LAST_ERROR(batched_rank_sums_presorted_kernel);
+        }
+
+        cudaMemcpy2DAsync(rank_sums + col, n_cols * sizeof(double),
+                          buf.sub_rank_sums, sb_cols * sizeof(double),
+                          sb_cols * sizeof(double), n_groups,
+                          cudaMemcpyDeviceToDevice, stream);
+        if (compute_tie_corr) {
+            cudaMemcpy2DAsync(tie_corr + col, n_cols * sizeof(double),
+                              buf.sub_tie_corr, sb_cols * sizeof(double),
+                              sb_cols * sizeof(double), n_groups,
+                              cudaMemcpyDeviceToDevice, stream);
+        }
+
+        col += sb_cols;
+        ++batch_idx;
+    }
+
+    for (int s = 0; s < n_streams; ++s) {
+        cudaError_t err = cudaStreamSynchronize(streams[s]);
+        if (err != cudaSuccess) {
+            throw std::runtime_error(
+                std::string("CUDA error in dense OVO tiered rank: ") +
+                cudaGetErrorString(err));
+        }
+    }
+    cudaEventDestroy(inputs_ready);
+    for (int s = 0; s < n_streams; ++s) cudaStreamDestroy(streams[s]);
+}
+
+static void launch_ovo_rank_dense_tiered(
+    const float* ref_sorted, const float* grp_data, const int* grp_offsets,
+    double* rank_sums, double* tie_corr, int n_ref, int n_all_grp, int n_cols,
+    int n_groups, bool compute_tie_corr, int sub_batch_cols,
+    cudaStream_t upstream_stream) {
+    launch_ovo_rank_dense_tiered_impl(ref_sorted, true, grp_data, grp_offsets,
+                                      rank_sums, tie_corr, n_ref, n_all_grp,
+                                      n_cols, n_groups, compute_tie_corr,
+                                      sub_batch_cols, upstream_stream);
+}
+
+static void launch_ovo_rank_dense_tiered_unsorted_ref(
+    const float* ref_data, const float* grp_data, const int* grp_offsets,
+    double* rank_sums, double* tie_corr, int n_ref, int n_all_grp, int n_cols,
+    int n_groups, bool compute_tie_corr, int sub_batch_cols,
+    cudaStream_t upstream_stream) {
+    launch_ovo_rank_dense_tiered_impl(ref_data, false, grp_data, grp_offsets,
+                                      rank_sums, tie_corr, n_ref, n_all_grp,
+                                      n_cols, n_groups, compute_tie_corr,
+                                      sub_batch_cols, upstream_stream);
+}
+
 template <typename Device>
 void register_bindings(nb::module_& m) {
     m.doc() = "CUDA kernels for Wilcoxon rank-sum test";
 
     m.def(
-        "ovo_rank_dense",
+        "ovo_rank_dense_tiered",
         [](gpu_array_f<const float, Device> ref_sorted,
            gpu_array_f<const float, Device> grp_data,
            gpu_array_c<const int, Device> grp_offsets,
            gpu_array_c<double, Device> rank_sums,
            gpu_array_c<double, Device> tie_corr, int n_ref, int n_all_grp,
-           int n_cols, int n_groups, bool compute_tie_corr,
+           int n_cols, int n_groups, bool compute_tie_corr, int sub_batch_cols,
            std::uintptr_t stream) {
-            launch_ovo_rank_dense(
-                ref_sorted.data(), grp_data.data(), grp_offsets.data(),
-                rank_sums.data(), tie_corr.data(), n_ref, n_all_grp, n_cols,
-                n_groups, compute_tie_corr, (cudaStream_t)stream);
+            launch_ovo_rank_dense_tiered(ref_sorted.data(), grp_data.data(),
+                                         grp_offsets.data(), rank_sums.data(),
+                                         tie_corr.data(), n_ref, n_all_grp,
+                                         n_cols, n_groups, compute_tie_corr,
+                                         sub_batch_cols, (cudaStream_t)stream);
         },
         "ref_sorted"_a, "grp_data"_a, "grp_offsets"_a, "rank_sums"_a,
         "tie_corr"_a, nb::kw_only(), "n_ref"_a, "n_all_grp"_a, "n_cols"_a,
-        "n_groups"_a, "compute_tie_corr"_a, "stream"_a = 0);
+        "n_groups"_a, "compute_tie_corr"_a, "sub_batch_cols"_a = SUB_BATCH_COLS,
+        "stream"_a = 0);
 
     m.def(
-        "ovo_rank_presorted",
-        [](gpu_array_f<const float, Device> ref_sorted,
-           gpu_array_f<const float, Device> grp_sorted,
+        "ovo_rank_dense_tiered_unsorted_ref",
+        [](gpu_array_f<const float, Device> ref_data,
+           gpu_array_f<const float, Device> grp_data,
            gpu_array_c<const int, Device> grp_offsets,
            gpu_array_c<double, Device> rank_sums,
            gpu_array_c<double, Device> tie_corr, int n_ref, int n_all_grp,
-           int n_cols, int n_groups, bool compute_tie_corr,
+           int n_cols, int n_groups, bool compute_tie_corr, int sub_batch_cols,
            std::uintptr_t stream) {
-            launch_ovo_rank_presorted(
-                ref_sorted.data(), grp_sorted.data(), grp_offsets.data(),
+            launch_ovo_rank_dense_tiered_unsorted_ref(
+                ref_data.data(), grp_data.data(), grp_offsets.data(),
                 rank_sums.data(), tie_corr.data(), n_ref, n_all_grp, n_cols,
-                n_groups, compute_tie_corr, (cudaStream_t)stream);
+                n_groups, compute_tie_corr, sub_batch_cols,
+                (cudaStream_t)stream);
         },
-        "ref_sorted"_a, "grp_sorted"_a, "grp_offsets"_a, "rank_sums"_a,
+        "ref_data"_a, "grp_data"_a, "grp_offsets"_a, "rank_sums"_a,
         "tie_corr"_a, nb::kw_only(), "n_ref"_a, "n_all_grp"_a, "n_cols"_a,
-        "n_groups"_a, "compute_tie_corr"_a, "stream"_a = 0);
+        "n_groups"_a, "compute_tie_corr"_a, "sub_batch_cols"_a = SUB_BATCH_COLS,
+        "stream"_a = 0);
 
     m.def(
         "ovr_rank_dense",
@@ -108,6 +474,23 @@ void register_bindings(nb::module_& m) {
         "sorted_vals"_a, "sorter"_a, "group_codes"_a, "rank_sums"_a,
         "tie_corr"_a, nb::kw_only(), "n_rows"_a, "n_cols"_a, "n_groups"_a,
         "compute_tie_corr"_a, "stream"_a = 0);
+
+    m.def(
+        "ovr_rank_dense_streaming",
+        [](gpu_array_f<const float, Device> block,
+           gpu_array_c<const int, Device> group_codes,
+           gpu_array_c<double, Device> rank_sums,
+           gpu_array_c<double, Device> tie_corr, int n_rows, int n_cols,
+           int n_groups, bool compute_tie_corr, int sub_batch_cols,
+           std::uintptr_t stream) {
+            launch_ovr_rank_dense_streaming(
+                block.data(), group_codes.data(), rank_sums.data(),
+                tie_corr.data(), n_rows, n_cols, n_groups, compute_tie_corr,
+                sub_batch_cols, (cudaStream_t)stream);
+        },
+        "block"_a, "group_codes"_a, "rank_sums"_a, "tie_corr"_a, nb::kw_only(),
+        "n_rows"_a, "n_cols"_a, "n_groups"_a, "compute_tie_corr"_a,
+        "sub_batch_cols"_a = SUB_BATCH_COLS, "stream"_a = 0);
 }
 
 NB_MODULE(_wilcoxon_cuda, m) {

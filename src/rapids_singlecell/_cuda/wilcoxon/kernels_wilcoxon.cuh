@@ -24,312 +24,117 @@ __device__ __forceinline__ double wilcoxon_block_sum(double val,
 }
 
 /**
- * OVO dense rank core.
+ * OVR dense rank-sum kernel for data sorted by column.
  *
- * ref_sorted is F-order and sorted independently for every column.
- * grp_data is F-order and contains test-group rows concatenated by
- * grp_offsets.  One block computes one (column, test-group) result.
- *
- * This intentionally centralizes the OVO math; host/device and CSR/CSC/dense
- * paths only need to materialize bounded dense column batches that feed this
- * kernel.
+ * sorted_vals and sorted_row_idx are F-order arrays from a segmented
+ * SortPairs. One block owns one column, walks tie runs, and accumulates the
+ * average ranks per group without materializing a full rank matrix.
  */
-__global__ void ovo_rank_dense_kernel(const float* __restrict__ ref_sorted,
-                                      const float* __restrict__ grp_data,
-                                      const int* __restrict__ grp_offsets,
-                                      double* __restrict__ rank_sums,
-                                      double* __restrict__ tie_corr, int n_ref,
-                                      int n_all_grp, int n_cols, int n_groups,
-                                      bool compute_tie_corr) {
+__global__ void rank_sums_from_sorted_kernel(
+    const float* __restrict__ sorted_vals,
+    const int* __restrict__ sorted_row_idx, const int* __restrict__ group_codes,
+    double* __restrict__ rank_sums, double* __restrict__ tie_corr, int n_rows,
+    int n_cols, int n_groups, bool compute_tie_corr, bool use_gmem) {
     int col = blockIdx.x;
-    int grp = blockIdx.y;
-    if (col >= n_cols || grp >= n_groups) return;
+    if (col >= n_cols) return;
 
-    int g_start = grp_offsets[grp];
-    int g_end = grp_offsets[grp + 1];
-    int n_grp = g_end - g_start;
+    extern __shared__ double smem[];
 
-    const float* ref_col = ref_sorted + (long long)col * n_ref;
-    const float* grp_col = grp_data + (long long)col * n_all_grp + g_start;
-
-    __shared__ double warp_buf[32];
-    double local_rank = 0.0;
-
-    for (int i = threadIdx.x; i < n_grp; i += blockDim.x) {
-        float v = grp_col[i];
-
-        int lo = 0, hi = n_ref;
-        while (lo < hi) {
-            int m = lo + ((hi - lo) >> 1);
-            if (ref_col[m] < v)
-                lo = m + 1;
-            else
-                hi = m;
+    double* grp_sums;
+    if (use_gmem) {
+        grp_sums = rank_sums + (size_t)col;
+    } else {
+        grp_sums = smem;
+        for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
+            grp_sums[g] = 0.0;
         }
-        int n_lt_ref = lo;
-
-        hi = n_ref;
-        while (lo < hi) {
-            int m = lo + ((hi - lo) >> 1);
-            if (ref_col[m] <= v)
-                lo = m + 1;
-            else
-                hi = m;
-        }
-        int n_eq_ref = lo - n_lt_ref;
-
-        int n_lt_grp = 0;
-        int n_eq_grp = 0;
-        for (int j = 0; j < n_grp; ++j) {
-            float u = grp_col[j];
-            n_lt_grp += (u < v);
-            n_eq_grp += (u == v);
-        }
-
-        local_rank += (double)(n_lt_ref + n_lt_grp) +
-                      ((double)(n_eq_ref + n_eq_grp) + 1.0) / 2.0;
+        __syncthreads();
     }
 
-    double total_rank = wilcoxon_block_sum(local_rank, warp_buf);
-    if (threadIdx.x == 0) {
-        rank_sums[(size_t)grp * n_cols + col] = total_rank;
+    const float* sv = sorted_vals + (size_t)col * n_rows;
+    const int* si = sorted_row_idx + (size_t)col * n_rows;
+
+    int chunk = (n_rows + blockDim.x - 1) / blockDim.x;
+    int my_start = threadIdx.x * chunk;
+    int my_end = my_start + chunk;
+    if (my_end > n_rows) my_end = n_rows;
+
+    double local_tie_sum = 0.0;
+    int acc_stride = use_gmem ? n_cols : 1;
+
+    int i = my_start;
+    while (i < my_end) {
+        double val = sv[i];
+
+        int tie_local_end = i + 1;
+        while (tie_local_end < my_end && sv[tie_local_end] == val) {
+            ++tie_local_end;
+        }
+
+        int tie_global_start = i;
+        if (i == my_start && i > 0 && sv[i - 1] == val) {
+            int lo = 0;
+            int hi = i;
+            while (lo < hi) {
+                int mid = lo + ((hi - lo) >> 1);
+                if (sv[mid] < val)
+                    lo = mid + 1;
+                else
+                    hi = mid;
+            }
+            tie_global_start = lo;
+        }
+
+        int tie_global_end = tie_local_end;
+        if (tie_local_end == my_end && tie_local_end < n_rows &&
+            sv[tie_local_end] == val) {
+            int lo = tie_local_end;
+            int hi = n_rows - 1;
+            while (lo < hi) {
+                int mid = hi - ((hi - lo) >> 1);
+                if (sv[mid] > val)
+                    hi = mid - 1;
+                else
+                    lo = mid;
+            }
+            tie_global_end = lo + 1;
+        }
+
+        int total_tie = tie_global_end - tie_global_start;
+        double avg_rank = (double)(tie_global_start + tie_global_end + 1) / 2.0;
+
+        for (int j = i; j < tie_local_end; ++j) {
+            int grp = group_codes[si[j]];
+            if (grp < n_groups) {
+                atomicAdd(&grp_sums[grp * acc_stride], avg_rank);
+            }
+        }
+
+        if (compute_tie_corr && tie_global_start >= my_start && total_tie > 1) {
+            double t = (double)total_tie;
+            local_tie_sum += t * t * t - t;
+        }
+
+        i = tie_local_end;
     }
 
-    if (!compute_tie_corr) return;
     __syncthreads();
 
-    double local_tie = 0.0;
-
-    for (int i = threadIdx.x; i < n_ref; i += blockDim.x) {
-        if (i == 0 || ref_col[i] != ref_col[i - 1]) {
-            float v = ref_col[i];
-            int lo = i + 1, hi = n_ref;
-            while (lo < hi) {
-                int m = lo + ((hi - lo) >> 1);
-                if (ref_col[m] <= v)
-                    lo = m + 1;
-                else
-                    hi = m;
-            }
-            int count = lo - i;
-            for (int j = 0; j < n_grp; ++j) count += (grp_col[j] == v);
-            if (count > 1) {
-                double t = (double)count;
-                local_tie += t * t * t - t;
-            }
+    if (!use_gmem) {
+        for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
+            rank_sums[(size_t)g * n_cols + col] = grp_sums[g];
         }
     }
 
-    for (int i = threadIdx.x; i < n_grp; i += blockDim.x) {
-        float v = grp_col[i];
-        bool seen_in_group = false;
-        for (int j = 0; j < i; ++j) {
-            if (grp_col[j] == v) {
-                seen_in_group = true;
-                break;
-            }
+    if (compute_tie_corr) {
+        int warp_buf_off = use_gmem ? 0 : n_groups;
+        double* warp_buf = smem + warp_buf_off;
+        double tie_sum = wilcoxon_block_sum(local_tie_sum, warp_buf);
+        if (threadIdx.x == 0) {
+            double n = (double)n_rows;
+            double denom = n * n * n - n;
+            tie_corr[col] = (denom > 0.0) ? (1.0 - tie_sum / denom) : 1.0;
         }
-        if (seen_in_group) continue;
-
-        int lo = 0, hi = n_ref;
-        while (lo < hi) {
-            int m = lo + ((hi - lo) >> 1);
-            if (ref_col[m] < v)
-                lo = m + 1;
-            else
-                hi = m;
-        }
-        if (lo < n_ref && ref_col[lo] == v) continue;
-
-        int count = 0;
-        for (int j = 0; j < n_grp; ++j) count += (grp_col[j] == v);
-        if (count > 1) {
-            double t = (double)count;
-            local_tie += t * t * t - t;
-        }
-    }
-
-    double tie_sum = wilcoxon_block_sum(local_tie, warp_buf);
-    if (threadIdx.x == 0) {
-        int n = n_ref + n_grp;
-        double dn = (double)n;
-        double denom = dn * dn * dn - dn;
-        tie_corr[(size_t)grp * n_cols + col] =
-            (denom > 0.0) ? (1.0 - tie_sum / denom) : 1.0;
-    }
-}
-
-__global__ void ovo_rank_presorted_kernel(const float* __restrict__ ref_sorted,
-                                          const float* __restrict__ grp_sorted,
-                                          const int* __restrict__ grp_offsets,
-                                          double* __restrict__ rank_sums,
-                                          double* __restrict__ tie_corr,
-                                          int n_ref, int n_all_grp, int n_cols,
-                                          int n_groups, bool compute_tie_corr) {
-    int col = blockIdx.x;
-    int grp = blockIdx.y;
-    if (col >= n_cols || grp >= n_groups) return;
-
-    int g_start = grp_offsets[grp];
-    int g_end = grp_offsets[grp + 1];
-    int n_grp = g_end - g_start;
-
-    const float* ref_col = ref_sorted + (long long)col * n_ref;
-    const float* grp_col = grp_sorted + (long long)col * n_all_grp + g_start;
-
-    __shared__ double warp_buf[32];
-    double local_rank = 0.0;
-
-    int ref_lb = 0, ref_ub = 0;
-    int grp_lb = 0, grp_ub = 0;
-    for (int i = threadIdx.x; i < n_grp; i += blockDim.x) {
-        float v = grp_col[i];
-
-        int lo = ref_lb, hi = n_ref;
-        while (lo < hi) {
-            int m = lo + ((hi - lo) >> 1);
-            if (ref_col[m] < v)
-                lo = m + 1;
-            else
-                hi = m;
-        }
-        int n_lt_ref = lo;
-        ref_lb = n_lt_ref;
-
-        lo = (ref_ub > n_lt_ref) ? ref_ub : n_lt_ref;
-        hi = n_ref;
-        while (lo < hi) {
-            int m = lo + ((hi - lo) >> 1);
-            if (ref_col[m] <= v)
-                lo = m + 1;
-            else
-                hi = m;
-        }
-        int n_eq_ref = lo - n_lt_ref;
-        ref_ub = lo;
-
-        lo = grp_lb;
-        hi = n_grp;
-        while (lo < hi) {
-            int m = lo + ((hi - lo) >> 1);
-            if (grp_col[m] < v)
-                lo = m + 1;
-            else
-                hi = m;
-        }
-        int n_lt_grp = lo;
-        grp_lb = n_lt_grp;
-
-        lo = (grp_ub > n_lt_grp) ? grp_ub : n_lt_grp;
-        hi = n_grp;
-        while (lo < hi) {
-            int m = lo + ((hi - lo) >> 1);
-            if (grp_col[m] <= v)
-                lo = m + 1;
-            else
-                hi = m;
-        }
-        int n_eq_grp = lo - n_lt_grp;
-        grp_ub = lo;
-
-        local_rank += (double)(n_lt_ref + n_lt_grp) +
-                      ((double)(n_eq_ref + n_eq_grp) + 1.0) / 2.0;
-    }
-
-    double total_rank = wilcoxon_block_sum(local_rank, warp_buf);
-    if (threadIdx.x == 0) {
-        rank_sums[(size_t)grp * n_cols + col] = total_rank;
-    }
-
-    if (!compute_tie_corr) return;
-    __syncthreads();
-
-    double local_tie = 0.0;
-    int grp_lb_tie = 0, grp_ub_tie = 0;
-    for (int i = threadIdx.x; i < n_ref; i += blockDim.x) {
-        if (i == 0 || ref_col[i] != ref_col[i - 1]) {
-            float v = ref_col[i];
-            int lo = i + 1, hi = n_ref;
-            while (lo < hi) {
-                int m = lo + ((hi - lo) >> 1);
-                if (ref_col[m] <= v)
-                    lo = m + 1;
-                else
-                    hi = m;
-            }
-            int cnt_ref = lo - i;
-
-            lo = grp_lb_tie;
-            hi = n_grp;
-            while (lo < hi) {
-                int m = lo + ((hi - lo) >> 1);
-                if (grp_col[m] < v)
-                    lo = m + 1;
-                else
-                    hi = m;
-            }
-            int lb = lo;
-            grp_lb_tie = lb;
-
-            lo = (grp_ub_tie > lb) ? grp_ub_tie : lb;
-            hi = n_grp;
-            while (lo < hi) {
-                int m = lo + ((hi - lo) >> 1);
-                if (grp_col[m] <= v)
-                    lo = m + 1;
-                else
-                    hi = m;
-            }
-            int cnt_grp = lo - lb;
-            grp_ub_tie = lo;
-
-            int cnt = cnt_ref + cnt_grp;
-            if (cnt > 1) {
-                double t = (double)cnt;
-                local_tie += t * t * t - t;
-            }
-        }
-    }
-
-    int ref_lb_tie = 0;
-    for (int i = threadIdx.x; i < n_grp; i += blockDim.x) {
-        if (i == 0 || grp_col[i] != grp_col[i - 1]) {
-            float v = grp_col[i];
-            int lo = ref_lb_tie, hi = n_ref;
-            while (lo < hi) {
-                int m = lo + ((hi - lo) >> 1);
-                if (ref_col[m] < v)
-                    lo = m + 1;
-                else
-                    hi = m;
-            }
-            ref_lb_tie = lo;
-            if (lo < n_ref && ref_col[lo] == v) continue;
-
-            lo = i + 1;
-            hi = n_grp;
-            while (lo < hi) {
-                int m = lo + ((hi - lo) >> 1);
-                if (grp_col[m] <= v)
-                    lo = m + 1;
-                else
-                    hi = m;
-            }
-            int cnt = lo - i;
-            if (cnt > 1) {
-                double t = (double)cnt;
-                local_tie += t * t * t - t;
-            }
-        }
-    }
-
-    double tie_sum = wilcoxon_block_sum(local_tie, warp_buf);
-    if (threadIdx.x == 0) {
-        int n = n_ref + n_grp;
-        double dn = (double)n;
-        double denom = dn * dn * dn - dn;
-        tie_corr[(size_t)grp * n_cols + col] =
-            (denom > 0.0) ? (1.0 - tie_sum / denom) : 1.0;
     }
 }
 

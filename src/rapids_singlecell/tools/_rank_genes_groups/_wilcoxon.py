@@ -21,13 +21,60 @@ if TYPE_CHECKING:
 
 MIN_GROUP_SIZE_WARNING = 25
 DEFAULT_WILCOXON_CHUNK_SIZE = 512
-OVO_SORT_GROUP_THRESHOLD = 512
 OVR_HOST_CSC_SUB_BATCH = 512
 OVR_HOST_CSR_SUB_BATCH = 2048
 OVR_DEVICE_CSC_SUB_BATCH = 2048
 OVR_DEVICE_CSR_SUB_BATCH = 2048
 OVO_HOST_SPARSE_SUB_BATCH = 256
 OVO_DEVICE_SPARSE_SUB_BATCH = 128
+OVR_DENSE_SUB_BATCH = 64
+OVO_DENSE_TIERED_SUB_BATCH = 256
+DENSE_HOST_PRELOAD_MAX_GPU_FRACTION = 0.55
+
+
+def _maybe_preload_host_dense(rg: _RankGenes) -> None:
+    X = rg.X
+    if not isinstance(X, np.ndarray) or X.size == 0:
+        return
+
+    try:
+        _, total = cp.cuda.runtime.memGetInfo()
+    except cp.cuda.runtime.CUDARuntimeError:
+        return
+
+    if X.nbytes > total * DENSE_HOST_PRELOAD_MAX_GPU_FRACTION:
+        return
+
+    registered = False
+    if X.flags.c_contiguous or X.flags.f_contiguous:
+        try:
+            cp.cuda.runtime.hostRegister(X.ctypes.data, X.nbytes, 0)
+            registered = True
+        except cp.cuda.runtime.CUDARuntimeError:
+            registered = False
+
+    try:
+        X_gpu = cp.asarray(X)
+        cp.cuda.get_current_stream().synchronize()
+    except cp.cuda.memory.OutOfMemoryError:
+        cp.get_default_memory_pool().free_all_blocks()
+        return
+    except cp.cuda.runtime.CUDARuntimeError:
+        return
+    finally:
+        if registered:
+            try:
+                cp.cuda.runtime.hostUnregister(X.ctypes.data)
+            except cp.cuda.runtime.CUDARuntimeError:
+                pass
+    rg.X = X_gpu
+
+
+def _get_dense_column_block_f32(X, start: int, stop: int) -> cp.ndarray:
+    """Extract a dense column block as F-order float32 CuPy memory."""
+    if isinstance(X, np.ndarray | cp.ndarray):
+        return cp.asarray(X[:, start:stop], dtype=cp.float32, order="F")
+    raise TypeError(f"Expected dense matrix, got {type(X)}")
 
 
 def _extract_dense_rows_cols(
@@ -333,6 +380,7 @@ def wilcoxon(
     return_u_values: bool = False,
 ) -> list[tuple[int, NDArray, NDArray]]:
     """Compute Wilcoxon rank-sum test statistics."""
+    _maybe_preload_host_dense(rg)
     # Compute basic stats - uses Aggregate if on GPU, else defers to chunks
     rg._basic_stats()
     X = rg.X
@@ -591,32 +639,29 @@ def _wilcoxon_vs_rest(
     for start in range(0, n_total_genes, chunk_width):
         stop = min(start + chunk_width, n_total_genes)
 
-        # Slice and convert to dense GPU array (F-order for column ops)
-        block = _get_column_block(X, start, stop)
+        if rg._compute_stats_in_chunks:
+            block = _get_column_block(X, start, stop)
+            rg._accumulate_chunk_stats_vs_rest(
+                block,
+                start,
+                stop,
+                group_matrix=group_matrix,
+                group_sizes_dev=group_sizes_dev,
+                n_cells=n_cells,
+            )
+            block_f32 = cp.asfortranarray(block.astype(cp.float32, copy=False))
+        else:
+            block_f32 = _get_dense_column_block_f32(X, start, stop)
 
-        # Accumulate stats for this chunk
-        rg._accumulate_chunk_stats_vs_rest(
-            block,
-            start,
-            stop,
-            group_matrix=group_matrix,
-            group_sizes_dev=group_sizes_dev,
-            n_cells=n_cells,
-        )
-
-        block_f32 = cp.asfortranarray(block.astype(cp.float32, copy=False))
-        sorter = cp.asfortranarray(cp.argsort(block_f32, axis=0).astype(cp.int32))
-        sorted_vals = cp.asfortranarray(cp.take_along_axis(block_f32, sorter, axis=0))
         n_cols = stop - start
-        rank_sums = cp.zeros((n_groups, n_cols), dtype=cp.float64)
+        rank_sums = cp.empty((n_groups, n_cols), dtype=cp.float64)
         tie_corr = (
             cp.empty(n_cols, dtype=cp.float64)
             if tie_correct
             else cp.ones(n_cols, dtype=cp.float64)
         )
-        _wc.ovr_rank_dense(
-            sorted_vals,
-            sorter,
+        _wc.ovr_rank_dense_streaming(
+            block_f32,
             group_codes_gpu,
             rank_sums,
             tie_corr,
@@ -624,6 +669,7 @@ def _wilcoxon_vs_rest(
             n_cols=n_cols,
             n_groups=n_groups,
             compute_tie_corr=tie_correct,
+            sub_batch_cols=OVR_DENSE_SUB_BATCH,
             stream=cp.cuda.get_current_stream().ptr,
         )
         expected = group_sizes_dev[:, None] * (n_cells + 1) / 2.0
@@ -713,8 +759,6 @@ def _wilcoxon_with_reference(
     offsets_gpu = cp.asarray(offsets_np)
     n_all_grp = int(all_grp_row_ids.size)
     n_test = len(test_group_indices)
-    max_test_size = int(np.diff(offsets_np).max(initial=0))
-    use_presorted_groups = max_test_size > OVO_SORT_GROUP_THRESHOLD
     test_sizes = cp.asarray(
         group_sizes[np.asarray(test_group_indices, dtype=np.intp)].astype(
             np.float64, copy=False
@@ -976,45 +1020,25 @@ def _wilcoxon_with_reference(
             group_sizes=group_sizes,
         )
 
-        ref_sorted = cp.asfortranarray(cp.sort(ref_block.astype(cp.float32), axis=0))
-        grp_f32 = cp.asfortranarray(grp_block.astype(cp.float32, copy=False))
+        ref_f32 = cp.asarray(ref_block, dtype=cp.float32, order="F")
+        grp_f32 = cp.asarray(grp_block, dtype=cp.float32, order="F")
         rank_sums = cp.empty((n_test, n_cols), dtype=cp.float64)
         tie_corr = cp.empty((n_test, n_cols), dtype=cp.float64)
 
-        if use_presorted_groups:
-            grp_rank_input = cp.empty_like(grp_f32)
-            for slot in range(n_test):
-                begin = int(offsets_np[slot])
-                end = int(offsets_np[slot + 1])
-                grp_rank_input[begin:end] = cp.sort(grp_f32[begin:end], axis=0)
-            grp_rank_input = cp.asfortranarray(grp_rank_input)
-            _wc.ovo_rank_presorted(
-                ref_sorted,
-                grp_rank_input,
-                offsets_gpu,
-                rank_sums,
-                tie_corr,
-                n_ref=n_ref,
-                n_all_grp=n_all_grp,
-                n_cols=n_cols,
-                n_groups=n_test,
-                compute_tie_corr=tie_correct,
-                stream=cp.cuda.get_current_stream().ptr,
-            )
-        else:
-            _wc.ovo_rank_dense(
-                ref_sorted,
-                grp_f32,
-                offsets_gpu,
-                rank_sums,
-                tie_corr,
-                n_ref=n_ref,
-                n_all_grp=n_all_grp,
-                n_cols=n_cols,
-                n_groups=n_test,
-                compute_tie_corr=tie_correct,
-                stream=cp.cuda.get_current_stream().ptr,
-            )
+        _wc.ovo_rank_dense_tiered_unsorted_ref(
+            ref_f32,
+            grp_f32,
+            offsets_gpu,
+            rank_sums,
+            tie_corr,
+            n_ref=n_ref,
+            n_all_grp=n_all_grp,
+            n_cols=n_cols,
+            n_groups=n_test,
+            compute_tie_corr=tie_correct,
+            sub_batch_cols=OVO_DENSE_TIERED_SUB_BATCH,
+            stream=cp.cuda.get_current_stream().ptr,
+        )
 
         n_combined = test_sizes + n_ref
         expected = test_sizes[:, None] * (n_combined[:, None] + 1) / 2.0

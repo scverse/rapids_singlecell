@@ -244,6 +244,40 @@ def test_rank_genes_groups_wilcoxon_matches_scanpy(reference, tie_correct, spars
     assert params["reference"] == reference
 
 
+def test_rank_genes_groups_wilcoxon_dense_ovr_ties_match_scanpy():
+    rng = np.random.default_rng(16)
+    X = rng.integers(0, 40, size=(128, 7)).astype(np.float32)
+    labels = rng.integers(0, 7, size=128).astype(str)
+    adata_gpu = sc.AnnData(
+        X=X.copy(),
+        obs=pd.DataFrame({"group": pd.Categorical(labels)}),
+        var=pd.DataFrame(index=[f"g{i}" for i in range(X.shape[1])]),
+    )
+    adata_cpu = adata_gpu.copy()
+
+    kw = {
+        "groupby": "group",
+        "method": "wilcoxon",
+        "reference": "rest",
+        "use_raw": False,
+        "tie_correct": True,
+        "n_genes": adata_gpu.n_vars,
+    }
+    rsc.tl.rank_genes_groups(adata_gpu, **kw)
+    sc.tl.rank_genes_groups(adata_cpu, **kw)
+
+    gpu_result = adata_gpu.uns["rank_genes_groups"]
+    cpu_result = adata_cpu.uns["rank_genes_groups"]
+    for group in gpu_result["scores"].dtype.names:
+        assert list(gpu_result["names"][group]) == list(cpu_result["names"][group])
+        np.testing.assert_allclose(
+            gpu_result["scores"][group], cpu_result["scores"][group], rtol=1e-13
+        )
+        np.testing.assert_allclose(
+            gpu_result["pvals"][group], cpu_result["pvals"][group], rtol=1e-13
+        )
+
+
 @pytest.mark.parametrize("reference", ["rest", "1"])
 def test_rank_genes_groups_wilcoxon_honors_layer_and_use_raw(reference):
     """Test that layer parameter is respected."""
