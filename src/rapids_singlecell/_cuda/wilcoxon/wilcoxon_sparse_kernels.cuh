@@ -1,0 +1,651 @@
+#pragma once
+
+#include <cuda_runtime.h>
+
+/**
+ * Fused rank-sum kernel: walk sorted data, compute per-group rank sums
+ * and tie correction without materializing a rank matrix.
+ *
+ * Each thread processes a CONTIGUOUS chunk of sorted elements, detecting
+ * tie groups by adjacent comparison (sequential access, no binary search).
+ * Cross-boundary ties are resolved via binary search at chunk boundaries.
+ *
+ * When use_gmem is false, per-group accumulators live in shared memory
+ * (fast atomics, limited to ~1500 groups on 48 KB devices).  When use_gmem
+ * is true, accumulators write directly to ``rank_sums`` in global memory,
+ * supporting an arbitrary number of groups.  The caller must pre-zero
+ * ``rank_sums`` before launching in the gmem path.
+ *
+ * Shared memory layout:
+ *   use_gmem=false: (n_groups + 32) doubles   (accumulators + warp buf)
+ *   use_gmem=true:  32 doubles                 (warp buf only)
+ */
+__global__ void rank_sums_from_sorted_kernel(
+    const float* __restrict__ sorted_vals,
+    const int* __restrict__ sorted_row_idx, const int* __restrict__ group_codes,
+    double* __restrict__ rank_sums, double* __restrict__ tie_corr, int n_rows,
+    int n_cols, int n_groups, bool compute_tie_corr, bool use_gmem) {
+    int col = blockIdx.x;
+    if (col >= n_cols) return;
+
+    extern __shared__ double smem[];
+
+    double* grp_sums;
+    if (use_gmem) {
+        // Global memory path: write directly to output (must be pre-zeroed)
+        grp_sums = rank_sums + (size_t)col;  // stride: n_cols
+    } else {
+        // Shared memory path: per-block accumulators
+        grp_sums = smem;
+        for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
+            grp_sums[g] = 0.0;
+        }
+        __syncthreads();
+    }
+
+    const float* sv = sorted_vals + (size_t)col * n_rows;
+    const int* si = sorted_row_idx + (size_t)col * n_rows;
+
+    int chunk = (n_rows + blockDim.x - 1) / blockDim.x;
+    int my_start = threadIdx.x * chunk;
+    int my_end = my_start + chunk;
+    if (my_end > n_rows) my_end = n_rows;
+
+    double local_tie_sum = 0.0;
+
+    // Stride for accumulator indexing: 1 for shared mem, n_cols for global mem
+    int acc_stride = use_gmem ? n_cols : 1;
+
+    int i = my_start;
+    while (i < my_end) {
+        double val = sv[i];
+
+        int tie_local_end = i + 1;
+        while (tie_local_end < my_end && sv[tie_local_end] == val)
+            ++tie_local_end;
+
+        int tie_global_start = i;
+        if (i == my_start && i > 0 && sv[i - 1] == val) {
+            int lo = 0, hi = i;
+            while (lo < hi) {
+                int mid = lo + (hi - lo) / 2;
+                if (sv[mid] < val)
+                    lo = mid + 1;
+                else
+                    hi = mid;
+            }
+            tie_global_start = lo;
+        }
+
+        int tie_global_end = tie_local_end;
+        if (tie_local_end == my_end && tie_local_end < n_rows &&
+            sv[tie_local_end] == val) {
+            int lo = tie_local_end, hi = n_rows - 1;
+            while (lo < hi) {
+                int mid = hi - ((hi - lo) >> 1);
+                if (sv[mid] > val)
+                    hi = mid - 1;
+                else
+                    lo = mid;
+            }
+            tie_global_end = lo + 1;
+        }
+
+        int total_tie = tie_global_end - tie_global_start;
+        double avg_rank = (double)(tie_global_start + tie_global_end + 1) / 2.0;
+
+        for (int j = i; j < tie_local_end; ++j) {
+            int grp = group_codes[si[j]];
+            if (grp < n_groups) {
+                atomicAdd(&grp_sums[grp * acc_stride], avg_rank);
+            }
+        }
+
+        if (compute_tie_corr && tie_global_start >= my_start && total_tie > 1) {
+            double t = (double)total_tie;
+            local_tie_sum += t * t * t - t;
+        }
+
+        i = tie_local_end;
+    }
+
+    __syncthreads();
+
+    // Copy shared memory accumulators to global output (smem path only)
+    if (!use_gmem) {
+        for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
+            rank_sums[(size_t)g * n_cols + col] = grp_sums[g];
+        }
+    }
+
+    if (compute_tie_corr) {
+        // Warp buf sits after accumulator array in shared memory.
+        // gmem path: warp buf starts at smem[0].
+        // smem path: n_groups doubles, then warp buf.
+        int warp_buf_off = use_gmem ? 0 : n_groups;
+        double* warp_buf = smem + warp_buf_off;
+#pragma unroll
+        for (int off = 16; off > 0; off >>= 1)
+            local_tie_sum += __shfl_down_sync(0xffffffff, local_tie_sum, off);
+        int lane = threadIdx.x & 31;
+        int wid = threadIdx.x >> 5;
+        if (lane == 0) warp_buf[wid] = local_tie_sum;
+        __syncthreads();
+        if (threadIdx.x < 32) {
+            double val = (threadIdx.x < ((blockDim.x + 31) >> 5))
+                             ? warp_buf[threadIdx.x]
+                             : 0.0;
+#pragma unroll
+            for (int off = 16; off > 0; off >>= 1)
+                val += __shfl_down_sync(0xffffffff, val, off);
+            if (threadIdx.x == 0) {
+                double n = (double)n_rows;
+                double denom = n * n * n - n;
+                tie_corr[col] = (denom > 0.0) ? (1.0 - val / denom) : 1.0;
+            }
+        }
+    }
+}
+
+/**
+ * Sparse-aware OVR rank-sum kernel for nonnegative sorted stored values.
+ *
+ * Sparse rank_genes_groups now rejects explicit negative sparse values before
+ * reaching CUDA, so after CUB sort each column segment is:
+ *   [stored_zeros..., positives...]
+ *
+ * Implicit zeros (n_rows - nnz_stored) join stored zeros as the first tie
+ * block.  The kernel ranks only stored positive values and adds each group's
+ * zero contribution analytically.
+ *
+ * Full sorted array (conceptual):
+ *   [ALL_zeros (stored+implicit)..., positives...]
+ *
+ * Rank offsets:
+ *   positive at stored pos i : full pos = i + n_implicit_zero
+ *   zeros                    : avg rank = (total_zero + 1) / 2
+ *
+ * Shared-memory layout (doubles):
+ *   grp_sums[n_groups]      rank-sum accumulators
+ *   grp_nz_count[n_groups]  nonzero-per-group counters
+ *   warp_buf[32]            tie-correction reduction scratch
+ *
+ * Grid: (sb_cols,)   Block: (tpb,)
+ */
+__global__ void rank_sums_sparse_ovr_kernel(
+    const float* __restrict__ sorted_vals,
+    const int* __restrict__ sorted_row_idx,
+    const int* __restrict__ col_seg_offsets,
+    const int* __restrict__ group_codes, const double* __restrict__ group_sizes,
+    double* __restrict__ rank_sums, double* __restrict__ tie_corr,
+    double* __restrict__ nz_count_scratch, int n_rows, int sb_cols,
+    int n_groups, bool compute_tie_corr, bool use_gmem) {
+    int col = blockIdx.x;
+    if (col >= sb_cols) return;
+
+    int seg_start = col_seg_offsets[col];
+    int seg_end = col_seg_offsets[col + 1];
+    int nnz_stored = seg_end - seg_start;
+
+    const float* sv = sorted_vals + seg_start;
+    const int* si = sorted_row_idx + seg_start;
+
+    extern __shared__ double smem[];
+    double* grp_sums;
+    double* grp_nz_count;
+    // Accumulator stride: 1 for shared mem (dense per-block), sb_cols for
+    // gmem (row-major layout (n_groups, sb_cols) shared across blocks).
+    int acc_stride;
+
+    if (use_gmem) {
+        // Output rank_sums doubles as accumulator (pre-zeroed by caller).
+        grp_sums = rank_sums + (size_t)col;
+        grp_nz_count = nz_count_scratch + (size_t)col;
+        acc_stride = sb_cols;
+    } else {
+        grp_sums = smem;
+        grp_nz_count = smem + n_groups;
+        acc_stride = 1;
+        for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
+            grp_sums[g] = 0.0;
+            grp_nz_count[g] = 0.0;
+        }
+        __syncthreads();
+    }
+
+    // --- Find stored zero range: pos_start = first val > 0 ---
+    __shared__ int sh_pos_start;
+    if (threadIdx.x == 0) {
+        // Binary search: first index where sv[i] > 0.0
+        int lo = 0, hi = nnz_stored;
+        while (lo < hi) {
+            int mid = lo + ((hi - lo) >> 1);
+            if (sv[mid] <= 0.0f)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        sh_pos_start = lo;
+    }
+    __syncthreads();
+
+    int pos_start = sh_pos_start;
+    int n_stored_zero = pos_start;
+    int n_implicit_zero = n_rows - nnz_stored;
+    int total_zero = n_implicit_zero + n_stored_zero;
+    double zero_avg_rank = (total_zero > 0) ? (total_zero + 1.0) / 2.0 : 0.0;
+
+    // Rank offset for positive stored values:
+    //   full_pos(i) = i + n_implicit_zero  for i >= pos_start
+    // So avg_rank for tie group [a,b) of positives:
+    //   = n_implicit_zero + (a + b + 1) / 2
+    int offset_pos = n_implicit_zero;
+
+    // --- Count stored positive values per group ---
+    for (int i = pos_start + threadIdx.x; i < nnz_stored; i += blockDim.x) {
+        int grp = group_codes[si[i]];
+        if (grp < n_groups) {
+            atomicAdd(&grp_nz_count[grp * acc_stride], 1.0);
+        }
+    }
+    __syncthreads();
+
+    // --- Zero-rank contribution per group ---
+    for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
+        double n_zero_in_g = group_sizes[g] - grp_nz_count[g * acc_stride];
+        grp_sums[g * acc_stride] = n_zero_in_g * zero_avg_rank;
+    }
+    __syncthreads();
+
+    // --- Walk stored positives only and compute ranks ---
+    int n_pos = nnz_stored - pos_start;
+    int chunk = (n_pos + blockDim.x - 1) / blockDim.x;
+    int my_start = pos_start + threadIdx.x * chunk;
+    int my_end = my_start + chunk;
+    if (my_end > nnz_stored) my_end = nnz_stored;
+
+    double local_tie_sum = 0.0;
+
+    int i = my_start;
+    while (i < my_end) {
+        float val = sv[i];
+
+        int tie_local_end = i + 1;
+        while (tie_local_end < my_end && sv[tie_local_end] == val)
+            ++tie_local_end;
+
+        int tie_global_start = i;
+        if (i == my_start && i > 0 && sv[i - 1] == val) {
+            // Binary search for first occurrence
+            int lo = pos_start, hi = i;
+            while (lo < hi) {
+                int mid = lo + ((hi - lo) >> 1);
+                if (sv[mid] < val)
+                    lo = mid + 1;
+                else
+                    hi = mid;
+            }
+            tie_global_start = lo;
+        }
+
+        int tie_global_end = tie_local_end;
+        if (tie_local_end == my_end && tie_local_end < nnz_stored &&
+            sv[tie_local_end] == val) {
+            int lo = tie_local_end, hi = nnz_stored - 1;
+            while (lo < hi) {
+                int mid = hi - ((hi - lo) >> 1);
+                if (sv[mid] > val)
+                    hi = mid - 1;
+                else
+                    lo = mid;
+            }
+            tie_global_end = lo + 1;
+        }
+
+        int total_tie = tie_global_end - tie_global_start;
+
+        double avg_rank = (double)offset_pos +
+                          (double)(tie_global_start + tie_global_end + 1) / 2.0;
+
+        for (int j = i; j < tie_local_end; ++j) {
+            int grp = group_codes[si[j]];
+            if (grp < n_groups) {
+                atomicAdd(&grp_sums[grp * acc_stride], avg_rank);
+            }
+        }
+
+        if (compute_tie_corr && tie_global_start >= my_start && total_tie > 1) {
+            double t = (double)total_tie;
+            local_tie_sum += t * t * t - t;
+        }
+
+        i = tie_local_end;
+    }
+
+    __syncthreads();
+
+    // Write rank sums to global output (smem path only — gmem path is direct)
+    if (!use_gmem) {
+        for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
+            rank_sums[(size_t)g * sb_cols + col] = grp_sums[g];
+        }
+    }
+
+    // Tie correction: warp + block reduction
+    if (compute_tie_corr) {
+        // Zero tie group contribution (one thread only)
+        if (threadIdx.x == 0 && total_zero > 1) {
+            double tz = (double)total_zero;
+            local_tie_sum += tz * tz * tz - tz;
+        }
+
+        // smem path: warp buf after both accumulator arrays (2 * n_groups).
+        // gmem path: accumulators are in gmem, warp buf starts at smem[0].
+        int warp_buf_off = use_gmem ? 0 : 2 * n_groups;
+        double* warp_buf = smem + warp_buf_off;
+
+#pragma unroll
+        for (int off = 16; off > 0; off >>= 1)
+            local_tie_sum += __shfl_down_sync(0xffffffff, local_tie_sum, off);
+        int lane = threadIdx.x & 31;
+        int wid = threadIdx.x >> 5;
+        if (lane == 0) warp_buf[wid] = local_tie_sum;
+        __syncthreads();
+        if (threadIdx.x < 32) {
+            double v = (threadIdx.x < ((blockDim.x + 31) >> 5))
+                           ? warp_buf[threadIdx.x]
+                           : 0.0;
+#pragma unroll
+            for (int off = 16; off > 0; off >>= 1)
+                v += __shfl_down_sync(0xffffffff, v, off);
+            if (threadIdx.x == 0) {
+                double n = (double)n_rows;
+                double denom = n * n * n - n;
+                tie_corr[col] = (denom > 0.0) ? (1.0 - v / denom) : 1.0;
+            }
+        }
+    }
+}
+
+/**
+ * Decide whether the host cast+stats kernels can use per-block shared memory
+ * accumulators.  Large group counts exceed the dynamic smem launch limit, so
+ * those cases fall back to direct global-memory atomics after zeroing the
+ * per-stream output buffers.
+ */
+static int wilcoxon_cast_max_smem_per_block() {
+    static int cached = -1;
+    if (cached < 0) {
+        int device;
+        cudaGetDevice(&device);
+        cudaDeviceGetAttribute(&cached, cudaDevAttrMaxSharedMemoryPerBlock,
+                               device);
+    }
+    return cached;
+}
+
+static size_t cast_accumulate_smem_config(int n_groups, bool compute_sq_sums,
+                                          bool compute_nnz, bool& use_gmem) {
+    int n_arrays = 1 + (compute_sq_sums ? 1 : 0) + (compute_nnz ? 1 : 0);
+    size_t need = (size_t)n_arrays * n_groups * sizeof(double);
+    if (need <= (size_t)wilcoxon_cast_max_smem_per_block()) {
+        use_gmem = false;
+        return need;
+    }
+    use_gmem = true;
+    return 0;
+}
+
+/**
+ * Pre-sort cast-and-accumulate kernel for dense OVR host streaming.
+ *
+ * Reads a sub-batch block in its native host dtype (InT = float or double),
+ * writes a float32 copy used as the sort input, and accumulates per-group
+ * sum, sum-of-squares and nonzero counts in float64.  Stats are derived
+ * from the original-precision values so float64 host input keeps its
+ * precision while the sort still runs on float32 keys.
+ *
+ * Block-per-column layout (grid: (sb_cols,), block: (tpb,)).
+ * Shared memory: 3 * n_groups doubles (s_sum, s_sq, s_nnz).
+ */
+template <typename InT>
+__global__ void ovr_cast_and_accumulate_dense_kernel(
+    const InT* __restrict__ block_in, float* __restrict__ block_f32_out,
+    const int* __restrict__ group_codes, double* __restrict__ group_sums,
+    double* __restrict__ group_sq_sums, double* __restrict__ group_nnz,
+    int n_rows, int sb_cols, int n_groups, bool compute_sq_sums = true,
+    bool compute_nnz = true) {
+    int col = blockIdx.x;
+    if (col >= sb_cols) return;
+
+    extern __shared__ double smem[];
+    double* s_sum = smem;
+    double* s_sq = smem + n_groups;
+    double* s_nnz = smem + 2 * n_groups;
+
+    for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
+        s_sum[g] = 0.0;
+        if (compute_sq_sums) s_sq[g] = 0.0;
+        if (compute_nnz) s_nnz[g] = 0.0;
+    }
+    __syncthreads();
+
+    const InT* src = block_in + (size_t)col * n_rows;
+    float* dst = block_f32_out + (size_t)col * n_rows;
+
+    for (int r = threadIdx.x; r < n_rows; r += blockDim.x) {
+        InT v_in = src[r];
+        double v = (double)v_in;
+        dst[r] = (float)v_in;
+        int g = group_codes[r];
+        if (g < n_groups) {
+            atomicAdd(&s_sum[g], v);
+            if (compute_sq_sums) atomicAdd(&s_sq[g], v * v);
+            if (compute_nnz && v != 0.0) atomicAdd(&s_nnz[g], 1.0);
+        }
+    }
+    __syncthreads();
+
+    for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
+        group_sums[(size_t)g * sb_cols + col] = s_sum[g];
+        if (compute_sq_sums) {
+            group_sq_sums[(size_t)g * sb_cols + col] = s_sq[g];
+        }
+        if (compute_nnz) {
+            group_nnz[(size_t)g * sb_cols + col] = s_nnz[g];
+        }
+    }
+}
+
+template <typename InT>
+__global__ void ovr_cast_and_accumulate_dense_global_kernel(
+    const InT* __restrict__ block_in, float* __restrict__ block_f32_out,
+    const int* __restrict__ group_codes, double* __restrict__ group_sums,
+    double* __restrict__ group_sq_sums, double* __restrict__ group_nnz,
+    int n_rows, int sb_cols, int n_groups, bool compute_sq_sums = true,
+    bool compute_nnz = true) {
+    int col = blockIdx.x;
+    if (col >= sb_cols) return;
+
+    const InT* src = block_in + (size_t)col * n_rows;
+    float* dst = block_f32_out + (size_t)col * n_rows;
+
+    for (int r = threadIdx.x; r < n_rows; r += blockDim.x) {
+        InT v_in = src[r];
+        double v = (double)v_in;
+        dst[r] = (float)v_in;
+        int g = group_codes[r];
+        if (g < n_groups) {
+            atomicAdd(&group_sums[(size_t)g * sb_cols + col], v);
+            if (compute_sq_sums) {
+                atomicAdd(&group_sq_sums[(size_t)g * sb_cols + col], v * v);
+            }
+            if (compute_nnz && v != 0.0) {
+                atomicAdd(&group_nnz[(size_t)g * sb_cols + col], 1.0);
+            }
+        }
+    }
+}
+
+/**
+ * Pre-sort cast-and-accumulate kernel for sparse OVR host streaming.
+ *
+ * Sub-batch CSC data is laid out contiguously: values for column c live
+ * at positions [col_seg_offsets[c], col_seg_offsets[c+1]).  For each
+ * stored value, read the native-dtype InT, write a float32 copy for the
+ * CUB sort, and accumulate per-group sum/sum-sq/nnz in float64.  Implicit
+ * zeros contribute nothing to any of these stats.
+ *
+ * Block-per-column layout (grid: (sb_cols,), block: (tpb,)).
+ * Shared memory: 3 * n_groups doubles.
+ */
+template <typename InT, typename IndexT = int>
+__global__ void ovr_cast_and_accumulate_sparse_kernel(
+    const InT* __restrict__ data_in, float* __restrict__ data_f32_out,
+    const IndexT* __restrict__ indices, const int* __restrict__ col_seg_offsets,
+    const int* __restrict__ group_codes, double* __restrict__ group_sums,
+    double* __restrict__ group_sq_sums, double* __restrict__ group_nnz,
+    int sb_cols, int n_groups, bool compute_sq_sums = true,
+    bool compute_nnz = true) {
+    int col = blockIdx.x;
+    if (col >= sb_cols) return;
+
+    int seg_start = col_seg_offsets[col];
+    int seg_end = col_seg_offsets[col + 1];
+
+    extern __shared__ double smem[];
+    double* s_sum = smem;
+    double* s_sq = smem + n_groups;
+    double* s_nnz = smem + 2 * n_groups;
+
+    for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
+        s_sum[g] = 0.0;
+        if (compute_sq_sums) s_sq[g] = 0.0;
+        if (compute_nnz) s_nnz[g] = 0.0;
+    }
+    __syncthreads();
+
+    for (int i = seg_start + threadIdx.x; i < seg_end; i += blockDim.x) {
+        InT v_in = data_in[i];
+        double v = (double)v_in;
+        data_f32_out[i] = (float)v_in;
+        int row = (int)indices[i];
+        int g = group_codes[row];
+        if (g < n_groups) {
+            atomicAdd(&s_sum[g], v);
+            if (compute_sq_sums) atomicAdd(&s_sq[g], v * v);
+            if (compute_nnz && v != 0.0) atomicAdd(&s_nnz[g], 1.0);
+        }
+    }
+    __syncthreads();
+
+    for (int g = threadIdx.x; g < n_groups; g += blockDim.x) {
+        group_sums[(size_t)g * sb_cols + col] = s_sum[g];
+        if (compute_sq_sums) {
+            group_sq_sums[(size_t)g * sb_cols + col] = s_sq[g];
+        }
+        if (compute_nnz) {
+            group_nnz[(size_t)g * sb_cols + col] = s_nnz[g];
+        }
+    }
+}
+
+template <typename InT, typename IndexT = int>
+__global__ void ovr_cast_and_accumulate_sparse_global_kernel(
+    const InT* __restrict__ data_in, float* __restrict__ data_f32_out,
+    const IndexT* __restrict__ indices, const int* __restrict__ col_seg_offsets,
+    const int* __restrict__ group_codes, double* __restrict__ group_sums,
+    double* __restrict__ group_sq_sums, double* __restrict__ group_nnz,
+    int sb_cols, int n_groups, bool compute_sq_sums = true,
+    bool compute_nnz = true) {
+    int col = blockIdx.x;
+    if (col >= sb_cols) return;
+
+    int seg_start = col_seg_offsets[col];
+    int seg_end = col_seg_offsets[col + 1];
+
+    for (int i = seg_start + threadIdx.x; i < seg_end; i += blockDim.x) {
+        InT v_in = data_in[i];
+        double v = (double)v_in;
+        data_f32_out[i] = (float)v_in;
+        int row = (int)indices[i];
+        int g = group_codes[row];
+        if (g < n_groups) {
+            atomicAdd(&group_sums[(size_t)g * sb_cols + col], v);
+            if (compute_sq_sums) {
+                atomicAdd(&group_sq_sums[(size_t)g * sb_cols + col], v * v);
+            }
+            if (compute_nnz && v != 0.0) {
+                atomicAdd(&group_nnz[(size_t)g * sb_cols + col], 1.0);
+            }
+        }
+    }
+}
+
+template <typename InT>
+static void launch_ovr_cast_and_accumulate_dense(
+    const InT* d_block_orig, float* d_block_f32, const int* d_group_codes,
+    double* d_group_sums, double* d_group_sq_sums, double* d_group_nnz,
+    int n_rows, int sb_cols, int n_groups, bool compute_sq_sums,
+    bool compute_nnz, int tpb, size_t smem_cast, bool use_gmem,
+    cudaStream_t stream) {
+    if (use_gmem) {
+        size_t stats_items = (size_t)n_groups * sb_cols;
+        cudaMemsetAsync(d_group_sums, 0, stats_items * sizeof(double), stream);
+        if (compute_sq_sums) {
+            cudaMemsetAsync(d_group_sq_sums, 0, stats_items * sizeof(double),
+                            stream);
+        }
+        if (compute_nnz) {
+            cudaMemsetAsync(d_group_nnz, 0, stats_items * sizeof(double),
+                            stream);
+        }
+        ovr_cast_and_accumulate_dense_global_kernel<InT>
+            <<<sb_cols, tpb, 0, stream>>>(
+                d_block_orig, d_block_f32, d_group_codes, d_group_sums,
+                d_group_sq_sums, d_group_nnz, n_rows, sb_cols, n_groups,
+                compute_sq_sums, compute_nnz);
+        CUDA_CHECK_LAST_ERROR(ovr_cast_and_accumulate_dense_global_kernel);
+    } else {
+        ovr_cast_and_accumulate_dense_kernel<InT>
+            <<<sb_cols, tpb, smem_cast, stream>>>(
+                d_block_orig, d_block_f32, d_group_codes, d_group_sums,
+                d_group_sq_sums, d_group_nnz, n_rows, sb_cols, n_groups,
+                compute_sq_sums, compute_nnz);
+        CUDA_CHECK_LAST_ERROR(ovr_cast_and_accumulate_dense_kernel);
+    }
+}
+
+template <typename InT, typename IndexT = int>
+static void launch_ovr_cast_and_accumulate_sparse(
+    const InT* d_data_orig, float* d_data_f32, const IndexT* d_indices,
+    const int* d_col_offsets, const int* d_group_codes, double* d_group_sums,
+    double* d_group_sq_sums, double* d_group_nnz, int sb_cols, int n_groups,
+    bool compute_sq_sums, bool compute_nnz, int tpb, size_t smem_cast,
+    bool use_gmem, cudaStream_t stream) {
+    if (use_gmem) {
+        size_t stats_items = (size_t)n_groups * sb_cols;
+        cudaMemsetAsync(d_group_sums, 0, stats_items * sizeof(double), stream);
+        if (compute_sq_sums) {
+            cudaMemsetAsync(d_group_sq_sums, 0, stats_items * sizeof(double),
+                            stream);
+        }
+        if (compute_nnz) {
+            cudaMemsetAsync(d_group_nnz, 0, stats_items * sizeof(double),
+                            stream);
+        }
+        ovr_cast_and_accumulate_sparse_global_kernel<InT, IndexT>
+            <<<sb_cols, tpb, 0, stream>>>(
+                d_data_orig, d_data_f32, d_indices, d_col_offsets,
+                d_group_codes, d_group_sums, d_group_sq_sums, d_group_nnz,
+                sb_cols, n_groups, compute_sq_sums, compute_nnz);
+        CUDA_CHECK_LAST_ERROR(ovr_cast_and_accumulate_sparse_global_kernel);
+    } else {
+        ovr_cast_and_accumulate_sparse_kernel<InT, IndexT>
+            <<<sb_cols, tpb, smem_cast, stream>>>(
+                d_data_orig, d_data_f32, d_indices, d_col_offsets,
+                d_group_codes, d_group_sums, d_group_sq_sums, d_group_nnz,
+                sb_cols, n_groups, compute_sq_sums, compute_nnz);
+        CUDA_CHECK_LAST_ERROR(ovr_cast_and_accumulate_sparse_kernel);
+    }
+}

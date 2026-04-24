@@ -102,7 +102,7 @@ def wilcoxon_binned(
         ``'log1p'`` uses a fixed [0, 15] range suitable for
         log1p-normalized data.
         ``'auto'`` computes the actual (min, max) of the data. Use this
-        for z-scored or unnormalized data.
+        for nonnegative expression data outside the fixed log1p range.
     """
     if not rg.is_log1p:
         warnings.warn(
@@ -118,20 +118,6 @@ def wilcoxon_binned(
 
     if n_bins is None:
         n_bins = _DASK_N_BINS if isinstance(X, DaskArray) else _DEFAULT_N_BINS
-
-    # Sparse kernels assume non-negative data (pre-fill+correct pattern).
-    # Dense kernel handles any range.
-    # NOTE: Dask sparse is not validated here because checking .data.min()
-    # would require materializing all blocks. The sparse histogram kernels
-    # will silently produce incorrect results for negative Dask sparse data.
-    if not isinstance(X, DaskArray) and cpsp.issparse(X) and X.nnz > 0:
-        if float(X.data.min()) < 0:
-            msg = (
-                "Sparse input contains negative values. The sparse histogram "
-                "kernels assume non-negative data. Convert to dense or use "
-                "bin_range='auto' with a dense array."
-            )
-            raise ValueError(msg)
 
     n_groups = len(rg.groups_order)
     n_cells, n_genes = X.shape

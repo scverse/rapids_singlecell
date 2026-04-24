@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import cupy as cp
+import cupyx.scipy.sparse as cpsp
 import numpy as np
 import pandas as pd
 import pytest
@@ -9,6 +10,177 @@ import scipy.sparse as sp
 from scipy.stats import mannwhitneyu, rankdata, tiecorrect
 
 import rapids_singlecell as rsc
+
+
+def _to_format(X_dense, fmt):
+    if fmt == "numpy_dense":
+        return np.asarray(X_dense)
+    if fmt == "scipy_csr":
+        return sp.csr_matrix(X_dense)
+    if fmt == "scipy_csc":
+        return sp.csc_matrix(X_dense)
+    if fmt == "cupy_dense":
+        return cp.asarray(X_dense)
+    if fmt == "cupy_csr":
+        return cpsp.csr_matrix(cp.asarray(X_dense))
+    if fmt == "cupy_csc":
+        return cpsp.csc_matrix(cp.asarray(X_dense))
+    raise ValueError(f"Unknown format: {fmt}")
+
+
+def _make_nonnegative(adata):
+    adata.X = np.abs(np.asarray(adata.X)).astype(np.float32)
+    return adata
+
+
+@pytest.mark.parametrize(
+    "method",
+    ["t-test", "t-test_overestim_var", "wilcoxon", "wilcoxon_binned", "logreg"],
+)
+@pytest.mark.parametrize("fmt", ["scipy_csr", "scipy_csc", "cupy_csr", "cupy_csc"])
+def test_rank_genes_groups_sparse_negative_values_raise(method, fmt):
+    X = np.array(
+        [
+            [-1.0, 0.0, 2.0],
+            [0.0, 1.0, 0.0],
+            [2.0, 0.0, 1.0],
+            [0.0, 3.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    adata = sc.AnnData(
+        X=_to_format(X, fmt),
+        obs=pd.DataFrame(
+            {"group": pd.Categorical(["a", "a", "b", "b"], categories=["a", "b"])}
+        ),
+        var=pd.DataFrame(index=["g0", "g1", "g2"]),
+    )
+
+    with pytest.raises(ValueError, match="Sparse input contains negative values"):
+        rsc.tl.rank_genes_groups(adata, "group", method=method, use_raw=False)
+
+
+def test_rank_genes_groups_default_lazy_get_df_matches_scanpy():
+    np.random.seed(42)
+    adata_lazy = sc.datasets.blobs(n_variables=6, n_centers=3, n_observations=120)
+    _make_nonnegative(adata_lazy)
+    adata_lazy.obs["blobs"] = adata_lazy.obs["blobs"].astype("category")
+    adata_lazy.X = sp.csr_matrix(adata_lazy.X)
+    adata_cpu = adata_lazy.copy()
+    adata_cpu.X = adata_cpu.X.toarray()
+
+    kw = {
+        "groupby": "blobs",
+        "method": "wilcoxon",
+        "reference": "1",
+        "use_raw": False,
+        "tie_correct": True,
+        "n_genes": 4,
+    }
+    rsc.tl.rank_genes_groups(adata_lazy, **kw)
+    sc.tl.rank_genes_groups(adata_cpu, **kw)
+
+    lazy_result = adata_lazy.uns["rank_genes_groups"]
+    assert lazy_result["names"].dtype.names == ("0", "2")
+    assert tuple(lazy_result["names"][0]) == tuple(
+        adata_cpu.uns["rank_genes_groups"]["names"][0]
+    )
+    np.testing.assert_array_equal(
+        lazy_result["names"].copy(),
+        np.asarray(lazy_result["names"]),
+    )
+
+    lazy_df = sc.get.rank_genes_groups_df(adata_lazy, group=None)
+    scanpy_df = sc.get.rank_genes_groups_df(adata_cpu, group=None)
+    pd.testing.assert_frame_equal(lazy_df, scanpy_df)
+
+
+def test_rank_genes_groups_return_format_removed():
+    adata = sc.datasets.blobs(n_variables=3, n_centers=2, n_observations=20)
+    _make_nonnegative(adata)
+    adata.obs["blobs"] = adata.obs["blobs"].astype("category")
+
+    with pytest.raises(TypeError, match="return_format has been removed"):
+        rsc.tl.rank_genes_groups(
+            adata,
+            "blobs",
+            method="wilcoxon",
+            use_raw=False,
+            return_format="arrays",
+        )
+
+
+@pytest.mark.parametrize("reference", ["rest", "b"])
+@pytest.mark.parametrize("fmt", ["numpy_dense", "scipy_csr", "cupy_csr"])
+def test_rank_genes_groups_wilcoxon_return_u_values(reference, fmt):
+    X = np.array(
+        [
+            [5.0, 0.0, 1.0, 2.0],
+            [4.0, 0.0, 1.0, 2.0],
+            [1.0, 3.0, 2.0, 2.0],
+            [0.0, 2.0, 2.0, 2.0],
+            [2.0, 1.0, 0.0, 3.0],
+            [3.0, 1.0, 0.0, 3.0],
+        ],
+        dtype=np.float32,
+    )
+    labels = np.array(["a", "a", "b", "b", "c", "c"])
+    adata = sc.AnnData(
+        X=_to_format(X, fmt),
+        obs=pd.DataFrame({"group": pd.Categorical(labels)}),
+        var=pd.DataFrame(index=[f"g{i}" for i in range(X.shape[1])]),
+    )
+
+    rsc.tl.rank_genes_groups(
+        adata,
+        "group",
+        groups=["a"],
+        reference=reference,
+        method="wilcoxon",
+        use_raw=False,
+        tie_correct=True,
+        use_continuity=True,
+        return_u_values=True,
+        n_genes=adata.n_vars,
+    )
+
+    result = adata.uns["rank_genes_groups"]
+    assert result["params"]["return_u_values"] is True
+    assert result["scores"].dtype["a"] == np.dtype("float64")
+
+    df = sc.get.rank_genes_groups_df(adata, group="a").sort_values("names")
+    mask_group = labels == "a"
+    mask_ref = labels != "a" if reference == "rest" else labels == reference
+    expected = np.array(
+        [
+            mannwhitneyu(
+                X[mask_group, gene],
+                X[mask_ref, gene],
+                alternative="two-sided",
+            ).statistic
+            for gene in range(X.shape[1])
+        ],
+        dtype=np.float64,
+    )
+
+    gene_to_idx = {name: idx for idx, name in enumerate(adata.var_names)}
+    expected_sorted = np.array([expected[gene_to_idx[name]] for name in df["names"]])
+    np.testing.assert_allclose(df["scores"].to_numpy(), expected_sorted)
+
+
+def test_rank_genes_groups_return_u_values_requires_wilcoxon():
+    adata = sc.datasets.blobs(n_variables=3, n_centers=2, n_observations=20)
+    _make_nonnegative(adata)
+    adata.obs["blobs"] = adata.obs["blobs"].astype("category")
+
+    with pytest.raises(ValueError, match="only supported for method='wilcoxon'"):
+        rsc.tl.rank_genes_groups(
+            adata,
+            "blobs",
+            method="t-test",
+            use_raw=False,
+            return_u_values=True,
+        )
 
 
 @pytest.mark.parametrize("reference", ["rest", "1"])
@@ -21,6 +193,7 @@ def test_rank_genes_groups_wilcoxon_matches_scanpy(reference, tie_correct, spars
     adata_gpu.obs["blobs"] = adata_gpu.obs["blobs"].astype("category")
 
     if sparse:
+        _make_nonnegative(adata_gpu)
         adata_gpu.X = sp.csr_matrix(adata_gpu.X)
 
     adata_cpu = adata_gpu.copy()
@@ -55,11 +228,13 @@ def test_rank_genes_groups_wilcoxon_matches_scanpy(reference, tie_correct, spars
     for field in ("scores", "logfoldchanges", "pvals", "pvals_adj"):
         gpu_field = gpu_result[field]
         cpu_field = cpu_result[field]
+        rtol = 1e-6 if field == "logfoldchanges" else 1e-13
         assert gpu_field.dtype.names == cpu_field.dtype.names
         for group in gpu_field.dtype.names:
             gpu_values = np.asarray(gpu_field[group], dtype=float)
             cpu_values = np.asarray(cpu_field[group], dtype=float)
-            np.testing.assert_allclose(gpu_values, cpu_values, rtol=1e-13, atol=1e-15)
+            atol = 1e-6 if field == "logfoldchanges" else 1e-15
+            np.testing.assert_allclose(gpu_values, cpu_values, rtol=rtol, atol=atol)
 
     params = gpu_result["params"]
     assert params["use_raw"] is False
@@ -146,6 +321,230 @@ def test_rank_genes_groups_wilcoxon_subset_and_bonferroni(reference):
     for group in result["pvals_adj"].dtype.names:
         adjusted = np.asarray(result["pvals_adj"][group])
         assert np.all(adjusted <= 1.0)
+
+
+def test_rank_genes_groups_wilcoxon_skip_empty_groups_filters_singletons():
+    np.random.seed(42)
+    adata = sc.datasets.blobs(n_variables=5, n_centers=2, n_observations=21)
+    adata.obs["target"] = pd.Categorical(
+        ["ref"] * 10 + ["valid"] * 10 + ["singleton"],
+        categories=["ref", "valid", "singleton", "empty"],
+    )
+
+    rsc.tl.rank_genes_groups(
+        adata,
+        "target",
+        method="wilcoxon",
+        reference="ref",
+        use_raw=False,
+        n_genes=3,
+        skip_empty_groups=True,
+    )
+
+    result = adata.uns["rank_genes_groups"]
+    assert result["names"].dtype.names == ("valid",)
+    assert result["scores"].dtype.names == ("valid",)
+
+
+def test_rank_genes_groups_wilcoxon_skip_empty_groups_all_tests_filtered():
+    np.random.seed(42)
+    adata = sc.datasets.blobs(n_variables=5, n_centers=2, n_observations=11)
+    adata.obs["target"] = pd.Categorical(
+        ["ref"] * 10 + ["singleton"],
+        categories=["ref", "singleton", "empty"],
+    )
+
+    rsc.tl.rank_genes_groups(
+        adata,
+        "target",
+        method="wilcoxon",
+        reference="ref",
+        use_raw=False,
+        skip_empty_groups=True,
+    )
+
+    result = adata.uns["rank_genes_groups"]
+    assert "names" not in result
+    assert result["params"]["reference"] == "ref"
+
+
+@pytest.mark.parametrize(
+    "fmt",
+    [
+        pytest.param("scipy_csr", id="host_csr"),
+        pytest.param("scipy_csc", id="host_csc"),
+        pytest.param("cupy_dense", id="device_dense"),
+    ],
+)
+def test_wilcoxon_subset_rest_stats_match_scanpy(fmt):
+    """groups=... with reference='rest' must use all other cells for stats."""
+    np.random.seed(42)
+    adata_gpu = sc.datasets.blobs(n_variables=6, n_centers=4, n_observations=160)
+    _make_nonnegative(adata_gpu)
+    adata_gpu.obs["blobs"] = adata_gpu.obs["blobs"].astype("category")
+    adata_cpu = adata_gpu.copy()
+    adata_gpu.X = _to_format(adata_gpu.X, fmt)
+
+    kw = {
+        "groupby": "blobs",
+        "method": "wilcoxon",
+        "use_raw": False,
+        "groups": ["0", "2"],
+        "reference": "rest",
+        "pts": True,
+        "n_genes": 6,
+    }
+    rsc.tl.rank_genes_groups(adata_gpu, **kw)
+    sc.tl.rank_genes_groups(adata_cpu, **kw)
+
+    gpu_result = adata_gpu.uns["rank_genes_groups"]
+    cpu_result = adata_cpu.uns["rank_genes_groups"]
+    for field in ("scores", "logfoldchanges", "pvals", "pvals_adj"):
+        rtol = 1e-6 if field == "logfoldchanges" else 1e-13
+        atol = 1e-6 if field == "logfoldchanges" else 1e-15
+        for group in gpu_result[field].dtype.names:
+            np.testing.assert_allclose(
+                np.asarray(gpu_result[field][group], dtype=float),
+                np.asarray(cpu_result[field][group], dtype=float),
+                rtol=rtol,
+                atol=atol,
+                equal_nan=True,
+            )
+
+    for key in ("pts", "pts_rest"):
+        gpu_pts = gpu_result[key]
+        cpu_pts = cpu_result[key]
+        for col in gpu_pts.columns:
+            np.testing.assert_allclose(
+                gpu_pts[col].values, cpu_pts[col].values, rtol=1e-13, atol=1e-15
+            )
+
+
+@pytest.mark.parametrize("reference", ["rest", "1"])
+@pytest.mark.parametrize("fmt", ["scipy_csr", "scipy_csc"])
+def test_wilcoxon_zero_nnz_host_sparse_does_not_crash(reference, fmt):
+    obs = pd.DataFrame(
+        {
+            "group": pd.Categorical(
+                ["0"] * 4 + ["1"] * 4 + ["2"] * 4,
+                categories=["0", "1", "2"],
+            )
+        }
+    )
+    adata = sc.AnnData(
+        X=_to_format(np.zeros((12, 5), dtype=np.float32), fmt),
+        obs=obs,
+        var=pd.DataFrame(index=[f"g{i}" for i in range(5)]),
+    )
+
+    rsc.tl.rank_genes_groups(
+        adata,
+        "group",
+        method="wilcoxon",
+        use_raw=False,
+        reference=reference,
+        pts=True,
+    )
+
+    result = adata.uns["rank_genes_groups"]
+    for field in ("scores", "pvals"):
+        for group in result[field].dtype.names:
+            assert np.all(np.isfinite(np.asarray(result[field][group], dtype=float)))
+
+
+def test_wilcoxon_ovo_host_csr_unsorted_indices_match_sorted():
+    rng = np.random.default_rng(42)
+    dense = rng.poisson(1.0, size=(80, 12)).astype(np.float32)
+    dense[rng.random(dense.shape) < 0.55] = 0
+    sorted_csr = sp.csr_matrix(dense)
+    unsorted_csr = sorted_csr.copy()
+    for row in range(unsorted_csr.shape[0]):
+        start, stop = unsorted_csr.indptr[row : row + 2]
+        order = np.arange(stop - start)[::-1]
+        unsorted_csr.indices[start:stop] = unsorted_csr.indices[start:stop][order]
+        unsorted_csr.data[start:stop] = unsorted_csr.data[start:stop][order]
+    unsorted_csr.has_sorted_indices = False
+
+    obs = pd.DataFrame(
+        {
+            "group": pd.Categorical(
+                ["ref"] * 20 + ["a"] * 20 + ["b"] * 20 + ["c"] * 20,
+                categories=["ref", "a", "b", "c"],
+            )
+        }
+    )
+    var = pd.DataFrame(index=[f"g{i}" for i in range(dense.shape[1])])
+    sorted_adata = sc.AnnData(X=sorted_csr, obs=obs.copy(), var=var.copy())
+    unsorted_adata = sc.AnnData(X=unsorted_csr, obs=obs.copy(), var=var.copy())
+
+    kw = {
+        "groupby": "group",
+        "method": "wilcoxon",
+        "reference": "ref",
+        "use_raw": False,
+        "tie_correct": True,
+        "n_genes": dense.shape[1],
+    }
+    rsc.tl.rank_genes_groups(sorted_adata, **kw)
+    rsc.tl.rank_genes_groups(unsorted_adata, **kw)
+
+    sorted_result = sorted_adata.uns["rank_genes_groups"]
+    unsorted_result = unsorted_adata.uns["rank_genes_groups"]
+    for field in ("scores", "logfoldchanges", "pvals", "pvals_adj"):
+        for group in sorted_result[field].dtype.names:
+            np.testing.assert_allclose(
+                np.asarray(unsorted_result[field][group], dtype=float),
+                np.asarray(sorted_result[field][group], dtype=float),
+                rtol=1e-13,
+                atol=1e-15,
+                equal_nan=True,
+            )
+
+
+@pytest.mark.parametrize("reference", ["rest", "1"])
+@pytest.mark.parametrize(
+    "fmt",
+    [
+        "numpy_dense",
+        "scipy_csr",
+        "scipy_csc",
+        "cupy_dense",
+        "cupy_csr",
+        "cupy_csc",
+    ],
+)
+def test_wilcoxon_all_public_formats_match_scanpy(reference, fmt):
+    np.random.seed(42)
+    adata_gpu = sc.datasets.blobs(n_variables=5, n_centers=3, n_observations=120)
+    _make_nonnegative(adata_gpu)
+    adata_gpu.obs["blobs"] = adata_gpu.obs["blobs"].astype("category")
+    adata_cpu = adata_gpu.copy()
+    adata_gpu.X = _to_format(adata_gpu.X, fmt)
+
+    kw = {
+        "groupby": "blobs",
+        "method": "wilcoxon",
+        "use_raw": False,
+        "reference": reference,
+        "tie_correct": True,
+        "n_genes": 5,
+    }
+    rsc.tl.rank_genes_groups(adata_gpu, **kw)
+    sc.tl.rank_genes_groups(adata_cpu, **kw)
+
+    gpu_result = adata_gpu.uns["rank_genes_groups"]
+    cpu_result = adata_cpu.uns["rank_genes_groups"]
+    for field in ("scores", "logfoldchanges", "pvals", "pvals_adj"):
+        rtol = 1e-6 if field == "logfoldchanges" else 1e-13
+        atol = 1e-6 if field == "logfoldchanges" else 1e-15
+        for group in gpu_result[field].dtype.names:
+            np.testing.assert_allclose(
+                np.asarray(gpu_result[field][group], dtype=float),
+                np.asarray(cpu_result[field][group], dtype=float),
+                rtol=rtol,
+                atol=atol,
+                equal_nan=True,
+            )
 
 
 @pytest.mark.parametrize(

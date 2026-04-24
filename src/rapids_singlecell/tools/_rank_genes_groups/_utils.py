@@ -18,9 +18,38 @@ WARP_SIZE = 32
 MAX_THREADS_PER_BLOCK = 512
 
 
+def _check_sparse_nonnegative(X) -> None:
+    """Reject sparse matrices with explicit negative values.
+
+    Sparse rank_genes_groups code treats missing entries as true expression
+    zeros. Optimized sparse Wilcoxon paths may rank explicit nonzeros and add
+    implicit zeros analytically, which is only valid when explicit sparse
+    values are nonnegative expression values.
+    """
+    if sp.issparse(X):
+        if X.nnz > 0 and float(X.data.min()) < 0:
+            msg = (
+                "Sparse input contains negative values. rank_genes_groups "
+                "expects nonnegative expression values; use raw counts or "
+                "log1p/log-normalized expression, not scaled or centered data."
+            )
+            raise ValueError(msg)
+    elif cpsp.issparse(X):
+        if X.nnz > 0 and float(X.data.min()) < 0:
+            msg = (
+                "Sparse input contains negative values. rank_genes_groups "
+                "expects nonnegative expression values; use raw counts or "
+                "log1p/log-normalized expression, not scaled or centered data."
+            )
+            raise ValueError(msg)
+
+
 def _select_groups(
     labels: pd.Series,
     selected: list | None,
+    *,
+    reference: str = "rest",
+    skip_empty_groups: bool = False,
 ) -> tuple[NDArray, NDArray[np.int32], NDArray[np.int64]]:
     """Build integer group codes from a categorical Series.
 
@@ -51,6 +80,29 @@ def _select_groups(
         cat_order = {str(c): i for i, c in enumerate(all_categories)}
         selected.sort(key=lambda x: cat_order.get(str(x), len(all_categories)))
 
+    if skip_empty_groups:
+        counts = {
+            str(name): int(count) for name, count in labels.value_counts().items()
+        }
+        valid_selected = [group for group in selected if counts.get(str(group), 0) >= 2]
+        if reference != "rest":
+            ref_matches = [group for group in selected if str(group) == str(reference)]
+            if ref_matches:
+                ref_group = ref_matches[0]
+                if ref_group not in valid_selected:
+                    msg = (
+                        f"reference = {reference} has fewer than two samples after "
+                        "filtering and cannot be used for rank_genes_groups."
+                    )
+                    raise ValueError(msg)
+        selected = valid_selected
+        if len(selected) == 0:
+            msg = (
+                "No groups with at least two samples remain after applying "
+                "skip_empty_groups=True."
+            )
+            raise ValueError(msg)
+
     n_groups = len(selected)
     groups_order = np.array(selected)
 
@@ -76,7 +128,7 @@ def _select_groups(
     if invalid_groups:
         msg = (
             f"Could not calculate statistics for groups {', '.join(invalid_groups)} "
-            "since they only contain one sample."
+            "since they contain fewer than two samples."
         )
         raise ValueError(msg)
 

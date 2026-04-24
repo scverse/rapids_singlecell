@@ -47,6 +47,8 @@ coverage.xml
 .cursor/
 .claude/
 CLAUDE.md
+.codex
 
 # tmp_scripts
 tmp_scripts/
+benchmarks/

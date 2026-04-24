@@ -1,18 +1,42 @@
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Literal, assert_never
 
 import cupy as cp
 import numpy as np
 import pandas as pd
-from statsmodels.stats.multitest import multipletests
 
 from rapids_singlecell._compat import DaskArray
 from rapids_singlecell.get import X_to_GPU
 from rapids_singlecell.get._aggregated import Aggregate
 from rapids_singlecell.preprocessing._utils import _check_gpu_X
 
-from ._utils import EPS, _select_groups, _select_top_n
+from ._utils import EPS, _check_sparse_nonnegative, _select_groups
+
+_FDR_BH_REVERSE_CUMMIN_KERNEL = cp.RawKernel(
+    r"""
+extern "C" __global__ void fdr_bh_reverse_cummin(double* values, const int n_cols) {
+    const int row = blockIdx.x;
+    double running = 1.0;
+    double* row_values = values + static_cast<size_t>(row) * n_cols;
+    for (int col = n_cols - 1; col >= 0; --col) {
+        double value = row_values[col];
+        if (!(value == value)) {
+            value = 1.0;
+        }
+        if (value < running) {
+            running = value;
+        }
+        row_values[col] = running;
+    }
+}
+""",
+    "fdr_bh_reverse_cummin",
+)
+_RANK_SORT_MIN_ELEMENTS = 1_000_000
+_RANK_SORT_MAX_WORKERS = 64
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -38,6 +62,7 @@ class _RankGenes:
         layer: str | None = None,
         comp_pts: bool = False,
         pre_load: bool = False,
+        skip_empty_groups: bool = False,
     ) -> None:
         # Handle groups parameter
         if groups == "all" or groups is None:
@@ -63,7 +88,10 @@ class _RankGenes:
             raise ValueError(msg)
 
         self.groups_order, self.group_codes, self.group_sizes = _select_groups(
-            self.labels, selected
+            self.labels,
+            selected,
+            reference=reference,
+            skip_empty_groups=skip_empty_groups,
         )
 
         # Get data matrix
@@ -91,6 +119,8 @@ class _RankGenes:
             self.X = self.X[:, mask_var]
             self.var_names = self.var_names[mask_var]
 
+        _check_sparse_nonnegative(self.X)
+
         self.pre_load = pre_load
 
         self.ireference = None
@@ -100,6 +130,7 @@ class _RankGenes:
         # Set up expm1 function based on log base
         self.is_log1p = "log1p" in adata.uns
         base = adata.uns.get("log1p", {}).get("base")
+        self._log1p_base = base
         if base is not None:
             self.expm1_func = lambda x: np.expm1(x * np.log(base))
         else:
@@ -115,8 +146,14 @@ class _RankGenes:
         self.pts_rest: np.ndarray | None = None
 
         self.stats: pd.DataFrame | None = None
+        self.stats_arrays: dict[str, object] | None = None
+        self._store_wilcoxon_gpu_result = False
+        self._wilcoxon_gpu_result: (
+            tuple[np.ndarray, cp.ndarray, cp.ndarray, cp.ndarray | None] | None
+        ) = None
         self._compute_stats_in_chunks: bool = False
         self._ref_chunk_computed: set[int] = set()
+        self._score_dtype = np.dtype(np.float32)
 
     def _init_stats_arrays(self, n_genes: int) -> None:
         """Pre-allocate stats arrays before chunk loop."""
@@ -190,16 +227,18 @@ class _RankGenes:
 
         # Compute rest statistics if reference='rest'
         if self.ireference is None:
-            n_rest = n.sum() - n
-            means_rest = (sums.sum(axis=0) - sums) / n_rest
-            rest_ss = (sq_sums.sum(axis=0) - sq_sums) - n_rest * means_rest**2
+            n_rest = cp.float64(self.X.shape[0]) - n
+            total_sums = result["sum"].sum(axis=0, keepdims=True)
+            total_sq_sums = result["sq_sum"].sum(axis=0, keepdims=True)
+            means_rest = (total_sums - sums) / n_rest
+            rest_ss = (total_sq_sums - sq_sums) - n_rest * means_rest**2
             vars_rest = cp.maximum(rest_ss / cp.maximum(n_rest - 1, 1), 0)
 
             self.means_rest = cp.asnumpy(means_rest)
             self.vars_rest = cp.asnumpy(vars_rest)
 
             if self.comp_pts:
-                total_count = (pts * n).sum(axis=0)
+                total_count = result["count_nonzero"].sum(axis=0, keepdims=True)
                 self.pts_rest = cp.asnumpy((total_count - pts * n) / n_rest)
             else:
                 self.pts_rest = None
@@ -325,6 +364,7 @@ class _RankGenes:
         tie_correct: bool,
         use_continuity: bool = False,
         chunk_size: int | None = None,
+        return_u_values: bool = False,
     ) -> list[tuple[int, NDArray, NDArray]]:
         """Compute Wilcoxon rank-sum test statistics."""
         from ._wilcoxon import wilcoxon
@@ -334,6 +374,7 @@ class _RankGenes:
             tie_correct=tie_correct,
             use_continuity=use_continuity,
             chunk_size=chunk_size,
+            return_u_values=return_u_values,
         )
 
     def wilcoxon_binned(
@@ -375,6 +416,7 @@ class _RankGenes:
         chunk_size: int | None = None,
         n_bins: int | None = None,
         bin_range: Literal["log1p", "auto"] | None = None,
+        return_u_values: bool = False,
         **kwds,
     ) -> None:
         """Compute statistics for all groups."""
@@ -385,17 +427,28 @@ class _RankGenes:
         }:
             self.X = X_to_GPU(self.X)
 
+        n_genes = self.X.shape[1]
+        if n_genes_user is None:
+            n_genes_user = n_genes
+
         if method in {"t-test", "t-test_overestim_var"}:
             test_results = self.t_test(method)
         elif method == "wilcoxon":
             if isinstance(self.X, DaskArray):
                 msg = "Wilcoxon test is not supported for Dask arrays. Please convert your data to CuPy arrays."
                 raise ValueError(msg)
-            test_results = self.wilcoxon(
-                tie_correct=tie_correct,
-                use_continuity=use_continuity,
-                chunk_size=chunk_size,
-            )
+            self._score_dtype = np.dtype(np.float64 if return_u_values else np.float32)
+            self._wilcoxon_gpu_result = None
+            self._store_wilcoxon_gpu_result = n_genes_user is not None
+            try:
+                test_results = self.wilcoxon(
+                    tie_correct=tie_correct,
+                    use_continuity=use_continuity,
+                    chunk_size=chunk_size,
+                    return_u_values=return_u_values,
+                )
+            finally:
+                self._store_wilcoxon_gpu_result = False
         elif method == "wilcoxon_binned":
             test_results = self.wilcoxon_binned(
                 tie_correct=tie_correct,
@@ -409,58 +462,225 @@ class _RankGenes:
         else:
             assert_never(method)
 
-        n_genes = self.X.shape[1]
-
-        # Collect all stats data first to avoid DataFrame fragmentation
-        stats_data: dict[tuple[str, str], np.ndarray] = {}
-
-        for group_index, scores, pvals in test_results:
-            group_name = str(self.groups_order[group_index])
-
-            if n_genes_user is not None:
-                scores_sort = np.abs(scores) if rankby_abs else scores
-                global_indices = _select_top_n(scores_sort, n_genes_user)
-            else:
-                global_indices = slice(None)
-
-            if n_genes_user is not None:
-                stats_data[group_name, "names"] = np.asarray(self.var_names)[
-                    global_indices
-                ]
-
-            stats_data[group_name, "scores"] = scores[global_indices]
-
-            if pvals is not None:
-                stats_data[group_name, "pvals"] = pvals[global_indices]
-                if corr_method == "benjamini-hochberg":
-                    pvals_clean = np.array(pvals, copy=True)
-                    pvals_clean[np.isnan(pvals_clean)] = 1.0
-                    _, pvals_adj, _, _ = multipletests(
-                        pvals_clean, alpha=0.05, method="fdr_bh"
-                    )
-                elif corr_method == "bonferroni":
-                    pvals_adj = np.minimum(pvals * n_genes, 1.0)
-                stats_data[group_name, "pvals_adj"] = pvals_adj[global_indices]
-
-            # Compute logfoldchanges
-            if self.means is not None:
-                mean_group = self.means[group_index]
-                if self.ireference is None:
-                    mean_rest = self.means_rest[group_index]
-                else:
-                    mean_rest = self.means[self.ireference]
-                foldchanges = (self.expm1_func(mean_group) + EPS) / (
-                    self.expm1_func(mean_rest) + EPS
-                )
-                stats_data[group_name, "logfoldchanges"] = np.log2(
-                    foldchanges[global_indices]
-                )
-
-        # Create DataFrame all at once to avoid fragmentation
-        if stats_data:
-            self.stats = pd.DataFrame(stats_data)
-            self.stats.columns = pd.MultiIndex.from_tuples(self.stats.columns)
-            if n_genes_user is None:
-                self.stats.index = self.var_names
-        else:
+        if not test_results and self._wilcoxon_gpu_result is None:
+            self.stats_arrays = {
+                "group_indices": np.empty(0, dtype=np.intp),
+                "group_names": np.empty(0, dtype=object),
+                "var_names": np.asarray(self.var_names),
+                "gene_indices": np.empty((0, n_genes_user), dtype=np.intp),
+            }
             self.stats = None
+            return
+
+        if self._wilcoxon_gpu_result is not None:
+            group_indices, scores_gpu, pvals_gpu, logfoldchanges_gpu = (
+                self._wilcoxon_gpu_result
+            )
+            try:
+                self._compute_statistics_gpu_arrays(
+                    group_indices,
+                    scores_gpu,
+                    pvals_gpu,
+                    logfoldchanges_gpu,
+                    corr_method=corr_method,
+                    n_genes_user=n_genes_user,
+                    n_genes=n_genes,
+                    rankby_abs=rankby_abs,
+                )
+            finally:
+                self._wilcoxon_gpu_result = None
+            return
+
+        self._compute_statistics_arrays(
+            test_results,
+            corr_method=corr_method,
+            n_genes_user=n_genes_user,
+            n_genes=n_genes,
+            rankby_abs=rankby_abs,
+        )
+
+    @staticmethod
+    def _rank_indices_matrix(scores: np.ndarray, n_top: int) -> np.ndarray:
+        if n_top >= scores.shape[1]:
+            return _RankGenes._argsort_desc_matrix(scores)
+        partition = np.argpartition(scores, -n_top, axis=1)[:, -n_top:]
+        row_ids = np.arange(scores.shape[0])[:, None]
+        order = np.argsort(scores[row_ids, partition], axis=1)[:, ::-1]
+        return partition[row_ids, order]
+
+    @staticmethod
+    def _argsort_desc_matrix(scores: np.ndarray) -> np.ndarray:
+        n_rows, n_cols = scores.shape
+        n_elements = n_rows * n_cols
+        n_workers = min(_RANK_SORT_MAX_WORKERS, os.cpu_count() or 1, n_rows)
+        if n_workers <= 1 or n_elements < _RANK_SORT_MIN_ELEMENTS:
+            return np.argsort(scores, axis=1)[:, ::-1]
+
+        chunks = np.linspace(0, n_rows, n_workers + 1, dtype=np.intp)
+        indices = np.empty((n_rows, n_cols), dtype=np.intp)
+
+        def sort_chunk(chunk_index: int) -> None:
+            start = int(chunks[chunk_index])
+            stop = int(chunks[chunk_index + 1])
+            if start < stop:
+                indices[start:stop] = np.argsort(scores[start:stop], axis=1)[:, ::-1]
+
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            list(executor.map(sort_chunk, range(n_workers)))
+        return indices
+
+    @staticmethod
+    def _fdr_bh_matrix(pvals: np.ndarray) -> np.ndarray:
+        pvals_clean = np.array(pvals, copy=True)
+        pvals_clean[np.isnan(pvals_clean)] = 1.0
+        order = np.argsort(pvals_clean, axis=1)
+        sorted_p = np.take_along_axis(pvals_clean, order, axis=1)
+        n_tests = sorted_p.shape[1]
+        scale = n_tests / np.arange(1, n_tests + 1, dtype=np.float64)
+        corrected_sorted = sorted_p * scale
+        corrected_sorted = np.minimum.accumulate(corrected_sorted[:, ::-1], axis=1)[
+            :, ::-1
+        ]
+        corrected_sorted[corrected_sorted > 1.0] = 1.0
+        corrected = np.empty_like(corrected_sorted)
+        np.put_along_axis(corrected, order, corrected_sorted, axis=1)
+        return corrected
+
+    @staticmethod
+    def _fdr_bh_matrix_gpu(pvals: cp.ndarray) -> cp.ndarray:
+        pvals_clean = cp.nan_to_num(pvals, nan=1.0)
+        order = cp.argsort(pvals_clean, axis=1)
+        corrected_sorted = cp.take_along_axis(pvals_clean, order, axis=1)
+        corrected_sorted *= corrected_sorted.shape[1] / cp.arange(
+            1, corrected_sorted.shape[1] + 1, dtype=cp.float64
+        )
+        _FDR_BH_REVERSE_CUMMIN_KERNEL(
+            (corrected_sorted.shape[0],),
+            (1,),
+            (corrected_sorted, np.int32(corrected_sorted.shape[1])),
+        )
+        corrected = cp.empty_like(corrected_sorted)
+        cp.put_along_axis(corrected, order, corrected_sorted, axis=1)
+        return corrected
+
+    def _compute_statistics_arrays(
+        self,
+        test_results: list[tuple[int, NDArray, NDArray]],
+        *,
+        corr_method: _CorrMethod,
+        n_genes_user: int,
+        n_genes: int,
+        rankby_abs: bool,
+    ) -> None:
+        group_indices = np.asarray([r[0] for r in test_results], dtype=np.intp)
+        scores = np.vstack([r[1] for r in test_results])
+        sort_scores = np.abs(scores) if rankby_abs else scores
+        top_idx = self._rank_indices_matrix(sort_scores, n_genes_user)
+
+        arrays: dict[str, object] = {
+            "group_indices": group_indices,
+            "group_names": np.asarray(
+                [str(self.groups_order[i]) for i in group_indices], dtype=object
+            ),
+            "var_names": np.asarray(self.var_names),
+            "gene_indices": top_idx.astype(np.intp, copy=False),
+            "scores": np.take_along_axis(scores, top_idx, axis=1).astype(
+                self._score_dtype, copy=False
+            ),
+        }
+
+        if test_results[0][2] is not None:
+            pvals = np.vstack([r[2] for r in test_results])
+            arrays["pvals"] = np.take_along_axis(pvals, top_idx, axis=1)
+            if corr_method == "benjamini-hochberg":
+                pvals_adj = self._fdr_bh_matrix(pvals)
+            elif corr_method == "bonferroni":
+                pvals_adj = np.minimum(pvals * n_genes, 1.0)
+            else:
+                msg = f"Unsupported correction method: {corr_method!r}."
+                raise ValueError(msg)
+            arrays["pvals_adj"] = np.take_along_axis(pvals_adj, top_idx, axis=1)
+
+        if self.means is not None:
+            mean_group = self.means[group_indices]
+            if self.ireference is None:
+                mean_rest = self.means_rest[group_indices]
+            else:
+                mean_rest = self.means[self.ireference][None, :]
+            foldchanges = (self.expm1_func(mean_group) + EPS) / (
+                self.expm1_func(mean_rest) + EPS
+            )
+            logfoldchanges = np.log2(foldchanges)
+            arrays["logfoldchanges"] = np.take_along_axis(
+                logfoldchanges, top_idx, axis=1
+            ).astype(np.float32, copy=False)
+
+        self.stats_arrays = arrays
+        self.stats = None
+
+    def _compute_statistics_gpu_arrays(
+        self,
+        group_indices: np.ndarray,
+        scores_gpu: cp.ndarray,
+        pvals_gpu: cp.ndarray,
+        logfoldchanges_gpu: cp.ndarray | None,
+        *,
+        corr_method: _CorrMethod,
+        n_genes_user: int,
+        n_genes: int,
+        rankby_abs: bool,
+    ) -> None:
+        group_indices = np.asarray(group_indices, dtype=np.intp)
+        scores = cp.asnumpy(scores_gpu)
+        sort_scores = np.abs(scores) if rankby_abs else scores
+        top_idx = self._rank_indices_matrix(sort_scores, n_genes_user)
+        top_idx_gpu = cp.asarray(top_idx)
+
+        arrays: dict[str, object] = {
+            "group_indices": group_indices,
+            "group_names": np.asarray(
+                [str(self.groups_order[i]) for i in group_indices], dtype=object
+            ),
+            "var_names": np.asarray(self.var_names),
+            "gene_indices": top_idx.astype(np.intp, copy=False),
+            "scores": cp.asnumpy(
+                cp.take_along_axis(scores_gpu, top_idx_gpu, axis=1).astype(
+                    self._score_dtype, copy=False
+                )
+            ),
+            "pvals": cp.asnumpy(cp.take_along_axis(pvals_gpu, top_idx_gpu, axis=1)),
+        }
+
+        if corr_method == "benjamini-hochberg":
+            pvals_adj_gpu = self._fdr_bh_matrix_gpu(pvals_gpu)
+        elif corr_method == "bonferroni":
+            pvals_adj_gpu = cp.minimum(pvals_gpu * n_genes, 1.0)
+        else:
+            msg = f"Unsupported correction method: {corr_method!r}."
+            raise ValueError(msg)
+        arrays["pvals_adj"] = cp.asnumpy(
+            cp.take_along_axis(pvals_adj_gpu, top_idx_gpu, axis=1)
+        )
+
+        if logfoldchanges_gpu is not None:
+            arrays["logfoldchanges"] = cp.asnumpy(
+                cp.take_along_axis(logfoldchanges_gpu, top_idx_gpu, axis=1).astype(
+                    cp.float32, copy=False
+                )
+            )
+        elif self.means is not None:
+            mean_group = self.means[group_indices]
+            if self.ireference is None:
+                mean_rest = self.means_rest[group_indices]
+            else:
+                mean_rest = self.means[self.ireference][None, :]
+            foldchanges = (self.expm1_func(mean_group) + EPS) / (
+                self.expm1_func(mean_rest) + EPS
+            )
+            logfoldchanges = np.log2(foldchanges)
+            arrays["logfoldchanges"] = np.take_along_axis(
+                logfoldchanges, top_idx, axis=1
+            ).astype(np.float32, copy=False)
+
+        self.stats_arrays = arrays
+        self.stats = None

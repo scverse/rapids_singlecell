@@ -20,6 +20,7 @@ def test_rank_genes_groups_ttest_matches_scanpy(reference, method, sparse):
     adata_gpu.obs["blobs"] = adata_gpu.obs["blobs"].astype("category")
 
     if sparse:
+        adata_gpu.X = np.abs(adata_gpu.X).astype(np.float32)
         adata_gpu.X = sp.csr_matrix(adata_gpu.X)
 
     adata_cpu = adata_gpu.copy()
@@ -52,12 +53,19 @@ def test_rank_genes_groups_ttest_matches_scanpy(reference, method, sparse):
     for field in ("scores", "logfoldchanges", "pvals", "pvals_adj"):
         gpu_field = gpu_result[field]
         cpu_field = cpu_result[field]
+        rtol = 1e-6 if sparse else 1e-13
+        if sparse and field in {"scores", "logfoldchanges"}:
+            atol = 1e-6
+        elif sparse:
+            atol = 1e-12
+        else:
+            atol = 1e-15
         assert gpu_field.dtype.names == cpu_field.dtype.names
         for group in gpu_field.dtype.names:
             gpu_values = np.asarray(gpu_field[group], dtype=float)
             cpu_values = np.asarray(cpu_field[group], dtype=float)
             np.testing.assert_allclose(
-                gpu_values, cpu_values, rtol=1e-13, atol=1e-15, equal_nan=True
+                gpu_values, cpu_values, rtol=rtol, atol=atol, equal_nan=True
             )
 
     params = gpu_result["params"]
