@@ -49,15 +49,6 @@ __global__ void csc_extract_mapped_kernel(const float* __restrict__ data,
     }
 }
 
-static size_t get_seg_sort_temp_bytes(int n_items, int n_segments) {
-    size_t bytes = 0;
-    auto* dk = reinterpret_cast<float*>(1);
-    auto* doff = reinterpret_cast<int*>(1);
-    cub::DeviceSegmentedRadixSort::SortKeys(nullptr, bytes, dk, dk, n_items,
-                                            n_segments, doff, doff + 1, 0, 32);
-    return bytes;
-}
-
 /**
  * Tier 1 dispatch: when the largest group fits in shared memory, a fused
  * bitonic-sort + binary-search kernel handles the whole group per block.

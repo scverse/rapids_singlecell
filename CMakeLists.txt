@@ -50,6 +50,26 @@ if (RSC_BUILD_EXTENSIONS)
   if (RSC_PYTHON_RMM_DIR AND EXISTS "${RSC_PYTHON_RMM_DIR}/rmm-config.cmake")
     list(APPEND RSC_RMM_HINTS "${RSC_PYTHON_RMM_DIR}")
   endif()
+  if(EXISTS "/tmp/.librmm_dir")
+    file(READ "/tmp/.librmm_dir" _rsc_librmm_marker)
+    string(STRIP "${_rsc_librmm_marker}" _rsc_librmm_marker)
+    file(GLOB _rsc_marker_rmm_dirs "${_rsc_librmm_marker}/lib64/cmake/rmm")
+    file(GLOB _rsc_marker_rapids_prefixes
+      "${_rsc_librmm_marker}/lib64"
+      "${_rsc_librmm_marker}/lib64/rapids"
+      "${_rsc_librmm_marker}/../rapids_logger/lib64"
+    )
+    file(GLOB _rsc_marker_cccl_dirs
+      "${_rsc_librmm_marker}/lib64/rapids/cmake/cccl"
+    )
+    file(GLOB _rsc_marker_rapids_logger_dirs "${_rsc_librmm_marker}/../rapids_logger/lib64/cmake/rapids_logger")
+    file(GLOB _rsc_marker_nvtx3_dirs "${_rsc_librmm_marker}/lib64/cmake/nvtx3")
+    list(APPEND RSC_RMM_HINTS ${_rsc_marker_rmm_dirs})
+    list(APPEND RSC_RAPIDS_CMAKE_PREFIXES ${_rsc_marker_rapids_prefixes})
+    list(APPEND RSC_CCCL_HINTS ${_rsc_marker_cccl_dirs})
+    list(APPEND RSC_RAPIDS_LOGGER_HINTS ${_rsc_marker_rapids_logger_dirs})
+    list(APPEND RSC_NVTX3_HINTS ${_rsc_marker_nvtx3_dirs})
+  endif()
   foreach(_rsc_python_prefix IN ITEMS "${Python_ROOT_DIR}" "${Python3_ROOT_DIR}")
     _rsc_collect_rapids_python_prefix("${_rsc_python_prefix}")
   endforeach()

@@ -15,29 +15,6 @@ static inline int round_up_to_warp(int n) {
     return (rounded < MAX_THREADS_PER_BLOCK) ? rounded : MAX_THREADS_PER_BLOCK;
 }
 
-static inline void launch_tie_correction(const double* sorted_vals,
-                                         double* correction, int n_rows,
-                                         int n_cols, cudaStream_t stream) {
-    int threads_per_block = round_up_to_warp(n_rows);
-    dim3 block(threads_per_block);
-    dim3 grid(n_cols);
-    tie_correction_kernel<<<grid, block, 0, stream>>>(sorted_vals, correction,
-                                                      n_rows, n_cols);
-    CUDA_CHECK_LAST_ERROR(tie_correction_kernel);
-}
-
-static inline void launch_average_rank(const double* sorted_vals,
-                                       const int* sorter, double* ranks,
-                                       int n_rows, int n_cols,
-                                       cudaStream_t stream) {
-    int threads_per_block = round_up_to_warp(n_rows);
-    dim3 block(threads_per_block);
-    dim3 grid(n_cols);
-    average_rank_kernel<<<grid, block, 0, stream>>>(sorted_vals, sorter, ranks,
-                                                    n_rows, n_cols);
-    CUDA_CHECK_LAST_ERROR(average_rank_kernel);
-}
-
 static inline void launch_ovo_rank_dense(
     const float* ref_sorted, const float* grp_data, const int* grp_offsets,
     double* rank_sums, double* tie_corr, int n_ref, int n_all_grp, int n_cols,
@@ -78,31 +55,6 @@ static inline void launch_ovr_rank_dense(
 template <typename Device>
 void register_bindings(nb::module_& m) {
     m.doc() = "CUDA kernels for Wilcoxon rank-sum test";
-
-    // Tie correction kernel
-    m.def(
-        "tie_correction",
-        [](gpu_array_f<const double, Device> sorted_vals,
-           gpu_array<double, Device> correction, int n_rows, int n_cols,
-           std::uintptr_t stream) {
-            launch_tie_correction(sorted_vals.data(), correction.data(), n_rows,
-                                  n_cols, (cudaStream_t)stream);
-        },
-        "sorted_vals"_a, "correction"_a, nb::kw_only(), "n_rows"_a, "n_cols"_a,
-        "stream"_a = 0);
-
-    // Average rank kernel
-    m.def(
-        "average_rank",
-        [](gpu_array_f<const double, Device> sorted_vals,
-           gpu_array_f<const int, Device> sorter,
-           gpu_array_f<double, Device> ranks, int n_rows, int n_cols,
-           std::uintptr_t stream) {
-            launch_average_rank(sorted_vals.data(), sorter.data(), ranks.data(),
-                                n_rows, n_cols, (cudaStream_t)stream);
-        },
-        "sorted_vals"_a, "sorter"_a, "ranks"_a, nb::kw_only(), "n_rows"_a,
-        "n_cols"_a, "stream"_a = 0);
 
     m.def(
         "ovo_rank_dense",
