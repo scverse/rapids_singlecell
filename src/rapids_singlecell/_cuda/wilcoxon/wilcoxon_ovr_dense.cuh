@@ -217,12 +217,9 @@ static void ovr_streaming_dense_host_impl(
     bool use_gmem = false;
     size_t smem_rank = ovr_smem_config(n_groups, use_gmem);
     int tpb_cast = UTIL_BLOCK_SIZE;
-    size_t smem_cast = (size_t)n_groups * sizeof(double);
-    if (compute_nnz) {
-        smem_cast = (size_t)(3 * n_groups) * sizeof(double);
-    } else if (compute_sq_sums) {
-        smem_cast = (size_t)(2 * n_groups) * sizeof(double);
-    }
+    bool cast_use_gmem = false;
+    size_t smem_cast = cast_accumulate_smem_config(n_groups, compute_sq_sums,
+                                                   compute_nnz, cast_use_gmem);
 
     // Pin only the host input.  Outputs live on the device (caller-owned).
     HostRegisterGuard _pin_block(const_cast<InT*>(h_block),
@@ -242,12 +239,11 @@ static void ovr_streaming_dense_host_impl(
                         sb_items * sizeof(InT), cudaMemcpyHostToDevice, stream);
 
         // Cast to float32 for sort + accumulate stats in float64
-        ovr_cast_and_accumulate_dense_kernel<InT>
-            <<<sb_cols, tpb_cast, smem_cast, stream>>>(
-                buf.d_block_orig, buf.d_block_f32, d_group_codes,
-                buf.d_group_sums, buf.d_group_sq_sums, buf.d_group_nnz, n_rows,
-                sb_cols, n_groups, compute_sq_sums, compute_nnz);
-        CUDA_CHECK_LAST_ERROR(ovr_cast_and_accumulate_dense_kernel);
+        launch_ovr_cast_and_accumulate_dense<InT>(
+            buf.d_block_orig, buf.d_block_f32, d_group_codes, buf.d_group_sums,
+            buf.d_group_sq_sums, buf.d_group_nnz, n_rows, sb_cols, n_groups,
+            compute_sq_sums, compute_nnz, tpb_cast, smem_cast, cast_use_gmem,
+            stream);
 
         // Fill segment offsets + row indices
         upload_linear_offsets(buf.seg_offsets, sb_cols, n_rows, stream);

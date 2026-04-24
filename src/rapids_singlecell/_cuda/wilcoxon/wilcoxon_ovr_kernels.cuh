@@ -1,16 +1,17 @@
 #pragma once
 
 /** Count nonzeros per column from CSR. One thread per row. */
-__global__ void csr_col_histogram_kernel(const int* __restrict__ indices,
-                                         const int* __restrict__ indptr,
+template <typename IndexT, typename IndptrT>
+__global__ void csr_col_histogram_kernel(const IndexT* __restrict__ indices,
+                                         const IndptrT* __restrict__ indptr,
                                          int* __restrict__ col_counts,
                                          int n_rows, int n_cols) {
     int row = blockIdx.x * blockDim.x + threadIdx.x;
     if (row >= n_rows) return;
-    int rs = indptr[row];
-    int re = indptr[row + 1];
-    for (int p = rs; p < re; ++p) {
-        int c = indices[p];
+    IndptrT rs = indptr[row];
+    IndptrT re = indptr[row + 1];
+    for (IndptrT p = rs; p < re; ++p) {
+        int c = (int)indices[p];
         if (c < n_cols) atomicAdd(&col_counts[c], 1);
     }
 }
@@ -20,26 +21,27 @@ __global__ void csr_col_histogram_kernel(const int* __restrict__ indices,
  * write_pos[c - col_start] must be initialized to the prefix-sum offset
  * for column c.  Each thread atomically claims a unique destination slot.
  */
+template <typename InT, typename IndexT, typename IndptrT>
 __global__ void csr_scatter_to_csc_kernel(
-    const float* __restrict__ data, const int* __restrict__ indices,
-    const int* __restrict__ indptr, int* __restrict__ write_pos,
-    float* __restrict__ csc_vals, int* __restrict__ csc_row_idx, int n_rows,
+    const InT* __restrict__ data, const IndexT* __restrict__ indices,
+    const IndptrT* __restrict__ indptr, int* __restrict__ write_pos,
+    InT* __restrict__ csc_vals, int* __restrict__ csc_row_idx, int n_rows,
     int col_start, int col_stop) {
     int row = blockIdx.x * blockDim.x + threadIdx.x;
     if (row >= n_rows) return;
-    int rs = indptr[row];
-    int re = indptr[row + 1];
+    IndptrT rs = indptr[row];
+    IndptrT re = indptr[row + 1];
     // Binary search for col_start (overflow-safe midpoint)
-    int lo = rs, hi = re;
+    IndptrT lo = rs, hi = re;
     while (lo < hi) {
-        int m = lo + ((hi - lo) >> 1);
+        IndptrT m = lo + ((hi - lo) >> 1);
         if (indices[m] < col_start)
             lo = m + 1;
         else
             hi = m;
     }
-    for (int p = lo; p < re; ++p) {
-        int c = indices[p];
+    for (IndptrT p = lo; p < re; ++p) {
+        int c = (int)indices[p];
         if (c >= col_stop) break;
         int dest = atomicAdd(&write_pos[c - col_start], 1);
         csc_vals[dest] = data[p];

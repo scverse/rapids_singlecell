@@ -109,12 +109,9 @@ static void ovr_sparse_csc_host_streaming_impl(
     int tpb = UTIL_BLOCK_SIZE;
     bool rank_use_gmem = false;
     size_t smem_bytes = sparse_ovr_smem_config(n_groups, rank_use_gmem);
-    size_t smem_cast = (size_t)n_groups * sizeof(double);
-    if (compute_nnz) {
-        smem_cast = (size_t)(3 * n_groups) * sizeof(double);
-    } else if (compute_sq_sums) {
-        smem_cast = (size_t)(2 * n_groups) * sizeof(double);
-    }
+    bool cast_use_gmem = false;
+    size_t smem_cast = cast_accumulate_smem_config(n_groups, compute_sq_sums,
+                                                   compute_nnz, cast_use_gmem);
 
     // In gmem mode the sparse rank kernel accumulates into rank_sums directly
     // and needs a per-stream nz_count scratch buffer sized (n_groups, sb_cols).
@@ -164,13 +161,12 @@ static void ovr_sparse_csc_host_streaming_impl(
                         cudaMemcpyDeviceToDevice, stream);
 
         // Cast to float32 for sort + accumulate stats in float64
-        ovr_cast_and_accumulate_sparse_kernel<InT>
-            <<<sb_cols, tpb, smem_cast, stream>>>(
-                buf.d_sparse_data_orig, buf.d_sparse_data_f32,
-                buf.d_sparse_indices, buf.d_seg_offsets, d_group_codes,
-                buf.d_group_sums, buf.d_group_sq_sums, buf.d_group_nnz, sb_cols,
-                n_groups, compute_sq_sums, compute_nnz);
-        CUDA_CHECK_LAST_ERROR(ovr_cast_and_accumulate_sparse_kernel);
+        launch_ovr_cast_and_accumulate_sparse<InT>(
+            buf.d_sparse_data_orig, buf.d_sparse_data_f32, buf.d_sparse_indices,
+            buf.d_seg_offsets, d_group_codes, buf.d_group_sums,
+            buf.d_group_sq_sums, buf.d_group_nnz, sb_cols, n_groups,
+            compute_sq_sums, compute_nnz, tpb, smem_cast, cast_use_gmem,
+            stream);
 
         // CUB sort only stored nonzeros (float32 keys)
         if (batch_nnz > 0) {
@@ -233,6 +229,284 @@ static void ovr_sparse_csc_host_streaming_impl(
         if (err != cudaSuccess)
             throw std::runtime_error(
                 std::string("CUDA error in sparse host CSC streaming: ") +
+                cudaGetErrorString(err));
+    }
+
+    for (int s = 0; s < n_streams; s++) cudaStreamDestroy(streams[s]);
+}
+
+// ============================================================================
+// Sparse-aware host-streaming CSR OVR pipeline.
+// ============================================================================
+
+/**
+ * Host CSR variant of the sparse OVR stream.
+ *
+ * The CSR input stays in host memory.  We count columns once on the CPU, then
+ * use mapped pinned CSR arrays for bounded per-column-batch CSR->CSC scatter
+ * on the GPU.  This avoids both a full host->device sparse upload and any
+ * whole-matrix CSR->CSC conversion.
+ */
+template <typename InT, typename IndexT, typename IndptrT>
+static void ovr_sparse_csr_host_streaming_impl(
+    const InT* h_data, const IndexT* h_indices, const IndptrT* h_indptr,
+    const int* h_group_codes, const double* h_group_sizes, double* d_rank_sums,
+    double* d_tie_corr, double* d_group_sums, double* d_group_sq_sums,
+    double* d_group_nnz, int n_rows, int n_cols, int n_groups,
+    bool compute_tie_corr, bool compute_sq_sums, bool compute_nnz,
+    int sub_batch_cols) {
+    if (n_rows == 0 || n_cols == 0) return;
+
+    RmmPool pool;
+    size_t total_nnz = (size_t)h_indptr[n_rows];
+
+    // ---- Phase 0: CPU planning in native CSR order ----
+    std::vector<int> h_col_counts(n_cols, 0);
+    for (int row = 0; row < n_rows; row++) {
+        IndptrT rs = h_indptr[row];
+        IndptrT re = h_indptr[row + 1];
+        for (IndptrT p = rs; p < re; ++p) {
+            int c = (int)h_indices[p];
+            if (c >= 0 && c < n_cols) h_col_counts[c]++;
+        }
+    }
+
+    int n_batches = (n_cols + sub_batch_cols - 1) / sub_batch_cols;
+    size_t max_batch_nnz = 0;
+    std::vector<int> h_all_offsets((size_t)n_batches * (sub_batch_cols + 1), 0);
+    std::vector<size_t> h_batch_nnz(n_batches);
+    for (int b = 0; b < n_batches; b++) {
+        int col_start = b * sub_batch_cols;
+        int sb_cols = std::min(sub_batch_cols, n_cols - col_start);
+        int* off = &h_all_offsets[(size_t)b * (sub_batch_cols + 1)];
+        for (int i = 0; i < sb_cols; i++)
+            off[i + 1] = off[i] + h_col_counts[col_start + i];
+        h_batch_nnz[b] = (size_t)off[sb_cols];
+        if (h_batch_nnz[b] > max_batch_nnz) max_batch_nnz = h_batch_nnz[b];
+    }
+
+    int* d_all_offsets =
+        pool.alloc<int>((size_t)n_batches * (sub_batch_cols + 1));
+    cudaMemcpy(d_all_offsets, h_all_offsets.data(),
+               h_all_offsets.size() * sizeof(int), cudaMemcpyHostToDevice);
+
+    // ---- Phase 1: allocate per-stream bounded work buffers ----
+    size_t cub_temp_bytes = 0;
+    if (max_batch_nnz > 0) {
+        auto* fk = reinterpret_cast<float*>(1);
+        auto* iv = reinterpret_cast<int*>(1);
+        cub::DeviceSegmentedRadixSort::SortPairs(
+            nullptr, cub_temp_bytes, fk, fk, iv, iv, (int)max_batch_nnz,
+            sub_batch_cols, iv, iv + 1, BEGIN_BIT, END_BIT);
+    }
+
+    int tpb = UTIL_BLOCK_SIZE;
+    bool rank_use_gmem = false;
+    size_t smem_bytes = sparse_ovr_smem_config(n_groups, rank_use_gmem);
+    bool cast_use_gmem = false;
+    size_t smem_cast = cast_accumulate_smem_config(n_groups, compute_sq_sums,
+                                                   compute_nnz, cast_use_gmem);
+
+    int n_streams = N_STREAMS;
+    if (n_batches < n_streams) n_streams = n_batches;
+
+    size_t per_stream_bytes =
+        max_batch_nnz * (sizeof(InT) + sizeof(float) + 2 * sizeof(int)) +
+        (sub_batch_cols + 1 + sub_batch_cols) * sizeof(int) + cub_temp_bytes +
+        2 * (size_t)n_groups * sub_batch_cols * sizeof(double) +
+        sub_batch_cols * sizeof(double);
+    if (compute_sq_sums) {
+        per_stream_bytes += (size_t)n_groups * sub_batch_cols * sizeof(double);
+    }
+    if (compute_nnz) {
+        per_stream_bytes += (size_t)n_groups * sub_batch_cols * sizeof(double);
+    }
+    if (rank_use_gmem) {
+        per_stream_bytes += (size_t)n_groups * sub_batch_cols * sizeof(double);
+    }
+
+    size_t free_mem = 0, total_mem = 0;
+    cudaMemGetInfo(&free_mem, &total_mem);
+    constexpr double MEM_BUDGET_FRAC = 0.8;
+    size_t budget = (size_t)(free_mem * MEM_BUDGET_FRAC);
+    while (n_streams > 1 && (size_t)n_streams * per_stream_bytes > budget)
+        n_streams--;
+
+    std::vector<cudaStream_t> streams(n_streams);
+    for (int i = 0; i < n_streams; i++) cudaStreamCreate(&streams[i]);
+
+    // Pin the source CSR arrays as mapped memory.  The scatter kernel reads
+    // only the requested column window from each row.
+    HostRegisterGuard pin_data;
+    HostRegisterGuard pin_indices;
+    InT* d_data_zc = nullptr;
+    IndexT* d_indices_zc = nullptr;
+    if (total_nnz > 0) {
+        pin_data =
+            HostRegisterGuard(const_cast<InT*>(h_data), total_nnz * sizeof(InT),
+                              cudaHostRegisterMapped);
+        pin_indices = HostRegisterGuard(const_cast<IndexT*>(h_indices),
+                                        total_nnz * sizeof(IndexT),
+                                        cudaHostRegisterMapped);
+        cudaError_t e1 = cudaHostGetDevicePointer((void**)&d_data_zc,
+                                                  const_cast<InT*>(h_data), 0);
+        cudaError_t e2 = cudaHostGetDevicePointer(
+            (void**)&d_indices_zc, const_cast<IndexT*>(h_indices), 0);
+        if (e1 != cudaSuccess || e2 != cudaSuccess) {
+            throw std::runtime_error(
+                std::string("cudaHostGetDevicePointer failed: ") +
+                cudaGetErrorString(e1 != cudaSuccess ? e1 : e2));
+        }
+    }
+
+    IndptrT* d_indptr_full = pool.alloc<IndptrT>(n_rows + 1);
+    cudaMemcpy(d_indptr_full, h_indptr, (n_rows + 1) * sizeof(IndptrT),
+               cudaMemcpyHostToDevice);
+
+    int* d_group_codes = pool.alloc<int>(n_rows);
+    double* d_group_sizes = pool.alloc<double>(n_groups);
+    cudaMemcpy(d_group_codes, h_group_codes, n_rows * sizeof(int),
+               cudaMemcpyHostToDevice);
+    cudaMemcpy(d_group_sizes, h_group_sizes, n_groups * sizeof(double),
+               cudaMemcpyHostToDevice);
+
+    int scatter_blocks = (n_rows + tpb - 1) / tpb;
+
+    struct StreamBuf {
+        int* col_offsets;
+        int* write_pos;
+        InT* csc_vals_orig;
+        float* csc_vals_f32;
+        int* csc_row_idx;
+        float* keys_out;
+        int* vals_out;
+        uint8_t* cub_temp;
+        double* sub_rank_sums;
+        double* sub_tie_corr;
+        double* sub_group_sums;
+        double* sub_group_sq_sums;
+        double* sub_group_nnz;
+        double* d_nz_scratch;
+    };
+    std::vector<StreamBuf> bufs(n_streams);
+    for (int s = 0; s < n_streams; s++) {
+        bufs[s].col_offsets = pool.alloc<int>(sub_batch_cols + 1);
+        bufs[s].write_pos = pool.alloc<int>(sub_batch_cols);
+        bufs[s].csc_vals_orig = pool.alloc<InT>(max_batch_nnz);
+        bufs[s].csc_vals_f32 = pool.alloc<float>(max_batch_nnz);
+        bufs[s].csc_row_idx = pool.alloc<int>(max_batch_nnz);
+        bufs[s].keys_out = pool.alloc<float>(max_batch_nnz);
+        bufs[s].vals_out = pool.alloc<int>(max_batch_nnz);
+        bufs[s].cub_temp = pool.alloc<uint8_t>(cub_temp_bytes);
+        bufs[s].sub_rank_sums =
+            pool.alloc<double>((size_t)n_groups * sub_batch_cols);
+        bufs[s].sub_tie_corr = pool.alloc<double>(sub_batch_cols);
+        bufs[s].sub_group_sums =
+            pool.alloc<double>((size_t)n_groups * sub_batch_cols);
+        bufs[s].sub_group_sq_sums =
+            compute_sq_sums
+                ? pool.alloc<double>((size_t)n_groups * sub_batch_cols)
+                : nullptr;
+        bufs[s].sub_group_nnz =
+            compute_nnz ? pool.alloc<double>((size_t)n_groups * sub_batch_cols)
+                        : nullptr;
+        bufs[s].d_nz_scratch =
+            rank_use_gmem
+                ? pool.alloc<double>((size_t)n_groups * sub_batch_cols)
+                : nullptr;
+    }
+
+    cudaDeviceSynchronize();
+
+    // ---- Phase 2: bounded CSR->CSC scatter + GPU rank batches ----
+    int col = 0;
+    for (int b = 0; b < n_batches; b++) {
+        int sb_cols = std::min(sub_batch_cols, n_cols - col);
+        int s = b % n_streams;
+        auto stream = streams[s];
+        auto& buf = bufs[s];
+        int batch_nnz = (int)h_batch_nnz[b];
+
+        int* src = d_all_offsets + (size_t)b * (sub_batch_cols + 1);
+        cudaMemcpyAsync(buf.col_offsets, src, (sb_cols + 1) * sizeof(int),
+                        cudaMemcpyDeviceToDevice, stream);
+        cudaMemcpyAsync(buf.write_pos, src, sb_cols * sizeof(int),
+                        cudaMemcpyDeviceToDevice, stream);
+
+        if (batch_nnz > 0) {
+            csr_scatter_to_csc_kernel<InT, IndexT, IndptrT>
+                <<<scatter_blocks, tpb, 0, stream>>>(
+                    d_data_zc, d_indices_zc, d_indptr_full, buf.write_pos,
+                    buf.csc_vals_orig, buf.csc_row_idx, n_rows, col,
+                    col + sb_cols);
+            CUDA_CHECK_LAST_ERROR(csr_scatter_to_csc_kernel);
+        }
+
+        launch_ovr_cast_and_accumulate_sparse<InT>(
+            buf.csc_vals_orig, buf.csc_vals_f32, buf.csc_row_idx,
+            buf.col_offsets, d_group_codes, buf.sub_group_sums,
+            buf.sub_group_sq_sums, buf.sub_group_nnz, sb_cols, n_groups,
+            compute_sq_sums, compute_nnz, tpb, smem_cast, cast_use_gmem,
+            stream);
+
+        if (batch_nnz > 0) {
+            size_t temp = cub_temp_bytes;
+            cub::DeviceSegmentedRadixSort::SortPairs(
+                buf.cub_temp, temp, buf.csc_vals_f32, buf.keys_out,
+                buf.csc_row_idx, buf.vals_out, batch_nnz, sb_cols,
+                buf.col_offsets, buf.col_offsets + 1, BEGIN_BIT, END_BIT,
+                stream);
+        }
+
+        if (rank_use_gmem) {
+            cudaMemsetAsync(buf.sub_rank_sums, 0,
+                            (size_t)n_groups * sb_cols * sizeof(double),
+                            stream);
+            cudaMemsetAsync(buf.d_nz_scratch, 0,
+                            (size_t)n_groups * sb_cols * sizeof(double),
+                            stream);
+        }
+        rank_sums_sparse_ovr_kernel<<<sb_cols, tpb, smem_bytes, stream>>>(
+            buf.keys_out, buf.vals_out, buf.col_offsets, d_group_codes,
+            d_group_sizes, buf.sub_rank_sums, buf.sub_tie_corr,
+            buf.d_nz_scratch, n_rows, sb_cols, n_groups, compute_tie_corr,
+            rank_use_gmem);
+        CUDA_CHECK_LAST_ERROR(rank_sums_sparse_ovr_kernel);
+
+        cudaMemcpy2DAsync(d_rank_sums + col, n_cols * sizeof(double),
+                          buf.sub_rank_sums, sb_cols * sizeof(double),
+                          sb_cols * sizeof(double), n_groups,
+                          cudaMemcpyDeviceToDevice, stream);
+        if (compute_tie_corr) {
+            cudaMemcpyAsync(d_tie_corr + col, buf.sub_tie_corr,
+                            sb_cols * sizeof(double), cudaMemcpyDeviceToDevice,
+                            stream);
+        }
+        cudaMemcpy2DAsync(d_group_sums + col, n_cols * sizeof(double),
+                          buf.sub_group_sums, sb_cols * sizeof(double),
+                          sb_cols * sizeof(double), n_groups,
+                          cudaMemcpyDeviceToDevice, stream);
+        if (compute_sq_sums) {
+            cudaMemcpy2DAsync(d_group_sq_sums + col, n_cols * sizeof(double),
+                              buf.sub_group_sq_sums, sb_cols * sizeof(double),
+                              sb_cols * sizeof(double), n_groups,
+                              cudaMemcpyDeviceToDevice, stream);
+        }
+        if (compute_nnz) {
+            cudaMemcpy2DAsync(d_group_nnz + col, n_cols * sizeof(double),
+                              buf.sub_group_nnz, sb_cols * sizeof(double),
+                              sb_cols * sizeof(double), n_groups,
+                              cudaMemcpyDeviceToDevice, stream);
+        }
+
+        col += sb_cols;
+    }
+
+    for (int s = 0; s < n_streams; s++) {
+        cudaError_t err = cudaStreamSynchronize(streams[s]);
+        if (err != cudaSuccess)
+            throw std::runtime_error(
+                std::string("CUDA error in sparse host CSR streaming: ") +
                 cudaGetErrorString(err));
     }
 

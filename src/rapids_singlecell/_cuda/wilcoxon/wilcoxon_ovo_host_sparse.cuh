@@ -75,6 +75,21 @@ static void ovo_streaming_csc_host_impl(
 
     RmmPool pool;
 
+    int n_batches = (n_cols + sub_batch_cols - 1) / sub_batch_cols;
+    std::vector<int> h_all_offsets((size_t)n_batches * (sub_batch_cols + 1), 0);
+    for (int b = 0; b < n_batches; b++) {
+        int col_start = b * sub_batch_cols;
+        int sb = std::min(sub_batch_cols, n_cols - col_start);
+        IndptrT ptr_start = h_indptr[col_start];
+        int* off = &h_all_offsets[(size_t)b * (sub_batch_cols + 1)];
+        for (int i = 0; i <= sb; i++)
+            off[i] = (int)(h_indptr[col_start + i] - ptr_start);
+    }
+    int* d_all_offsets =
+        pool.alloc<int>((size_t)n_batches * (sub_batch_cols + 1));
+    cudaMemcpy(d_all_offsets, h_all_offsets.data(),
+               h_all_offsets.size() * sizeof(int), cudaMemcpyHostToDevice);
+
     // GPU copies of row maps + group offsets + stats codes (uploaded once)
     int* d_ref_row_map = pool.alloc<int>(n_rows);
     int* d_grp_row_map = pool.alloc<int>(n_rows);
@@ -154,7 +169,9 @@ static void ovo_streaming_csc_host_impl(
 
     int tpb_rank =
         round_up_to_warp(std::min(max_grp_size, MAX_THREADS_PER_BLOCK));
-    size_t smem_cast = (size_t)(3 * n_groups_stats) * sizeof(double);
+    bool cast_use_gmem = false;
+    size_t smem_cast = cast_accumulate_smem_config(
+        n_groups_stats, compute_sq_sums, compute_nnz, cast_use_gmem);
 
     // Pin only the sparse input arrays; outputs live on the device.
     size_t total_nnz = (size_t)h_indptr[n_cols];
@@ -181,22 +198,16 @@ static void ovo_streaming_csc_host_impl(
                         nnz * sizeof(InT), cudaMemcpyHostToDevice, stream);
         cudaMemcpyAsync(buf.d_sparse_indices, h_indices + ptr_start,
                         nnz * sizeof(IndexT), cudaMemcpyHostToDevice, stream);
-        {
-            std::vector<int> h_adj(sb_cols + 1);
-            for (int i = 0; i <= sb_cols; i++)
-                h_adj[i] = (int)(h_indptr[col + i] - ptr_start);
-            cudaMemcpy(buf.d_indptr, h_adj.data(), (sb_cols + 1) * sizeof(int),
-                       cudaMemcpyHostToDevice);
-        }
+        int* src = d_all_offsets + (size_t)batch_idx * (sub_batch_cols + 1);
+        cudaMemcpyAsync(buf.d_indptr, src, (sb_cols + 1) * sizeof(int),
+                        cudaMemcpyDeviceToDevice, stream);
 
         // ---- Cast to float32 for sort + accumulate stats in float64 ----
-        ovr_cast_and_accumulate_sparse_kernel<InT, IndexT>
-            <<<sb_cols, UTIL_BLOCK_SIZE, smem_cast, stream>>>(
-                buf.d_sparse_data_orig, buf.d_sparse_data_f32,
-                buf.d_sparse_indices, buf.d_indptr, d_stats_codes,
-                buf.d_group_sums, buf.d_group_sq_sums, buf.d_group_nnz, sb_cols,
-                n_groups_stats, compute_sq_sums, compute_nnz);
-        CUDA_CHECK_LAST_ERROR(ovr_cast_and_accumulate_sparse_kernel);
+        launch_ovr_cast_and_accumulate_sparse<InT, IndexT>(
+            buf.d_sparse_data_orig, buf.d_sparse_data_f32, buf.d_sparse_indices,
+            buf.d_indptr, d_stats_codes, buf.d_group_sums, buf.d_group_sq_sums,
+            buf.d_group_nnz, sb_cols, n_groups_stats, compute_sq_sums,
+            compute_nnz, UTIL_BLOCK_SIZE, smem_cast, cast_use_gmem, stream);
 
         // ---- Extract ref from CSC via row_map, sort ----
         cudaMemsetAsync(buf.ref_dense, 0, sb_ref_actual * sizeof(float),
@@ -470,7 +481,7 @@ static void ovo_streaming_csr_host_impl(
     // Linux x86-64, but the API is the safe/portable way).
     InT* d_data_zc = nullptr;
     IndexT* d_indices_zc = nullptr;
-    {
+    if (full_nnz > 0) {
         cudaError_t e1 = cudaHostGetDevicePointer((void**)&d_data_zc,
                                                   const_cast<InT*>(h_data), 0);
         cudaError_t e2 = cudaHostGetDevicePointer(

@@ -53,9 +53,9 @@ struct HostRegisterGuard {
     void* ptr = nullptr;
 
     HostRegisterGuard() = default;
-    HostRegisterGuard(void* p, size_t bytes, unsigned int flags = 0) : ptr(p) {
-        if (ptr) {
-            cudaError_t err = cudaHostRegister(ptr, bytes, flags);
+    HostRegisterGuard(void* p, size_t bytes, unsigned int flags = 0) {
+        if (p && bytes > 0) {
+            cudaError_t err = cudaHostRegister(p, bytes, flags);
             if (err != cudaSuccess) {
                 // Already-registered memory is fine; anything else means the
                 // subsequent kernels would read garbage from an unmapped
@@ -63,13 +63,14 @@ struct HostRegisterGuard {
                 if (err == cudaErrorHostMemoryAlreadyRegistered) {
                     cudaGetLastError();  // clear sticky error flag
                 } else {
-                    ptr = nullptr;  // don't unregister in dtor
                     throw std::runtime_error(
                         std::string("cudaHostRegister failed (") +
                         std::to_string((size_t)bytes) +
                         " bytes, flags=" + std::to_string(flags) +
                         "): " + cudaGetErrorString(err));
                 }
+            } else {
+                ptr = p;
             }
         }
     }

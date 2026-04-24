@@ -14,6 +14,10 @@ import rapids_singlecell as rsc
 
 def _to_format(X_dense, fmt):
     """Convert dense numpy array to the specified format."""
+    if fmt == "numpy_dense":
+        return np.asarray(X_dense)
+    if fmt == "scipy_csr":
+        return sp.csr_matrix(X_dense)
     if fmt == "scipy_csc":
         return sp.csc_matrix(X_dense)
     if fmt == "cupy_dense":
@@ -160,6 +164,118 @@ def test_rank_genes_groups_wilcoxon_subset_and_bonferroni(reference):
     for group in result["pvals_adj"].dtype.names:
         adjusted = np.asarray(result["pvals_adj"][group])
         assert np.all(adjusted <= 1.0)
+
+
+@pytest.mark.parametrize(
+    "fmt",
+    [
+        pytest.param("scipy_csr", id="host_csr"),
+        pytest.param("scipy_csc", id="host_csc"),
+        pytest.param("cupy_dense", id="device_dense"),
+    ],
+)
+def test_wilcoxon_subset_rest_stats_match_scanpy(fmt):
+    """groups=... with reference='rest' must use all other cells for stats."""
+    np.random.seed(42)
+    adata_gpu = sc.datasets.blobs(n_variables=6, n_centers=4, n_observations=160)
+    adata_gpu.obs["blobs"] = adata_gpu.obs["blobs"].astype("category")
+    adata_cpu = adata_gpu.copy()
+    adata_gpu.X = _to_format(adata_gpu.X, fmt)
+
+    kw = {
+        "groupby": "blobs",
+        "method": "wilcoxon",
+        "use_raw": False,
+        "groups": ["0", "2"],
+        "reference": "rest",
+        "pts": True,
+        "n_genes": 6,
+    }
+    rsc.tl.rank_genes_groups(adata_gpu, **kw)
+    sc.tl.rank_genes_groups(adata_cpu, **kw)
+
+    gpu_result = adata_gpu.uns["rank_genes_groups"]
+    cpu_result = adata_cpu.uns["rank_genes_groups"]
+    for field in ("scores", "logfoldchanges", "pvals", "pvals_adj"):
+        for group in gpu_result[field].dtype.names:
+            np.testing.assert_allclose(
+                np.asarray(gpu_result[field][group], dtype=float),
+                np.asarray(cpu_result[field][group], dtype=float),
+                rtol=1e-13,
+                atol=1e-15,
+                equal_nan=True,
+            )
+
+    for key in ("pts", "pts_rest"):
+        gpu_pts = gpu_result[key]
+        cpu_pts = cpu_result[key]
+        for col in gpu_pts.columns:
+            np.testing.assert_allclose(
+                gpu_pts[col].values, cpu_pts[col].values, rtol=1e-13, atol=1e-15
+            )
+
+
+@pytest.mark.parametrize("reference", ["rest", "1"])
+@pytest.mark.parametrize("fmt", ["scipy_csr", "scipy_csc"])
+def test_wilcoxon_zero_nnz_host_sparse_does_not_crash(reference, fmt):
+    obs = pd.DataFrame(
+        {
+            "group": pd.Categorical(
+                ["0"] * 4 + ["1"] * 4 + ["2"] * 4,
+                categories=["0", "1", "2"],
+            )
+        }
+    )
+    adata = sc.AnnData(
+        X=_to_format(np.zeros((12, 5), dtype=np.float32), fmt),
+        obs=obs,
+        var=pd.DataFrame(index=[f"g{i}" for i in range(5)]),
+    )
+
+    rsc.tl.rank_genes_groups(
+        adata,
+        "group",
+        method="wilcoxon",
+        use_raw=False,
+        reference=reference,
+        pts=True,
+    )
+
+    result = adata.uns["rank_genes_groups"]
+    for field in ("scores", "pvals"):
+        for group in result[field].dtype.names:
+            assert np.all(np.isfinite(np.asarray(result[field][group], dtype=float)))
+
+
+def test_wilcoxon_dense_ovo_chunk_size_matches_unchunked():
+    np.random.seed(42)
+    base = sc.datasets.blobs(n_variables=9, n_centers=3, n_observations=120)
+    base.obs["blobs"] = base.obs["blobs"].astype("category")
+    unchunked = base.copy()
+    chunked = base.copy()
+    unchunked.X = cp.asarray(unchunked.X)
+    chunked.X = cp.asarray(chunked.X)
+
+    kw = {
+        "groupby": "blobs",
+        "method": "wilcoxon",
+        "use_raw": False,
+        "reference": "1",
+        "tie_correct": True,
+        "n_genes": 9,
+    }
+    rsc.tl.rank_genes_groups(unchunked, **kw)
+    rsc.tl.rank_genes_groups(chunked, **kw, chunk_size=2)
+
+    for field in ("scores", "pvals", "pvals_adj", "logfoldchanges"):
+        for group in unchunked.uns["rank_genes_groups"][field].dtype.names:
+            np.testing.assert_allclose(
+                np.asarray(unchunked.uns["rank_genes_groups"][field][group], float),
+                np.asarray(chunked.uns["rank_genes_groups"][field][group], float),
+                rtol=1e-13,
+                atol=1e-15,
+                equal_nan=True,
+            )
 
 
 @pytest.mark.parametrize(

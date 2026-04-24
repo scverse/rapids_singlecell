@@ -3,6 +3,10 @@ requires = [
     "scikit-build-core>=0.10",
     "nanobind>=2.0.0",
     "setuptools-scm>=8",
+    # librmm headers are needed at build time for the Wilcoxon CUDA kernels.
+    # The headers are identical across cu12/cu13; the runtime .so is loaded
+    # from the installed RAPIDS package.
+    "librmm-cu12>=25.10",
 ]
 build-backend = "scikit_build_core.build"
 
@@ -197,14 +201,3 @@ source = [ "./src", "**/site-packages" ]
 exclude_also = [
     "if TYPE_CHECKING:",
 ]
-
-[tool.uv]
-# librmm headers are needed at build time for the wilcoxon CUDA kernels.
-# The headers are identical across cu12/cu13 — only the .so differs (loaded
-# at runtime via librmm.load_library()).  cu12 is used here as the build-time
-# provider; cu13 envs get the same headers.
-# NOTE: This is uv-specific.  pip users building from source need:
-#   pip install librmm-cu12 && pip install --no-build-isolation -e .
-
-[tool.uv.extra-build-dependencies]
-rapids-singlecell = [ "librmm-cu12>=25.10" ]

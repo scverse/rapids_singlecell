@@ -214,16 +214,18 @@ class _RankGenes:
 
         # Compute rest statistics if reference='rest'
         if self.ireference is None:
-            n_rest = n.sum() - n
-            means_rest = (sums.sum(axis=0) - sums) / n_rest
-            rest_ss = (sq_sums.sum(axis=0) - sq_sums) - n_rest * means_rest**2
+            n_rest = cp.float64(self.X.shape[0]) - n
+            total_sums = result["sum"].sum(axis=0, keepdims=True)
+            total_sq_sums = result["sq_sum"].sum(axis=0, keepdims=True)
+            means_rest = (total_sums - sums) / n_rest
+            rest_ss = (total_sq_sums - sq_sums) - n_rest * means_rest**2
             vars_rest = cp.maximum(rest_ss / cp.maximum(n_rest - 1, 1), 0)
 
             self.means_rest = cp.asnumpy(means_rest)
             self.vars_rest = cp.asnumpy(vars_rest)
 
             if self.comp_pts:
-                total_count = (pts * n).sum(axis=0)
+                total_count = result["count_nonzero"].sum(axis=0, keepdims=True)
                 self.pts_rest = cp.asnumpy((total_count - pts * n) / n_rest)
             else:
                 self.pts_rest = None
@@ -250,6 +252,7 @@ class _RankGenes:
         *,
         tie_correct: bool,
         use_continuity: bool = False,
+        chunk_size: int | None = None,
     ) -> list[tuple[int, NDArray, NDArray]]:
         """Compute Wilcoxon rank-sum test statistics."""
         from ._wilcoxon import wilcoxon
@@ -258,6 +261,7 @@ class _RankGenes:
             self,
             tie_correct=tie_correct,
             use_continuity=use_continuity,
+            chunk_size=chunk_size,
         )
 
     def wilcoxon_binned(
@@ -318,6 +322,7 @@ class _RankGenes:
             test_results = self.wilcoxon(
                 tie_correct=tie_correct,
                 use_continuity=use_continuity,
+                chunk_size=chunk_size,
             )
         elif method == "wilcoxon_binned":
             test_results = self.wilcoxon_binned(

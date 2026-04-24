@@ -160,7 +160,9 @@ static void ovo_streaming_dense_host_impl(
 
     int tpb_rank =
         round_up_to_warp(std::min(max_grp_size, MAX_THREADS_PER_BLOCK));
-    size_t smem_cast = (size_t)(3 * n_groups_stats) * sizeof(double);
+    bool cast_use_gmem = false;
+    size_t smem_cast = cast_accumulate_smem_config(
+        n_groups_stats, compute_sq_sums, compute_nnz, cast_use_gmem);
 
     // Pin only the host input; outputs live on the device.
     HostRegisterGuard _pin_block(const_cast<InT*>(h_block),
@@ -182,12 +184,11 @@ static void ovo_streaming_dense_host_impl(
                         sb_dense * sizeof(InT), cudaMemcpyHostToDevice, stream);
 
         // ---- Cast to float32 for sort + accumulate stats in float64 ----
-        ovr_cast_and_accumulate_dense_kernel<InT>
-            <<<sb_cols, UTIL_BLOCK_SIZE, smem_cast, stream>>>(
-                buf.d_block_orig, buf.d_block_f32, d_stats_codes,
-                buf.d_group_sums, buf.d_group_sq_sums, buf.d_group_nnz, n_rows,
-                sb_cols, n_groups_stats, compute_sq_sums, compute_nnz);
-        CUDA_CHECK_LAST_ERROR(ovr_cast_and_accumulate_dense_kernel);
+        launch_ovr_cast_and_accumulate_dense<InT>(
+            buf.d_block_orig, buf.d_block_f32, d_stats_codes, buf.d_group_sums,
+            buf.d_group_sq_sums, buf.d_group_nnz, n_rows, sb_cols,
+            n_groups_stats, compute_sq_sums, compute_nnz, UTIL_BLOCK_SIZE,
+            smem_cast, cast_use_gmem, stream);
 
         // ---- Gather ref rows, sort ----
         dense_gather_rows_kernel<<<sb_cols, UTIL_BLOCK_SIZE, 0, stream>>>(

@@ -107,10 +107,10 @@ def rank_genes_groups(
     layer
         Key from `adata.layers` whose value will be used to perform tests on.
     chunk_size
-        Number of genes to process at once for `'wilcoxon_binned'`.
-        The default is sized dynamically based on ``n_groups`` and
-        ``n_bins`` to keep histogram memory stable.
-        Ignored for other methods.
+        Number of genes to process at once for memory-bounded Wilcoxon
+        paths. For `'wilcoxon_binned'`, the default is sized dynamically
+        based on ``n_groups`` and ``n_bins`` to keep histogram memory
+        stable.
     pre_load
         Pre-load the data into GPU memory. Used only for `'wilcoxon'`.
     n_bins

@@ -25,6 +25,16 @@ STREAMING_SUB_BATCH = 64
 # ---------------------------------------------------------------------------
 
 
+def _resolve_chunk_size(chunk_size: int | None, n_total_genes: int) -> int:
+    if chunk_size is None:
+        return max(1, n_total_genes)
+    chunk_width = int(chunk_size)
+    if chunk_width <= 0:
+        msg = "`chunk_size` must be a positive integer."
+        raise ValueError(msg)
+    return min(chunk_width, max(1, n_total_genes))
+
+
 def _fill_basic_stats_from_accumulators(
     rg: _RankGenes,
     group_sums: cp.ndarray,
@@ -34,6 +44,9 @@ def _fill_basic_stats_from_accumulators(
     *,
     n_cells: int,
     compute_vars: bool = True,
+    total_sums: cp.ndarray | None = None,
+    total_sq_sums: cp.ndarray | None = None,
+    total_nnz: cp.ndarray | None = None,
 ) -> None:
     """Populate rg.means/vars/pts (+ *_rest) from streamed accumulators.
 
@@ -57,20 +70,23 @@ def _fill_basic_stats_from_accumulators(
 
     if rg.ireference is None:
         n_rest = cp.float64(n_cells) - n
-        total_sum = group_sums.sum(axis=0, keepdims=True)
-        rest_sums = total_sum - group_sums
+        if total_sums is None:
+            total_sums = group_sums.sum(axis=0, keepdims=True)
+        rest_sums = total_sums - group_sums
         rest_means = rest_sums / n_rest
         rg.means_rest = cp.asnumpy(rest_means)
         if compute_vars:
-            total_sq_sum = group_sq_sums.sum(axis=0, keepdims=True)
-            rest_ss = (total_sq_sum - group_sq_sums) - n_rest * rest_means**2
+            if total_sq_sums is None:
+                total_sq_sums = group_sq_sums.sum(axis=0, keepdims=True)
+            rest_ss = (total_sq_sums - group_sq_sums) - n_rest * rest_means**2
             rg.vars_rest = cp.asnumpy(
                 cp.maximum(rest_ss / cp.maximum(n_rest - 1, 1), 0)
             )
         else:
             rg.vars_rest = np.zeros_like(rg.means_rest)
         if rg.comp_pts:
-            total_nnz = group_nnz.sum(axis=0, keepdims=True)
+            if total_nnz is None:
+                total_nnz = group_nnz.sum(axis=0, keepdims=True)
             rg.pts_rest = cp.asnumpy((total_nnz - group_nnz) / n_rest)
         else:
             rg.pts_rest = None
@@ -139,7 +155,8 @@ def _to_gpu_native(X, n_rows: int, n_cols: int):
     if cpsp.issparse(X):
         return X
 
-    # Host sparse → GPU sparse, same format.
+    # Host sparse → GPU sparse, same format.  Wilcoxon kernels are native CSR
+    # or CSC only; do not hide a whole-matrix sparse format conversion here.
     # Downcast indices to int32 on host before transfer (column indices
     # always fit in int32; scipy may use int64 when nnz > 2^31).
     if isinstance(X, sp.spmatrix | sp.sparray):
@@ -152,7 +169,12 @@ def _to_gpu_native(X, n_rows: int, n_cols: int):
                 ),
                 shape=(n_rows, n_cols),
             )
-        csr = X.tocsr() if X.format != "csr" else X
+        if X.format != "csr":
+            raise TypeError(
+                "Wilcoxon sparse input must be CSR or CSC; refusing hidden "
+                f"full-matrix conversion from {X.format!r}."
+            )
+        csr = X
         return cpsp.csr_matrix(
             (
                 cp.asarray(csr.data),
@@ -167,6 +189,128 @@ def _to_gpu_native(X, n_rows: int, n_cols: int):
         return cp.asarray(X)
 
     raise TypeError(f"Unsupported matrix type: {type(X)}")
+
+
+def _host_sparse_fn_and_arrays(module, base_name: str, X, *, support_idx64: bool):
+    """Select host sparse binding and dtype-normalized arrays."""
+    is_f64 = X.data.dtype == np.float64
+    is_idx64 = support_idx64 and X.indices.dtype == np.int64
+    is_i64 = X.indptr.dtype == np.int64
+    suffix = ""
+    if is_f64:
+        suffix += "_f64"
+    if is_idx64:
+        suffix += "_idx64"
+    if is_i64:
+        suffix += "_i64"
+    fn = getattr(module, base_name + suffix)
+    data_arr = X.data if is_f64 else X.data.astype(np.float32, copy=False)
+    indices_arr = X.indices if is_idx64 else X.indices.astype(np.int32, copy=False)
+    return fn, data_arr, indices_arr
+
+
+def _column_totals_for_host_matrix(
+    X, *, compute_sq_sums: bool, compute_nnz: bool
+) -> tuple[cp.ndarray, cp.ndarray | None, cp.ndarray | None]:
+    """Compute all-cell column totals without changing sparse format."""
+    n_cols = X.shape[1]
+
+    if isinstance(X, sp.spmatrix | sp.sparray):
+        data = np.asarray(X.data)
+        values = data.astype(np.float64, copy=False)
+
+        if X.format == "csc":
+            indptr = np.asarray(X.indptr)
+            counts = np.diff(indptr)
+            nonempty = counts > 0
+            starts = indptr[:-1][nonempty]
+
+            sums = np.zeros(n_cols, dtype=np.float64)
+            if starts.size:
+                sums[nonempty] = np.add.reduceat(values, starts)
+
+            sq_sums = None
+            if compute_sq_sums:
+                sq_sums = np.zeros(n_cols, dtype=np.float64)
+                if starts.size:
+                    sq_sums[nonempty] = np.add.reduceat(values * values, starts)
+
+            nnz = None
+            if compute_nnz:
+                nnz = np.zeros(n_cols, dtype=np.float64)
+                if starts.size:
+                    nnz[nonempty] = np.add.reduceat(
+                        (data != 0).astype(np.float64, copy=False), starts
+                    )
+        elif X.format == "csr":
+            indices = np.asarray(X.indices, dtype=np.intp)
+            sums = np.bincount(indices, weights=values, minlength=n_cols).astype(
+                np.float64, copy=False
+            )
+
+            sq_sums = (
+                np.bincount(indices, weights=values * values, minlength=n_cols).astype(
+                    np.float64, copy=False
+                )
+                if compute_sq_sums
+                else None
+            )
+            nnz = (
+                np.bincount(
+                    indices,
+                    weights=(data != 0).astype(np.float64, copy=False),
+                    minlength=n_cols,
+                ).astype(np.float64, copy=False)
+                if compute_nnz
+                else None
+            )
+        else:
+            raise TypeError(
+                "Wilcoxon sparse input must be CSR or CSC; refusing hidden "
+                f"full-matrix conversion from {X.format!r}."
+            )
+    elif isinstance(X, np.ndarray):
+        sums = np.asarray(X.sum(axis=0, dtype=np.float64), dtype=np.float64)
+        sq_sums = (
+            np.asarray(np.square(X, dtype=np.float64).sum(axis=0), dtype=np.float64)
+            if compute_sq_sums
+            else None
+        )
+        nnz = (
+            np.asarray(np.count_nonzero(X, axis=0), dtype=np.float64)
+            if compute_nnz
+            else None
+        )
+    else:
+        raise TypeError(f"Unsupported host matrix type: {type(X)}")
+
+    total_sums = cp.asarray(sums.reshape(1, n_cols), dtype=cp.float64)
+    total_sq_sums = (
+        cp.asarray(sq_sums.reshape(1, n_cols), dtype=cp.float64)
+        if sq_sums is not None
+        else None
+    )
+    total_nnz = (
+        cp.asarray(nnz.reshape(1, n_cols), dtype=cp.float64)
+        if nnz is not None
+        else None
+    )
+    return total_sums, total_sq_sums, total_nnz
+
+
+def _host_ovr_totals_if_needed(
+    X,
+    group_codes: np.ndarray,
+    n_groups: int,
+    *,
+    compute_sq_sums: bool,
+    compute_nnz: bool,
+) -> tuple[cp.ndarray | None, cp.ndarray | None, cp.ndarray | None]:
+    if not np.any(group_codes == n_groups):
+        return None, None, None
+    return _column_totals_for_host_matrix(
+        X, compute_sq_sums=compute_sq_sums, compute_nnz=compute_nnz
+    )
 
 
 def _extract_dense_block(
@@ -298,6 +442,7 @@ def wilcoxon(
     *,
     tie_correct: bool,
     use_continuity: bool = False,
+    chunk_size: int | None = None,
 ) -> list[tuple[int, NDArray, NDArray]]:
     """Compute Wilcoxon rank-sum test statistics."""
     X = rg.X
@@ -316,6 +461,7 @@ def wilcoxon(
             group_sizes,
             tie_correct=tie_correct,
             use_continuity=use_continuity,
+            chunk_size=chunk_size,
         )
     return _wilcoxon_vs_rest(
         rg,
@@ -368,9 +514,10 @@ def _wilcoxon_vs_rest(
 
     # Determine host-streaming eligibility BEFORE transferring
     host_csc = isinstance(X, sp.spmatrix | sp.sparray) and X.format == "csc"
+    host_csr = isinstance(X, sp.spmatrix | sp.sparray) and X.format == "csr"
     host_dense = isinstance(X, np.ndarray)
 
-    if host_csc or host_dense:
+    if host_csc or host_csr or host_dense:
         # Host-streaming: sort+rank stays on host→GPU per sub-batch.  The
         # kernel also emits per-group sum, sum-of-squares, and nonzero
         # counts into caller-provided CuPy buffers, so means/vars/pts can
@@ -395,21 +542,41 @@ def _wilcoxon_vs_rest(
             # Native host dtype is preserved and uploaded once per sub-batch;
             # a pre-sort kernel casts to float32 for the sort keys while
             # accumulating stats in float64 from the original values.
-            is_f64 = X.data.dtype == np.float64
-            is_i64 = X.indptr.dtype == np.int64
-            if is_f64 and is_i64:
-                _csc_host_fn = _ovr.ovr_sparse_csc_host_f64_i64
-            elif is_f64:
-                _csc_host_fn = _ovr.ovr_sparse_csc_host_f64
-            elif is_i64:
-                _csc_host_fn = _ovr.ovr_sparse_csc_host_i64
-            else:
-                _csc_host_fn = _ovr.ovr_sparse_csc_host
-            data_arr = X.data if is_f64 else X.data.astype(np.float32, copy=False)
+            _csc_host_fn, data_arr, indices_arr = _host_sparse_fn_and_arrays(
+                _ovr, "ovr_sparse_csc_host", X, support_idx64=False
+            )
             _csc_host_fn(
                 data_arr,
-                X.indices.astype(np.int32, copy=False),
+                indices_arr,
                 X.indptr,
+                group_codes,
+                group_sizes_np,
+                rank_sums,
+                tie_corr,
+                group_sums,
+                group_sq_sums,
+                group_nnz,
+                n_rows=n_cells,
+                n_cols=n_total_genes,
+                n_groups=n_groups,
+                compute_tie_corr=tie_correct,
+                compute_sq_sums=compute_vars,
+                compute_nnz=compute_nnz,
+                sub_batch_cols=STREAMING_SUB_BATCH,
+            )
+        elif host_csr:
+            group_sizes_np = group_sizes.astype(np.float64, copy=False)
+            csr = X
+            if not csr.has_sorted_indices:
+                csr = csr.copy()
+                csr.sort_indices()
+            _csr_host_fn, data_arr, indices_arr = _host_sparse_fn_and_arrays(
+                _ovr, "ovr_sparse_csr_host", csr, support_idx64=True
+            )
+            _csr_host_fn(
+                data_arr,
+                indices_arr,
+                csr.indptr,
                 group_codes,
                 group_sizes_np,
                 rank_sums,
@@ -451,6 +618,13 @@ def _wilcoxon_vs_rest(
             )
 
         if rg._compute_stats_in_chunks:
+            total_sums, total_sq_sums, total_nnz = _host_ovr_totals_if_needed(
+                X,
+                group_codes,
+                n_groups,
+                compute_sq_sums=compute_vars,
+                compute_nnz=compute_nnz,
+            )
             _fill_basic_stats_from_accumulators(
                 rg,
                 group_sums,
@@ -459,9 +633,12 @@ def _wilcoxon_vs_rest(
                 group_sizes.astype(np.float64, copy=False),
                 n_cells=n_cells,
                 compute_vars=compute_vars,
+                total_sums=total_sums,
+                total_sq_sums=total_sq_sums,
+                total_nnz=total_nnz,
             )
     else:
-        # GPU data or host CSR → transfer to GPU, use GPU kernels
+        # GPU data → use native GPU kernels.
         X_gpu = _to_gpu_native(X, n_cells, n_total_genes)
 
         if rg._compute_stats_in_chunks:
@@ -563,6 +740,7 @@ def _wilcoxon_with_reference(
     *,
     tie_correct: bool,
     use_continuity: bool,
+    chunk_size: int | None,
 ) -> list[tuple[int, NDArray, NDArray]]:
     """Wilcoxon test: each group vs a specific reference group.
 
@@ -684,29 +862,8 @@ def _wilcoxon_with_reference(
         )
 
         if host_sparse and X.format == "csc":
-            is_f64 = X.data.dtype == np.float64
-            is_idx64 = X.indices.dtype == np.int64
-            is_i64 = X.indptr.dtype == np.int64
-            if is_f64:
-                if is_idx64 and is_i64:
-                    _csc_host_fn = _wc.ovo_streaming_csc_host_f64_idx64_i64
-                elif is_idx64:
-                    _csc_host_fn = _wc.ovo_streaming_csc_host_f64_idx64
-                elif is_i64:
-                    _csc_host_fn = _wc.ovo_streaming_csc_host_f64_i64
-                else:
-                    _csc_host_fn = _wc.ovo_streaming_csc_host_f64
-            elif is_idx64 and is_i64:
-                _csc_host_fn = _wc.ovo_streaming_csc_host_idx64_i64
-            elif is_idx64:
-                _csc_host_fn = _wc.ovo_streaming_csc_host_idx64
-            elif is_i64:
-                _csc_host_fn = _wc.ovo_streaming_csc_host_i64
-            else:
-                _csc_host_fn = _wc.ovo_streaming_csc_host
-            data_arr = X.data if is_f64 else X.data.astype(np.float32, copy=False)
-            indices_arr = (
-                X.indices if is_idx64 else X.indices.astype(np.int32, copy=False)
+            _csc_host_fn, data_arr, indices_arr = _host_sparse_fn_and_arrays(
+                _wc, "ovo_streaming_csc_host", X, support_idx64=True
             )
             _csc_host_fn(
                 data_arr,
@@ -732,37 +889,16 @@ def _wilcoxon_with_reference(
                 compute_nnz=compute_nnz,
                 sub_batch_cols=STREAMING_SUB_BATCH,
             )
-        elif host_sparse:
-            csr = X.tocsr() if X.format != "csr" else X
+        elif host_sparse and X.format == "csr":
+            csr = X
             if not csr.has_sorted_indices:
                 csr = csr.copy()
                 csr.sort_indices()
-            is_f64 = csr.data.dtype == np.float64
-            is_idx64 = csr.indices.dtype == np.int64
-            is_i64 = csr.indptr.dtype == np.int64
 
             # Zero-copy mapped: pin full CSR, upload indptr + row_ids, GPU
             # kernels gather per-pack rows via UVA reads.
-            if is_f64:
-                if is_idx64 and is_i64:
-                    _csr_host_fn = _wc.ovo_streaming_csr_host_f64_idx64_i64
-                elif is_idx64:
-                    _csr_host_fn = _wc.ovo_streaming_csr_host_f64_idx64
-                elif is_i64:
-                    _csr_host_fn = _wc.ovo_streaming_csr_host_f64_i64
-                else:
-                    _csr_host_fn = _wc.ovo_streaming_csr_host_f64
-            elif is_idx64 and is_i64:
-                _csr_host_fn = _wc.ovo_streaming_csr_host_idx64_i64
-            elif is_idx64:
-                _csr_host_fn = _wc.ovo_streaming_csr_host_idx64
-            elif is_i64:
-                _csr_host_fn = _wc.ovo_streaming_csr_host_i64
-            else:
-                _csr_host_fn = _wc.ovo_streaming_csr_host
-            data_arr = csr.data if is_f64 else csr.data.astype(np.float32, copy=False)
-            indices_arr = (
-                csr.indices if is_idx64 else csr.indices.astype(np.int32, copy=False)
+            _csr_host_fn, data_arr, indices_arr = _host_sparse_fn_and_arrays(
+                _wc, "ovo_streaming_csr_host", csr, support_idx64=True
             )
             _csr_host_fn(
                 data_arr,
@@ -786,6 +922,11 @@ def _wilcoxon_with_reference(
                 compute_sq_sums=compute_vars,
                 compute_nnz=compute_nnz,
                 sub_batch_cols=STREAMING_SUB_BATCH,
+            )
+        elif host_sparse:
+            raise TypeError(
+                "Wilcoxon sparse input must be CSR or CSC; refusing hidden "
+                f"full-matrix conversion from {X.format!r}."
             )
         else:
             is_f64 = X.dtype == np.float64
@@ -869,9 +1010,9 @@ def _wilcoxon_with_reference(
                 compute_tie_corr=tie_correct,
                 sub_batch_cols=STREAMING_SUB_BATCH,
             )
-        elif cpsp.issparse(X_gpu):
+        elif cpsp.isspmatrix_csr(X_gpu):
             # CSR-native: extract ref/grp rows directly
-            csr_gpu = X_gpu.tocsr() if not cpsp.isspmatrix_csr(X_gpu) else X_gpu
+            csr_gpu = X_gpu
             if not csr_gpu.has_sorted_indices:
                 csr_gpu = csr_gpu.copy()
                 csr_gpu.sort_indices()
@@ -895,33 +1036,50 @@ def _wilcoxon_with_reference(
                 compute_tie_corr=tie_correct,
                 sub_batch_cols=STREAMING_SUB_BATCH,
             )
+        elif cpsp.issparse(X_gpu):
+            raise TypeError(
+                "Wilcoxon sparse input must be CSR or CSC; refusing hidden "
+                "full-matrix GPU sparse conversion."
+            )
         else:
-            # Dense: extract blocks, sort, stream
-            ref_block = _extract_dense_block(X_gpu, ref_row_ids_gpu, 0, n_total_genes)
-            grp_block = _extract_dense_block(
-                X_gpu, all_grp_row_ids_gpu, 0, n_total_genes
-            )
-            ref_sorted = _segmented_sort_columns(
-                ref_block,
-                np.array([0, n_ref], dtype=np.int32),
-                n_ref,
-                n_total_genes,
-                1,
-            )
-            grp_f32 = cp.asfortranarray(grp_block.astype(cp.float32, copy=False))
-            cp.cuda.get_current_stream().synchronize()
-            _wc.ovo_streaming(
-                ref_sorted,
-                grp_f32,
-                grp_offsets_gpu,
-                rank_sums,
-                tie_corr_arr,
-                n_ref=n_ref,
-                n_all_grp=n_all_grp,
-                n_cols=n_total_genes,
-                n_groups=n_test,
-                compute_tie_corr=tie_correct,
-            )
+            # Dense device data is already resident, but extracting all genes
+            # for all reference/test rows can still blow up memory.  Preserve
+            # the public chunk_size escape hatch by materializing bounded
+            # column blocks and stitching the CUDA outputs together.
+            dense_chunk = _resolve_chunk_size(chunk_size, n_total_genes)
+            for start in range(0, n_total_genes, dense_chunk):
+                stop = min(start + dense_chunk, n_total_genes)
+                sb_cols = stop - start
+                ref_block = _extract_dense_block(X_gpu, ref_row_ids_gpu, start, stop)
+                grp_block = _extract_dense_block(
+                    X_gpu, all_grp_row_ids_gpu, start, stop
+                )
+                ref_sorted = _segmented_sort_columns(
+                    ref_block,
+                    np.array([0, n_ref], dtype=np.int32),
+                    n_ref,
+                    sb_cols,
+                    1,
+                )
+                grp_f32 = cp.asfortranarray(grp_block.astype(cp.float32, copy=False))
+                sub_rank_sums = cp.empty((n_test, sb_cols), dtype=cp.float64)
+                sub_tie_corr = cp.empty((n_test, sb_cols), dtype=cp.float64)
+                cp.cuda.get_current_stream().synchronize()
+                _wc.ovo_streaming(
+                    ref_sorted,
+                    grp_f32,
+                    grp_offsets_gpu,
+                    sub_rank_sums,
+                    sub_tie_corr,
+                    n_ref=n_ref,
+                    n_all_grp=n_all_grp,
+                    n_cols=sb_cols,
+                    n_groups=n_test,
+                    compute_tie_corr=tie_correct,
+                    sub_batch_cols=STREAMING_SUB_BATCH,
+                )
+                rank_sums[:, start:stop] = sub_rank_sums
+                tie_corr_arr[:, start:stop] = sub_tie_corr
 
     # ---- z-scores & p-values (vectorised) ----
     n_combined = test_sizes + n_ref
