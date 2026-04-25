@@ -5,26 +5,30 @@
 
 using namespace nb::literals;
 
+constexpr int BLOCK_SIZE = 256;
+
 template <typename T>
 static inline void launch_outer(T* E, const T* Pr_b, const T* R_sum,
                                 long long n_cats, long long n_pcs,
                                 long long switcher, cudaStream_t stream) {
-    dim3 block(256);
+    dim3 block(BLOCK_SIZE);
     long long N = n_cats * n_pcs;
     dim3 grid((unsigned)((N + block.x - 1) / block.x));
     outer_kernel<T>
         <<<grid, block, 0, stream>>>(E, Pr_b, R_sum, n_cats, n_pcs, switcher);
+    CUDA_CHECK_LAST_ERROR(outer_kernel);
 }
 
 template <typename T>
 static inline void launch_harmony_corr(T* Z, const T* W, const int* cats,
                                        const T* R, long long n_cells,
                                        long long n_pcs, cudaStream_t stream) {
-    dim3 block(256);
+    dim3 block(BLOCK_SIZE);
     long long N = n_cells * n_pcs;
     dim3 grid((unsigned)((N + block.x - 1) / block.x));
     harmony_correction_kernel<T>
         <<<grid, block, 0, stream>>>(Z, W, cats, R, n_cells, n_pcs);
+    CUDA_CHECK_LAST_ERROR(harmony_correction_kernel);
 }
 
 template <typename T>
@@ -33,11 +37,12 @@ static inline void launch_batched_correction(T* Z, const T* W_all,
                                              int n_cells, int n_pcs,
                                              int n_clusters, int n_batches_p1,
                                              cudaStream_t stream) {
-    dim3 block(256);
+    dim3 block(BLOCK_SIZE);
     long long N = (long long)n_cells * n_pcs;
     dim3 grid((unsigned)((N + block.x - 1) / block.x));
     batched_correction_kernel<T><<<grid, block, 0, stream>>>(
         Z, W_all, cats, R, n_cells, n_pcs, n_clusters, n_batches_p1);
+    CUDA_CHECK_LAST_ERROR(batched_correction_kernel);
 }
 
 template <typename Device>

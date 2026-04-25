@@ -22,6 +22,7 @@ static inline void launch_tie_correction(const double* sorted_vals,
     dim3 grid(n_cols);
     tie_correction_kernel<<<grid, block, 0, stream>>>(sorted_vals, correction,
                                                       n_rows, n_cols);
+    CUDA_CHECK_LAST_ERROR(tie_correction_kernel);
 }
 
 static inline void launch_average_rank(const double* sorted_vals,
@@ -33,6 +34,7 @@ static inline void launch_average_rank(const double* sorted_vals,
     dim3 grid(n_cols);
     average_rank_kernel<<<grid, block, 0, stream>>>(sorted_vals, sorter, ranks,
                                                     n_rows, n_cols);
+    CUDA_CHECK_LAST_ERROR(average_rank_kernel);
 }
 
 template <typename Device>

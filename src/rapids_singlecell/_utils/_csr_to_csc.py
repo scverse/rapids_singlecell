@@ -25,11 +25,12 @@ def _csr_to_csc_kernel(csr_data, csr_indices, csr_indptr, n_cols):
     csc_indptr = np.empty(n_cols + 1, dtype=np.int64)
     csc_indptr[0] = 0
 
-    # Block size targeting 256 MB per block buffer
-    target_mem_bytes = 256 * 1024 * 1024
-    block_size = target_mem_bytes // (num_threads * 8)
-    if block_size < 1000:
-        block_size = 1000
+    # Block size targeting 256 MB per block buffer (L3 cache target)
+    TARGET_MEM_BYTES = 256 * 1024 * 1024
+    MIN_BLOCK_SIZE = 1000
+    block_size = TARGET_MEM_BYTES // (num_threads * 8)
+    if block_size < MIN_BLOCK_SIZE:
+        block_size = MIN_BLOCK_SIZE
 
     # Workspace: threads x block_width
     counts = np.zeros((num_threads, block_size), dtype=np.int64)

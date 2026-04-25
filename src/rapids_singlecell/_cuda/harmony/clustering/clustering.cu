@@ -18,16 +18,27 @@
 
 using namespace nb::literals;
 
+constexpr unsigned WARP_SIZE = 32;
+constexpr unsigned MAX_BLOCK_DIM = 256;
+constexpr int BLOCK_DIM_1D = 256;
+constexpr int MAX_BLOCK_DIM_1D = 1024;
+constexpr int BLOCKS_PER_SM = 8;
+constexpr int SCATTER_SHARED_BLOCKS_PER_SM = 4;
+constexpr int SCATTER_SHARED_CELLS_PER_BLOCK = 64;
+
 // ---------- Launch helpers ----------
 
-// 1D grid size capped at 8 blocks/SM
+// 1D grid size capped at BLOCKS_PER_SM blocks/SM
 static inline int grid_1d(int n, int n_sm) {
-    return std::min(n_sm * 8, (n + 255) / 256);
+    return std::min(n_sm * BLOCKS_PER_SM,
+                    (n + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D);
 }
 
-// Block dim rounded up to nearest warp, capped at 256
+// Block dim rounded up to nearest warp, capped at MAX_BLOCK_DIM
 static inline unsigned warp_aligned_bdim(unsigned n) {
-    return std::min(256u, std::max(32u, (n + 31u) / 32u * 32u));
+    return std::min(
+        MAX_BLOCK_DIM,
+        std::max(WARP_SIZE, (n + WARP_SIZE - 1u) / WARP_SIZE * WARP_SIZE));
 }
 
 // ---------- CUB temp-storage query ----------
@@ -57,22 +68,30 @@ static inline void colsum_dispatch(int algo, cublasHandle_t handle, const T* A,
 
     switch (algo) {
         case COLSUM_COLUMNS: {
-            int threads = std::min(1024, std::max(32, (rows + 31) / 32 * 32));
-            colsum_kernel<T><<<std::min(cols, n_sm * 8), threads, 0, stream>>>(
-                A, out, rows, cols);
+            int threads = std::min(
+                MAX_BLOCK_DIM_1D,
+                std::max((int)WARP_SIZE, (rows + (int)WARP_SIZE - 1) /
+                                             (int)WARP_SIZE * (int)WARP_SIZE));
+            colsum_kernel<T>
+                <<<std::min(cols, n_sm * BLOCKS_PER_SM), threads, 0, stream>>>(
+                    A, out, rows, cols);
+            CUDA_CHECK_LAST_ERROR(colsum_kernel);
             break;
         }
         case COLSUM_ATOMICS: {
             cudaMemsetAsync(out, 0, cols * sizeof(T), stream);
-            int col_tiles = (cols + 31) / 32;
+            int col_tiles = (cols + (int)WARP_SIZE - 1) / (int)WARP_SIZE;
             int target_row_tiles =
-                std::max(1, n_sm * 4 / std::max(1, col_tiles));
+                std::max(1, n_sm * SCATTER_SHARED_BLOCKS_PER_SM /
+                                std::max(1, col_tiles));
             int rows_per_tile =
-                std::max(32, (rows + target_row_tiles - 1) / target_row_tiles);
+                std::max((int)WARP_SIZE,
+                         (rows + target_row_tiles - 1) / target_row_tiles);
             int row_tiles = (rows + rows_per_tile - 1) / rows_per_tile;
             colsum_atomic_kernel<T>
-                <<<dim3(col_tiles, row_tiles), dim3(32, 32), 0, stream>>>(
-                    A, out, rows, cols, rows_per_tile);
+                <<<dim3(col_tiles, row_tiles), dim3(WARP_SIZE, WARP_SIZE), 0,
+                   stream>>>(A, out, rows, cols, rows_per_tile);
+            CUDA_CHECK_LAST_ERROR(colsum_atomic_kernel);
             break;
         }
         default:  // COLSUM_GEMM
@@ -91,15 +110,21 @@ static inline void scatter_add_to_O(const T* R_buf, const int* cats_in,
                                     bool use_shared, size_t shared_bytes,
                                     int n_sm, cudaStream_t stream) {
     if (use_shared) {
-        int max_blocks = std::max(1, (current_bs + 63) / 64);
-        int blocks = std::min(n_sm * 4, max_blocks);
-        scatter_add_shared_kernel<T><<<blocks, 256, shared_bytes, stream>>>(
-            R_buf, cats_in, current_bs, n_clusters, n_batches, switcher, O);
+        int max_blocks =
+            std::max(1, (current_bs + SCATTER_SHARED_CELLS_PER_BLOCK - 1) /
+                            SCATTER_SHARED_CELLS_PER_BLOCK);
+        int blocks = std::min(n_sm * SCATTER_SHARED_BLOCKS_PER_SM, max_blocks);
+        scatter_add_shared_kernel<T>
+            <<<blocks, BLOCK_DIM_1D, shared_bytes, stream>>>(
+                R_buf, cats_in, current_bs, n_clusters, n_batches, switcher, O);
+        CUDA_CHECK_LAST_ERROR(scatter_add_shared_kernel);
     } else {
         size_t N = (size_t)current_bs * n_clusters;
-        scatter_add_kernel<T><<<(int)((N + 255) / 256), 256, 0, stream>>>(
-            R_buf, cats_in, (size_t)current_bs, (size_t)n_clusters,
-            (size_t)switcher, O);
+        scatter_add_kernel<T>
+            <<<(int)((N + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D), BLOCK_DIM_1D, 0,
+               stream>>>(R_buf, cats_in, (size_t)current_bs, (size_t)n_clusters,
+                         (size_t)switcher, O);
+        CUDA_CHECK_LAST_ERROR(scatter_add_kernel);
     }
 }
 
@@ -145,6 +170,7 @@ struct ClusteringArgs {
     T tol;
     int max_iter;
     unsigned int seed;
+    bool stabilized;
     cudaStream_t stream;
 };
 
@@ -154,7 +180,8 @@ template <typename T>
 static T compute_objective_impl(const T* R, const T* similarities, const T* O,
                                 const T* E, const T* theta, T sigma,
                                 T* obj_scalar, int n_cells, int n_clusters,
-                                int n_batches, cudaStream_t stream) {
+                                int n_batches, bool stabilized,
+                                cudaStream_t stream) {
     int device;
     cudaGetDevice(&device);
     cudaDeviceProp prop;
@@ -166,23 +193,31 @@ static T compute_objective_impl(const T* R, const T* similarities, const T* O,
     // K-means error: sum(R[i] * 2 * (1 - sim[i]))
     {
         size_t n = (size_t)n_cells * n_clusters;
-        kmeans_err_kernel<T><<<grid_1d((int)n, n_sm), 256, 0, stream>>>(
-            R, similarities, n, obj_scalar);
+        kmeans_err_kernel<T>
+            <<<grid_1d((int)n, n_sm), BLOCK_DIM_1D, 0, stream>>>(
+                R, similarities, n, obj_scalar);
+        CUDA_CHECK_LAST_ERROR(kmeans_err_kernel);
     }
 
     // Entropy: sigma * sum(x_norm * log(x_norm + eps)), row-normalized
     // internally
     entropy_kernel<T><<<n_cells, warp_aligned_bdim(n_clusters), 0, stream>>>(
         R, sigma, n_cells, n_clusters, obj_scalar);
+    CUDA_CHECK_LAST_ERROR(entropy_kernel);
 
-    // Diversity: sigma * sum(theta[b] * O[b,k] * log((O[b,k]+1)/(E[b,k]+1)))
+    // Diversity penalty (stabilized selects Harmony2 formula)
     {
         int ob_total = n_batches * n_clusters;
         int threads = (int)warp_aligned_bdim(ob_total);
         int blocks =
             std::max(1, std::min(n_sm, (ob_total + threads - 1) / threads));
-        diversity_kernel<T><<<blocks, threads, 0, stream>>>(
-            O, E, theta, sigma, n_batches, n_clusters, obj_scalar);
+        if (stabilized)
+            diversity_kernel<T, true><<<blocks, threads, 0, stream>>>(
+                O, E, theta, sigma, n_batches, n_clusters, obj_scalar);
+        else
+            diversity_kernel<T, false><<<blocks, threads, 0, stream>>>(
+                O, E, theta, sigma, n_batches, n_clusters, obj_scalar);
+        CUDA_CHECK_LAST_ERROR(diversity_kernel);
     }
 
     T host_obj;
@@ -233,6 +268,7 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
         l2_row_normalize_kernel<T>
             <<<a.n_clusters, warp_aligned_bdim(a.n_pcs), 0, a.stream>>>(
                 a.Y, a.Y_norm, a.n_clusters, a.n_pcs);
+        CUDA_CHECK_LAST_ERROR(l2_row_normalize_kernel);
 
         // ---- Similarities: Z_norm @ Y_norm^T ----
         cublas_gemm<T>(handle, CUBLAS_OP_T, CUBLAS_OP_N, a.n_clusters,
@@ -240,10 +276,12 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
                        a.n_pcs, &zero, a.similarities, a.n_clusters);
 
         // ---- Shuffle: random permutation via PCG hash + radix sort ----
-        pcg_hash_kernel<<<grid_1d(a.n_cells, n_sm), 256, 0, a.stream>>>(
-            a.sort_keys, a.n_cells, a.seed + iter);
-        iota_kernel<<<grid_1d(a.n_cells, n_sm), 256, 0, a.stream>>>(a.idx_list,
-                                                                    a.n_cells);
+        pcg_hash_kernel<<<grid_1d(a.n_cells, n_sm), BLOCK_DIM_1D, 0,
+                          a.stream>>>(a.sort_keys, a.n_cells, a.seed + iter);
+        CUDA_CHECK_LAST_ERROR(pcg_hash_kernel);
+        iota_kernel<<<grid_1d(a.n_cells, n_sm), BLOCK_DIM_1D, 0, a.stream>>>(
+            a.idx_list, a.n_cells);
+        CUDA_CHECK_LAST_ERROR(iota_kernel);
 
         cub::DeviceRadixSort::SortPairs(
             a.cub_temp, cub_temp_bytes, a.sort_keys, a.sort_keys_alt,
@@ -255,11 +293,13 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
             const int* block_idx = a.idx_list_alt + pos;
 
             // Gather block: R[idx] -> R_out_buffer, cats[idx] -> cats_in
-            gather_rows_kernel<T>
-                <<<grid_1d(bs * a.n_clusters, n_sm), 256, 0, a.stream>>>(
-                    a.R, block_idx, a.R_out_buffer, bs, a.n_clusters);
-            gather_int_kernel<<<grid_1d(bs, n_sm), 256, 0, a.stream>>>(
+            gather_rows_kernel<T><<<grid_1d(bs * a.n_clusters, n_sm),
+                                    BLOCK_DIM_1D, 0, a.stream>>>(
+                a.R, block_idx, a.R_out_buffer, bs, a.n_clusters);
+            CUDA_CHECK_LAST_ERROR(gather_rows_kernel);
+            gather_int_kernel<<<grid_1d(bs, n_sm), BLOCK_DIM_1D, 0, a.stream>>>(
                 a.cats, block_idx, a.cats_in, bs);
+            CUDA_CHECK_LAST_ERROR(gather_int_kernel);
 
             // Remove old contribution: O -= scatter(R_in), E -= Pr_b @ R_in_sum
             colsum_dispatch<T>(a.colsum_algo, handle, a.R_out_buffer,
@@ -268,38 +308,55 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
             scatter_add_to_O<T>(a.R_out_buffer, a.cats_in, bs, a.n_clusters,
                                 a.n_batches, 0, a.O, use_scatter_shared,
                                 scatter_shared_bytes, n_sm, a.stream);
-            outer_kernel<T><<<(ob_total + 255) / 256, 256, 0, a.stream>>>(
+            outer_kernel<T><<<(ob_total + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D,
+                              BLOCK_DIM_1D, 0, a.stream>>>(
                 a.E, a.Pr_b, a.R_in_sum, (long long)a.n_batches,
                 (long long)a.n_clusters, 0LL);
+            CUDA_CHECK_LAST_ERROR(outer_kernel);
 
             // Compute penalty and fused softmax -> R_out_buffer
-            penalty_kernel<T><<<(ob_total + 255) / 256, 256, 0, a.stream>>>(
-                a.E, a.O, a.theta, a.penalty, a.n_batches, a.n_clusters);
+            if (a.stabilized)
+                penalty_kernel<T, true>
+                    <<<(ob_total + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D,
+                       BLOCK_DIM_1D, 0, a.stream>>>(a.E, a.O, a.theta,
+                                                    a.penalty, a.n_batches,
+                                                    a.n_clusters);
+            else
+                penalty_kernel<T, false>
+                    <<<(ob_total + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D,
+                       BLOCK_DIM_1D, 0, a.stream>>>(a.E, a.O, a.theta,
+                                                    a.penalty, a.n_batches,
+                                                    a.n_clusters);
+            CUDA_CHECK_LAST_ERROR(penalty_kernel);
             fused_pen_norm_kernel<T, int>
                 <<<bs, warp_aligned_bdim(a.n_clusters), 0, a.stream>>>(
                     a.similarities, a.penalty, a.cats_in, block_idx,
                     a.R_out_buffer, term, bs, a.n_clusters);
+            CUDA_CHECK_LAST_ERROR(fused_pen_norm_kernel);
 
             // Write back and add new contribution: O += scatter(R_out), E +=
             // Pr_b @ R_out_sum
-            scatter_rows_kernel<T>
-                <<<grid_1d(bs * a.n_clusters, n_sm), 256, 0, a.stream>>>(
-                    a.R_out_buffer, block_idx, a.R, bs, a.n_clusters);
+            scatter_rows_kernel<T><<<grid_1d(bs * a.n_clusters, n_sm),
+                                     BLOCK_DIM_1D, 0, a.stream>>>(
+                a.R_out_buffer, block_idx, a.R, bs, a.n_clusters);
+            CUDA_CHECK_LAST_ERROR(scatter_rows_kernel);
             colsum_dispatch<T>(a.colsum_algo, handle, a.R_out_buffer,
                                a.R_out_sum, a.ones_vec, bs, a.n_clusters, n_sm,
                                a.stream);
             scatter_add_to_O<T>(a.R_out_buffer, a.cats_in, bs, a.n_clusters,
                                 a.n_batches, 1, a.O, use_scatter_shared,
                                 scatter_shared_bytes, n_sm, a.stream);
-            outer_kernel<T><<<(ob_total + 255) / 256, 256, 0, a.stream>>>(
+            outer_kernel<T><<<(ob_total + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D,
+                              BLOCK_DIM_1D, 0, a.stream>>>(
                 a.E, a.Pr_b, a.R_out_sum, (long long)a.n_batches,
                 (long long)a.n_clusters, 1LL);
+            CUDA_CHECK_LAST_ERROR(outer_kernel);
         }
 
         // ---- Objective function (reuses similarities buffer) ----
         host_obj = compute_objective_impl(
             a.R, a.similarities, a.O, a.E, a.theta, a.sigma, a.obj_scalar,
-            a.n_cells, a.n_clusters, a.n_batches, a.stream);
+            a.n_cells, a.n_clusters, a.n_batches, a.stabilized, a.stream);
         objectives.push_back(host_obj);
 
         if (static_cast<int>(objectives.size()) >= WINDOW_SIZE + 1) {
@@ -343,7 +400,7 @@ static void register_clustering_loop(nb::module_& m) {
            gpu_array_c<T, Device> last_obj, int n_cells, int n_pcs,
            int n_clusters, int n_batches, int block_size, int colsum_algo,
            double sigma, double tol, int max_iter, unsigned int seed,
-           std::uintptr_t stream) {
+           bool stabilized, std::uintptr_t stream) {
             ClusteringArgs<T> a{
                 Z_norm.data(),
                 R.data(),
@@ -378,6 +435,7 @@ static void register_clustering_loop(nb::module_& m) {
                 static_cast<T>(tol),
                 max_iter,
                 seed,
+                stabilized,
                 (cudaStream_t)stream,
             };
             clustering_loop_impl(a);
@@ -388,7 +446,8 @@ static void register_clustering_loop(nb::module_& m) {
         "R_out_buffer"_a, "cats_in"_a, "R_in_sum"_a, "R_out_sum"_a, "penalty"_a,
         "obj_scalar"_a, "ones_vec"_a, "last_obj"_a, "n_cells"_a, "n_pcs"_a,
         "n_clusters"_a, "n_batches"_a, "block_size"_a, "colsum_algo"_a,
-        "sigma"_a, "tol"_a, "max_iter"_a, "seed"_a, "stream"_a = 0);
+        "sigma"_a, "tol"_a, "max_iter"_a, "seed"_a, "stabilized"_a,
+        "stream"_a = 0);
 }
 
 template <typename T, typename Device>
@@ -400,15 +459,15 @@ static void register_compute_objective(nb::module_& m) {
            gpu_array_c<const T, Device> O, gpu_array_c<const T, Device> E,
            gpu_array_c<const T, Device> theta, double sigma,
            gpu_array_c<T, Device> obj_scalar, int n_cells, int n_clusters,
-           int n_batches, std::uintptr_t stream) {
+           int n_batches, bool stabilized, std::uintptr_t stream) {
             return compute_objective_impl<T>(
                 R.data(), similarities.data(), O.data(), E.data(), theta.data(),
                 static_cast<T>(sigma), obj_scalar.data(), n_cells, n_clusters,
-                n_batches, (cudaStream_t)stream);
+                n_batches, stabilized, (cudaStream_t)stream);
         },
         "R"_a, nb::kw_only(), "similarities"_a, "O"_a, "E"_a, "theta"_a,
         "sigma"_a, "obj_scalar"_a, "n_cells"_a, "n_clusters"_a, "n_batches"_a,
-        "stream"_a = 0);
+        "stabilized"_a, "stream"_a = 0);
 }
 
 template <typename Device>

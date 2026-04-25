@@ -10,10 +10,14 @@
 
 using namespace nb::literals;
 
+constexpr int WARP_SIZE = 32;
+constexpr int MAX_BLOCK_DIM = 256;
+constexpr int BLOCK_DIM_1D = 256;
+
 template <typename T>
 static void correction_batched_impl(
     const T* X, const T* R, const T* O, const int* cats, const int* cat_offsets,
-    const int* cell_indices, T ridge_lambda, int n_cells, int n_pcs,
+    const int* cell_indices, const T* lambda_kb, int n_cells, int n_pcs,
     int n_clusters, int n_batches,
     // workspace
     T* Z, T* inv_mats, T* Phi_t_diag_R_X_all, T* W_all, T* g_factor,
@@ -25,10 +29,13 @@ static void correction_batched_impl(
                     cudaMemcpyDeviceToDevice, stream);
 
     // Step 2: Compute all inv_mats at once (n_clusters blocks, cluster_k=-1)
-    int bdim = std::min(256, std::max(32, (n_batches + 31) / 32 * 32));
+    int bdim = std::min(MAX_BLOCK_DIM,
+                        std::max(WARP_SIZE, (n_batches + WARP_SIZE - 1) /
+                                                WARP_SIZE * WARP_SIZE));
     compute_inv_mats_kernel<T><<<n_clusters, bdim, 0, stream>>>(
-        O, ridge_lambda, inv_mats, g_factor, g_P_row0, n_batches, n_clusters,
+        O, lambda_kb, inv_mats, g_factor, g_P_row0, n_batches, n_clusters,
         /*cluster_k=*/-1);
+    CUDA_CHECK_LAST_ERROR(compute_inv_mats_kernel);
 
     // cuBLAS handle
     cublasHandle_t handle;
@@ -54,12 +61,16 @@ static void correction_batched_impl(
     // Gather X and R into batch-sorted order
     {
         size_t n_x = (size_t)n_cells * n_pcs;
-        gather_rows_kernel<T><<<(int)((n_x + 255) / 256), 256, 0, stream>>>(
-            X, cell_indices, X_sorted, n_cells, n_pcs);
+        gather_rows_kernel<T>
+            <<<(int)((n_x + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D), BLOCK_DIM_1D, 0,
+               stream>>>(X, cell_indices, X_sorted, n_cells, n_pcs);
+        CUDA_CHECK_LAST_ERROR(gather_rows_kernel);
 
         size_t n_r = (size_t)n_cells * n_clusters;
-        gather_rows_kernel<T><<<(int)((n_r + 255) / 256), 256, 0, stream>>>(
-            R, cell_indices, R_sorted, n_cells, n_clusters);
+        gather_rows_kernel<T>
+            <<<(int)((n_r + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D), BLOCK_DIM_1D, 0,
+               stream>>>(R, cell_indices, R_sorted, n_cells, n_clusters);
+        CUDA_CHECK_LAST_ERROR(gather_rows_kernel);
     }
 
     // Copy cat_offsets to host for batch loop
@@ -108,8 +119,9 @@ static void correction_batched_impl(
     {
         size_t n_total = (size_t)n_cells * n_pcs;
         batched_correction_kernel<T>
-            <<<(int)((n_total + 255) / 256), 256, 0, stream>>>(
-                Z, W_all, cats, R, n_cells, n_pcs, n_clusters, nb1);
+            <<<(int)((n_total + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D), BLOCK_DIM_1D,
+               0, stream>>>(Z, W_all, cats, R, n_cells, n_pcs, n_clusters, nb1);
+        CUDA_CHECK_LAST_ERROR(batched_correction_kernel);
     }
 
     cublasDestroy(handle);
@@ -124,8 +136,9 @@ static void register_correction_batched(nb::module_& m) {
         [](gpu_array_c<const T, Device> X, gpu_array_c<const T, Device> R,
            gpu_array_c<const T, Device> O, gpu_array_c<const int, Device> cats,
            gpu_array_c<const int, Device> cat_offsets,
-           gpu_array_c<const int, Device> cell_indices, double ridge_lambda,
-           int n_cells, int n_pcs, int n_clusters, int n_batches,
+           gpu_array_c<const int, Device> cell_indices,
+           gpu_array_c<const T, Device> lambda_kb, int n_cells, int n_pcs,
+           int n_clusters, int n_batches,
            // workspace
            gpu_array_c<T, Device> Z, gpu_array_c<T, Device> inv_mats,
            gpu_array_c<T, Device> Phi_t_diag_R_X_all,
@@ -134,17 +147,16 @@ static void register_correction_batched(nb::module_& m) {
            gpu_array_c<T, Device> R_sorted, std::uintptr_t stream) {
             correction_batched_impl<T>(
                 X.data(), R.data(), O.data(), cats.data(), cat_offsets.data(),
-                cell_indices.data(), static_cast<T>(ridge_lambda), n_cells,
-                n_pcs, n_clusters, n_batches, Z.data(), inv_mats.data(),
+                cell_indices.data(), lambda_kb.data(), n_cells, n_pcs,
+                n_clusters, n_batches, Z.data(), inv_mats.data(),
                 Phi_t_diag_R_X_all.data(), W_all.data(), g_factor.data(),
                 g_P_row0.data(), X_sorted.data(), R_sorted.data(),
                 (cudaStream_t)stream);
         },
         "X"_a, nb::kw_only(), "R"_a, "O"_a, "cats"_a, "cat_offsets"_a,
-        "cell_indices"_a, "ridge_lambda"_a, "n_cells"_a, "n_pcs"_a,
-        "n_clusters"_a, "n_batches"_a, "Z"_a, "inv_mats"_a,
-        "Phi_t_diag_R_X_all"_a, "W_all"_a, "g_factor"_a, "g_P_row0"_a,
-        "X_sorted"_a, "R_sorted"_a, "stream"_a = 0);
+        "cell_indices"_a, "lambda_kb"_a, "n_cells"_a, "n_pcs"_a, "n_clusters"_a,
+        "n_batches"_a, "Z"_a, "inv_mats"_a, "Phi_t_diag_R_X_all"_a, "W_all"_a,
+        "g_factor"_a, "g_P_row0"_a, "X_sorted"_a, "R_sorted"_a, "stream"_a = 0);
 }
 
 template <typename Device>

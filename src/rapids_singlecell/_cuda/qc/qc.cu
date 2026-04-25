@@ -5,15 +5,19 @@
 
 using namespace nb::literals;
 
+constexpr int SPARSE_BLOCK_SIZE = 32;
+constexpr int DENSE_BLOCK_DIM = 16;
+
 template <typename T>
 static inline void launch_qc_csc(const int* indptr, const int* index,
                                  const T* data, T* sums_cells, T* sums_genes,
                                  int* cell_ex, int* gene_ex, int n_genes,
                                  cudaStream_t stream) {
-    dim3 block(32);
-    dim3 grid((n_genes + block.x - 1) / block.x);
+    dim3 block(SPARSE_BLOCK_SIZE);
+    dim3 grid((n_genes + SPARSE_BLOCK_SIZE - 1) / SPARSE_BLOCK_SIZE);
     qc_csc_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, sums_cells, sums_genes, cell_ex, gene_ex, n_genes);
+    CUDA_CHECK_LAST_ERROR(qc_csc_kernel);
 }
 
 template <typename T>
@@ -21,21 +25,23 @@ static inline void launch_qc_csr(const int* indptr, const int* index,
                                  const T* data, T* sums_cells, T* sums_genes,
                                  int* cell_ex, int* gene_ex, int n_cells,
                                  cudaStream_t stream) {
-    dim3 block(32);
-    dim3 grid((n_cells + block.x - 1) / block.x);
+    dim3 block(SPARSE_BLOCK_SIZE);
+    dim3 grid((n_cells + SPARSE_BLOCK_SIZE - 1) / SPARSE_BLOCK_SIZE);
     qc_csr_kernel<T><<<grid, block, 0, stream>>>(
         indptr, index, data, sums_cells, sums_genes, cell_ex, gene_ex, n_cells);
+    CUDA_CHECK_LAST_ERROR(qc_csr_kernel);
 }
 
 template <typename T>
 static inline void launch_qc_dense(const T* data, T* sums_cells, T* sums_genes,
                                    int* cell_ex, int* gene_ex, int n_cells,
                                    int n_genes, cudaStream_t stream) {
-    dim3 block(16, 16);
-    dim3 grid((n_cells + block.x - 1) / block.x,
-              (n_genes + block.y - 1) / block.y);
+    dim3 block(DENSE_BLOCK_DIM, DENSE_BLOCK_DIM);
+    dim3 grid((n_cells + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM,
+              (n_genes + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM);
     qc_dense_kernel<T><<<grid, block, 0, stream>>>(
         data, sums_cells, sums_genes, cell_ex, gene_ex, n_cells, n_genes);
+    CUDA_CHECK_LAST_ERROR(qc_dense_kernel);
 }
 
 template <typename T>
@@ -43,10 +49,11 @@ static inline void launch_qc_csc_sub(const int* indptr, const int* index,
                                      const T* data, T* sums_cells,
                                      const bool* mask, int n_genes,
                                      cudaStream_t stream) {
-    dim3 block(32);
-    dim3 grid((n_genes + block.x - 1) / block.x);
+    dim3 block(SPARSE_BLOCK_SIZE);
+    dim3 grid((n_genes + SPARSE_BLOCK_SIZE - 1) / SPARSE_BLOCK_SIZE);
     qc_csc_sub_kernel<T><<<grid, block, 0, stream>>>(indptr, index, data,
                                                      sums_cells, mask, n_genes);
+    CUDA_CHECK_LAST_ERROR(qc_csc_sub_kernel);
 }
 
 template <typename T>
@@ -54,21 +61,23 @@ static inline void launch_qc_csr_sub(const int* indptr, const int* index,
                                      const T* data, T* sums_cells,
                                      const bool* mask, int n_cells,
                                      cudaStream_t stream) {
-    dim3 block(32);
-    dim3 grid((n_cells + block.x - 1) / block.x);
+    dim3 block(SPARSE_BLOCK_SIZE);
+    dim3 grid((n_cells + SPARSE_BLOCK_SIZE - 1) / SPARSE_BLOCK_SIZE);
     qc_csr_sub_kernel<T><<<grid, block, 0, stream>>>(indptr, index, data,
                                                      sums_cells, mask, n_cells);
+    CUDA_CHECK_LAST_ERROR(qc_csr_sub_kernel);
 }
 
 template <typename T>
 static inline void launch_qc_dense_sub(const T* data, T* sums_cells,
                                        const bool* mask, int n_cells,
                                        int n_genes, cudaStream_t stream) {
-    dim3 block(16, 16);
-    dim3 grid((n_cells + block.x - 1) / block.x,
-              (n_genes + block.y - 1) / block.y);
+    dim3 block(DENSE_BLOCK_DIM, DENSE_BLOCK_DIM);
+    dim3 grid((n_cells + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM,
+              (n_genes + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM);
     qc_dense_sub_kernel<T>
         <<<grid, block, 0, stream>>>(data, sums_cells, mask, n_cells, n_genes);
+    CUDA_CHECK_LAST_ERROR(qc_dense_sub_kernel);
 }
 
 template <typename Device>

@@ -9,6 +9,7 @@ inline void launch_gaussian_kde_2d(const T* xy, T* out, int n, T a, T b, T c,
     constexpr int threads = 256;
     const int blocks = (n + threads - 1) / threads;
     gaussian_kde_2d_kernel<<<blocks, threads, 0, stream>>>(xy, out, n, a, b, c);
+    CUDA_CHECK_LAST_ERROR(gaussian_kde_2d_kernel);
 }
 
 template <typename Device>

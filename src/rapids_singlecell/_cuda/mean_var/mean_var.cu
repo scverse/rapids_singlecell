@@ -5,25 +5,30 @@
 
 using namespace nb::literals;
 
+constexpr int BLOCK_SIZE_MAJOR = 64;
+constexpr int BLOCK_SIZE_MINOR = 256;
+
 template <typename T>
 static inline void launch_mean_var_major(const int* indptr, const int* indices,
                                          const T* data, double* means,
                                          double* vars, int major, int minor,
                                          cudaStream_t stream) {
-    dim3 block(64);
+    dim3 block(BLOCK_SIZE_MAJOR);
     dim3 grid(major);
     mean_var_major_kernel<T><<<grid, block, 0, stream>>>(
         indptr, indices, data, means, vars, major, minor);
+    CUDA_CHECK_LAST_ERROR(mean_var_major_kernel);
 }
 
 template <typename T>
 static inline void launch_mean_var_minor(const int* indices, const T* data,
                                          double* means, double* vars, int nnz,
                                          cudaStream_t stream) {
-    int block = 256;
+    int block = BLOCK_SIZE_MINOR;
     int grid = (nnz + block - 1) / block;
     mean_var_minor_kernel<T>
         <<<grid, block, 0, stream>>>(indices, data, means, vars, nnz);
+    CUDA_CHECK_LAST_ERROR(mean_var_minor_kernel);
 }
 
 template <typename Device>

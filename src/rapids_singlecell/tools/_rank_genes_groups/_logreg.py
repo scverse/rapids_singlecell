@@ -3,30 +3,25 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import cupy as cp
-import numpy as np
 
 from rapids_singlecell._compat import DaskArray, _meta_dense
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-
     from numpy.typing import NDArray
 
     from ._core import _RankGenes
 
 
-def logreg(rg: _RankGenes, **kwds) -> Generator[tuple[int, NDArray, None], None, None]:
+def logreg(rg: _RankGenes, **kwds) -> list[tuple[int, NDArray, None]]:
     """Compute logistic regression scores."""
     if len(rg.groups_order) == 1:
         msg = "Cannot perform logistic regression on a single cluster."
         raise ValueError(msg)
 
-    X = rg.X[rg.grouping_mask.values, :]
-
-    grouping_logreg = rg.grouping.cat.codes.to_numpy().astype(X.dtype)
-    uniques = np.unique(grouping_logreg)
-    for idx, cat in enumerate(uniques):
-        grouping_logreg[np.where(grouping_logreg == cat)] = idx
+    n_groups = len(rg.groups_order)
+    selected = rg.group_codes < n_groups
+    X = rg.X[selected, :]
+    grouping_logreg = rg.group_codes[selected].astype(X.dtype)
 
     if isinstance(X, DaskArray):
         import dask.array as da
@@ -43,16 +38,19 @@ def logreg(rg: _RankGenes, **kwds) -> Generator[tuple[int, NDArray, None], None,
     clf = LogisticRegression(**kwds)
     clf.fit(X, grouping_logreg)
     scores_all = cp.array(clf.coef_)
-    if len(rg.groups_order) == scores_all.shape[1]:
+    if n_groups == scores_all.shape[1]:
         scores_all = scores_all.T
 
-    for igroup, _group in enumerate(rg.groups_order):
-        if len(rg.groups_order) <= 2:
+    results: list[tuple[int, NDArray, None]] = []
+    for igroup in range(n_groups):
+        if n_groups <= 2:
             scores = scores_all[0].get()
         else:
             scores = scores_all[igroup].get()
 
-        yield igroup, scores, None
+        results.append((igroup, scores, None))
 
-        if len(rg.groups_order) <= 2:
+        if n_groups <= 2:
             break
+
+    return results

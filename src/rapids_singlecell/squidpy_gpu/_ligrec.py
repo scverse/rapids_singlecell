@@ -36,8 +36,6 @@ def _get_interactions(
         receiver_params=receiver_params,
     )
 
-    if True:
-        assert isinstance(interactions, pd.DataFrame)
     # we don't really care about these
     if SOURCE in interactions.columns:
         interactions.pop(SOURCE)

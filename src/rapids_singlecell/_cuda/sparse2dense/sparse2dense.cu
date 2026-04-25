@@ -18,9 +18,12 @@ static inline void launch_sparse2dense(const int* indptr, const int* index,
     cudaGetDeviceProperties(&prop, device);
     int max_grid_y = prop.maxGridSize[1];
 
-    dim3 block(32, 32);
-    unsigned grid_x = (unsigned)((major + block.x - 1) / block.x);
-    unsigned grid_y = (unsigned)((max_nnz + block.y - 1) / block.y);
+    if (max_nnz == 0 || major == 0) return;  // nothing to scatter
+
+    constexpr int BLOCK_DIM = 32;
+    dim3 block(BLOCK_DIM, BLOCK_DIM);
+    unsigned grid_x = (unsigned)((major + BLOCK_DIM - 1) / BLOCK_DIM);
+    unsigned grid_y = (unsigned)((max_nnz + BLOCK_DIM - 1) / BLOCK_DIM);
     // Limit grid Y to device max - strided loop in kernel handles overflow
     if (grid_y > (unsigned)max_grid_y) {
         grid_y = (unsigned)max_grid_y;
@@ -28,6 +31,7 @@ static inline void launch_sparse2dense(const int* indptr, const int* index,
     dim3 grid(grid_x, grid_y);
     sparse2dense_kernel<T, C_ORDER>
         <<<grid, block, 0, stream>>>(indptr, index, data, out, major, minor);
+    CUDA_CHECK_LAST_ERROR(sparse2dense_kernel);
 }
 
 // Runtime dispatch wrapper - c_switch depends on both sparse format and output
