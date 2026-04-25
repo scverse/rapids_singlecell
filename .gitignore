@@ -47,7 +47,7 @@ coverage.xml
 .vscode/
 .cursor/
 .claude/
-.codex/
+.codex
 CLAUDE.md
 
 # tmp_scripts
