@@ -10,7 +10,7 @@ conda env create -f conda/rsc_rapids_26.04_cuda13.yml
 # or
 mamba env create -f conda/rsc_rapids_26.04_cuda13.yml
 ```
-*Python 3.13, CUDA 13.1*
+*Python 3.14, CUDA 13.1*
 ````
 ````{tab-item} CUDA 12
 ```bash
@@ -18,7 +18,7 @@ conda env create -f conda/rsc_rapids_26.04_cuda12.yml
 # or
 mamba env create -f conda/rsc_rapids_26.04_cuda12.yml
 ```
-*Python 3.13, CUDA 12.9*
+*Python 3.14, CUDA 12.9*
 ````
 `````
 
@@ -107,11 +107,7 @@ pip install rapids-singlecell
 ```
 
 The CUDA kernels will be compiled during installation for your local GPU architecture.
-You can select RAPIDS dependencies with the `rapids-cu12` or `rapids-cu13` extras:
-
-```bash
-pip install 'rapids-singlecell[rapids-cu12]' --extra-index-url=https://pypi.nvidia.com
-```
+Install the RAPIDS stack separately before building from source, or use the prebuilt CUDA wheels with the `rapids` extra.
 
 ```{note}
 Building from source requires the CUDA toolkit (nvcc) and CMake >= 3.24 to be available in your environment.

@@ -5,7 +5,7 @@ channels:
  - conda-forge
 dependencies:
  - rapids=26.04
- - python=3.13
+ - python=3.14
  - cuda-version=12.9
  - zarr=3.0.6
  - cudnn

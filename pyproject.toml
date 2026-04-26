@@ -1,10 +1,9 @@
 [build-system]
 requires = [
+    "rapids-build-backend>=0.4.1,<0.5.0dev0",
     "scikit-build-core>=0.10",
-    "nanobind>=2.0.0",
-    "setuptools-scm>=8",
 ]
-build-backend = "scikit_build_core.build"
+build-backend = "rapids_build_backend.build"
 
 [project]
 name = "rapids-singlecell"
@@ -32,8 +31,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-rapids-cu13 = [ "cupy-cuda13x", "cudf-cu13>=25.10", "cuml-cu13>=25.10", "cugraph-cu13>=25.10", "cuvs-cu13>=25.10" ]
-rapids-cu12 = [ "cupy-cuda12x", "cudf-cu12>=25.10", "cuml-cu12>=25.10", "cugraph-cu12>=25.10", "cuvs-cu12>=25.10" ]
+rapids = []
 
 doc = [
     "sphinx>=4.5.0",
@@ -67,6 +65,7 @@ test = [
 ]
 
 dev = [
+    "hatch>=1.16.5",
     "hatch-vcs",
     "pre-commit",
 ]
@@ -131,6 +130,16 @@ write_to = "src/rapids_singlecell/_version.py"
 version_scheme = "guess-next-dev"
 local_scheme = "node-and-date"
 
+[tool.rapids-build-backend]
+build-backend = "scikit_build_core.build"
+commit-files = []
+dependencies-file = "dependencies.yaml"
+disable-cuda = true
+requires = [
+    "nanobind>=2.0.0",
+    "setuptools-scm>=8",
+]
+
 [tool.scikit-build]
 # Use limited ABI wheels (one wheel for all Python minor versions on one platform)
 wheel.py-api = "cp312"
@@ -141,7 +150,7 @@ cmake.build-type = "Release"
 ninja.version = ">=1.10"
 experimental = false
 # Default: use native arch for source builds (auto-detect user's GPU)
-# CI overrides via SKBUILD_CMAKE_DEFINE_CMAKE_CUDA_ARCHITECTURES env var
+# CI overrides via PEP 517 config settings
 cmake.define.CMAKE_CUDA_ARCHITECTURES = "native"
 build-dir = "build"
 metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
