@@ -31,7 +31,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-rapids = []
+rapids = [  ]
 
 doc = [
     "sphinx>=4.5.0",
@@ -132,7 +132,7 @@ local_scheme = "node-and-date"
 
 [tool.rapids-build-backend]
 build-backend = "scikit_build_core.build"
-commit-files = []
+commit-files = [  ]
 dependencies-file = "dependencies.yaml"
 disable-cuda = true
 requires = [
