@@ -6,17 +6,17 @@ These *yaml* files install everything needed to run the example notebooks and ge
 `````{tab-set}
 ````{tab-item} CUDA 13
 ```bash
-conda env create -f conda/rsc_rapids_26.02_cuda13.yml
+conda env create -f conda/rsc_rapids_26.04_cuda13.yml
 # or
-mamba env create -f conda/rsc_rapids_26.02_cuda13.yml
+mamba env create -f conda/rsc_rapids_26.04_cuda13.yml
 ```
-*Python 3.13, CUDA 13.0*
+*Python 3.13, CUDA 13.1*
 ````
 ````{tab-item} CUDA 12
 ```bash
-conda env create -f conda/rsc_rapids_26.02_cuda12.yml
+conda env create -f conda/rsc_rapids_26.04_cuda12.yml
 # or
-mamba env create -f conda/rsc_rapids_26.02_cuda12.yml
+mamba env create -f conda/rsc_rapids_26.04_cuda12.yml
 ```
 *Python 3.13, CUDA 12.9*
 ````
@@ -55,7 +55,7 @@ The prebuilt wheels support the following CUDA runtime versions:
 | `rapids-singlecell-cu12` | CUDA 12.2 | CUDA 12.2–12.9+ | Turing through Hopper (native), Blackwell (via PTX JIT) |
 | `rapids-singlecell-cu13` | CUDA 13.0 | CUDA 13.0+ | Turing through Blackwell (all native) |
 
-The CUDA 12 wheels are compiled with CUDA 12.2 to match the [RAPIDS 26.02 support matrix](https://docs.rapids.ai/install/) (CUDA 12.2–12.9).
+The CUDA 12 wheels are compiled with CUDA 12.2 to match the [RAPIDS 26.04 support matrix](https://docs.rapids.ai/platform-support/) (CUDA 12.2–12.9).
 Blackwell GPUs (CC 100, 120) are supported via PTX just-in-time compilation from the `sm_90` PTX included in the wheel.
 The CUDA 13 wheels include native Blackwell binaries, so no JIT is needed.
 

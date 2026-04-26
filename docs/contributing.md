@@ -6,7 +6,7 @@
 
 - NVIDIA GPU with CUDA support
 - [micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html), conda/mamba, or [uv](https://docs.astral.sh/uv/)
-- A RAPIDS environment (e.g., conda `rapids-26.02` or pip-installed RAPIDS)
+- A RAPIDS environment (e.g., conda `rapids-26.04` or pip-installed RAPIDS)
 
 ### Clone and install
 
