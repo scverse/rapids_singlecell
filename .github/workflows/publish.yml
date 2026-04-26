@@ -66,6 +66,7 @@ jobs:
         uses: pypa/cibuildwheel@v3.1.4
         env:
           SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.version.outputs.version }}
+          CIBW_BUILD: 'cp312-*'
           CIBW_SKIP: '*-musllinux*'
           CIBW_MANYLINUX_X86_64_IMAGE: ${{ matrix.os == 'linux-intel' && matrix.cibw_image || '' }}
           CIBW_MANYLINUX_AARCH64_IMAGE: ${{ matrix.os == 'linux-arm' && matrix.cibw_image || '' }}
@@ -93,6 +94,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - name: Build sdist
         run: RAPIDS_DISABLE_CUDA=true pipx run build --sdist
       - uses: actions/upload-artifact@v4
