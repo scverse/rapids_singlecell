@@ -108,10 +108,17 @@ pip install rapids-singlecell
 ```
 
 The CUDA kernels will be compiled during installation for your local GPU architecture.
-Install the RAPIDS stack separately before building from source, or use one of the prebuilt CUDA wheels with the `rapids` extra.
+Install the RAPIDS stack separately before building from source, or use the single `rapids` extra:
+
+```bash
+pip install 'rapids-singlecell[rapids]' --extra-index-url=https://pypi.nvidia.com
+```
+
+The `rapids` extra is the only RAPIDS dependency extra; there are no CUDA-specific extras such as `rapids-cu12` or `rapids-cu13`.
 
 ```{note}
 Building from source requires the CUDA toolkit (nvcc) and CMake >= 3.24 to be available in your environment.
+The nvcc/CUDAToolkit found during the build should match the RAPIDS/CuPy CUDA major runtime version in or linked to the environment.
 ```
 
 ### Install from GitHub
