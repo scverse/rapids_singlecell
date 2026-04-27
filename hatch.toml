@@ -6,17 +6,11 @@ features = [ "dev" ]
 default-args = [  ]
 features = [ "test" ]
 
-# Select CUDA feature per matrix
-overrides.matrix.cuda.features = [
-    { if = [ "12" ], value = "rapids-cu12" },
-    { if = [ "13" ], value = "rapids-cu13" },
-]
-
 # Python per deps
 overrides.matrix.deps.python = [
     { if = [ "stable" ], value = "3.12" },
-    { if = [ "dev" ], value = "3.13" },
-    { if = [ "rapids_prerelease" ], value = "3.13" },
+    { if = [ "dev" ], value = "3.14" },
+    { if = [ "rapids_prerelease" ], value = "3.14" },
 ]
 
 # Allow prereleases and use RAPIDS nightly index only for prerelease
@@ -40,17 +34,19 @@ overrides.matrix.deps.extra-dependencies = [
     ], value = "scanpy @ git+https://github.com/scverse/scanpy.git" },
 ]
 overrides.matrix.cuda.extra-dependencies = [
-    { if = [ "13" ], value = "cuml-cu13<26.6" },
-    { if = [ "13" ], value = "cudf-cu13<26.6" },
-    { if = [ "13" ], value = "cugraph-cu13<26.6" },
-    { if = [ "13" ], value = "cuvs-cu13<26.6" },
-    { if = [ "12" ], value = "cuml-cu12<26.6" },
-    { if = [ "12" ], value = "cudf-cu12<26.6" },
-    { if = [ "12" ], value = "cugraph-cu12<26.6" },
-    { if = [ "12" ], value = "cuvs-cu12<26.6" },
+    { if = [ "13" ], value = "cupy-cuda13x" },
+    { if = [ "13" ], value = "cuml-cu13<26.8" },
+    { if = [ "13" ], value = "cudf-cu13<26.8" },
+    { if = [ "13" ], value = "cugraph-cu13<26.8" },
+    { if = [ "13" ], value = "cuvs-cu13<26.8" },
+    { if = [ "12" ], value = "cupy-cuda12x" },
+    { if = [ "12" ], value = "cuml-cu12<26.8" },
+    { if = [ "12" ], value = "cudf-cu12<26.8" },
+    { if = [ "12" ], value = "cugraph-cu12<26.8" },
+    { if = [ "12" ], value = "cuvs-cu12<26.8" },
 ]
 
-## For prerelease we rely on UV_PRERELEASE + nightly index; features select cu12/cu13
+## For prerelease we rely on UV_PRERELEASE + nightly index; CUDA selects cu12/cu13 dependencies
 
 [envs.docs]
 features = [ "doc" ]
