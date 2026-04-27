@@ -8,6 +8,7 @@ from anndata import AnnData
 from cupyx.scipy.sparse import csr_matrix as gpu_csr
 
 import rapids_singlecell as rsc
+from rapids_singlecell.pertpy_gpu._guide_assignment import _fit_assign_cuda
 
 
 @pytest.fixture
@@ -192,6 +193,12 @@ def test_mixture_model_stores_params(guide_adata: AnnData) -> None:
         "gaussian_std",
         "mix_probs_0",
         "mix_probs_1",
+        "threshold",
+        "weight_Poisson",
+        "weight_Normal",
+        "lambda",
+        "mu",
+        "scale",
     ]:
         assert col in guide_adata.var.columns, f"Missing column: {col}"
 
@@ -205,6 +212,29 @@ def test_mixture_model_stores_params(guide_adata: AnnData) -> None:
     rates = guide_adata.var["poisson_rate"].dropna()
     means = guide_adata.var["gaussian_mean"].dropna()
     assert (rates < means).all(), "Poisson rate should be < Gaussian mean"
+
+    # Crispat-compatible aliases should mirror the pertpy-style parameter names.
+    np.testing.assert_allclose(
+        guide_adata.var["weight_Poisson"].dropna(),
+        guide_adata.var["mix_probs_0"].dropna(),
+    )
+    np.testing.assert_allclose(
+        guide_adata.var["weight_Normal"].dropna(),
+        guide_adata.var["mix_probs_1"].dropna(),
+    )
+    np.testing.assert_allclose(
+        guide_adata.var["lambda"].dropna(),
+        guide_adata.var["poisson_rate"].dropna(),
+    )
+    np.testing.assert_allclose(
+        guide_adata.var["mu"].dropna(),
+        guide_adata.var["gaussian_mean"].dropna(),
+    )
+    np.testing.assert_allclose(
+        guide_adata.var["scale"].dropna(),
+        guide_adata.var["gaussian_std"].dropna(),
+    )
+    assert guide_adata.var["threshold"].dropna().ge(1).all()
 
 
 def test_mixture_model_sparse_input(guide_adata_sparse: AnnData) -> None:
@@ -223,6 +253,61 @@ def test_mixture_model_only_return_results(guide_adata: AnnData) -> None:
     assert result is not None
     assert len(result) == guide_adata.n_obs
     assert isinstance(result, np.ndarray)
+
+
+def test_mixture_model_invalid_posterior_threshold(guide_adata: AnnData) -> None:
+    ga = rsc.ptg.GuideAssignment()
+    with pytest.raises(ValueError, match="posterior_threshold"):
+        ga.assign_mixture_model(guide_adata, posterior_threshold=1.0)
+
+
+def test_mixture_model_invalid_backend(guide_adata: AnnData) -> None:
+    ga = rsc.ptg.GuideAssignment()
+    with pytest.raises(ValueError, match="backend"):
+        ga.assign_mixture_model(guide_adata, backend="not-a-backend")
+    with pytest.raises(ValueError, match="backend"):
+        ga.assign_mixture_model(guide_adata, backend="cuda_em")
+
+
+def test_mixture_model_cuda_backend_matches_cupy(guide_adata: AnnData) -> None:
+    from rapids_singlecell._cuda import _guide_assignment_cuda
+
+    if _guide_assignment_cuda is None:
+        pytest.skip("_guide_assignment_cuda extension is not available")
+
+    cupy_adata = guide_adata.copy()
+    cuda_adata = guide_adata.copy()
+    ga = rsc.ptg.GuideAssignment()
+
+    ga.assign_mixture_model(cupy_adata, backend="cupy")
+    ga.assign_mixture_model(cuda_adata, backend="cuda")
+
+    np.testing.assert_array_equal(
+        cupy_adata.obs["assigned_guide"].to_numpy(),
+        cuda_adata.obs["assigned_guide"].to_numpy(),
+    )
+    np.testing.assert_array_equal(
+        cupy_adata.var["threshold"].to_numpy(),
+        cuda_adata.var["threshold"].to_numpy(),
+    )
+    for col in ["lambda", "mu", "scale", "weight_Poisson"]:
+        assert np.isfinite(cuda_adata.var[col].dropna()).all()
+
+
+def test_mixture_model_cuda_assignments_are_bool(guide_adata: AnnData) -> None:
+    from rapids_singlecell._cuda import _guide_assignment_cuda
+
+    if _guide_assignment_cuda is None:
+        pytest.skip("_guide_assignment_cuda extension is not available")
+
+    assignments, *_ = _fit_assign_cuda(
+        cp.ascontiguousarray(guide_adata.X.astype(cp.float32, copy=False)),
+        max_iter=90,
+        tol=1e-4,
+        posterior_threshold=0.645,
+    )
+
+    assert assignments.dtype == cp.bool_
 
 
 def test_mixture_model_skip_low_count() -> None:
@@ -247,6 +332,24 @@ def test_mixture_model_skip_low_count() -> None:
     # "good" guide should have some assignments
     assigned = adata.obs["assigned_guide"]
     assert assigned.str.contains("good", na=False).any()
+
+
+def test_mixture_model_skip_max_count_below_two() -> None:
+    """Crispat skips guides whose non-zero counts never reach 2 UMIs."""
+    X = np.zeros((50, 2), dtype=np.float32)
+    X[:25, :] = 1.0
+
+    adata = AnnData(
+        X=cp.array(X),
+        var=pd.DataFrame(index=["one_a", "one_b"]),
+        obs=pd.DataFrame(index=[f"c{i}" for i in range(50)]),
+    )
+
+    ga = rsc.ptg.GuideAssignment()
+    with pytest.warns(UserWarning, match="maximum UMI count is less than 2"):
+        ga.assign_mixture_model(adata)
+
+    assert (adata.obs["assigned_guide"] == "negative").all()
 
 
 def test_multiple_guide_assignment() -> None:

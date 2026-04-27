@@ -23,8 +23,9 @@ class GuideAssignment:
 
     Provides threshold-based and mixture-model-based methods for assigning
     cells to guide RNAs, compatible with pertpy's ``GuideAssignment`` API.
-    The mixture model uses a batched EM algorithm on GPU instead of
-    per-guide MCMC, yielding orders-of-magnitude speedup.
+    The mixture model follows crispat's Poisson-Gaussian assignment rule
+    while using batched EM on GPU instead of per-guide Pyro SVI, yielding
+    orders-of-magnitude speedup.
     """
 
     def assign_by_threshold(
@@ -128,16 +129,21 @@ class GuideAssignment:
         multiple_grna_assigned_key: str = "multiple",
         multiple_grna_assignment_string: str = "+",
         only_return_results: bool = False,
-        max_iter: int = 50,
+        max_iter: int = 90,
         tol: float = 1e-4,
+        posterior_threshold: float = 0.645,
+        backend: str = "cupy",
     ) -> np.ndarray | None:
         """Assign gRNAs using a GPU-accelerated Poisson–Gaussian mixture model.
 
         Fits a two-component mixture (Poisson background + Gaussian signal)
         to the log₂-transformed non-zero counts of each guide simultaneously
-        using batched Expectation-Maximization on GPU. This replaces pertpy's
-        sequential per-guide MCMC with a single vectorised EM, giving
-        orders-of-magnitude speedup.
+        using batched Expectation-Maximization on GPU. Like crispat's
+        Poisson-Gaussian assignment, the fitted model is converted to an
+        integer raw-count threshold. The default posterior cutoff is slightly
+        conservative to calibrate the GPU EM approximation against crispat's
+        Pyro SVI outputs; set ``posterior_threshold=0.5`` for the literal
+        crispat threshold rule.
 
         Parameters
         ----------
@@ -159,6 +165,14 @@ class GuideAssignment:
             Maximum number of EM iterations.
         tol
             Convergence tolerance on parameter changes.
+        posterior_threshold
+            Minimum posterior probability of the Gaussian component required
+            for a raw UMI count to define the assignment threshold.
+        backend
+            Backend for fitting and assignment. ``"cupy"`` uses the existing
+            CuPy EM and threshold implementation, ``"cuda"`` uses the
+            nanobind/CUDA EM + threshold kernel, and ``"auto"`` tries CUDA
+            with a CuPy fallback.
 
         Returns
         -------
@@ -169,15 +183,51 @@ class GuideAssignment:
         X = X_to_GPU(adata.X)
         if cp_issparse(X):
             X = X.toarray()
-        X = X.astype(cp.float32)
+        # TODO: The CUDA guide kernel scans one guide column per block. If this
+        # path becomes the default, consider densifying sparse inputs directly
+        # to F-order with _sparse_to_dense(order="F") and dispatching an
+        # F-contiguous kernel to improve memory coalescing.
+        X = cp.ascontiguousarray(X.astype(cp.float32, copy=False))
+        if not 0 < posterior_threshold < 1:
+            raise ValueError("posterior_threshold must be between 0 and 1.")
+        if backend not in {"cupy", "cuda", "auto"}:
+            raise ValueError("backend must be one of 'cupy', 'cuda', or 'auto'.")
 
         _, n_guides = X.shape
         var_names = np.asarray(adata.var_names)
 
-        # Build padded arrays for batched EM
-        data_pad, mask, cell_indices, counts, valid_guides = _prepare_batched_data(
-            X, n_guides
-        )
+        if backend in {"cuda", "auto"}:
+            try:
+                assignments, thresholds, lam, mu, sigma, pi0, valid_guides = (
+                    _fit_assign_cuda(
+                        X,
+                        max_iter=max_iter,
+                        tol=tol,
+                        posterior_threshold=posterior_threshold,
+                    )
+                )
+            except ImportError:
+                if backend == "cuda":
+                    raise
+                backend = "cupy"
+
+        if backend == "cupy":
+            data_pad, mask, _cell_indices, counts, valid_guides = _prepare_batched_data(
+                X, n_guides
+            )
+            if len(valid_guides) > 0:
+                lam, mu, sigma, pi0, _ = _batched_em(
+                    data_pad, mask, counts, max_iter=max_iter, tol=tol
+                )
+                assignments, thresholds = _assign_by_crispat_threshold(
+                    X,
+                    valid_guides,
+                    lam=lam,
+                    mu=mu,
+                    sigma=sigma,
+                    pi0=pi0,
+                    posterior_threshold=posterior_threshold,
+                )
 
         if len(valid_guides) == 0:
             warnings.warn(
@@ -194,11 +244,6 @@ class GuideAssignment:
             adata.obs[assigned_guides_key] = series.values
             return None
 
-        # Run batched EM
-        lam, mu, sigma, pi0, assignments = _batched_em(
-            data_pad, mask, counts, max_iter=max_iter, tol=tol
-        )
-
         # Store fitted parameters in adata.var
         lam_cpu = cp.asnumpy(lam.ravel())
         mu_cpu = cp.asnumpy(mu.ravel())
@@ -211,10 +256,17 @@ class GuideAssignment:
             "gaussian_std",
             "mix_probs_0",
             "mix_probs_1",
+            "threshold",
+            "weight_Poisson",
+            "weight_Normal",
+            "lambda",
+            "mu",
+            "scale",
         ]:
             if col not in adata.var.columns:
                 adata.var[col] = np.nan
 
+        thresholds_cpu = cp.asnumpy(thresholds.ravel())
         for i, g in enumerate(valid_guides):
             adata.var.iloc[g, adata.var.columns.get_loc("poisson_rate")] = lam_cpu[i]
             adata.var.iloc[g, adata.var.columns.get_loc("gaussian_mean")] = mu_cpu[i]
@@ -223,29 +275,35 @@ class GuideAssignment:
             adata.var.iloc[g, adata.var.columns.get_loc("mix_probs_1")] = (
                 1.0 - pi0_cpu[i]
             )
+            adata.var.iloc[g, adata.var.columns.get_loc("threshold")] = thresholds_cpu[
+                i
+            ]
+            adata.var.iloc[g, adata.var.columns.get_loc("weight_Poisson")] = pi0_cpu[i]
+            adata.var.iloc[g, adata.var.columns.get_loc("weight_Normal")] = (
+                1.0 - pi0_cpu[i]
+            )
+            adata.var.iloc[g, adata.var.columns.get_loc("lambda")] = lam_cpu[i]
+            adata.var.iloc[g, adata.var.columns.get_loc("mu")] = mu_cpu[i]
+            adata.var.iloc[g, adata.var.columns.get_loc("scale")] = sigma_cpu[i]
 
         # Map assignments back to (n_cells, n_guides) result
-        assignments_cpu = cp.asnumpy(assignments)  # (n_valid_guides, max_nnz)
-        mask_cpu = cp.asnumpy(mask)
-        cell_indices_cpu = cp.asnumpy(cell_indices)
+        assignments_cpu = cp.asnumpy(assignments)  # (n_valid_guides, n_cells)
 
-        result = pd.DataFrame(0, index=adata.obs_names, columns=var_names)
+        result = pd.DataFrame(data=False, index=adata.obs_names, columns=var_names)
         for i, g in enumerate(valid_guides):
-            valid = mask_cpu[i]
-            cells = cell_indices_cpu[i, valid]
-            assigned = assignments_cpu[i, valid]
-            result.iloc[cells, g] = assigned
+            result.iloc[:, g] = assignments_cpu[i]
 
         # Build final assignment series
         series = pd.Series(no_grna_assigned_key, index=adata.obs_names)
         num_assigned = result.sum(axis=1)
         multi_mask = (num_assigned > 0) & (num_assigned <= max_assignments_per_cell)
-        series.loc[multi_mask] = result.loc[multi_mask].apply(
-            lambda row: multiple_grna_assignment_string.join(
-                row.index[row == 1].tolist()
-            ),
-            axis=1,
-        )
+        if multi_mask.any():
+            series.loc[multi_mask] = result.loc[multi_mask].apply(
+                lambda row: multiple_grna_assignment_string.join(
+                    row.index[row].tolist()
+                ),
+                axis=1,
+            )
         series.loc[num_assigned > max_assignments_per_cell] = multiple_grna_assigned_key
 
         if only_return_results:
@@ -292,6 +350,14 @@ def _prepare_batched_data(
                     stacklevel=4,
                 )
             continue
+        max_count = float(col.max().item())
+        if max_count < 2:
+            warnings.warn(
+                f"Skipping guide index {g} as the maximum UMI count is less than 2.",
+                UserWarning,
+                stacklevel=4,
+            )
+            continue
         valid_guides.append(g)
         nnz_per_guide.append(nz_count)
         nz_data.append(cp.log2(col[nz_mask]))
@@ -316,6 +382,149 @@ def _prepare_batched_data(
         cell_indices[i, :n] = nz_indices[i]
 
     return data_pad, mask, cell_indices, counts, valid_guides
+
+
+def _assign_by_crispat_threshold(
+    X: cp.ndarray,
+    valid_guides: list[int],
+    *,
+    lam: cp.ndarray,
+    mu: cp.ndarray,
+    sigma: cp.ndarray,
+    pi0: cp.ndarray,
+    posterior_threshold: float,
+) -> tuple[cp.ndarray, cp.ndarray]:
+    """Assign cells using crispat's posterior-derived raw UMI threshold."""
+    assignments = cp.zeros((len(valid_guides), X.shape[0]), dtype=cp.bool_)
+    thresholds = cp.full((len(valid_guides), 1), cp.nan, dtype=cp.float32)
+
+    for i, g in enumerate(valid_guides):
+        col = X[:, g]
+        max_count = int(cp.ceil(col.max()).item())
+        if max_count < 2:
+            continue
+
+        raw_counts = cp.arange(1, max_count + 1, dtype=cp.float32)
+        log_counts = cp.log2(raw_counts).reshape(1, -1)
+        threshold_mask = cp.ones_like(log_counts, dtype=cp.bool_)
+        _, prob_gaussian = _e_step(
+            log_counts,
+            threshold_mask,
+            lam=lam[i : i + 1],
+            mu=mu[i : i + 1],
+            sigma=sigma[i : i + 1],
+            pi0=pi0[i : i + 1],
+        )
+        positive_counts = raw_counts[cp.ravel(prob_gaussian > posterior_threshold)]
+        if positive_counts.size == 0:
+            continue
+
+        threshold = positive_counts[0]
+        thresholds[i, 0] = threshold
+        assignments[i] = col >= threshold
+
+    return assignments, thresholds
+
+
+def _fit_assign_cuda(
+    X: cp.ndarray,
+    *,
+    max_iter: int,
+    tol: float,
+    posterior_threshold: float,
+) -> tuple[
+    cp.ndarray,
+    cp.ndarray,
+    cp.ndarray,
+    cp.ndarray,
+    cp.ndarray,
+    cp.ndarray,
+    list[int],
+]:
+    """Fit and assign all guides with the nanobind/CUDA EM kernel."""
+    from rapids_singlecell._cuda import _guide_assignment_cuda
+
+    if _guide_assignment_cuda is None:
+        raise ImportError(
+            "The _guide_assignment_cuda extension is not available. "
+            "Build rapids-singlecell with CUDA extensions or use backend='cupy'."
+        )
+
+    n_cells, n_guides = X.shape
+    assignments_all = cp.empty((n_guides, n_cells), dtype=cp.bool_)
+    thresholds_all = cp.empty((n_guides, 1), dtype=cp.float32)
+    lam_all = cp.empty((n_guides, 1), dtype=cp.float32)
+    mu_all = cp.empty((n_guides, 1), dtype=cp.float32)
+    sigma_all = cp.empty((n_guides, 1), dtype=cp.float32)
+    pi0_all = cp.empty((n_guides, 1), dtype=cp.float32)
+    valid_mask = cp.empty(n_guides, dtype=cp.bool_)
+    nonzero_counts = cp.empty(n_guides, dtype=cp.int32)
+    max_counts = cp.empty(n_guides, dtype=cp.int32)
+
+    _guide_assignment_cuda.fit_assign_dense(
+        X,
+        assignments_all,
+        thresholds_all,
+        lam_all,
+        mu_all,
+        sigma_all,
+        pi0_all,
+        valid_mask,
+        nonzero_counts,
+        max_counts,
+        n_cells=n_cells,
+        n_guides=n_guides,
+        max_iter=int(max_iter),
+        tol=float(tol),
+        posterior_threshold=float(posterior_threshold),
+        stream=cp.cuda.get_current_stream().ptr,
+    )
+
+    valid_mask_cpu = cp.asnumpy(valid_mask).astype(bool)
+    nonzero_counts_cpu = cp.asnumpy(nonzero_counts)
+    max_counts_cpu = cp.asnumpy(max_counts)
+
+    for guide, (nz_count, max_count) in enumerate(
+        zip(nonzero_counts_cpu, max_counts_cpu, strict=True)
+    ):
+        if 0 < nz_count < 2:
+            warnings.warn(
+                f"Skipping guide index {guide} as there are less than 2 cells "
+                "expressing the guide.",
+                UserWarning,
+                stacklevel=4,
+            )
+        elif nz_count >= 2 and max_count < 2:
+            warnings.warn(
+                f"Skipping guide index {guide} as the maximum UMI count is less "
+                "than 2.",
+                UserWarning,
+                stacklevel=4,
+            )
+
+    valid_guides = np.flatnonzero(valid_mask_cpu).tolist()
+    if len(valid_guides) == 0:
+        empty_2d = cp.empty((0, 1), dtype=cp.float32)
+        return (
+            cp.empty((0, n_cells), dtype=cp.bool_),
+            empty_2d,
+            empty_2d,
+            empty_2d,
+            empty_2d,
+            empty_2d,
+            [],
+        )
+
+    valid_guides_gpu = cp.asarray(valid_guides, dtype=cp.int32)
+    return (
+        assignments_all[valid_guides_gpu],
+        thresholds_all[valid_guides_gpu],
+        lam_all[valid_guides_gpu],
+        mu_all[valid_guides_gpu],
+        sigma_all[valid_guides_gpu],
+        pi0_all[valid_guides_gpu],
+        valid_guides,
+    )
 
 
 def _batched_em(
@@ -346,7 +555,7 @@ def _batched_em(
     lam, mu, sigma, pi0
         Fitted parameters, each ``(n_guides, 1)``.
     assignments
-        ``(n_guides, max_nnz)`` int8 array (1 = positive, 0 = negative).
+        ``(n_guides, max_nnz)`` boolean array (``True`` = positive).
     """
     n_valid = mask.sum(axis=1, keepdims=True).astype(cp.float32)  # (n_guides, 1)
 
@@ -427,7 +636,7 @@ def _batched_em(
 
     # Final assignment: cell is positive if P(Gaussian) > 0.5
     r0, r1 = _e_step(data, mask, lam=lam, mu=mu, sigma=sigma, pi0=pi0)
-    assignments = (r1 > 0.5).astype(cp.int8)
+    assignments = r1 > 0.5
 
     return lam, mu, sigma, pi0, assignments
 
