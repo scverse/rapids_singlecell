@@ -6,7 +6,7 @@ channels:
  - bioconda
 dependencies:
  - rapids=26.04
- - python=3.13
+ - python=3.14
  - cuda-version=12.9
  - cudnn
  - cutensor
