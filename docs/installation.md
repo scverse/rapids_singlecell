@@ -82,7 +82,6 @@ This is the recommended approach for **conda/mamba users** who already have RAPI
 ### Prebuilt wheels with RAPIDS dependencies
 
 To also install the RAPIDS stack via pip, use the `rapids` extra.
-This is the only RAPIDS dependency extra; select CUDA 12 or CUDA 13 with the package name (`rapids-singlecell-cu12` or `rapids-singlecell-cu13`), not with a CUDA-specific extra.
 This requires the `--extra-index-url` flag for the NVIDIA PyPI index:
 
 `````{tab-set}
@@ -108,13 +107,11 @@ pip install rapids-singlecell
 ```
 
 The CUDA kernels will be compiled during installation for your local GPU architecture.
-Install the RAPIDS stack separately before building from source, or use the single `rapids` extra:
+You can select RAPIDS dependencies with the `rapids-cu12` or `rapids-cu13` extras:
 
 ```bash
-pip install 'rapids-singlecell[rapids]' --extra-index-url=https://pypi.nvidia.com
+pip install 'rapids-singlecell[rapids-cu12]' --extra-index-url=https://pypi.nvidia.com
 ```
-
-The `rapids` extra is the only RAPIDS dependency extra; there are no CUDA-specific extras such as `rapids-cu12` or `rapids-cu13`.
 
 ```{note}
 Building from source requires the CUDA toolkit (nvcc) and CMake >= 3.24 to be available in your environment.

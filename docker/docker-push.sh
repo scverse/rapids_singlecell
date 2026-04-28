@@ -5,8 +5,8 @@ docker_account=scverse
 rapids_version=26.04
 
 declare -A cuda_versions=(
-    [cu12]="12.9.1"
-    [cu13]="13.1.0"
+    [cu12]="12.8.0"
+    [cu13]="13.0.2"
 )
 
 declare -A cuda_archs=(
