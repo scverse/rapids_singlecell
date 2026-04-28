@@ -156,14 +156,14 @@ The `add_nb_cuda_module` helper automatically handles:
 
 The project uses [hatch](https://hatch.pypa.io/) to manage test environments. The test matrix is defined in `hatch.toml` with two axes:
 
-- **`cuda`**: `12` or `13` — selects the matching RAPIDS and CuPy packages
+- **`cuda`**: `12` or `13` — selects the matching RAPIDS/CuPy packages
 - **`deps`**: `stable`, `dev`, or `rapids_prerelease` — controls Python version and dependency sources
 
 | `deps` | Python | Description |
 |---|---|---|
 | `stable` | 3.12 | Released versions of all dependencies |
-| `dev` | 3.14 | Upstream `main` branches of anndata and scanpy |
-| `rapids_prerelease` | 3.14 | RAPIDS nightly wheels |
+| `dev` | 3.13 | Upstream `main` branches of anndata and scanpy |
+| `rapids_prerelease` | 3.13 | RAPIDS nightly wheels |
 
 To run the test suite against a specific matrix combination:
 
@@ -230,7 +230,7 @@ The project publishes three separate packages:
 ### Wheel builds
 
 Wheels are built via [cibuildwheel](https://cibuildwheel.pypa.io/) in GitHub Actions using custom manylinux Docker images with CUDA toolkit pre-installed.
-The RAPIDS build backend applies the CUDA package suffix and generates the `rapids` extra from `dependencies.yaml`.
+The CI renames the package and adjusts optional dependencies per CUDA version using an inline Python script in `publish.yml`.
 
 Each wheel contains:
 - Compiled `.abi3.so` modules (stable ABI, one wheel per platform for all Python 3.12+ versions)
