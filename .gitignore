@@ -4,6 +4,7 @@ __pycache__/
 /*cache/
 .ipynb_checkpoints/
 /data/
+/benchmarks/
 test-data/
 .vscode/
 
@@ -46,6 +47,7 @@ coverage.xml
 .vscode/
 .cursor/
 .claude/
+.codex
 CLAUDE.md
 .codex
 
