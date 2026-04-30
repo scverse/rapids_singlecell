@@ -6,19 +6,19 @@ These *yaml* files install everything needed to run the example notebooks and ge
 `````{tab-set}
 ````{tab-item} CUDA 13
 ```bash
-conda env create -f conda/rsc_rapids_26.02_cuda13.yml
+conda env create -f conda/rsc_rapids_26.04_cuda13.yml
 # or
-mamba env create -f conda/rsc_rapids_26.02_cuda13.yml
+mamba env create -f conda/rsc_rapids_26.04_cuda13.yml
 ```
-*Python 3.13, CUDA 13.0*
+*Python 3.14, CUDA 13.1*
 ````
 ````{tab-item} CUDA 12
 ```bash
-conda env create -f conda/rsc_rapids_26.02_cuda12.yml
+conda env create -f conda/rsc_rapids_26.04_cuda12.yml
 # or
-mamba env create -f conda/rsc_rapids_26.02_cuda12.yml
+mamba env create -f conda/rsc_rapids_26.04_cuda12.yml
 ```
-*Python 3.13, CUDA 12.9*
+*Python 3.14, CUDA 12.9*
 ````
 `````
 
@@ -26,21 +26,7 @@ mamba env create -f conda/rsc_rapids_26.02_cuda12.yml
 RAPIDS currently doesn't support `channel_priority: strict`; use `channel_priority: flexible` instead
 ```
 
-```{warning}
-The conda environment files on the `main` branch reference the new `rapids-singlecell-cu12`/`-cu13` wheel names, which are currently only available as pre-release.
-Until 0.15.0 is released, use the environment files from the [v0.14.1 tag](https://github.com/scverse/rapids_singlecell/tree/v0.14.1/conda) instead, or add `--pre` to the pip line manually.
-```
-
 ## PyPI
-
-```{note}
-**Pre-release testing:** Version 0.15.0 is currently in pre-release. We'd love for you to test it
-and report any issues! Install the latest release candidate with:
-
-    pip install --pre rapids-singlecell-cu13  # or rapids-singlecell-cu12
-
-Please report any problems on [GitHub Issues](https://github.com/scverse/rapids_singlecell/issues).
-```
 
 Starting with version 0.15.0, *rapids-singlecell* ships precompiled CUDA kernels via nanobind.
 Prebuilt wheels are available for **x86_64** and **aarch64** Linux for both CUDA 12 and CUDA 13.
@@ -55,7 +41,7 @@ The prebuilt wheels support the following CUDA runtime versions:
 | `rapids-singlecell-cu12` | CUDA 12.2 | CUDA 12.2–12.9+ | Turing through Hopper (native), Blackwell (via PTX JIT) |
 | `rapids-singlecell-cu13` | CUDA 13.0 | CUDA 13.0+ | Turing through Blackwell (all native) |
 
-The CUDA 12 wheels are compiled with CUDA 12.2 to match the [RAPIDS 26.02 support matrix](https://docs.rapids.ai/install/) (CUDA 12.2–12.9).
+The CUDA 12 wheels are compiled with CUDA 12.2 to match the [RAPIDS 26.04 support matrix](https://docs.rapids.ai/platform-support/) (CUDA 12.2–12.9).
 Blackwell GPUs (CC 100, 120) are supported via PTX just-in-time compilation from the `sm_90` PTX included in the wheel.
 The CUDA 13 wheels include native Blackwell binaries, so no JIT is needed.
 
@@ -115,6 +101,7 @@ pip install 'rapids-singlecell[rapids-cu12]' --extra-index-url=https://pypi.nvid
 
 ```{note}
 Building from source requires the CUDA toolkit (nvcc) and CMake >= 3.24 to be available in your environment.
+The nvcc/CUDAToolkit found during the build should match the RAPIDS/CuPy CUDA major runtime version in or linked to the environment.
 ```
 
 ### Install from GitHub
