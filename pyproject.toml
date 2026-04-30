@@ -9,7 +9,7 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "rapids-singlecell"
 description = "running single cell analysis on Nvidia GPUs"
-requires-python = ">=3.12, <3.14"
+requires-python = ">=3.12, <3.15"
 license = { file = "LICENSE" }
 authors = [ { name = "Severin Dicks" } ]
 readme = { file = "README.md", content-type = "text/markdown" }

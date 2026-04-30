@@ -4,7 +4,9 @@
 
 
 ## Version 0.15.0
-```{include} /release-notes/0.15.0.md
+```{include} /release-notes/0.15.0rc7.md
+```
+```{include} /release-notes/0.15.0rc6.md
 ```
 ```{include} /release-notes/0.15.0rc5.md
 ```
