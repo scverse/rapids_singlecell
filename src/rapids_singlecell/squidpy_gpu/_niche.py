@@ -33,6 +33,7 @@ def calculate_niche(
     n_components: int = 10,
     use_rep: str | None = None,
     init: Literal["kmeans", "random_from_data"] = "kmeans",
+    kmeans_n_init: int = 1,
     spatial_connectivities_key: str = "spatial_connectivities",
     random_state: int = 0,
     copy: bool = False,
@@ -84,9 +85,13 @@ def calculate_niche(
         if provided, the first ``n_components`` columns are used and the shell-aggregation
         + PCA step is skipped.
     init
-        GMM initialization for ``flavor="cellcharter"``. ``"kmeans"`` (default, robust)
+        GMM initialization for ``flavor="cellcharter"``. ``"kmeans"`` (default)
         or ``"random_from_data"`` (sklearn-parity). Use the latter if kmeans init lands
         on a degenerate component on noisy / low-signal data.
+    kmeans_n_init
+        Number of cuML KMeans restarts for ``flavor="cellcharter", init="kmeans"``.
+        The default ``1`` follows sklearn's GaussianMixture default and keeps the
+        CUDA GMM path fast.
     spatial_connectivities_key
         Key in ``adata.obsp`` with the spatial connectivity matrix.
     random_state
@@ -120,6 +125,7 @@ def calculate_niche(
             n_components=n_components,
             use_rep=use_rep,
             init=init,
+            kmeans_n_init=kmeans_n_init,
             random_state=random_state,
             key=spatial_connectivities_key,
         )
@@ -264,6 +270,7 @@ def _run_cellcharter(
     n_components: int,
     use_rep: str | None,
     init: str,
+    kmeans_n_init: int,
     random_state: int,
     key: str,
 ) -> None:
@@ -299,6 +306,7 @@ def _run_cellcharter(
         n_components=n_components,
         random_state=random_state,
         init=init,
+        kmeans_n_init=kmeans_n_init,
     )
     adata.obs["cellcharter_niche"] = pd.Categorical(cp.asnumpy(labels).astype(str))
 
