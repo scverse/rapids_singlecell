@@ -13,4 +13,5 @@
     gr.spatial_autocorr
     gr.co_occurrence
     gr.ligrec
+    gr.calculate_niche
 ```
