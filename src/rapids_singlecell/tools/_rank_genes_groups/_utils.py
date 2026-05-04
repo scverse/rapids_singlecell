@@ -16,11 +16,55 @@ if TYPE_CHECKING:
 EPS = 1e-9
 WARP_SIZE = 32
 MAX_THREADS_PER_BLOCK = 512
+MIN_GROUP_SIZE_WARNING = 25
+
+
+def _nonnegative_error(prefix: str) -> ValueError:
+    msg = (
+        f"{prefix} contains negative values. rank_genes_groups expects "
+        "nonnegative expression values; use raw counts or log1p/log-normalized "
+        "expression, not scaled or centered data."
+    )
+    return ValueError(msg)
+
+
+def _check_sparse_nonnegative(X) -> None:
+    """Reject inputs with negative values where an eager check is cheap.
+
+    Sparse rank_genes_groups code treats missing entries as true expression
+    zeros. Optimized sparse Wilcoxon paths may rank explicit nonzeros and add
+    implicit zeros analytically, which is only valid when explicit sparse
+    values are nonnegative expression values.
+    """
+    dtype = None
+    if sp.issparse(X) or cpsp.issparse(X):
+        dtype = np.dtype(X.data.dtype)
+    elif isinstance(X, np.ndarray | cp.ndarray):
+        dtype = np.dtype(X.dtype)
+    if dtype is not None and dtype.kind == "c":
+        msg = "rank_genes_groups does not support complex expression values."
+        raise TypeError(msg)
+
+    if sp.issparse(X):
+        if X.nnz > 0 and float(X.data.min()) < 0:
+            raise _nonnegative_error("Sparse input")
+    elif cpsp.issparse(X):
+        if X.nnz > 0 and float(X.data.min()) < 0:
+            raise _nonnegative_error("Sparse input")
+    elif isinstance(X, np.ndarray):
+        if X.size > 0 and float(np.nanmin(X)) < 0:
+            raise _nonnegative_error("Dense input")
+    elif isinstance(X, cp.ndarray):
+        if X.size > 0 and float(cp.nanmin(X)) < 0:
+            raise _nonnegative_error("Dense input")
 
 
 def _select_groups(
     labels: pd.Series,
     selected: list | None,
+    *,
+    reference: str = "rest",
+    skip_empty_groups: bool = False,
 ) -> tuple[NDArray, NDArray[np.int32], NDArray[np.int64]]:
     """Build integer group codes from a categorical Series.
 
@@ -51,6 +95,29 @@ def _select_groups(
         cat_order = {str(c): i for i, c in enumerate(all_categories)}
         selected.sort(key=lambda x: cat_order.get(str(x), len(all_categories)))
 
+    if skip_empty_groups:
+        counts = {
+            str(name): int(count) for name, count in labels.value_counts().items()
+        }
+        valid_selected = [group for group in selected if counts.get(str(group), 0) >= 2]
+        if reference != "rest":
+            ref_matches = [group for group in selected if str(group) == str(reference)]
+            if ref_matches:
+                ref_group = ref_matches[0]
+                if ref_group not in valid_selected:
+                    msg = (
+                        f"reference = {reference} has fewer than two samples after "
+                        "filtering and cannot be used for rank_genes_groups."
+                    )
+                    raise ValueError(msg)
+        selected = valid_selected
+        if len(selected) == 0:
+            msg = (
+                "No groups with at least two samples remain after applying "
+                "skip_empty_groups=True."
+            )
+            raise ValueError(msg)
+
     n_groups = len(selected)
     groups_order = np.array(selected)
 
@@ -76,7 +143,7 @@ def _select_groups(
     if invalid_groups:
         msg = (
             f"Could not calculate statistics for groups {', '.join(invalid_groups)} "
-            "since they only contain one sample."
+            "since they contain fewer than two samples."
         )
         raise ValueError(msg)
 
@@ -86,20 +153,6 @@ def _select_groups(
 def _round_up_to_warp(n: int) -> int:
     """Round up to nearest multiple of WARP_SIZE, capped at MAX_THREADS_PER_BLOCK."""
     return min(MAX_THREADS_PER_BLOCK, ((n + WARP_SIZE - 1) // WARP_SIZE) * WARP_SIZE)
-
-
-def _select_top_n(scores: NDArray, n_top: int) -> NDArray:
-    """Select indices of top n scores.
-
-    Uses argpartition + argsort for O(n + k log k) complexity where k = n_top.
-    This is faster than full sorting when k << n.
-    """
-    n_from = scores.shape[0]
-    reference_indices = np.arange(n_from, dtype=int)
-    partition = np.argpartition(scores, -n_top)[-n_top:]
-    partial_indices = np.argsort(scores[partition])[::-1]
-    global_indices = reference_indices[partition][partial_indices]
-    return global_indices
 
 
 def _choose_chunk_size(requested: int | None) -> int:

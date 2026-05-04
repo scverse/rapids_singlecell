@@ -14,6 +14,104 @@ if (RSC_BUILD_EXTENSIONS)
   find_package(Python REQUIRED COMPONENTS Interpreter Development.Module ${SKBUILD_SABI_COMPONENT})
   find_package(nanobind CONFIG REQUIRED)
   find_package(CUDAToolkit REQUIRED)
+  set(RSC_RMM_HINTS)
+  set(RSC_RAPIDS_CMAKE_PREFIXES)
+  set(RSC_CCCL_HINTS)
+  set(RSC_RAPIDS_LOGGER_HINTS)
+  set(RSC_NVTX3_HINTS)
+  macro(_rsc_collect_rapids_python_prefix _rsc_prefix)
+    if (NOT "${_rsc_prefix}" STREQUAL "")
+      file(GLOB _rsc_rmm_dirs "${_rsc_prefix}/lib/python*/site-packages/librmm/lib64/cmake/rmm")
+      file(GLOB _rsc_rapids_prefixes
+        "${_rsc_prefix}/lib/python*/site-packages/librmm/lib64"
+        "${_rsc_prefix}/lib/python*/site-packages/librmm/lib64/rapids"
+        "${_rsc_prefix}/lib/python*/site-packages/rapids_logger/lib64"
+        "${_rsc_prefix}/lib/python*/site-packages/nvidia/cu*/lib"
+      )
+      file(GLOB _rsc_cccl_dirs
+        "${_rsc_prefix}/lib/python*/site-packages/librmm/lib64/rapids/cmake/cccl"
+        "${_rsc_prefix}/lib/python*/site-packages/nvidia/cu*/lib/cmake/cccl"
+      )
+      file(GLOB _rsc_rapids_logger_dirs "${_rsc_prefix}/lib/python*/site-packages/rapids_logger/lib64/cmake/rapids_logger")
+      file(GLOB _rsc_nvtx3_dirs "${_rsc_prefix}/lib/python*/site-packages/librmm/lib64/cmake/nvtx3")
+      list(APPEND RSC_RMM_HINTS ${_rsc_rmm_dirs})
+      list(APPEND RSC_RAPIDS_CMAKE_PREFIXES ${_rsc_rapids_prefixes})
+      list(APPEND RSC_CCCL_HINTS ${_rsc_cccl_dirs})
+      list(APPEND RSC_RAPIDS_LOGGER_HINTS ${_rsc_rapids_logger_dirs})
+      list(APPEND RSC_NVTX3_HINTS ${_rsc_nvtx3_dirs})
+    endif()
+  endmacro()
+  execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c "import importlib.util, pathlib; spec = importlib.util.find_spec('librmm'); print(pathlib.Path(spec.origin).parent / 'lib64' / 'cmake' / 'rmm' if spec else '')"
+    OUTPUT_VARIABLE RSC_PYTHON_RMM_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if (RSC_PYTHON_RMM_DIR AND EXISTS "${RSC_PYTHON_RMM_DIR}/rmm-config.cmake")
+    list(APPEND RSC_RMM_HINTS "${RSC_PYTHON_RMM_DIR}")
+  endif()
+  # Wheel builds install librmm/rapids_logger into the isolated build env and
+  # write build/.librmm_dir from CIBW_BEFORE_BUILD.  publish.yml also symlinks
+  # those shared libraries into /usr/local/lib so auditwheel can see and exclude
+  # them instead of bundling RAPIDS runtime libraries into the wheel.
+  if(DEFINED ENV{RSC_LIBRMM_DIR} AND EXISTS "$ENV{RSC_LIBRMM_DIR}/lib64/cmake/rmm/rmm-config.cmake")
+    set(_rsc_librmm_marker "$ENV{RSC_LIBRMM_DIR}")
+  elseif(EXISTS "${CMAKE_SOURCE_DIR}/build/.librmm_dir")
+    file(READ "${CMAKE_SOURCE_DIR}/build/.librmm_dir" _rsc_librmm_marker)
+    string(STRIP "${_rsc_librmm_marker}" _rsc_librmm_marker)
+  else()
+    set(_rsc_librmm_marker "")
+  endif()
+  if(NOT "${_rsc_librmm_marker}" STREQUAL "" AND EXISTS "${_rsc_librmm_marker}/lib64/cmake/rmm/rmm-config.cmake")
+    file(GLOB _rsc_marker_rmm_dirs "${_rsc_librmm_marker}/lib64/cmake/rmm")
+    file(GLOB _rsc_marker_rapids_prefixes
+      "${_rsc_librmm_marker}/lib64"
+      "${_rsc_librmm_marker}/lib64/rapids"
+      "${_rsc_librmm_marker}/../rapids_logger/lib64"
+    )
+    file(GLOB _rsc_marker_cccl_dirs
+      "${_rsc_librmm_marker}/lib64/rapids/cmake/cccl"
+    )
+    file(GLOB _rsc_marker_rapids_logger_dirs "${_rsc_librmm_marker}/../rapids_logger/lib64/cmake/rapids_logger")
+    file(GLOB _rsc_marker_nvtx3_dirs "${_rsc_librmm_marker}/lib64/cmake/nvtx3")
+    list(APPEND RSC_RMM_HINTS ${_rsc_marker_rmm_dirs})
+    list(APPEND RSC_RAPIDS_CMAKE_PREFIXES ${_rsc_marker_rapids_prefixes})
+    list(APPEND RSC_CCCL_HINTS ${_rsc_marker_cccl_dirs})
+    list(APPEND RSC_RAPIDS_LOGGER_HINTS ${_rsc_marker_rapids_logger_dirs})
+    list(APPEND RSC_NVTX3_HINTS ${_rsc_marker_nvtx3_dirs})
+  endif()
+  foreach(_rsc_python_prefix IN ITEMS "${Python_ROOT_DIR}" "${Python3_ROOT_DIR}")
+    _rsc_collect_rapids_python_prefix("${_rsc_python_prefix}")
+  endforeach()
+  foreach(_rsc_env_prefix IN ITEMS "$ENV{CONDA_PREFIX}" "$ENV{VIRTUAL_ENV}")
+    _rsc_collect_rapids_python_prefix("${_rsc_env_prefix}")
+  endforeach()
+  string(REPLACE ":" ";" _rsc_path_entries "$ENV{PATH}")
+  foreach(_rsc_path_entry IN LISTS _rsc_path_entries)
+    get_filename_component(_rsc_path_prefix "${_rsc_path_entry}/.." ABSOLUTE)
+    _rsc_collect_rapids_python_prefix("${_rsc_path_prefix}")
+  endforeach()
+  if (RSC_RAPIDS_CMAKE_PREFIXES)
+    list(APPEND CMAKE_PREFIX_PATH ${RSC_RAPIDS_CMAKE_PREFIXES})
+    if (RSC_CCCL_HINTS)
+      list(GET RSC_CCCL_HINTS 0 _rsc_cccl_dir)
+      set(CCCL_DIR "${_rsc_cccl_dir}" CACHE PATH "Path to CCCL package config" FORCE)
+    endif()
+    if (RSC_RAPIDS_LOGGER_HINTS)
+      list(GET RSC_RAPIDS_LOGGER_HINTS 0 _rsc_rapids_logger_dir)
+      set(rapids_logger_DIR "${_rsc_rapids_logger_dir}" CACHE PATH "Path to rapids_logger package config" FORCE)
+    endif()
+    if (RSC_NVTX3_HINTS)
+      list(GET RSC_NVTX3_HINTS 0 _rsc_nvtx3_dir)
+      set(nvtx3_DIR "${_rsc_nvtx3_dir}" CACHE PATH "Path to nvtx3 package config" FORCE)
+    endif()
+  endif()
+  if (RSC_RMM_HINTS)
+    find_package(rmm CONFIG REQUIRED HINTS ${RSC_RMM_HINTS})
+  else()
+    find_package(rmm CONFIG REQUIRED)
+  endif()
+  message(STATUS "Using RMM for CUDA extension scratch allocations")
   message(STATUS "Building for CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 else()
   message(STATUS "RSC_BUILD_EXTENSIONS=OFF -> skipping compiled extensions for docs")
@@ -85,6 +183,11 @@ if (RSC_BUILD_EXTENSIONS)
   add_nb_cuda_module(_hvg_cuda          src/rapids_singlecell/_cuda/hvg/hvg.cu)
   add_nb_cuda_module(_kde_cuda          src/rapids_singlecell/_cuda/kde/kde.cu)
   add_nb_cuda_module(_wilcoxon_cuda     src/rapids_singlecell/_cuda/wilcoxon/wilcoxon.cu)
+  target_sources(_wilcoxon_cuda PRIVATE src/rapids_singlecell/_cuda/wilcoxon/wilcoxon_rmm.cu)
+  target_link_libraries(_wilcoxon_cuda PRIVATE rmm::rmm)
+  add_nb_cuda_module(_wilcoxon_sparse_cuda src/rapids_singlecell/_cuda/wilcoxon/wilcoxon_sparse.cu)
+  target_sources(_wilcoxon_sparse_cuda PRIVATE src/rapids_singlecell/_cuda/wilcoxon/wilcoxon_rmm.cu)
+  target_link_libraries(_wilcoxon_sparse_cuda PRIVATE rmm::rmm)
   # Harmony CUDA modules
   add_nb_cuda_module(_harmony_scatter_cuda   src/rapids_singlecell/_cuda/harmony/scatter/scatter.cu)
   add_nb_cuda_module(_harmony_outer_cuda     src/rapids_singlecell/_cuda/harmony/outer/outer.cu)
