@@ -152,8 +152,11 @@ def harmonize(
     cat_offsets, cell_indices = _create_category_index_mapping(cats, n_batches)
 
     # Set up parameters
+    if max_iter_harmony < 1:
+        raise ValueError("max_iter_harmony must be >= 1")
     if n_clusters is None:
         n_clusters = int(min(100, n_cells / 30))
+        n_clusters = max(n_clusters, 2)
 
     # TODO: Allow for multiple colsum algorithms in a list
     assert colsum_algo in ["columns", "atomics", "gemm", "benchmark", None]
