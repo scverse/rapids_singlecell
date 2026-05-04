@@ -64,14 +64,16 @@ static inline void launch_gearys_sparse(
     CUDA_CHECK_LAST_ERROR(gearys_C_num_sparse_kernel);
 }
 
-template <typename T>
-static inline void launch_pre_den_sparse(const int* data_col_ind,
-                                         const T* data_values, int nnz,
+template <typename T, typename IdxT>
+static inline void launch_pre_den_sparse(const IdxT* data_col_ind,
+                                         const T* data_values, long long nnz,
                                          const T* mean_array, T* den,
                                          int* counter, cudaStream_t stream) {
     dim3 block(ELEMENTWISE_BLOCK_SIZE);
-    dim3 grid((nnz + ELEMENTWISE_BLOCK_SIZE - 1) / ELEMENTWISE_BLOCK_SIZE);
-    pre_den_sparse_kernel<<<grid, block, 0, stream>>>(
+    long long grid_size =
+        (nnz + ELEMENTWISE_BLOCK_SIZE - 1) / ELEMENTWISE_BLOCK_SIZE;
+    dim3 grid(grid_size);
+    pre_den_sparse_kernel<T, IdxT><<<grid, block, 0, stream>>>(
         data_col_ind, data_values, nnz, mean_array, den, counter);
     CUDA_CHECK_LAST_ERROR(pre_den_sparse_kernel);
 }
@@ -220,31 +222,59 @@ void register_bindings(nb::module_& m) {
         "data_row_ptr"_a, "data_col_ind"_a, "data_values"_a, "n_samples"_a,
         "n_features"_a, "num"_a, "stream"_a = 0);
 
-    // pre_den_sparse - float32
+    // pre_den_sparse - float32, int32
     m.def(
         "pre_den_sparse",
         [](gpu_array_c<const int, Device> data_col_ind,
-           gpu_array_c<const float, Device> data_values, int nnz,
+           gpu_array_c<const float, Device> data_values, long long nnz,
            gpu_array_c<const float, Device> mean_array,
            gpu_array_c<float, Device> den, gpu_array_c<int, Device> counter,
            std::uintptr_t stream) {
-            launch_pre_den_sparse(data_col_ind.data(), data_values.data(), nnz,
-                                  mean_array.data(), den.data(), counter.data(),
-                                  (cudaStream_t)stream);
+            launch_pre_den_sparse<float, int>(
+                data_col_ind.data(), data_values.data(), nnz, mean_array.data(),
+                den.data(), counter.data(), (cudaStream_t)stream);
         },
         "data_col_ind"_a, "data_values"_a, nb::kw_only(), "nnz"_a,
         "mean_array"_a, "den"_a, "counter"_a, "stream"_a = 0);
-    // pre_den_sparse - float64
+    // pre_den_sparse - float64, int32
     m.def(
         "pre_den_sparse",
         [](gpu_array_c<const int, Device> data_col_ind,
-           gpu_array_c<const double, Device> data_values, int nnz,
+           gpu_array_c<const double, Device> data_values, long long nnz,
            gpu_array_c<const double, Device> mean_array,
            gpu_array_c<double, Device> den, gpu_array_c<int, Device> counter,
            std::uintptr_t stream) {
-            launch_pre_den_sparse(data_col_ind.data(), data_values.data(), nnz,
-                                  mean_array.data(), den.data(), counter.data(),
-                                  (cudaStream_t)stream);
+            launch_pre_den_sparse<double, int>(
+                data_col_ind.data(), data_values.data(), nnz, mean_array.data(),
+                den.data(), counter.data(), (cudaStream_t)stream);
+        },
+        "data_col_ind"_a, "data_values"_a, nb::kw_only(), "nnz"_a,
+        "mean_array"_a, "den"_a, "counter"_a, "stream"_a = 0);
+    // pre_den_sparse - float32, int64
+    m.def(
+        "pre_den_sparse",
+        [](gpu_array_c<const long long, Device> data_col_ind,
+           gpu_array_c<const float, Device> data_values, long long nnz,
+           gpu_array_c<const float, Device> mean_array,
+           gpu_array_c<float, Device> den, gpu_array_c<int, Device> counter,
+           std::uintptr_t stream) {
+            launch_pre_den_sparse<float, long long>(
+                data_col_ind.data(), data_values.data(), nnz, mean_array.data(),
+                den.data(), counter.data(), (cudaStream_t)stream);
+        },
+        "data_col_ind"_a, "data_values"_a, nb::kw_only(), "nnz"_a,
+        "mean_array"_a, "den"_a, "counter"_a, "stream"_a = 0);
+    // pre_den_sparse - float64, int64
+    m.def(
+        "pre_den_sparse",
+        [](gpu_array_c<const long long, Device> data_col_ind,
+           gpu_array_c<const double, Device> data_values, long long nnz,
+           gpu_array_c<const double, Device> mean_array,
+           gpu_array_c<double, Device> den, gpu_array_c<int, Device> counter,
+           std::uintptr_t stream) {
+            launch_pre_den_sparse<double, long long>(
+                data_col_ind.data(), data_values.data(), nnz, mean_array.data(),
+                den.data(), counter.data(), (cudaStream_t)stream);
         },
         "data_col_ind"_a, "data_values"_a, nb::kw_only(), "nnz"_a,
         "mean_array"_a, "den"_a, "counter"_a, "stream"_a = 0);

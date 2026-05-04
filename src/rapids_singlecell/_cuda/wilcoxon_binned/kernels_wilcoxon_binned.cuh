@@ -30,10 +30,10 @@ __global__ void dense_hist_kernel(const T* __restrict__ X,
 
 // ---------- csr_hist ----------
 // One block per cell row. Threads stride over nonzeros.
-template <typename T>
+template <typename T, typename IdxT>
 __global__ void csr_hist_kernel(
-    const T* __restrict__ data, const int* __restrict__ indices,
-    const int* __restrict__ indptr, const int* __restrict__ gcodes,
+    const T* __restrict__ data, const IdxT* __restrict__ indices,
+    const IdxT* __restrict__ indptr, const int* __restrict__ gcodes,
     unsigned int* __restrict__ hist, int n_cells, int n_genes, int n_groups,
     int n_bins, double bin_low, double inv_bin_width, int gene_start) {
     int row = blockIdx.x;
@@ -43,11 +43,11 @@ __global__ void csr_hist_kernel(
     if (grp >= n_groups) return;  // skip unselected cells
 
     int nbt = n_bins + 1;
-    int row_start = indptr[row];
-    int row_end = indptr[row + 1];
+    IdxT row_start = indptr[row];
+    IdxT row_end = indptr[row + 1];
     int gene_stop = gene_start + n_genes;
 
-    for (int i = row_start + threadIdx.x; i < row_end; i += blockDim.x) {
+    for (IdxT i = row_start + threadIdx.x; i < row_end; i += blockDim.x) {
         int col = indices[i];
         if (col < gene_start || col >= gene_stop) continue;
 
@@ -65,10 +65,10 @@ __global__ void csr_hist_kernel(
 
 // ---------- csc_hist ----------
 // One block per gene column. Threads stride over nonzeros.
-template <typename T>
+template <typename T, typename IdxT>
 __global__ void csc_hist_kernel(
-    const T* __restrict__ data, const int* __restrict__ indices,
-    const int* __restrict__ indptr, const int* __restrict__ gcodes,
+    const T* __restrict__ data, const IdxT* __restrict__ indices,
+    const IdxT* __restrict__ indptr, const int* __restrict__ gcodes,
     unsigned int* __restrict__ hist, int n_cells, int n_genes, int n_groups,
     int n_bins, double bin_low, double inv_bin_width, int gene_start) {
     int gene = blockIdx.x;
@@ -78,10 +78,10 @@ __global__ void csc_hist_kernel(
     unsigned int* dst = hist + (long long)gene * n_groups * nbt;
 
     int col = gene_start + gene;
-    int col_start = indptr[col];
-    int col_end = indptr[col + 1];
+    IdxT col_start = indptr[col];
+    IdxT col_end = indptr[col + 1];
 
-    for (int i = col_start + threadIdx.x; i < col_end; i += blockDim.x) {
+    for (IdxT i = col_start + threadIdx.x; i < col_end; i += blockDim.x) {
         double val = (double)data[i];
         if (val == 0.0) continue;
 

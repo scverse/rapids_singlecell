@@ -173,17 +173,18 @@ __global__ void gearys_C_num_sparse_kernel(
 }
 
 // Pre-denominator for sparse paths
-template <typename T>
-__global__ void pre_den_sparse_kernel(const int* __restrict__ data_col_ind,
+template <typename T, typename IdxT>
+__global__ void pre_den_sparse_kernel(const IdxT* __restrict__ data_col_ind,
                                       const T* __restrict__ data_values,
-                                      int nnz, const T* __restrict__ mean_array,
+                                      long long nnz,
+                                      const T* __restrict__ mean_array,
                                       T* __restrict__ den,
                                       int* __restrict__ counter) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    long long i = (long long)blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= nnz) {
         return;
     }
-    int geneidx = data_col_ind[i];
+    IdxT geneidx = data_col_ind[i];
     T value = data_values[i] - mean_array[geneidx];
     atomicAdd(&counter[geneidx], 1);
     atomicAdd(&den[geneidx], value * value);
