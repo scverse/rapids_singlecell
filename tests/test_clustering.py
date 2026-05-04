@@ -86,6 +86,7 @@ def test_clustering_resolution(adata_neighbors, clustering_function, resolution)
         assert isinstance(adata.uns["test_clustering"]["modularity"], float)
         assert adata.uns["test_clustering"]["params"]["resolution"] == resolution
 
+
 def test_kmeans_basic(adata_neighbors):
     rsc.tl.kmeans(adata_neighbors)
     assert adata_neighbors.obs["kmeans"].nunique() == 8
