@@ -158,17 +158,10 @@ def test_rank_genes_groups_wilcoxon_subset_and_bonferroni(reference):
     ],
 )
 @pytest.mark.parametrize("tie_correct", [False, True])
+@pytest.mark.parametrize("pre_load", [False, True])
 def test_rank_genes_groups_wilcoxon_subset_matches_scanpy(
-    groups, reference, tie_correct
+    groups, reference, tie_correct, pre_load
 ):
-    """Regression for issue #650 (vs-rest path) plus OVO subset coverage.
-
-    With ``groups=[subset]`` and ``reference='rest'``, the GPU path used to
-    derive logfoldchanges from a means_rest computed over the selected groups
-    only, producing NaN values when only one group was selected.
-    Parameterizing over ``reference`` also pins the OVO subset path against
-    scanpy.
-    """
     np.random.seed(42)
     adata_gpu = sc.datasets.blobs(n_variables=8, n_centers=5, n_observations=200)
     adata_gpu.obs["blobs"] = adata_gpu.obs["blobs"].astype("category")
@@ -182,6 +175,7 @@ def test_rank_genes_groups_wilcoxon_subset_matches_scanpy(
         reference=reference,
         use_raw=False,
         tie_correct=tie_correct,
+        pre_load=pre_load,
     )
     sc.tl.rank_genes_groups(
         adata_cpu,

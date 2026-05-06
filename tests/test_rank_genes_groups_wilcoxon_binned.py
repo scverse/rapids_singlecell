@@ -302,6 +302,9 @@ class TestWilcoxonBinnedEdgeCases:
         )
 
         for group in result_sub["names"].dtype.names:
+            assert tuple(result_all["names"][group]) == tuple(
+                result_sub["names"][group]
+            ), f"names mismatch for group {group}"
             for field in ("scores", "logfoldchanges", "pvals", "pvals_adj"):
                 np.testing.assert_allclose(
                     np.asarray(result_all[field][group], dtype=float),
