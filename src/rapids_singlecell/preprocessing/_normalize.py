@@ -357,7 +357,7 @@ def _calc_log1p(X: ArrayTypesDask, base: float | None = None) -> ArrayTypesDask:
 
 
 def log1p(
-    adata: AnnData,
+    data: AnnData,
     *,
     base: float | None = None,
     layer: str | None = None,
@@ -373,7 +373,7 @@ def log1p(
 
     Parameters
     ----------
-        adata
+        data
             AnnData object
         base
             Base of the logarithm. Natural logarithm is used by default.
@@ -393,6 +393,7 @@ def log1p(
     in-place and returns None.
 
     """
+    adata = data
     if copy:
         if not inplace:
             raise ValueError("`copy=True` cannot be used with `inplace=False`.")
