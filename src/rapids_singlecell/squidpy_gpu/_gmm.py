@@ -11,8 +11,8 @@ Implementation notes
 --------------------
 - CUDA E-step uses a cached precision Cholesky (computed once per M-step) and a
   custom Mahalanobis + responsibility kernel for the common <=64-PC case.
-- CUDA M-step reuses preallocated workspaces and computes full covariances from
-  upper-triangle tiled reductions.
+- CUDA M-step reuses preallocated workspaces and uses a cuBLAS covariance
+  update to avoid the chunked atomic reduction bottleneck.
 - ``_precision_cholesky`` is a batched ``inv``+``cholesky`` — no Python K-loop.
 - Convergence is the change in mean log-likelihood.
 """
@@ -64,7 +64,7 @@ def gmm_fit_predict(
         ``"auto"`` (default) uses the nanobind/CUDA EM backend when the compiled
         extension is available, otherwise falls back to CuPy. ``"cupy"`` uses
         CuPy + cuBLAS for the covariance update. ``"cuda"`` forces the custom
-        CUDA kernels for the E-step and M-step reductions.
+        CUDA kernels for the E-step and the fastest available CUDA M-step.
     kmeans_n_init
         Number of cuML KMeans restarts for ``init="kmeans"``. The default ``1``
         matches sklearn's GaussianMixture default and keeps cellcharter fast;
@@ -92,7 +92,13 @@ def gmm_fit_predict(
         )
 
     weights, means, covariances = _initialize(
-        X, K, random_state, reg_covar, init, int(kmeans_n_init)
+        X,
+        K,
+        random_state=random_state,
+        reg_covar=reg_covar,
+        init=init,
+        kmeans_n_init=int(kmeans_n_init),
+        backend=backend,
     )
     prec_chol, log_det_prec_half = _precision_cholesky(covariances)
 
@@ -128,7 +134,13 @@ def _fit_predict_cuda(
     kmeans_n_init: int,
 ) -> cp.ndarray:
     weights, means, covariances = _initialize(
-        X, K, random_state, reg_covar, init, kmeans_n_init
+        X,
+        K,
+        random_state=random_state,
+        reg_covar=reg_covar,
+        init=init,
+        kmeans_n_init=kmeans_n_init,
+        backend="cuda",
     )
     weights = cp.ascontiguousarray(weights)
     means = cp.ascontiguousarray(means)
@@ -145,7 +157,7 @@ def _fit_predict_cuda(
             converged = True
             break
         prev_ll = ll_value
-        workspace.m_step(resp, weights, means, covariances, reg_covar)
+        workspace.m_step_cublas(resp, weights, means, covariances, reg_covar)
         prec_chol, log_det_prec_half = _precision_cholesky(covariances)
 
     if not converged:
@@ -214,6 +226,35 @@ class _GMMCudaWorkspace:
             stream=self.stream,
         )
 
+    def m_step_cublas(
+        self,
+        resp: cp.ndarray,
+        weights: cp.ndarray,
+        means: cp.ndarray,
+        covariances: cp.ndarray,
+        reg_covar: float,
+    ) -> None:
+        if not hasattr(self, "_ones"):
+            self._ones = cp.ones(self.n, dtype=self.X.dtype)
+        if not hasattr(self, "_centered"):
+            self._centered = cp.empty_like(self.X)
+        self._gc.m_step_cublas(
+            cp.ascontiguousarray(resp),
+            self.X,
+            self._ones,
+            weights,
+            means,
+            covariances,
+            self.N_k,
+            self.num,
+            self._centered,
+            n=self.n,
+            d=self.d,
+            K=self.K,
+            reg_covar=float(reg_covar),
+            stream=self.stream,
+        )
+
 
 def _resolve_backend(backend: str) -> str:
     if backend == "cupy":
@@ -245,6 +286,7 @@ def _initialize(
     reg_covar: float,
     init: str,
     kmeans_n_init: int,
+    backend: str = "cupy",
 ) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray]:
     n, d = X.shape
     eye_reg = reg_covar * cp.eye(d, dtype=X.dtype)
@@ -273,6 +315,9 @@ def _initialize(
     labels = cp.asarray(km.labels_)
     means = cp.asarray(km.cluster_centers_, dtype=X.dtype)
 
+    if backend == "cuda":
+        return _initialize_covariances_cuda(X, labels, means, reg_covar)
+
     weights = cp.zeros(K, dtype=X.dtype)
     covariances = cp.empty((K, d, d), dtype=X.dtype)
     for k in range(K):
@@ -286,6 +331,34 @@ def _initialize(
         weights[k] = cnt / n
         diff = X[mask] - means[k]
         covariances[k] = (diff.T @ diff) / cnt + eye_reg
+    return weights, means, covariances
+
+
+def _initialize_covariances_cuda(
+    X: cp.ndarray,
+    labels: cp.ndarray,
+    means_init: cp.ndarray,
+    reg_covar: float,
+) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray]:
+    n = X.shape[0]
+    K = means_init.shape[0]
+
+    labels = labels.astype(cp.int64, copy=False)
+    resp = cp.zeros((n, K), dtype=X.dtype)
+    resp[cp.arange(n), labels] = X.dtype.type(1.0)
+    weights, means, covariances = _m_step(X, resp, reg_covar, backend="cuda")
+
+    counts = cp.bincount(labels, minlength=K).astype(X.dtype, copy=False)
+    empty = counts == 0
+    eye_reg = reg_covar * cp.eye(X.shape[1], dtype=X.dtype)
+
+    weights = cp.where(empty, X.dtype.type(1.0 / n), counts / n)
+    means = cp.where(empty[:, None], means_init, means)
+    covariances = cp.where(
+        empty[:, None, None],
+        cp.broadcast_to(eye_reg, covariances.shape),
+        covariances,
+    )
     return weights, means, covariances
 
 
@@ -373,19 +446,26 @@ def _m_step(
         covariances = cp.empty((K, d, d), dtype=X.dtype)
         N_k_ws = cp.empty(K, dtype=X.dtype)
         num_ws = cp.empty((K, d), dtype=X.dtype)
-        _gc.m_step(
-            cp.ascontiguousarray(resp),
-            cp.ascontiguousarray(X),
+        resp = cp.ascontiguousarray(resp)
+        X = cp.ascontiguousarray(X)
+        stream = cp.cuda.get_current_stream().ptr
+        ones_ws = cp.ones(n, dtype=X.dtype)
+        centered_ws = cp.empty_like(X)
+        _gc.m_step_cublas(
+            resp,
+            X,
+            ones_ws,
             weights,
             means,
             covariances,
             N_k_ws,
             num_ws,
+            centered_ws,
             n=int(n),
             d=int(d),
             K=int(K),
             reg_covar=float(reg_covar),
-            stream=cp.cuda.get_current_stream().ptr,
+            stream=stream,
         )
         return weights, means, covariances
 

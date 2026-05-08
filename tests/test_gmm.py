@@ -111,7 +111,7 @@ def test_cuda_backend_matches_cupy_steps():
         pytest.skip("_gmm_cuda extension is not available")
 
     rng = cp.random.RandomState(0)
-    n, d, K = 40_000, 6, 3  # large enough to exercise the chunked M-step path
+    n, d, K = 40_000, 6, 3  # large enough to exercise the cuBLAS M-step path
     X = rng.standard_normal((n, d), dtype=cp.float32)
     logits = rng.standard_normal((n, K), dtype=cp.float32)
     resp = cp.exp(logits - cp.log(cp.exp(logits).sum(axis=1, keepdims=True)))

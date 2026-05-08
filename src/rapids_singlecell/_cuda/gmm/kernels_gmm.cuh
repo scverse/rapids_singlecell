@@ -73,7 +73,9 @@ __global__ void e_step_log_prob_kernel(
     T mahal = T(0);
     for (int j = 0; j < d; ++j) {
         T y = T(0);
-        for (int dd = 0; dd < d; ++dd) {
+        // prec_chol is lower triangular from Cholesky, so entries above the
+        // diagonal are zero. Skip that half of the multiply.
+        for (int dd = j; dd < d; ++dd) {
             y += centered_vals[dd] * sh_pc[dd * d + j];
         }
         mahal += y * y;
@@ -318,5 +320,68 @@ __global__ void m_step_finalize_kernel(const T* __restrict__ N_k,
         if (i == j) v += reg_covar;
         sm_to_cov[k * d * d + idx] = v;
         if (i != j) sm_to_cov[k * d * d + j * d + i] = v;
+    }
+}
+
+template <typename T>
+__global__ void m_step_finalize_means_kernel(const T* __restrict__ N_k,
+                                             const T* __restrict__ num,
+                                             T* __restrict__ weights,
+                                             T* __restrict__ means, T eps,
+                                             int n, int d, int K) {
+    int k = blockIdx.x;
+    int tid = threadIdx.x;
+    if (k >= K) return;
+
+    T Nk = N_k[k] + T(10) * eps;
+    T inv_Nk = T(1) / Nk;
+    if (tid == 0) weights[k] = Nk / T(n);
+
+    for (int i = tid; i < d; i += blockDim.x)
+        means[k * d + i] = num[k * d + i] * inv_Nk;
+}
+
+template <typename T>
+__global__ void weighted_center_kernel(const T* __restrict__ X,
+                                       const T* __restrict__ resp,
+                                       const T* __restrict__ means, int n,
+                                       int d, int K, int k,
+                                       T* __restrict__ centered) {
+    size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    size_t total = (size_t)n * d;
+    if (idx >= total) return;
+
+    int row = idx / d;
+    int col = idx - (size_t)row * d;
+    T r = resp[row * K + k];
+    centered[idx] = sqrt(r) * (X[idx] - means[k * d + col]);
+}
+
+template <typename T>
+__global__ void m_step_finalize_cov_cublas_kernel(const T* __restrict__ N_k,
+                                                  T* __restrict__ covariances,
+                                                  T reg_covar, T eps, int d,
+                                                  int K) {
+    int k = blockIdx.x;
+    int tid = threadIdx.x;
+    if (k >= K) return;
+
+    T Nk = N_k[k] + T(10) * eps;
+    T inv_Nk = T(1) / Nk;
+    int total = d * d;
+    T* cov = covariances + (size_t)k * d * d;
+
+    for (int idx = tid; idx < total; idx += blockDim.x) {
+        int i = idx / d;
+        int j = idx % d;
+        if (i > j) continue;
+
+        // cuBLAS wrote the row-major symmetric result through a column-major
+        // view. Read the transposed element and write a symmetric row-major
+        // covariance.
+        T v = cov[j * d + i] * inv_Nk;
+        if (i == j) v += reg_covar;
+        cov[i * d + j] = v;
+        if (i != j) cov[j * d + i] = v;
     }
 }

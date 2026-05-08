@@ -1,10 +1,13 @@
 #include <cuda_runtime.h>
 #include <math_constants.h>
 
+#include <cublas_v2.h>
+
 #include <limits>
 #include <stdexcept>
 #include <string>
 
+#include "../cublas_helpers.cuh"
 #include "../nb_types.h"
 
 #include "kernels_gmm.cuh"
@@ -21,6 +24,15 @@ static inline void cuda_check_runtime(cudaError_t err, const char* what) {
     if (err != cudaSuccess) {
         throw std::runtime_error(std::string(what) +
                                  " failed: " + cudaGetErrorString(err));
+    }
+}
+
+static inline void cublas_check_status(cublasStatus_t status,
+                                       const char* what) {
+    if (status != CUBLAS_STATUS_SUCCESS) {
+        throw std::runtime_error(std::string(what) +
+                                 " failed with cuBLAS status " +
+                                 std::to_string(static_cast<int>(status)));
     }
 }
 
@@ -94,6 +106,73 @@ static inline void launch_m_step(const T* resp, const T* X, int n, int d, int K,
     }
 }
 
+template <typename T>
+static inline void launch_m_step_cublas(const T* resp, const T* X,
+                                        const T* ones, int n, int d, int K,
+                                        T reg_covar, T* weights, T* means,
+                                        T* covariances, T* workspace_N_k,
+                                        T* workspace_num, T* workspace_centered,
+                                        cudaStream_t stream) {
+    if (n == 0 || d == 0 || K == 0) return;
+
+    cublasHandle_t handle;
+    cublas_check_status(cublasCreate(&handle), "cublasCreate");
+    cublas_check_status(cublasSetStream(handle, stream), "cublasSetStream");
+
+    T one = T(1);
+    T zero = T(0);
+    T eps = std::numeric_limits<T>::epsilon();
+
+    // Row-major resp(n,K) is cuBLAS column-major (K,n). N_k = resp.T @ 1.
+    cublas_check_status(cublas_gemv<T>(handle, CUBLAS_OP_N, K, n, &one, resp, K,
+                                       ones, 1, &zero, workspace_N_k, 1),
+                        "cublas_gemv(N_k)");
+
+    // Row-major X(n,d) is cuBLAS column-major (d,n). Fill row-major
+    // workspace_num(K,d) through its column-major (d,K) view with X.T @ resp.
+    cublas_check_status(
+        cublas_gemm<T>(handle, CUBLAS_OP_N, CUBLAS_OP_T, d, K, n, &one, X, d,
+                       resp, K, &zero, workspace_num, d),
+        "cublas_gemm(num)");
+
+    {
+        int threads = 256;
+        dim3 block(threads);
+        dim3 grid(K);
+        m_step_finalize_means_kernel<T><<<grid, block, 0, stream>>>(
+            workspace_N_k, workspace_num, weights, means, eps, n, d, K);
+        CUDA_CHECK_LAST_ERROR(m_step_finalize_means_kernel);
+    }
+
+    {
+        int threads = 256;
+        int blocks = (int)(((size_t)n * d + threads - 1) / threads);
+        for (int k = 0; k < K; ++k) {
+            weighted_center_kernel<T><<<blocks, threads, 0, stream>>>(
+                X, resp, means, n, d, K, k, workspace_centered);
+            CUDA_CHECK_LAST_ERROR(weighted_center_kernel);
+
+            T* cov_k = covariances + (size_t)k * d * d;
+            cublas_check_status(
+                cublas_gemm<T>(handle, CUBLAS_OP_N, CUBLAS_OP_T, d, d, n, &one,
+                               workspace_centered, d, workspace_centered, d,
+                               &zero, cov_k, d),
+                "cublas_gemm(covariance)");
+        }
+    }
+
+    {
+        int threads = 256;
+        dim3 block(threads);
+        dim3 grid(K);
+        m_step_finalize_cov_cublas_kernel<T><<<grid, block, 0, stream>>>(
+            workspace_N_k, covariances, reg_covar, eps, d, K);
+        CUDA_CHECK_LAST_ERROR(m_step_finalize_cov_cublas_kernel);
+    }
+
+    cublas_check_status(cublasDestroy(handle), "cublasDestroy");
+}
+
 template <typename Device>
 void register_bindings(nb::module_& m) {
     m.def(
@@ -152,6 +231,49 @@ void register_bindings(nb::module_& m) {
         "resp"_a, "X"_a, "weights"_a, "means"_a, "covariances"_a,
         "N_k_workspace"_a, "num_workspace"_a, nb::kw_only(), "n"_a, "d"_a,
         "K"_a, "reg_covar"_a, "stream"_a = 0);
+
+    m.def(
+        "m_step_cublas",
+        [](gpu_array_c<const float, Device> resp,
+           gpu_array_c<const float, Device> X,
+           gpu_array_c<const float, Device> ones,
+           gpu_array_c<float, Device> weights, gpu_array_c<float, Device> means,
+           gpu_array_c<float, Device> covariances,
+           gpu_array_c<float, Device> N_k_workspace,
+           gpu_array_c<float, Device> num_workspace,
+           gpu_array_c<float, Device> centered_workspace, int n, int d, int K,
+           float reg_covar, std::uintptr_t stream) {
+            launch_m_step_cublas<float>(
+                resp.data(), X.data(), ones.data(), n, d, K, reg_covar,
+                weights.data(), means.data(), covariances.data(),
+                N_k_workspace.data(), num_workspace.data(),
+                centered_workspace.data(), (cudaStream_t)stream);
+        },
+        "resp"_a, "X"_a, "ones"_a, "weights"_a, "means"_a, "covariances"_a,
+        "N_k_workspace"_a, "num_workspace"_a, "centered_workspace"_a,
+        nb::kw_only(), "n"_a, "d"_a, "K"_a, "reg_covar"_a, "stream"_a = 0);
+
+    m.def(
+        "m_step_cublas",
+        [](gpu_array_c<const double, Device> resp,
+           gpu_array_c<const double, Device> X,
+           gpu_array_c<const double, Device> ones,
+           gpu_array_c<double, Device> weights,
+           gpu_array_c<double, Device> means,
+           gpu_array_c<double, Device> covariances,
+           gpu_array_c<double, Device> N_k_workspace,
+           gpu_array_c<double, Device> num_workspace,
+           gpu_array_c<double, Device> centered_workspace, int n, int d, int K,
+           double reg_covar, std::uintptr_t stream) {
+            launch_m_step_cublas<double>(
+                resp.data(), X.data(), ones.data(), n, d, K, reg_covar,
+                weights.data(), means.data(), covariances.data(),
+                N_k_workspace.data(), num_workspace.data(),
+                centered_workspace.data(), (cudaStream_t)stream);
+        },
+        "resp"_a, "X"_a, "ones"_a, "weights"_a, "means"_a, "covariances"_a,
+        "N_k_workspace"_a, "num_workspace"_a, "centered_workspace"_a,
+        nb::kw_only(), "n"_a, "d"_a, "K"_a, "reg_covar"_a, "stream"_a = 0);
 
     m.def(
         "m_step",
