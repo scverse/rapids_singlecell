@@ -203,6 +203,51 @@ Then run the following command to execute the container:
 apptainer run --nv rsc.sif
 ```
 
+If you encounter errors importing the package inside the container, you may need to activate the conda environment inside the container:
+
+<details><summary>Example loading error:</summary>
+  ```python
+  >>> import rapids_singlecell as rsc
+Traceback (most recent call last):
+  File "<python-input-0>", line 1, in <module>
+    import rapids_singlecell as rsc
+  File "/src/rapids_singlecell/src/rapids_singlecell/__init__.py", line 3, in <module>
+    import cuml.internals.logger as logger
+  File "/opt/conda/lib/python3.14/site-packages/cuml/__init__.py", line 16, in <module>
+    import cupy
+  File "/opt/conda/lib/python3.14/site-packages/cupy/__init__.py", line 18, in <module>
+    from cupy import _core  # NOQA
+    ^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/lib/python3.14/site-packages/cupy/_core/__init__.py", line 5, in <module>
+    from cupy._core import core  # NOQA
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "cupy/_core/core.pyx", line 1, in init cupy._core.core
+  File "cupy/_core/_routines_math.pyx", line 7, in init cupy._core._routines_math
+  File "cupy/_core/_reduction.pyx", line 1, in init cupy._core._reduction
+  File "cupy/_core/_cub_reduction.pyx", line 260, in init cupy._core._cub_reduction
+  File "/opt/conda/lib/python3.14/site-packages/cupy/_environment.py", line 86, in get_nvcc_path
+    _nvcc_path = _get_nvcc_path()
+  File "/opt/conda/lib/python3.14/site-packages/cupy/_environment.py", line 198, in _get_nvcc_path
+    cuda_path = get_cuda_path()
+  File "/opt/conda/lib/python3.14/site-packages/cupy/_environment.py", line 78, in get_cuda_path
+    _cuda_path = _get_cuda_path()
+  File "/opt/conda/lib/python3.14/site-packages/cupy/_environment.py", line 151, in _get_cuda_path
+    conda_cuda_path = _get_conda_cuda_path()
+  File "/opt/conda/lib/python3.14/site-packages/cupy/_environment.py", line 130, in _get_conda_cuda_path
+    cuda_path = os.path.join(conda_prefix, 'targets', arch)
+  File "<frozen posixpath>", line 77, in join
+TypeError: expected str, bytes or os.PathLike object, not NoneType
+>>> 
+  ```
+</details>
+
+```bash
+source /opt/conda/etc/profile.d/conda.sh
+conda activate base
+python3
+...
+```
+
 
 # System requirements
 
