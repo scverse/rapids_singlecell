@@ -237,7 +237,7 @@ Traceback (most recent call last):
     cuda_path = os.path.join(conda_prefix, 'targets', arch)
   File "<frozen posixpath>", line 77, in join
 TypeError: expected str, bytes or os.PathLike object, not NoneType
->>> 
+>>>
   ```
 </details>
 
