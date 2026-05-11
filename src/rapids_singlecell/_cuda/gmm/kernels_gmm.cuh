@@ -234,9 +234,13 @@ __global__ void e_step_log_prob_from_y_kernel(
     if (row >= n) return;
 
     T mahal = T(0);
+    T compensation = T(0);
     for (int col = 0; col < d; ++col) {
         T v = y[(size_t)row * d + col];
-        mahal += v * v;
+        T term = v * v - compensation;
+        T next = mahal + term;
+        compensation = (next - mahal) - term;
+        mahal = next;
     }
 
     T constant =

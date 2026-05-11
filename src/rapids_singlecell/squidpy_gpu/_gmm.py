@@ -30,8 +30,8 @@ from cupyx.scipy.special import logsumexp
 
 _LOG_2PI = float(np.log(2.0 * np.pi))
 # Common <=64-PC widths use scalar row kernels with compile-time specialization.
-# Mid-width float32 embeddings use a 64-column tiled CUDA kernel; high-width
-# embeddings switch to the cuBLAS E-step.
+# Mid-width float32 embeddings use the tiled CUDA kernel; high-width fp32 and
+# wide float64 embeddings use the cuBLAS E-step.
 _CUDA_E_STEP_MAX_D = 512
 _CUDA_CUBLAS_E_STEP_MIN_D = 257
 
@@ -207,6 +207,11 @@ class _GMMCudaWorkspace:
         prec_chol: cp.ndarray,
         log_det_half: cp.ndarray,
     ) -> tuple[cp.ndarray, cp.ndarray]:
+        if not _use_cuda_fused_e_step(self.d, self.X.dtype):
+            raise ValueError(
+                "The fused CUDA GMM E-step supports float64 only for "
+                "d <= 64. Use e_step() or e_step_cublas() for this input."
+            )
         self._gc.e_step(
             self.X,
             _cuda_arg(weights, self.X.dtype),
@@ -315,14 +320,23 @@ def _use_cuda_e_step(d: int, dtype=None) -> bool:
         return False
     if dtype is None:
         return True
+    return _use_cuda_fused_e_step(d, dtype) or _use_cuda_cublas_e_step(d, dtype)
+
+
+def _use_cuda_fused_e_step(d: int, dtype) -> bool:
+    if not 0 < d <= _CUDA_E_STEP_MAX_D:
+        return False
     dtype = np.dtype(dtype)
     return d <= 64 or dtype == np.dtype("float32")
 
 
 def _use_cuda_cublas_e_step(d: int, dtype) -> bool:
-    return _CUDA_CUBLAS_E_STEP_MIN_D <= d <= _CUDA_E_STEP_MAX_D and np.dtype(
-        dtype
-    ) == np.dtype("float32")
+    if not 0 < d <= _CUDA_E_STEP_MAX_D:
+        return False
+    dtype = np.dtype(dtype)
+    if dtype == np.dtype("float32"):
+        return d >= _CUDA_CUBLAS_E_STEP_MIN_D
+    return dtype == np.dtype("float64") and d > 64
 
 
 def _initialize(

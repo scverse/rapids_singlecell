@@ -14,6 +14,7 @@ from rapids_singlecell.squidpy_gpu._gmm import (
     _resolve_backend,
     _use_cuda_cublas_e_step,
     _use_cuda_e_step,
+    _use_cuda_fused_e_step,
     gmm_fit_predict,
 )
 
@@ -140,7 +141,7 @@ def test_auto_backend_uses_cuda_when_available():
     assert _resolve_backend("cuda") == "cuda"
 
 
-def test_cuda_e_step_routing_uses_fused_kernels_for_wide_embeddings():
+def test_cuda_e_step_routing_uses_cublas_for_high_d_and_wide_float64():
     assert _use_cuda_e_step(16)
     assert _use_cuda_e_step(32)
     assert _use_cuda_e_step(50)
@@ -153,12 +154,18 @@ def test_cuda_e_step_routing_uses_fused_kernels_for_wide_embeddings():
     assert _use_cuda_e_step(512)
     assert not _use_cuda_e_step(768)
     assert _use_cuda_e_step(512, cp.float32)
-    assert not _use_cuda_e_step(512, cp.float64)
+    assert _use_cuda_e_step(512, cp.float64)
     assert _use_cuda_e_step(64, cp.float64)
+    assert not _use_cuda_cublas_e_step(64, cp.float32)
+    assert not _use_cuda_cublas_e_step(80, cp.float32)
+    assert not _use_cuda_cublas_e_step(128, cp.float32)
     assert not _use_cuda_cublas_e_step(256, cp.float32)
+    assert _use_cuda_fused_e_step(512, cp.float32)
+    assert not _use_cuda_fused_e_step(128, cp.float64)
     assert _use_cuda_cublas_e_step(384, cp.float32)
     assert _use_cuda_cublas_e_step(512, cp.float32)
-    assert not _use_cuda_cublas_e_step(512, cp.float64)
+    assert _use_cuda_cublas_e_step(128, cp.float64)
+    assert _use_cuda_cublas_e_step(512, cp.float64)
 
 
 def test_n_components_one_returns_single_label():
@@ -253,6 +260,29 @@ def test_cuda_512_e_step_matches_cupy_for_cublas_route():
     assert cp.abs(ll_c - ll_g).item() < 1e-3
     assert cp.max(cp.abs(r_c - r_b)).item() < 1e-3
     assert cp.abs(ll_c - ll_b).item() < 1e-3
+
+
+def test_cuda_float64_wide_e_step_uses_cublas_route():
+    if _resolve_backend("auto") != "cuda":
+        pytest.skip("_gmm_cuda extension is not available")
+
+    rng = cp.random.RandomState(7)
+    n, d, K = 256, 128, 3
+    X = rng.standard_normal((n, d), dtype=cp.float64)
+    weights = cp.asarray([0.2, 0.3, 0.5], dtype=cp.float64)
+    means = rng.standard_normal((K, d), dtype=cp.float64)
+    A = rng.standard_normal((K, d, d), dtype=cp.float64)
+    cov = (A @ A.transpose(0, 2, 1)) / d + cp.eye(d, dtype=cp.float64)[None] * 0.5
+    prec_chol, log_det_half = _precision_cholesky(cov)
+
+    r_c, ll_c = _e_step(X, weights, means, prec_chol, log_det_half, backend="cupy")
+    workspace = _GMMCudaWorkspace(X, K)
+    r_g, ll_g = workspace.e_step(weights, means, prec_chol, log_det_half)
+
+    assert cp.max(cp.abs(r_c - r_g)).item() < 1e-12
+    assert cp.abs(ll_c - ll_g).item() < 1e-12
+    with pytest.raises(ValueError, match="fused CUDA GMM E-step"):
+        workspace.e_step_fused(weights, means, prec_chol, log_det_half)
 
 
 def test_cuda_fixed_e_step_matches_cupy_for_medium_regime():
