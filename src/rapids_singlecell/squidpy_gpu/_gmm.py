@@ -1,39 +1,169 @@
-"""Minimal GMM (full covariance) for the cellcharter niche flavor.
+"""Full-covariance GMM for the CellCharter niche flavor.
 
-Mirrors :class:`sklearn.mixture.GaussianMixture` with
-``covariance_type="full"``. Two init strategies are exposed: ``"kmeans"`` (default,
-cuML KMeans warm-start) and ``"random_from_data"`` (sklearn-equivalent for parity
-testing). The default ``"auto"`` backend uses a nanobind/CUDA EM path when the
-compiled extension is available, with a CuPy fallback for environments without
-compiled extensions.
-
-Implementation notes
---------------------
-- CUDA E-step uses a cached precision Cholesky (computed once per M-step) and
-  fused Mahalanobis + responsibility kernels.
-- CUDA M-step reuses preallocated workspaces and uses a cuBLAS covariance
-  update to avoid the chunked atomic reduction bottleneck.
-- ``_precision_cholesky`` uses batched Cholesky + triangular solve - no
-  explicit covariance inverse and no Python K-loop.
-- Convergence is the change in mean log-likelihood.
+The public behavior mirrors :class:`sklearn.mixture.GaussianMixture` with
+``covariance_type="full"``. EM is CUDA-only: CuPy is used for array handling and
+the precision-Cholesky factorization, while E-step and M-step work is delegated
+to the nanobind/CUDA extension.
 """
 
 from __future__ import annotations
 
-import importlib
 from typing import Literal
 
 import cupy as cp
 import numpy as np
 from cupyx.scipy.linalg import solve_triangular
-from cupyx.scipy.special import logsumexp
 
-_LOG_2PI = float(np.log(2.0 * np.pi))
-# Common <=64-PC widths use scalar row kernels with compile-time specialization.
-# Mid-width float32 embeddings use the tiled CUDA kernel; high-width fp32 and
-# wide float64 embeddings use the cuBLAS E-step.
-_CUDA_E_STEP_MAX_D = 512
+from rapids_singlecell._cuda import _gmm_cuda as _gc
+
+_GMMInit = Literal["kmeans", "random_from_data", "sklearn_kmeans"]
+_EStepRoute = Literal["fused", "cublas"]
+
+_KMEANS_MAX_ITER = 100
+_SKLEARN_SEEDED_KMEANS_MAX_ITER = 300
+
+# Fused kernels cover the CellCharter regime. Wider float32 embeddings and
+# float64 embeddings above 64 dimensions use the cuBLAS E-step.
+_CUDA_FUSED_E_STEP_MAX_D = 512
+_CUDA_FUSED_FLOAT64_MAX_D = 64
 _CUDA_CUBLAS_E_STEP_MIN_D = 257
+
+
+def _allocate_m_step_workspace(X: cp.ndarray, K: int) -> dict[str, cp.ndarray]:
+    n, d = X.shape
+    return {
+        "ones": cp.ones(n, dtype=X.dtype),
+        "effective_counts": cp.empty(K, dtype=X.dtype),
+        "weighted_sums": cp.empty((K, d), dtype=X.dtype),
+        "centered": cp.empty_like(X),
+    }
+
+
+def _allocate_em_workspace(
+    X: cp.ndarray, K: int, e_step_route: _EStepRoute
+) -> dict[str, cp.ndarray]:
+    n = X.shape[0]
+    workspace = {
+        "log_prob": cp.empty((n, K), dtype=X.dtype),
+        "responsibilities": cp.empty((n, K), dtype=X.dtype),
+        "ll_per_cell": cp.empty(n, dtype=X.dtype),
+        **_allocate_m_step_workspace(X, K),
+    }
+    if e_step_route == "cublas":
+        workspace["e_step_y"] = cp.empty_like(X)
+    return workspace
+
+
+def _e_step(
+    X: cp.ndarray,
+    weights: cp.ndarray,
+    means: cp.ndarray,
+    prec_chol: cp.ndarray,
+    log_det_half: cp.ndarray,
+    *,
+    log_prob: cp.ndarray,
+    responsibilities: cp.ndarray,
+    ll_per_cell: cp.ndarray,
+    centered: cp.ndarray,
+    e_step_y: cp.ndarray | None,
+    e_step_route: _EStepRoute,
+    stream: int,
+    handle: int,
+) -> tuple[cp.ndarray, cp.ndarray]:
+    if e_step_route == "cublas":
+        return _e_step_cublas(
+            X,
+            weights,
+            means,
+            prec_chol,
+            log_det_half,
+            centered=centered,
+            e_step_y=e_step_y,
+            log_prob=log_prob,
+            responsibilities=responsibilities,
+            ll_per_cell=ll_per_cell,
+            stream=stream,
+            handle=handle,
+        )
+    return _e_step_fused(
+        X,
+        weights,
+        means,
+        prec_chol,
+        log_det_half,
+        log_prob=log_prob,
+        responsibilities=responsibilities,
+        ll_per_cell=ll_per_cell,
+        stream=stream,
+    )
+
+
+def _e_step_fused(
+    X: cp.ndarray,
+    weights: cp.ndarray,
+    means: cp.ndarray,
+    prec_chol: cp.ndarray,
+    log_det_half: cp.ndarray,
+    *,
+    log_prob: cp.ndarray,
+    responsibilities: cp.ndarray,
+    ll_per_cell: cp.ndarray,
+    stream: int,
+) -> tuple[cp.ndarray, cp.ndarray]:
+    n, d = X.shape
+    K = int(weights.shape[0])
+    _gc.e_step(
+        X,
+        weights,
+        means,
+        prec_chol,
+        log_det_half,
+        log_prob,
+        responsibilities,
+        ll_per_cell,
+        n=int(n),
+        d=int(d),
+        K=K,
+        stream=stream,
+    )
+    return responsibilities, ll_per_cell.mean()
+
+
+def _e_step_cublas(
+    X: cp.ndarray,
+    weights: cp.ndarray,
+    means: cp.ndarray,
+    prec_chol: cp.ndarray,
+    log_det_half: cp.ndarray,
+    *,
+    centered: cp.ndarray,
+    e_step_y: cp.ndarray | None,
+    log_prob: cp.ndarray,
+    responsibilities: cp.ndarray,
+    ll_per_cell: cp.ndarray,
+    stream: int,
+    handle: int,
+) -> tuple[cp.ndarray, cp.ndarray]:
+    n, d = X.shape
+    K = int(weights.shape[0])
+    _gc.e_step_cublas(
+        X,
+        weights,
+        means,
+        prec_chol,
+        log_det_half,
+        centered,
+        e_step_y,
+        log_prob,
+        responsibilities,
+        ll_per_cell,
+        n=int(n),
+        d=int(d),
+        K=K,
+        stream=stream,
+        handle=handle,
+    )
+    return responsibilities, ll_per_cell.mean()
 
 
 def gmm_fit_predict(
@@ -44,8 +174,7 @@ def gmm_fit_predict(
     max_iter: int = 100,
     tol: float = 1e-3,
     reg_covar: float = 1e-6,
-    init: Literal["kmeans", "random_from_data"] = "kmeans",
-    backend: Literal["auto", "cupy", "cuda"] = "auto",
+    init: _GMMInit = "kmeans",
     kmeans_n_init: int = 1,
 ) -> cp.ndarray:
     """Fit a full-covariance GMM and return cluster labels.
@@ -53,477 +182,339 @@ def gmm_fit_predict(
     Parameters
     ----------
     X
-        Cupy array, shape ``(n_samples, n_features)``, float32 or float64.
+        GPU matrix with observations in rows and features in columns.
     n_components
-        Number of mixture components ``K``.
+        Number of mixture components.
     random_state
-        Seed for initialization.
+        Seed used by the selected initialization strategy.
     max_iter
-        Maximum EM iterations.
+        Maximum number of EM iterations.
     tol
-        Convergence threshold on the change in mean log-likelihood.
+        Convergence threshold on the mean log-likelihood change.
     reg_covar
-        Regularization added to each component covariance diagonal.
+        Non-negative regularization added to each covariance diagonal.
     init
-        ``"kmeans"`` (default) uses cuML KMeans for warm-start; usually much
-        better than ``"random_from_data"``, which mirrors sklearn for parity.
-    backend
-        ``"auto"`` (default) uses the nanobind/CUDA EM backend when the compiled
-        extension is available, otherwise falls back to CuPy. ``"cupy"`` uses
-        CuPy + cuBLAS for the covariance update. ``"cuda"`` uses fused CUDA
-        E-step kernels where available and keeps the fastest available CUDA
-        M-step for wider embeddings.
+        Initialization strategy. ``"kmeans"`` uses native cuML KMeans,
+        ``"random_from_data"`` matches sklearn/Squidpy random-from-data, and
+        ``"sklearn_kmeans"`` uses sklearn k-means++ seeding followed by cuML
+        KMeans.
     kmeans_n_init
-        Number of cuML KMeans restarts for ``init="kmeans"``. The default ``1``
-        matches sklearn's GaussianMixture default and keeps cellcharter fast;
-        increase this for difficult or noisy initialization landscapes.
+        Number of cuML KMeans restarts for ``init="kmeans"``.
     """
-    if backend not in {"auto", "cupy", "cuda"}:
-        raise ValueError("backend must be one of 'auto', 'cupy', or 'cuda'.")
+    K = int(n_components)
+    if K < 1:
+        raise ValueError("n_components must be >= 1.")
     if int(kmeans_n_init) < 1:
         raise ValueError("kmeans_n_init must be >= 1.")
 
     X = cp.ascontiguousarray(X)
-    K = int(n_components)
-    backend = _resolve_backend(backend)
-
-    if backend == "cuda" and _use_cuda_e_step(int(X.shape[1]), X.dtype):
-        return _fit_predict_cuda(
-            X,
-            K,
-            random_state=random_state,
-            max_iter=max_iter,
-            tol=tol,
-            reg_covar=reg_covar,
-            init=init,
-            kmeans_n_init=int(kmeans_n_init),
-        )
-
-    weights, means, covariances = _initialize(
+    weights, means, covariances = _initialize_parameters(
         X,
         K,
+        init=init,
         random_state=random_state,
         reg_covar=reg_covar,
-        init=init,
         kmeans_n_init=int(kmeans_n_init),
-        backend=backend,
     )
-    prec_chol, log_det_prec_half = _precision_cholesky(covariances)
-
-    prev_ll = -cp.inf
-    converged = False
-    for _ in range(max_iter):
-        resp, ll = _e_step(
-            X, weights, means, prec_chol, log_det_prec_half, backend=backend
-        )
-        if cp.abs(ll - prev_ll) < tol:
-            converged = True
-            break
-        prev_ll = ll
-        weights, means, covariances = _m_step(X, resp, reg_covar, backend=backend)
-        prec_chol, log_det_prec_half = _precision_cholesky(covariances)
-
-    if not converged:
-        resp, _ = _e_step(
-            X, weights, means, prec_chol, log_det_prec_half, backend=backend
-        )
-    return resp.argmax(axis=1).astype(cp.int32)
+    responsibilities = _run_em(
+        X,
+        weights,
+        means,
+        covariances,
+        max_iter=int(max_iter),
+        tol=float(tol),
+        reg_covar=float(reg_covar),
+    )
+    return responsibilities.argmax(axis=1).astype(cp.int32)
 
 
-def _fit_predict_cuda(
+def _run_em(
     X: cp.ndarray,
-    K: int,
+    weights: cp.ndarray,
+    means: cp.ndarray,
+    covariances: cp.ndarray,
     *,
-    random_state: int,
     max_iter: int,
     tol: float,
     reg_covar: float,
-    init: str,
-    kmeans_n_init: int,
 ) -> cp.ndarray:
-    weights, means, covariances = _initialize(
-        X,
-        K,
-        random_state=random_state,
-        reg_covar=reg_covar,
-        init=init,
-        kmeans_n_init=kmeans_n_init,
-        backend="cuda",
-    )
-    weights = cp.ascontiguousarray(weights)
-    means = cp.ascontiguousarray(means)
-    covariances = cp.ascontiguousarray(covariances)
-    workspace = _GMMCudaWorkspace(X, K)
-    prec_chol, log_det_prec_half = _precision_cholesky(covariances)
+    n, d = X.shape
+    K = int(weights.shape[0])
+    stream = cp.cuda.get_current_stream().ptr
+    handle = cp.cuda.device.get_cublas_handle()
+    e_step_route = _choose_e_step(int(d), X.dtype)
+    workspace = _allocate_em_workspace(X, K, e_step_route)
 
-    prev_ll = -np.inf
-    converged = False
+    prec_chol, log_det_half = _precision_cholesky(covariances)
+    previous_ll = -np.inf
+
     for _ in range(max_iter):
-        resp, ll = workspace.e_step(weights, means, prec_chol, log_det_prec_half)
-        ll_value = float(ll)
-        if abs(ll_value - prev_ll) < tol:
-            converged = True
-            break
-        prev_ll = ll_value
-        workspace.m_step(resp, weights, means, covariances, reg_covar)
-        prec_chol, log_det_prec_half = _precision_cholesky(covariances)
-
-    if not converged:
-        resp, _ = workspace.e_step(weights, means, prec_chol, log_det_prec_half)
-    return resp.argmax(axis=1).astype(cp.int32)
-
-
-class _GMMCudaWorkspace:
-    def __init__(self, X: cp.ndarray, K: int):
-        n, d = X.shape
-        self._gc = _get_gmm_cuda()
-        self.X = X
-        self.n = int(n)
-        self.d = int(d)
-        self.K = int(K)
-        self.stream = cp.cuda.get_current_stream().ptr
-        self.cublas_handle = cp.cuda.device.get_cublas_handle()
-        self.log_prob = cp.empty((n, K), dtype=X.dtype)
-        self.resp = cp.empty((n, K), dtype=X.dtype)
-        self.ll_per_cell = cp.empty(n, dtype=X.dtype)
-        self.N_k = cp.empty(K, dtype=X.dtype)
-        self.num = cp.empty((K, d), dtype=X.dtype)
-
-    def e_step(
-        self,
-        weights: cp.ndarray,
-        means: cp.ndarray,
-        prec_chol: cp.ndarray,
-        log_det_half: cp.ndarray,
-    ) -> tuple[cp.ndarray, cp.ndarray]:
-        if _use_cuda_cublas_e_step(self.d, self.X.dtype):
-            return self.e_step_cublas(weights, means, prec_chol, log_det_half)
-        return self.e_step_fused(weights, means, prec_chol, log_det_half)
-
-    def e_step_fused(
-        self,
-        weights: cp.ndarray,
-        means: cp.ndarray,
-        prec_chol: cp.ndarray,
-        log_det_half: cp.ndarray,
-    ) -> tuple[cp.ndarray, cp.ndarray]:
-        if not _use_cuda_fused_e_step(self.d, self.X.dtype):
-            raise ValueError(
-                "The fused CUDA GMM E-step supports float64 only for "
-                "d <= 64. Use e_step() or e_step_cublas() for this input."
-            )
-        self._gc.e_step(
-            self.X,
-            _cuda_arg(weights, self.X.dtype),
-            cp.ascontiguousarray(means),
-            cp.ascontiguousarray(prec_chol),
-            _cuda_arg(log_det_half, self.X.dtype),
-            self.log_prob,
-            self.resp,
-            self.ll_per_cell,
-            n=self.n,
-            d=self.d,
-            K=self.K,
-            stream=self.stream,
+        responsibilities, mean_ll = _e_step(
+            X,
+            weights,
+            means,
+            prec_chol,
+            log_det_half,
+            log_prob=workspace["log_prob"],
+            responsibilities=workspace["responsibilities"],
+            ll_per_cell=workspace["ll_per_cell"],
+            centered=workspace["centered"],
+            e_step_y=workspace.get("e_step_y"),
+            e_step_route=e_step_route,
+            stream=stream,
+            handle=handle,
         )
-        return self.resp, self.ll_per_cell.mean()
+        mean_ll = float(mean_ll)
+        if abs(mean_ll - previous_ll) < tol:
+            return responsibilities
 
-    def e_step_cublas(
-        self,
-        weights: cp.ndarray,
-        means: cp.ndarray,
-        prec_chol: cp.ndarray,
-        log_det_half: cp.ndarray,
-    ) -> tuple[cp.ndarray, cp.ndarray]:
-        if not hasattr(self, "_centered"):
-            self._centered = cp.empty_like(self.X)
-        if not hasattr(self, "_e_step_y"):
-            self._e_step_y = cp.empty_like(self.X)
-        self._gc.e_step_cublas(
-            self.X,
-            _cuda_arg(weights, self.X.dtype),
-            cp.ascontiguousarray(means),
-            cp.ascontiguousarray(prec_chol),
-            _cuda_arg(log_det_half, self.X.dtype),
-            self._centered,
-            self._e_step_y,
-            self.log_prob,
-            self.resp,
-            self.ll_per_cell,
-            n=self.n,
-            d=self.d,
-            K=self.K,
-            stream=self.stream,
-            handle=self.cublas_handle,
-        )
-        return self.resp, self.ll_per_cell.mean()
-
-    def m_step(
-        self,
-        resp: cp.ndarray,
-        weights: cp.ndarray,
-        means: cp.ndarray,
-        covariances: cp.ndarray,
-        reg_covar: float,
-    ) -> None:
-        if not hasattr(self, "_ones"):
-            self._ones = cp.ones(self.n, dtype=self.X.dtype)
-        if not hasattr(self, "_centered"):
-            self._centered = cp.empty_like(self.X)
-        self._gc.m_step(
-            cp.ascontiguousarray(resp),
-            self.X,
-            self._ones,
+        previous_ll = mean_ll
+        _m_step(
+            X,
+            responsibilities,
             weights,
             means,
             covariances,
-            self.N_k,
-            self.num,
-            self._centered,
-            n=self.n,
-            d=self.d,
-            K=self.K,
-            reg_covar=float(reg_covar),
-            stream=self.stream,
-            handle=self.cublas_handle,
+            reg_covar=reg_covar,
+            ones=workspace["ones"],
+            effective_counts=workspace["effective_counts"],
+            weighted_sums=workspace["weighted_sums"],
+            centered=workspace["centered"],
+            stream=stream,
+            handle=handle,
         )
+        prec_chol, log_det_half = _precision_cholesky(covariances)
+
+    responsibilities, _ = _e_step(
+        X,
+        weights,
+        means,
+        prec_chol,
+        log_det_half,
+        log_prob=workspace["log_prob"],
+        responsibilities=workspace["responsibilities"],
+        ll_per_cell=workspace["ll_per_cell"],
+        centered=workspace["centered"],
+        e_step_y=workspace.get("e_step_y"),
+        e_step_route=e_step_route,
+        stream=stream,
+        handle=handle,
+    )
+    return responsibilities
 
 
-def _resolve_backend(backend: str) -> str:
-    if backend == "cupy":
-        return backend
-    try:
-        _get_gmm_cuda()
-    except ImportError:
-        if backend == "cuda":
-            raise
-        return "cupy"
-    return "cuda"
-
-
-def _get_gmm_cuda():
-    try:
-        return importlib.import_module("rapids_singlecell._cuda._gmm_cuda")
-    except ImportError as err:
-        raise ImportError(
-            "The _gmm_cuda extension is not available. Build rapids-singlecell "
-            "with CUDA extensions or use backend='cupy'."
-        ) from err
-
-
-def _cuda_arg(array: cp.ndarray, dtype) -> cp.ndarray:
-    return cp.ascontiguousarray(array.astype(dtype, copy=False))
-
-
-def _use_cuda_e_step(d: int, dtype=None) -> bool:
-    if not 0 < d <= _CUDA_E_STEP_MAX_D:
-        return False
-    if dtype is None:
-        return True
-    return _use_cuda_fused_e_step(d, dtype) or _use_cuda_cublas_e_step(d, dtype)
-
-
-def _use_cuda_fused_e_step(d: int, dtype) -> bool:
-    if not 0 < d <= _CUDA_E_STEP_MAX_D:
-        return False
-    dtype = np.dtype(dtype)
-    return d <= 64 or dtype == np.dtype("float32")
-
-
-def _use_cuda_cublas_e_step(d: int, dtype) -> bool:
-    if not 0 < d <= _CUDA_E_STEP_MAX_D:
-        return False
-    dtype = np.dtype(dtype)
-    if dtype == np.dtype("float32"):
-        return d >= _CUDA_CUBLAS_E_STEP_MIN_D
-    return dtype == np.dtype("float64") and d > 64
-
-
-def _initialize(
+def _initialize_parameters(
     X: cp.ndarray,
     K: int,
     *,
+    init: str,
     random_state: int,
     reg_covar: float,
-    init: str,
     kmeans_n_init: int,
-    backend: str = "cupy",
+) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray]:
+    if init == "random_from_data":
+        return _random_from_data_init(X, K, random_state, reg_covar)
+
+    if init not in ("kmeans", "sklearn_kmeans"):
+        raise ValueError(
+            "init must be 'kmeans', 'random_from_data', or "
+            f"'sklearn_kmeans', got {init!r}"
+        )
+
+    labels, centers = _fit_kmeans(
+        X,
+        K,
+        init=init,
+        random_state=random_state,
+        kmeans_n_init=kmeans_n_init,
+    )
+    return _parameters_from_labels(X, labels, centers, reg_covar)
+
+
+def _random_from_data_init(
+    X: cp.ndarray,
+    K: int,
+    random_state: int,
+    reg_covar: float,
 ) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray]:
     n, d = X.shape
+    rng = np.random.RandomState(random_state)
+    idx = cp.asarray(rng.choice(n, size=K, replace=False))
     eye_reg = reg_covar * cp.eye(d, dtype=X.dtype)
+    return (
+        cp.full(K, 1.0 / K, dtype=X.dtype),
+        X[idx].copy(),
+        cp.broadcast_to(eye_reg, (K, d, d)).copy(),
+    )
 
-    if init == "random_from_data":
-        # sklearn parity: pick K rows as means, equal weights, reg-only covariance.
-        rng = np.random.default_rng(random_state)
-        idx = cp.asarray(rng.choice(n, size=K, replace=False))
-        means = X[idx].copy()
-        weights = cp.full(K, 1.0 / K, dtype=X.dtype)
-        covariances = cp.broadcast_to(eye_reg, (K, d, d)).copy()
-        return weights, means, covariances
 
-    if init != "kmeans":
-        raise ValueError(f"init must be 'kmeans' or 'random_from_data', got {init!r}")
-
+def _fit_kmeans(
+    X: cp.ndarray,
+    K: int,
+    *,
+    init: str,
+    random_state: int,
+    kmeans_n_init: int,
+) -> tuple[cp.ndarray, cp.ndarray]:
     from cuml.cluster import KMeans
+
+    kwargs = {}
+    if init == "sklearn_kmeans":
+        from sklearn.cluster import kmeans_plusplus
+
+        centers, _ = kmeans_plusplus(cp.asnumpy(X), K, random_state=random_state)
+        kwargs["init"] = cp.asarray(centers, dtype=X.dtype)
+        kmeans_n_init = 1
+        max_iter = _SKLEARN_SEEDED_KMEANS_MAX_ITER
+    else:
+        max_iter = _KMEANS_MAX_ITER
 
     km = KMeans(
         n_clusters=K,
         random_state=random_state,
         n_init=int(kmeans_n_init),
-        max_iter=100,
+        max_iter=max_iter,
+        **kwargs,
     )
     km.fit(X)
-    labels = cp.asarray(km.labels_)
-    means = cp.asarray(km.cluster_centers_, dtype=X.dtype)
-
-    if backend == "cuda":
-        return _initialize_covariances_cuda(X, labels, means, reg_covar)
-
-    weights = cp.zeros(K, dtype=X.dtype)
-    covariances = cp.empty((K, d, d), dtype=X.dtype)
-    for k in range(K):
-        mask = labels == k
-        cnt = int(mask.sum())
-        if cnt == 0:
-            # KMeans can return empty clusters; fall back to a tiny uniform component.
-            weights[k] = 1.0 / n
-            covariances[k] = eye_reg
-            continue
-        weights[k] = cnt / n
-        diff = X[mask] - means[k]
-        covariances[k] = (diff.T @ diff) / cnt + eye_reg
-    return weights, means, covariances
+    return (
+        cp.asarray(km.labels_).astype(cp.int64, copy=False),
+        cp.asarray(km.cluster_centers_, dtype=X.dtype),
+    )
 
 
-def _initialize_covariances_cuda(
+def _parameters_from_labels(
     X: cp.ndarray,
     labels: cp.ndarray,
     means_init: cp.ndarray,
     reg_covar: float,
 ) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray]:
-    n = X.shape[0]
-    K = means_init.shape[0]
+    n, d = X.shape
+    K = int(means_init.shape[0])
+    weights = cp.empty(K, dtype=X.dtype)
+    means = cp.empty((K, d), dtype=X.dtype)
+    covariances = cp.empty((K, d, d), dtype=X.dtype)
+    responsibilities = cp.zeros((n, K), dtype=X.dtype)
+    workspace = _allocate_m_step_workspace(X, K)
+    responsibilities[cp.arange(n), labels] = X.dtype.type(1.0)
+    _m_step(
+        X,
+        responsibilities,
+        weights,
+        means,
+        covariances,
+        reg_covar=reg_covar,
+        ones=workspace["ones"],
+        effective_counts=workspace["effective_counts"],
+        weighted_sums=workspace["weighted_sums"],
+        centered=workspace["centered"],
+        stream=cp.cuda.get_current_stream().ptr,
+        handle=cp.cuda.device.get_cublas_handle(),
+    )
+    _restore_empty_components(
+        weights,
+        means,
+        covariances,
+        labels,
+        means_init,
+        n=n,
+        reg_covar=reg_covar,
+    )
+    return weights, means, covariances
 
-    labels = labels.astype(cp.int64, copy=False)
-    resp = cp.zeros((n, K), dtype=X.dtype)
-    resp[cp.arange(n), labels] = X.dtype.type(1.0)
-    weights, means, covariances = _m_step(X, resp, reg_covar, backend="cuda")
 
-    counts = cp.bincount(labels, minlength=K).astype(X.dtype, copy=False)
+def _restore_empty_components(
+    weights: cp.ndarray,
+    means: cp.ndarray,
+    covariances: cp.ndarray,
+    labels: cp.ndarray,
+    means_init: cp.ndarray,
+    *,
+    n: int,
+    reg_covar: float,
+) -> None:
+    """Repair empty cuML KMeans components before EM starts.
+
+    sklearn's GMM init estimates parameters from hard KMeans responsibilities
+    and adds ``10 * eps`` to component counts, relying on sklearn KMeans to
+    avoid empty final labels in normal cases. cuML can still hand back an empty
+    component, so keep its center, give it a tiny finite weight, and use the
+    regularized identity covariance instead of letting the M-step create a
+    zero-mean component from an empty responsibility column.
+    """
+    K, d = means_init.shape
+    counts = cp.bincount(labels, minlength=int(K)).astype(means_init.dtype, copy=False)
     empty = counts == 0
-    eye_reg = reg_covar * cp.eye(X.shape[1], dtype=X.dtype)
+    eye_reg = reg_covar * cp.eye(d, dtype=means_init.dtype)
 
-    weights = cp.where(empty, X.dtype.type(1.0 / n), counts / n)
-    means = cp.where(empty[:, None], means_init, means)
-    covariances = cp.where(
+    weights[...] = cp.where(empty, means_init.dtype.type(1.0 / n), counts / n)
+    means[...] = cp.where(empty[:, None], means_init, means)
+    covariances[...] = cp.where(
         empty[:, None, None],
         cp.broadcast_to(eye_reg, covariances.shape),
         covariances,
     )
-    return weights, means, covariances
 
 
-def _precision_cholesky(
-    covariances: cp.ndarray,
-) -> tuple[cp.ndarray, cp.ndarray]:
-    """Return ``(prec_chol, log|Σ⁻¹|/2)`` where ``prec_chol @ prec_chol.T = Σ⁻¹``.
-
-    This mirrors sklearn's precision-Cholesky orientation: ``prec_chol`` is an
-    upper-triangular factor built from the covariance Cholesky without forming
-    the explicit covariance inverse.
-    """
+def _precision_cholesky(covariances: cp.ndarray) -> tuple[cp.ndarray, cp.ndarray]:
+    """Return sklearn-oriented precision Cholesky without forming an inverse."""
     cov_chol = cp.linalg.cholesky(covariances)
     eye = cp.broadcast_to(
-        cp.eye(covariances.shape[-1], dtype=covariances.dtype), covariances.shape
+        cp.eye(covariances.shape[-1], dtype=covariances.dtype),
+        covariances.shape,
     )
     cov_chol_inv = solve_triangular(cov_chol, eye, lower=True)
-    prec_chol = cp.ascontiguousarray(cov_chol_inv.transpose(0, 2, 1))
-    log_det_half = -cp.sum(cp.log(cp.diagonal(cov_chol, axis1=1, axis2=2)), axis=1)
-    return prec_chol, log_det_half
-
-
-@cp.fuse(kernel_name="_gmm_log_pdf_const")
-def _log_pdf_const(mahal: cp.ndarray, log_det_half: cp.ndarray, half_d_log2pi):
-    return -0.5 * mahal + log_det_half - half_d_log2pi
-
-
-def _e_step(
-    X: cp.ndarray,
-    weights: cp.ndarray,
-    means: cp.ndarray,
-    prec_chol: cp.ndarray,
-    log_det_half: cp.ndarray,
-    *,
-    backend: str = "cupy",
-) -> tuple[cp.ndarray, cp.ndarray]:
-    n, d = X.shape
-    K = means.shape[0]
-    if backend == "cuda" and _use_cuda_e_step(int(d), X.dtype):
-        workspace = _GMMCudaWorkspace(cp.ascontiguousarray(X), int(K))
-        return workspace.e_step(weights, means, prec_chol, log_det_half)
-
-    log_prob = cp.empty((n, K), dtype=X.dtype)
-    half_d_log2pi = X.dtype.type(0.5 * d * _LOG_2PI)
-    for k in range(K):
-        # mahal = || (X - μ_k) @ prec_chol[k] ||²
-        y = (X - means[k]) @ prec_chol[k]
-        mahal = cp.einsum("ij,ij->i", y, y)
-        log_prob[:, k] = _log_pdf_const(mahal, log_det_half[k], half_d_log2pi)
-    log_prob = log_prob + cp.log(weights)
-
-    log_total = logsumexp(log_prob, axis=1, keepdims=True)
-    resp = cp.exp(log_prob - log_total)
-    return resp, log_total.mean()
+    return (
+        cp.ascontiguousarray(cov_chol_inv.transpose(0, 2, 1)),
+        -cp.sum(
+            cp.log(cp.diagonal(cov_chol, axis1=1, axis2=2)),
+            axis=1,
+        ),
+    )
 
 
 def _m_step(
     X: cp.ndarray,
-    resp: cp.ndarray,
-    reg_covar: float,
+    responsibilities: cp.ndarray,
+    weights: cp.ndarray,
+    means: cp.ndarray,
+    covariances: cp.ndarray,
     *,
-    backend: str = "cupy",
-) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray]:
+    reg_covar: float,
+    ones: cp.ndarray,
+    effective_counts: cp.ndarray,
+    weighted_sums: cp.ndarray,
+    centered: cp.ndarray,
+    stream: int,
+    handle: int,
+) -> None:
     n, d = X.shape
-    K = resp.shape[1]
+    K = int(weights.shape[0])
 
-    if backend == "cuda":
-        _gc = _get_gmm_cuda()
+    _gc.m_step(
+        responsibilities,
+        X,
+        ones,
+        weights,
+        means,
+        covariances,
+        effective_counts,
+        weighted_sums,
+        centered,
+        n=int(n),
+        d=int(d),
+        K=K,
+        reg_covar=float(reg_covar),
+        stream=stream,
+        handle=handle,
+    )
 
-        weights = cp.empty(K, dtype=X.dtype)
-        means = cp.empty((K, d), dtype=X.dtype)
-        covariances = cp.empty((K, d, d), dtype=X.dtype)
-        N_k_ws = cp.empty(K, dtype=X.dtype)
-        num_ws = cp.empty((K, d), dtype=X.dtype)
-        resp = cp.ascontiguousarray(resp)
-        X = cp.ascontiguousarray(X)
-        stream = cp.cuda.get_current_stream().ptr
-        ones_ws = cp.ones(n, dtype=X.dtype)
-        centered_ws = cp.empty_like(X)
-        _gc.m_step(
-            resp,
-            X,
-            ones_ws,
-            weights,
-            means,
-            covariances,
-            N_k_ws,
-            num_ws,
-            centered_ws,
-            n=int(n),
-            d=int(d),
-            K=int(K),
-            reg_covar=float(reg_covar),
-            stream=stream,
-            handle=cp.cuda.device.get_cublas_handle(),
-        )
-        return weights, means, covariances
 
-    N_k = resp.sum(axis=0) + 10.0 * cp.finfo(X.dtype).eps  # (K,)
-    weights = N_k / n
-    means = (resp.T @ X) / N_k[:, None]
-    covariances = cp.empty((K, d, d), dtype=X.dtype)
-    eye_reg = reg_covar * cp.eye(d, dtype=X.dtype)
-    for k in range(K):
-        diff = X - means[k]
-        covariances[k] = ((resp[:, k : k + 1] * diff).T @ diff) / N_k[k] + eye_reg
-    return weights, means, covariances
+def _choose_e_step(d: int, dtype) -> _EStepRoute:
+    """Select the CUDA E-step implementation for a feature width and dtype."""
+    dtype = np.dtype(dtype)
+    if dtype == np.dtype("float32"):
+        return "cublas" if d >= _CUDA_CUBLAS_E_STEP_MIN_D else "fused"
+    if dtype == np.dtype("float64"):
+        return "cublas" if d > _CUDA_FUSED_FLOAT64_MAX_D else "fused"
+    return "cublas" if d >= _CUDA_CUBLAS_E_STEP_MIN_D else "fused"

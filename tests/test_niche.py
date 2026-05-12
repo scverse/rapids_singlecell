@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import cupy as cp
@@ -289,6 +290,15 @@ def test_cellcharter_basic(adata):
     assert col.nunique() <= 4
 
 
+def test_calculate_niche_exposes_only_gmm_init_extension():
+    params = inspect.signature(calculate_niche).parameters
+    assert "init" not in params
+    assert "kmeans_n_init" not in params
+    assert "gmm_init" in params
+    assert params["gmm_init"].default == "random_from_data"
+    assert params["random_state"].default == 42
+
+
 def test_cellcharter_distance_zero(adata):
     """distance=0 falls back to PCA + GMM on raw X (no shell aggregation)."""
     calculate_niche(adata, flavor="cellcharter", n_components=3, distance=0)
@@ -300,6 +310,21 @@ def test_cellcharter_use_rep(adata):
     rng = np.random.default_rng(0)
     adata.obsm["X_test"] = rng.standard_normal((adata.n_obs, 10)).astype(np.float32)
     calculate_niche(adata, flavor="cellcharter", n_components=4, use_rep="X_test")
+    assert "cellcharter_niche" in adata.obs.columns
+
+
+@pytest.mark.parametrize("gmm_init", ["random_from_data", "kmeans", "sklearn_kmeans"])
+def test_cellcharter_gmm_init_options(adata, gmm_init):
+    rng = np.random.default_rng(0)
+    adata.obsm["X_test"] = rng.standard_normal((adata.n_obs, 10)).astype(np.float32)
+    calculate_niche(
+        adata,
+        flavor="cellcharter",
+        n_components=4,
+        use_rep="X_test",
+        gmm_init=gmm_init,
+        random_state=0,
+    )
     assert "cellcharter_niche" in adata.obs.columns
 
 
@@ -328,16 +353,9 @@ def test_cellcharter_invalid_aggregation(adata):
         )
 
 
-def test_cellcharter_init_random_from_data(adata):
-    """`init="random_from_data"` is a valid escape hatch from kmeans init."""
-    calculate_niche(
-        adata,
-        flavor="cellcharter",
-        n_components=4,
-        init="random_from_data",
-        random_state=0,
-    )
-    assert "cellcharter_niche" in adata.obs.columns
+def test_cellcharter_invalid_gmm_init(adata):
+    with pytest.raises(ValueError, match="gmm_init"):
+        calculate_niche(adata, flavor="cellcharter", n_components=4, gmm_init="bogus")
 
 
 def test_cellcharter_bad_n_components(adata):

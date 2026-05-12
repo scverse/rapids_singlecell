@@ -32,10 +32,11 @@ def calculate_niche(
     aggregation: Literal["mean", "variance"] = "mean",
     n_components: int = 10,
     use_rep: str | None = None,
-    init: Literal["kmeans", "random_from_data"] = "kmeans",
-    kmeans_n_init: int = 1,
+    gmm_init: Literal[
+        "random_from_data", "kmeans", "sklearn_kmeans"
+    ] = "random_from_data",
     spatial_connectivities_key: str = "spatial_connectivities",
-    random_state: int = 0,
+    random_state: int = 42,
     copy: bool = False,
 ) -> AnnData | None:
     """\
@@ -84,14 +85,11 @@ def calculate_niche(
         Key in ``adata.obsm`` to use as the embedding for ``flavor="cellcharter"``;
         if provided, the first ``n_components`` columns are used and the shell-aggregation
         + PCA step is skipped.
-    init
-        GMM initialization for ``flavor="cellcharter"``. ``"kmeans"`` (default)
-        or ``"random_from_data"`` (sklearn-parity). Use the latter if kmeans init lands
-        on a degenerate component on noisy / low-signal data.
-    kmeans_n_init
-        Number of cuML KMeans restarts for ``flavor="cellcharter", init="kmeans"``.
-        The default ``1`` follows sklearn's GaussianMixture default and keeps the
-        CUDA GMM path fast.
+    gmm_init
+        GMM initialization for ``flavor="cellcharter"``. ``"random_from_data"``
+        (default) matches Squidpy's CellCharter path. ``"kmeans"`` uses native
+        cuML KMeans. ``"sklearn_kmeans"`` uses sklearn-compatible k-means++ seeding
+        followed by cuML KMeans.
     spatial_connectivities_key
         Key in ``adata.obsp`` with the spatial connectivity matrix.
     random_state
@@ -118,14 +116,18 @@ def calculate_niche(
     adata = adata.copy() if copy else adata
 
     if flavor == "cellcharter":
+        if gmm_init not in ("random_from_data", "kmeans", "sklearn_kmeans"):
+            raise ValueError(
+                "`gmm_init` must be one of 'random_from_data', 'kmeans', or "
+                f"'sklearn_kmeans', got {gmm_init!r}."
+            )
         _run_cellcharter(
             adata,
             distance=distance,
             aggregation=aggregation,
             n_components=n_components,
             use_rep=use_rep,
-            init=init,
-            kmeans_n_init=kmeans_n_init,
+            gmm_init=gmm_init,
             random_state=random_state,
             key=spatial_connectivities_key,
         )
@@ -269,8 +271,7 @@ def _run_cellcharter(
     aggregation: str,
     n_components: int,
     use_rep: str | None,
-    init: str,
-    kmeans_n_init: int,
+    gmm_init: str,
     random_state: int,
     key: str,
 ) -> None:
@@ -305,8 +306,7 @@ def _run_cellcharter(
         embedding,
         n_components=n_components,
         random_state=random_state,
-        init=init,
-        kmeans_n_init=kmeans_n_init,
+        init=gmm_init,
     )
     adata.obs["cellcharter_niche"] = pd.Categorical(cp.asnumpy(labels).astype(str))
 
