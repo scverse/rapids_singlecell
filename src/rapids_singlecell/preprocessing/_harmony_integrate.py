@@ -37,17 +37,17 @@ def harmony_integrate(
     random_state: int = 0,
     verbose: bool = False,
 ) -> None:
-    """
-    Integrate different experiments using the Harmony algorithm :cite:p:`Korsunsky2019,Patikas2026`.
+    """Integrate different experiments using the Harmony algorithm :cite:p:`Korsunsky2019,Patikas2026`.
 
-    This GPU-accelerated implementation is based on the `harmony-pytorch` package.
-    As Harmony works by adjusting the
-    principal components, this function should be run after performing
-    PCA but before computing the neighbor graph.
+    This GPU-accelerated implementation is based on the harmony-pytorch package.
+    As Harmony works by adjusting the principal components,
+    this function should be run after performing PCA but before computing the neighbor graph.
 
-    By default, the Harmony2 algorithm is used, which includes a stabilized
-    diversity penalty, dynamic per-cluster-per-batch ridge regularization,
-    and automatic batch pruning. To revert to the original Harmony behavior::
+    By default, the Harmony2 algorithm is used,
+    which includes a stabilized diversity penalty,
+    dynamic per-cluster-per-batch ridge regularization,
+    and automatic batch pruning.
+    To revert to the original Harmony behavior::
 
         rsc.pp.harmony_integrate(adata, key, flavor="harmony1")
 
@@ -56,64 +56,88 @@ def harmony_integrate(
     adata
         The annotated data matrix.
     key
-        The key(s) of the column(s) in ``adata.obs`` that differentiates
-        among experiments/batches.
+        The key(s) of the column(s) in ``adata.obs`` that differentiate(s) among experiments/batches.
+        When multiple keys are provided, a combined batch variable is created from all columns.
     basis
-        The name of the field in ``adata.obsm`` where the PCA table is
-        stored. Defaults to ``'X_pca'``, which is the default for
-        ``sc.tl.pca()``.
+        The name of the field in ``adata.obsm`` where the PCA table is stored.
     adjusted_basis
-        The name of the field in ``adata.obsm`` where the adjusted PCA
-        table will be stored after running this function. Defaults to
-        ``X_pca_harmony``.
+        The name of the field in ``adata.obsm`` where the adjusted PCA table will be stored.
     dtype
-        The data type to use for Harmony. If you use 32-bit you may
-        experience numerical instability.
+        The data type to use for Harmony computation.
+        If you use 32-bit you may experience numerical instability.
     flavor
         Which version of the Harmony algorithm to use.
         ``"harmony2"`` (default) enables the stabilized diversity penalty,
-        dynamic per-cluster-per-batch ridge regularization, and automatic
-        batch pruning from :cite:p:`Patikas2026`.
-        ``"harmony1"`` uses the original algorithm from
-        :cite:p:`Korsunsky2019`.
+        dynamic per-cluster-per-batch ridge regularization,
+        and automatic batch pruning from :cite:p:`Patikas2026`.
+        ``"harmony1"`` uses the original algorithm from :cite:p:`Korsunsky2019`.
     n_clusters
-        Number of clusters. If ``None``, uses ``min(100, N / 30)``.
+        Number of clusters used for soft k-means in the Harmony algorithm.
+        If ``None``, uses ``min(100, N / 30)``.
+        More clusters capture finer-grained structure but increase computation time.
     max_iter_harmony
-        Maximum number of Harmony iterations.
+        Maximum number of outer Harmony iterations
+        (each consisting of a clustering step followed by a correction step).
     max_iter_clustering
-        Maximum iterations for the clustering step within each Harmony
-        iteration.
+        Maximum iterations for the clustering step within each Harmony iteration.
     tol_harmony
         Convergence tolerance for the Harmony objective function.
+        The algorithm stops when the relative change in objective falls below this value.
     tol_clustering
-        Convergence tolerance for the clustering step.
+        Convergence tolerance for the clustering step within each
+        Harmony iteration.
     sigma
-        Weight of the entropy term in the objective function.
+        Width of the soft-clustering kernel.
+        Controls the entropy of cluster assignments:
+        smaller values produce harder assignments (cells assigned to fewer clusters),
+        while larger values produce softer assignments (cells spread across more clusters).
     theta
-        Weight of the diversity penalty term in the objective function.
+        Diversity penalty weight per batch variable.
+        Controls how strongly Harmony encourages each cluster
+        to contain a balanced representation of all batches.
+        Higher values (e.g. ``4``) produce more aggressive mixing;
+        lower values (e.g. ``0.5``) allow more batch-specific clusters.
+        Set to ``0`` to disable batch correction entirely.
+        A list can be provided to set different weights per batch variable.
     tau
-        Discounting factor on ``theta``. By default, there is no
-        discounting.
+        Discounting factor on ``theta``.
+        When ``tau > 0``,
+        the diversity penalty is down-weighted for batches with fewer cells,
+        preventing over-correction of small batches.
+        By default (``0``), there is no discounting.
     ridge_lambda
-        Ridge regression hyperparameter for the correction step.
+        Ridge regression regularization for the correction step.
+        Larger values produce more conservative (smaller) corrections,
+        preventing over-fitting.
         Only used with ``flavor="harmony1"``.
     alpha
-        Scaling factor for dynamic lambda. Only used with
-        ``flavor="harmony2"``.
+        Scaling factor for the dynamic per-cluster-per-batch ridge regularization.
+        The effective regularization for each cluster-batch pair is ``alpha * E_kb``
+        where ``E_kb`` is the expected number of cells.
+        Larger values produce more conservative corrections.
+        Only used with ``flavor="harmony2"``.
     batch_prune_threshold
-        Fraction threshold below which a batch–cluster pair is pruned
-        (correction suppressed). Only used with ``flavor="harmony2"``.
+        Fraction threshold below which a batch-cluster pair is pruned (correction suppressed).
+        When the fraction of a batch's cells assigned to a cluster (``O_kb / N_b``) falls below this threshold,
+        that batch-cluster pair receives no correction, preventing spurious adjustments.
+        Only used with ``flavor="harmony2"``.
         Set to ``None`` to disable pruning.
     correction_method
-        Method for the correction step: ``"original"``, ``"fast"``, or
-        ``"batched"`` (fastest, more memory). If ``None`` (default),
-        automatically selects ``"batched"`` unless the workspace would
-        exceed 1 GB, in which case ``"fast"`` is used.
+        Method for the correction step.
+        ``"original"`` uses per-cluster ridge regression with explicit matrix inversion.
+        ``"fast"`` uses a precomputed factorization that avoids the full inversion,
+        which can be faster for datasets with many batches.
+        ``"batched"`` processes all clusters simultaneously (fastest but requires more memory).
+        If ``None`` (default), automatically selects ``"batched"`` unless
+        the workspace would exceed 1 GB, in which case ``"fast"`` is used.
     colsum_algo
-        Algorithm for column sums. If ``None``, chosen automatically.
+        Algorithm for column sums.
+        If ``None``, chosen automatically.
         If ``"benchmark"``, benchmarks all algorithms.
     block_proportion
         Proportion of cells updated per clustering sub-iteration.
+        Smaller values produce more stochastic updates.
+        Larger values are faster but may converge to different solutions.
     random_state
         Random seed for reproducibility.
     verbose
@@ -121,10 +145,9 @@ def harmony_integrate(
 
     Returns
     -------
-    Updates adata with the field ``adata.obsm[adjusted_basis]``, \
-    containing principal components adjusted by Harmony such that \
-    different experiments are integrated.
-
+    Updates adata with the field ``adata.obsm[adjusted_basis]``,
+    containing principal components adjusted by Harmony
+    such that different experiments are integrated.
     """
     from ._harmony import harmonize
 
