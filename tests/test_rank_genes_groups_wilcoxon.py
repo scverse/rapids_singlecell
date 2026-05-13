@@ -60,33 +60,6 @@ def test_rank_genes_groups_sparse_negative_values_raise(method, fmt):
         rsc.tl.rank_genes_groups(adata, "group", method=method, use_raw=False)
 
 
-@pytest.mark.parametrize(
-    "method",
-    ["t-test", "t-test_overestim_var", "wilcoxon", "wilcoxon_binned", "logreg"],
-)
-@pytest.mark.parametrize("fmt", ["numpy_dense", "cupy_dense"])
-def test_rank_genes_groups_dense_negative_values_raise(method, fmt):
-    X = np.array(
-        [
-            [-1.0, 0.0, 2.0],
-            [0.0, 1.0, 0.0],
-            [2.0, 0.0, 1.0],
-            [0.0, 3.0, 0.0],
-        ],
-        dtype=np.float32,
-    )
-    adata = sc.AnnData(
-        X=_to_format(X, fmt),
-        obs=pd.DataFrame(
-            {"group": pd.Categorical(["a", "a", "b", "b"], categories=["a", "b"])}
-        ),
-        var=pd.DataFrame(index=["g0", "g1", "g2"]),
-    )
-
-    with pytest.raises(ValueError, match="Dense input contains negative values"):
-        rsc.tl.rank_genes_groups(adata, "group", method=method, use_raw=False)
-
-
 @pytest.mark.parametrize("fmt", ["numpy_dense", "scipy_csr", "cupy_dense", "cupy_csr"])
 def test_rank_genes_groups_complex_values_raise(fmt):
     X = np.array(

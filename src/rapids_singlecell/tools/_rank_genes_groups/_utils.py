@@ -51,12 +51,6 @@ def _check_sparse_nonnegative(X) -> None:
     elif cpsp.issparse(X):
         if X.nnz > 0 and float(X.data.min()) < 0:
             raise _nonnegative_error("Sparse input")
-    elif isinstance(X, np.ndarray):
-        if X.size > 0 and float(np.nanmin(X)) < 0:
-            raise _nonnegative_error("Dense input")
-    elif isinstance(X, cp.ndarray):
-        if X.size > 0 and float(cp.nanmin(X)) < 0:
-            raise _nonnegative_error("Dense input")
 
 
 def _select_groups(
