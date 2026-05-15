@@ -199,7 +199,7 @@ def _neighborhood_profile(
     weights: Sequence[float] | None,
     abs_nhood: bool,
     key: str,
-) -> np.ndarray:
+) -> cp.ndarray:
     """Cells x categories matrix of cell-type counts (or relative frequencies) over n-hop neighbors."""
     cats = pd.Categorical(adata.obs[groups])
     n_cats = len(cats.categories)
@@ -218,6 +218,8 @@ def _neighborhood_profile(
         weights = [1.0] * distance
     elif len(weights) < distance:
         weights = list(weights) + [weights[-1]] * (distance - len(weights))
+    if not abs_nhood and sum(weights) == 0:
+        raise ValueError("`n_hop_weights` must not sum to zero.")
 
     profile = cp.zeros((n_obs, n_cats), dtype=cp.float32)
     adj_k = adj_bin
@@ -325,7 +327,7 @@ def _cellcharter_features(
     fused ``mul_csr`` kernel used for utag, then aggregated as either:
 
     - ``"mean"``: ``Âₖ @ X``
-    - ``"variance"``: ``Âₖ @ (X·X) − (Âₖ @ X)²``  (matches squidpy's path; densifies X)
+    - ``"variance"``: ``Âₖ @ (X·X) - (Âₖ @ X)²``  (matches squidpy's path; densifies X)
 
     All layers are concatenated horizontally.
     """
