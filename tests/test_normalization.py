@@ -130,6 +130,38 @@ def test_normalize_pearson_residuals_float64_precision(sparsity_func, theta):
     cp.testing.assert_allclose(output, reference, rtol=1e-9, atol=1e-9)
 
 
+def test_normalize_pearson_residuals_preserves_input_matrix():
+    """Regression test: `normalize_pearson_residuals` must not mutate `adata.X`.
+
+    `_check_gpu_X(..., require_cf=True)` previously canonicalized a
+    non-canonical sparse input *in place* -- it called ``sort_indices()`` and
+    ``sum_duplicates()`` on ``adata.X`` itself. Canonicalization now happens
+    on a copy (``_ensure_canonical_format``), so the caller's matrix is left
+    untouched. With ``inplace=False`` the function does not write ``adata.X``,
+    so the input matrix must come out byte-identical to how it went in.
+    """
+    # non-canonical CSR: unsorted column indices + a duplicate (row, col) entry
+    indptr = cp.array([0, 3, 4, 6], dtype=cp.int32)
+    indices = cp.array([2, 0, 2, 1, 2, 1], dtype=cp.int32)
+    data = cp.array([5.0, 1.0, 3.0, 7.0, 4.0, 2.0], dtype=cp.float64)
+    cudata = AnnData(X=csr_matrix((data, indices, indptr), shape=(3, 3)))
+
+    X = cudata.X
+    assert not X.has_canonical_format, "test premise: input must be non-canonical"
+    indices_before = cp.asnumpy(X.indices).copy()
+    data_before = cp.asnumpy(X.data).copy()
+    nnz_before = X.nnz
+
+    rsc.pp.normalize_pearson_residuals(cudata, inplace=False)
+
+    # the function must not have mutated the input matrix
+    X_after = cudata.X
+    assert X_after.nnz == nnz_before
+    np.testing.assert_array_equal(cp.asnumpy(X_after.indices), indices_before)
+    np.testing.assert_array_equal(cp.asnumpy(X_after.data), data_before)
+    assert not X_after.has_canonical_format
+
+
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])
 @pytest.mark.parametrize("sparse", [True, False])
 @pytest.mark.parametrize("base", [None, 2, 10])
