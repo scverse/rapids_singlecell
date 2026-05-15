@@ -297,6 +297,20 @@ def _run_cellcharter(
         embedding = cp.asarray(emb[:, :n_components], dtype=cp.float32)
     else:
         feat = _cellcharter_features(adata, distance, aggregation, key)
+        # Deeper shells can yield all-zero columns when a gene's expression
+        # never propagates into that shell across the whole dataset. rsc PCA
+        # rejects zero columns; drop them so the embedding still uses the
+        # informative dimensions.
+        if sparse_gpu.issparse(feat):
+            col_sum = cp.asarray(feat.sum(axis=0)).ravel()
+            nonzero = cp.where(col_sum != 0)[0]
+            if int(nonzero.size) < feat.shape[1]:
+                feat = feat[:, nonzero]
+        else:
+            col_sum = feat.sum(axis=0)
+            nonzero = col_sum != 0
+            if int(nonzero.sum()) < feat.shape[1]:
+                feat = feat[:, nonzero]
         inner = AnnData(X=feat, obs=pd.DataFrame(index=adata.obs_names.copy()))
         rsc.get.anndata_to_GPU(inner)
         rsc.pp.pca(inner)
