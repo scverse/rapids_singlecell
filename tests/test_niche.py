@@ -383,18 +383,13 @@ def test_cellcharter_invalid_distance_negative(adata):
 
 def test_cellcharter_handles_zero_columns_after_shell_aggregation(adata):
     """Regression: shell-aggregated features can contain all-zero columns when
-    a gene's expression never propagates into a given shell. rsc PCA rejects
-    zero columns, so `_run_cellcharter` must drop them before PCA. Injecting an
-    all-zero gene guarantees zero columns in every shell."""
+    a gene's expression never propagates into a given shell. The sparse PCA
+    path rejects zero columns, so `_run_cellcharter` must drop them before PCA.
+    Use a sparse X with an injected zero gene to force the sparse PCA route."""
     X = adata.X
-    if sparse.issparse(X):
-        X = X.tolil()
-        X[:, 0] = 0
-        adata.X = X.tocsr()
-    else:
-        X = np.array(X, copy=True)
-        X[:, 0] = 0
-        adata.X = X
+    X = X.toarray() if sparse.issparse(X) else np.array(X, copy=True)
+    X[:, 0] = 0
+    adata.X = sparse.csr_matrix(X.astype(np.float32))
     calculate_niche(adata, flavor="cellcharter", n_components=4, distance=2)
     assert "cellcharter_niche" in adata.obs.columns
     assert adata.obs["cellcharter_niche"].isna().sum() == 0
