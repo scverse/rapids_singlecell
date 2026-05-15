@@ -130,6 +130,8 @@ def _fix_self_distances(knn_dist: cp.ndarray, metric: _Metrics) -> cp.ndarray:
     return knn_dist
 
 
+# Empirically, the block-cooperative CUB sort kernel is faster for trim >= 100;
+# below this threshold the per-thread top-k kernel has less launch overhead.
 _TRIM_SORT_THRESHOLD = 100
 
 

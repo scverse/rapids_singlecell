@@ -162,6 +162,9 @@ def test_bbknn_connectivities_not_collapsed():
     adata = pbmc68k_reduced()
     bbknn(adata, n_pcs=15, batch_key="phase", algorithm="brute")
     weights = adata.obsp["connectivities"].data
+    # Regression bounds chosen vs pre-fix behaviour (mean ~0.60, >0.99 frac ~0.28
+    # on this dataset). Anything close to those values indicates sigma estimation
+    # has broken again. Healthy distribution on the same dataset is mean ~0.50.
     assert weights.mean() < 0.7
     assert (weights > 0.99).mean() < 0.5
 

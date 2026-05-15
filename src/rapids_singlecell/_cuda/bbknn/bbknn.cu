@@ -28,6 +28,12 @@ static inline void launch_find_top_k_per_row(const float* data,
                SHARED_MEM_BUDGET) {
         block_size /= 2;
     }
+    if (static_cast<size_t>(block_size) * per_thread_bytes >
+        SHARED_MEM_BUDGET) {
+        throw std::runtime_error(
+            "find_top_k_per_row: trim too large for shared-memory budget; "
+            "use find_top_k_per_row_sorted instead");
+    }
     dim3 block(block_size);
     dim3 grid((n_rows + block_size - 1) / block_size);
     size_t shared_mem_size = static_cast<size_t>(block_size) * per_thread_bytes;
