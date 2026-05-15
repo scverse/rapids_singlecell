@@ -24,7 +24,7 @@ __global__ void sparse_norm_res_csc_kernel(
             ++sparse_idx;
         }
         residuals[res_index] -= mu;
-        residuals[res_index] /= sqrtf(mu + mu * mu * inv_theta);
+        residuals[res_index] /= sqrt(mu + mu * mu * inv_theta);
         // clamp to [-clip, clip]
         if (residuals[res_index] < -clip) residuals[res_index] = -clip;
         if (residuals[res_index] > clip) residuals[res_index] = clip;
@@ -53,7 +53,7 @@ __global__ void sparse_norm_res_csr_kernel(
             ++sparse_idx;
         }
         residuals[res_index] -= mu;
-        residuals[res_index] /= sqrtf(mu + mu * mu * inv_theta);
+        residuals[res_index] /= sqrt(mu + mu * mu * inv_theta);
 
         if (residuals[res_index] < -clip) residuals[res_index] = -clip;
         if (residuals[res_index] > clip) residuals[res_index] = clip;
