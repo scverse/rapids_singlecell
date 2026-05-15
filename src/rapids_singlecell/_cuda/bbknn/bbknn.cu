@@ -6,10 +6,10 @@
 using namespace nb::literals;
 
 constexpr int BLOCK_SIZE = 64;
-// Block-cooperative sort kernel: BLOCK_THREADS * ITEMS_PER_THREAD = 1024.
+// Block-cooperative sort kernel: BLOCK_THREADS * ITEMS_PER_THREAD = 2048.
 // Rows larger than this must use the per-thread kernel (kernel 1).
 constexpr int SORT_BLOCK_THREADS = 128;
-constexpr int SORT_ITEMS_PER_THREAD = 8;
+constexpr int SORT_ITEMS_PER_THREAD = 16;
 constexpr int SORT_TILE_SIZE = SORT_BLOCK_THREADS * SORT_ITEMS_PER_THREAD;
 
 static inline void launch_find_top_k_per_row(const float* data,
