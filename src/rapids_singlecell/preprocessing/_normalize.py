@@ -16,7 +16,11 @@ from rapids_singlecell._compat import (
     _meta_sparse,
 )
 
-from ._utils import _check_gpu_X, _check_nonnegative_integers
+from ._utils import (
+    _check_gpu_X,
+    _check_nonnegative_integers,
+    _ensure_canonical_format,
+)
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -457,7 +461,8 @@ def normalize_pearson_residuals(
     """
     X = _get_obs_rep(adata, layer=layer)
 
-    _check_gpu_X(X, require_cf=True)
+    _check_gpu_X(X)
+    X = _ensure_canonical_format(X)
 
     if check_values and not _check_nonnegative_integers(X):
         warnings.warn(

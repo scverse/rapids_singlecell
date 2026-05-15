@@ -13,6 +13,7 @@ from rapids_singlecell._cuda import _pr_cuda
 from rapids_singlecell.preprocessing._utils import (
     _check_gpu_X,
     _check_nonnegative_integers,
+    _ensure_canonical_format,
     _get_mean_var,
 )
 
@@ -39,7 +40,8 @@ def _highly_variable_pearson_residuals(
     Expects raw count input.
     """
     X = _get_obs_rep(adata, layer=layer)
-    _check_gpu_X(X, require_cf=True)
+    _check_gpu_X(X)
+    X = _ensure_canonical_format(X)
     if check_values and not _check_nonnegative_integers(X):
         warnings.warn(
             "`flavor='pearson_residuals'` expects raw count data, but non-integers were found.",

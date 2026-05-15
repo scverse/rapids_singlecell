@@ -283,7 +283,13 @@ def _check_nonnegative_integers(X):
         return True
 
 
-def _check_gpu_X(X, *, require_cf=False, allow_dask=False, allow_csc=True):
+def _check_gpu_X(X, *, allow_dask=False, allow_csc=True):
+    """Validate that ``X`` is a GPU matrix supported by this function.
+
+    This is a pure validator: it raises :class:`TypeError` on unsupported
+    input and returns ``True`` otherwise. It never modifies ``X``. When a
+    kernel requires canonical sparse format, use :func:`_ensure_canonical_format`.
+    """
     if isinstance(X, DaskArray):
         if allow_dask:
             return _check_gpu_X(X._meta, allow_csc=False)
@@ -301,13 +307,7 @@ def _check_gpu_X(X, *, require_cf=False, allow_dask=False, allow_csc=True):
                 "When using Dask, only CuPy ndarrays and CSR matrices are supported as "
                 "meta arrays. Please convert your data to CSR format if it is in CSC."
             )
-        elif not require_cf:
-            return True
-        elif X.has_canonical_format:
-            return True
-        else:
-            X.sort_indices()
-            X.sum_duplicates()
+        return True
     else:
         raise TypeError(
             "The input is not a CuPy ndarray or CuPy sparse matrix. "
@@ -316,6 +316,22 @@ def _check_gpu_X(X, *, require_cf=False, allow_dask=False, allow_csc=True):
             "Please checkout `rapids_singlecell.get.anndata_to_GPU` to convert your data to GPU. "
             "If you're working with CPU-based matrices, please consider using Scanpy instead."
         )
+
+
+def _ensure_canonical_format(X):
+    """Return ``X`` in canonical sparse format without mutating the input.
+
+    Some GPU kernels (e.g. the Pearson-residual kernels) co-iterate the
+    sparse structure and require sorted indices with no duplicate entries.
+    If ``X`` is a sparse matrix that is not already in canonical format, a
+    canonicalized **copy** is returned and the caller's matrix is left
+    untouched. Dense and already-canonical inputs are returned unchanged.
+    """
+    if issparse(X) and not X.has_canonical_format:
+        X = X.copy()
+        X.sort_indices()
+        X.sum_duplicates()
+    return X
 
 
 def _check_use_raw(adata: AnnData, layer: str | None, *, use_raw: None | bool) -> bool:
