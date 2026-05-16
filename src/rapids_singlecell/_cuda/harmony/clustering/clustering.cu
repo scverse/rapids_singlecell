@@ -95,8 +95,10 @@ static inline void colsum_dispatch(int algo, cublasHandle_t handle, const T* A,
             break;
         }
         default:  // COLSUM_GEMM
-            cublas_gemv<T>(handle, CUBLAS_OP_N, cols, rows, &one, A, cols,
-                           ones_vec, 1, &zero, out, 1);
+            cublas_check_status(
+                cublas_gemv<T>(handle, CUBLAS_OP_N, cols, rows, &one, A, cols,
+                               ones_vec, 1, &zero, out, 1),
+                "cublas_gemv(colsum)");
             break;
     }
 }
@@ -172,6 +174,7 @@ struct ClusteringArgs {
     unsigned int seed;
     bool stabilized;
     cudaStream_t stream;
+    cublasHandle_t handle;
 };
 
 // ---------- Standalone objective computation ----------
@@ -233,9 +236,8 @@ template <typename T>
 static void clustering_loop_impl(const ClusteringArgs<T>& a) {
     size_t cub_temp_bytes = get_cub_sort_temp_bytes(a.n_cells);
 
-    cublasHandle_t handle;
-    cublasCreate(&handle);
-    cublasSetStream(handle, a.stream);
+    cublasHandle_t handle = a.handle;
+    cublas_check_status(cublasSetStream(handle, a.stream), "cublasSetStream");
 
     T term = T(-2) / a.sigma;
     T one = T(1), zero = T(0);
@@ -261,9 +263,11 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
 
     for (int iter = 0; iter < a.max_iter; iter++) {
         // ---- Centroids: Y = R^T @ Z_norm, then L2-normalize ----
-        cublas_gemm<T>(handle, CUBLAS_OP_N, CUBLAS_OP_T, a.n_pcs, a.n_clusters,
-                       a.n_cells, &one, a.Z_norm, a.n_pcs, a.R, a.n_clusters,
-                       &zero, a.Y, a.n_pcs);
+        cublas_check_status(
+            cublas_gemm<T>(handle, CUBLAS_OP_N, CUBLAS_OP_T, a.n_pcs,
+                           a.n_clusters, a.n_cells, &one, a.Z_norm, a.n_pcs,
+                           a.R, a.n_clusters, &zero, a.Y, a.n_pcs),
+            "cublas_gemm(centroids)");
 
         l2_row_normalize_kernel<T>
             <<<a.n_clusters, warp_aligned_bdim(a.n_pcs), 0, a.stream>>>(
@@ -271,9 +275,12 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
         CUDA_CHECK_LAST_ERROR(l2_row_normalize_kernel);
 
         // ---- Similarities: Z_norm @ Y_norm^T ----
-        cublas_gemm<T>(handle, CUBLAS_OP_T, CUBLAS_OP_N, a.n_clusters,
-                       a.n_cells, a.n_pcs, &one, a.Y_norm, a.n_pcs, a.Z_norm,
-                       a.n_pcs, &zero, a.similarities, a.n_clusters);
+        cublas_check_status(
+            cublas_gemm<T>(handle, CUBLAS_OP_T, CUBLAS_OP_N, a.n_clusters,
+                           a.n_cells, a.n_pcs, &one, a.Y_norm, a.n_pcs,
+                           a.Z_norm, a.n_pcs, &zero, a.similarities,
+                           a.n_clusters),
+            "cublas_gemm(similarities)");
 
         // ---- Shuffle: random permutation via PCG hash + radix sort ----
         pcg_hash_kernel<<<grid_1d(a.n_cells, n_sm), BLOCK_DIM_1D, 0,
@@ -372,7 +379,6 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
     T final_obj = objectives.empty() ? T(0) : objectives.back();
     cudaMemcpyAsync(a.last_obj, &final_obj, sizeof(T), cudaMemcpyHostToDevice,
                     a.stream);
-    cublasDestroy(handle);
 }
 
 // ---------- Nanobind bindings ----------
@@ -400,7 +406,7 @@ static void register_clustering_loop(nb::module_& m) {
            gpu_array_c<T, Device> last_obj, int n_cells, int n_pcs,
            int n_clusters, int n_batches, int block_size, int colsum_algo,
            double sigma, double tol, int max_iter, unsigned int seed,
-           bool stabilized, std::uintptr_t stream) {
+           bool stabilized, std::uintptr_t stream, std::uintptr_t handle) {
             ClusteringArgs<T> a{
                 Z_norm.data(),
                 R.data(),
@@ -437,6 +443,7 @@ static void register_clustering_loop(nb::module_& m) {
                 seed,
                 stabilized,
                 (cudaStream_t)stream,
+                (cublasHandle_t)handle,
             };
             clustering_loop_impl(a);
         },
@@ -447,7 +454,7 @@ static void register_clustering_loop(nb::module_& m) {
         "obj_scalar"_a, "ones_vec"_a, "last_obj"_a, "n_cells"_a, "n_pcs"_a,
         "n_clusters"_a, "n_batches"_a, "block_size"_a, "colsum_algo"_a,
         "sigma"_a, "tol"_a, "max_iter"_a, "seed"_a, "stabilized"_a,
-        "stream"_a = 0);
+        "stream"_a = 0, "handle"_a);
 }
 
 template <typename T, typename Device>

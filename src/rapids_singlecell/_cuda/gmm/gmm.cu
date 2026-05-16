@@ -31,15 +31,6 @@ static inline void cuda_check_runtime(cudaError_t err, const char* what) {
     }
 }
 
-static inline void cublas_check_status(cublasStatus_t status,
-                                       const char* what) {
-    if (status != CUBLAS_STATUS_SUCCESS) {
-        throw std::runtime_error(std::string(what) +
-                                 " failed with cuBLAS status " +
-                                 std::to_string(static_cast<int>(status)));
-    }
-}
-
 template <typename T, int D>
 static inline void launch_e_step_log_prob_fixed_d_impl(
     const T* X, const T* weights, const T* means, const T* prec_chol,
@@ -119,8 +110,6 @@ static inline void launch_e_step_cublas(const T* X, const T* weights,
                                         cublasHandle_t handle) {
     if (n == 0 || d == 0 || K == 0) return;
 
-    bool own_handle = handle == nullptr;
-    if (own_handle) cublas_check_status(cublasCreate(&handle), "cublasCreate");
     cublas_check_status(cublasSetStream(handle, stream), "cublasSetStream");
 
     T one = T(1);
@@ -153,8 +142,6 @@ static inline void launch_e_step_cublas(const T* X, const T* weights,
             <<<grid, block, 0, stream>>>(log_prob, n, K, resp, ll_per_cell);
         CUDA_CHECK_LAST_ERROR(e_step_normalize_kernel);
     }
-
-    if (own_handle) cublas_check_status(cublasDestroy(handle), "cublasDestroy");
 }
 
 template <typename T>
@@ -165,8 +152,6 @@ static inline void launch_m_step(const T* resp, const T* X, const T* ones,
                                  cudaStream_t stream, cublasHandle_t handle) {
     if (n == 0 || d == 0 || K == 0) return;
 
-    bool own_handle = handle == nullptr;
-    if (own_handle) cublas_check_status(cublasCreate(&handle), "cublasCreate");
     cublas_check_status(cublasSetStream(handle, stream), "cublasSetStream");
 
     T one = T(1);
@@ -219,8 +204,6 @@ static inline void launch_m_step(const T* resp, const T* X, const T* ones,
             workspace_N_k, covariances, reg_covar, eps, d, K);
         CUDA_CHECK_LAST_ERROR(m_step_finalize_cov_cublas_kernel);
     }
-
-    if (own_handle) cublas_check_status(cublasDestroy(handle), "cublasDestroy");
 }
 
 template <typename Device>
@@ -286,7 +269,7 @@ void register_bindings(nb::module_& m) {
         "X"_a, "weights"_a, "means"_a, "prec_chol"_a, "log_det_half"_a,
         "centered_workspace"_a, "y_workspace"_a, "log_prob"_a, "resp"_a,
         "ll_per_cell"_a, nb::kw_only(), "n"_a, "d"_a, "K"_a, "stream"_a = 0,
-        "handle"_a = 0);
+        "handle"_a);
 
     m.def(
         "e_step_cublas",
@@ -311,7 +294,7 @@ void register_bindings(nb::module_& m) {
         "X"_a, "weights"_a, "means"_a, "prec_chol"_a, "log_det_half"_a,
         "centered_workspace"_a, "y_workspace"_a, "log_prob"_a, "resp"_a,
         "ll_per_cell"_a, nb::kw_only(), "n"_a, "d"_a, "K"_a, "stream"_a = 0,
-        "handle"_a = 0);
+        "handle"_a);
 
     m.def(
         "m_step",
@@ -334,7 +317,7 @@ void register_bindings(nb::module_& m) {
         "resp"_a, "X"_a, "ones"_a, "weights"_a, "means"_a, "covariances"_a,
         "N_k_workspace"_a, "num_workspace"_a, "centered_workspace"_a,
         nb::kw_only(), "n"_a, "d"_a, "K"_a, "reg_covar"_a, "stream"_a = 0,
-        "handle"_a = 0);
+        "handle"_a);
 
     m.def(
         "m_step",
@@ -358,7 +341,7 @@ void register_bindings(nb::module_& m) {
         "resp"_a, "X"_a, "ones"_a, "weights"_a, "means"_a, "covariances"_a,
         "N_k_workspace"_a, "num_workspace"_a, "centered_workspace"_a,
         nb::kw_only(), "n"_a, "d"_a, "K"_a, "reg_covar"_a, "stream"_a = 0,
-        "handle"_a = 0);
+        "handle"_a);
 }
 
 NB_MODULE(_gmm_cuda, m) {
