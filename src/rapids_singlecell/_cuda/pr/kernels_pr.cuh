@@ -76,7 +76,7 @@ __global__ void dense_norm_res_kernel(const T* __restrict__ X,
     T mu = sums_genes[gene] * sums_cells[cell] * inv_inv_sum_total;
     long long res_index = static_cast<long long>(cell) * n_genes + gene;
     T r = X[res_index] - mu;
-    r /= sqrt(mu + mu * mu * inv_theta);
+    r *= rsqrt(mu + mu * mu * inv_theta);
     if (r < -clip) r = -clip;
     if (r > clip) r = clip;
     residuals[res_index] = r;
