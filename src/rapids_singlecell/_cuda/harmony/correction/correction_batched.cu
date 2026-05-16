@@ -21,7 +21,8 @@ static void correction_batched_impl(
     int n_clusters, int n_batches,
     // workspace
     T* Z, T* inv_mats, T* Phi_t_diag_R_X_all, T* W_all, T* g_factor,
-    T* g_P_row0, T* X_sorted, T* R_sorted, cudaStream_t stream) {
+    T* g_P_row0, T* X_sorted, T* R_sorted, cudaStream_t stream,
+    cublasHandle_t handle) {
     int nb1 = n_batches + 1;
 
     // Step 1: Z = X.copy()
@@ -37,10 +38,7 @@ static void correction_batched_impl(
         /*cluster_k=*/-1);
     CUDA_CHECK_LAST_ERROR(compute_inv_mats_kernel);
 
-    // cuBLAS handle
-    cublasHandle_t handle;
-    cublasCreate(&handle);
-    cublasSetStream(handle, stream);
+    cublas_check_status(cublasSetStream(handle, stream), "cublasSetStream");
 
     T one = T(1), zero = T(0);
 
@@ -54,9 +52,11 @@ static void correction_batched_impl(
     // X is (n_cells, n_pcs) row-major → cuBLAS sees (n_pcs, n_cells)
     // Want C_cublas(n_pcs, n_clusters) = X_cublas @ R_cublas^T
     // op=N,T  m=n_pcs  n=n_clusters  k=n_cells  ldc=nb1*n_pcs (strided write)
-    cublas_gemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, n_pcs, n_clusters, n_cells,
-                &one, X, n_pcs, R, n_clusters, &zero, Phi_t_diag_R_X_all,
-                nb1 * n_pcs);
+    cublas_check_status(
+        cublas_gemm<T>(handle, CUBLAS_OP_N, CUBLAS_OP_T, n_pcs, n_clusters,
+                       n_cells, &one, X, n_pcs, R, n_clusters, &zero,
+                       Phi_t_diag_R_X_all, nb1 * n_pcs),
+        "cublas_gemm(correction_batched row0)");
 
     // Gather X and R into batch-sorted order
     {
@@ -92,9 +92,11 @@ static void correction_batched_impl(
         T* C_ptr = Phi_t_diag_R_X_all + (b + 1) * n_pcs;
 
         // result[:,b+1,:] = R_batch.T @ X_batch (same N,T trick as row 0)
-        cublas_gemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, n_pcs, n_clusters,
-                    n_batch_cells, &one, X_batch, n_pcs, R_batch, n_clusters,
-                    &zero, C_ptr, nb1 * n_pcs);
+        cublas_check_status(
+            cublas_gemm<T>(handle, CUBLAS_OP_N, CUBLAS_OP_T, n_pcs, n_clusters,
+                           n_batch_cells, &one, X_batch, n_pcs, R_batch,
+                           n_clusters, &zero, C_ptr, nb1 * n_pcs),
+            "cublas_gemm(correction_batched per-batch)");
     }
 
     // Step 4: W_all = inv_mats @ Phi_t_diag_R_X_all (strided batched GEMM)
@@ -105,10 +107,12 @@ static void correction_batched_impl(
         long long sB = (long long)nb1 * nb1;    // stride for inv_mats
         long long sC = (long long)nb1 * n_pcs;  // stride for W_all
 
-        cublas_gemm_strided_batched(handle, CUBLAS_OP_N, CUBLAS_OP_N, n_pcs,
-                                    nb1, nb1, &one, Phi_t_diag_R_X_all, n_pcs,
-                                    sA, inv_mats, nb1, sB, &zero, W_all, n_pcs,
-                                    sC, n_clusters);
+        cublas_check_status(
+            cublas_gemm_strided_batched<T>(
+                handle, CUBLAS_OP_N, CUBLAS_OP_N, n_pcs, nb1, nb1, &one,
+                Phi_t_diag_R_X_all, n_pcs, sA, inv_mats, nb1, sB, &zero, W_all,
+                n_pcs, sC, n_clusters),
+            "cublas_gemm_strided_batched(correction_batched W_all)");
     }
 
     // Step 5: W_all[:, 0, :] = 0
@@ -123,8 +127,6 @@ static void correction_batched_impl(
                0, stream>>>(Z, W_all, cats, R, n_cells, n_pcs, n_clusters, nb1);
         CUDA_CHECK_LAST_ERROR(batched_correction_kernel);
     }
-
-    cublasDestroy(handle);
 }
 
 // ---- nanobind registration ----
@@ -144,19 +146,21 @@ static void register_correction_batched(nb::module_& m) {
            gpu_array_c<T, Device> Phi_t_diag_R_X_all,
            gpu_array_c<T, Device> W_all, gpu_array_c<T, Device> g_factor,
            gpu_array_c<T, Device> g_P_row0, gpu_array_c<T, Device> X_sorted,
-           gpu_array_c<T, Device> R_sorted, std::uintptr_t stream) {
+           gpu_array_c<T, Device> R_sorted, std::uintptr_t stream,
+           std::uintptr_t handle) {
             correction_batched_impl<T>(
                 X.data(), R.data(), O.data(), cats.data(), cat_offsets.data(),
                 cell_indices.data(), lambda_kb.data(), n_cells, n_pcs,
                 n_clusters, n_batches, Z.data(), inv_mats.data(),
                 Phi_t_diag_R_X_all.data(), W_all.data(), g_factor.data(),
                 g_P_row0.data(), X_sorted.data(), R_sorted.data(),
-                (cudaStream_t)stream);
+                (cudaStream_t)stream, (cublasHandle_t)handle);
         },
         "X"_a, nb::kw_only(), "R"_a, "O"_a, "cats"_a, "cat_offsets"_a,
         "cell_indices"_a, "lambda_kb"_a, "n_cells"_a, "n_pcs"_a, "n_clusters"_a,
         "n_batches"_a, "Z"_a, "inv_mats"_a, "Phi_t_diag_R_X_all"_a, "W_all"_a,
-        "g_factor"_a, "g_P_row0"_a, "X_sorted"_a, "R_sorted"_a, "stream"_a = 0);
+        "g_factor"_a, "g_P_row0"_a, "X_sorted"_a, "R_sorted"_a, "stream"_a = 0,
+        "handle"_a);
 }
 
 template <typename Device>
