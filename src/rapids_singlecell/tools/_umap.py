@@ -216,6 +216,11 @@ def umap(
 
         if hasattr(init_coords, "dtype"):
             init_coords = _validate_init_pos(init_coords)
+            if init_coords.shape[1] != n_components:
+                raise ValueError(
+                    f"Expected {n_components} columns but got "
+                    f"{init_coords.shape[1]} columns."
+                )
 
         random_state = check_random_state(random_state)
 
