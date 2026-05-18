@@ -4,7 +4,7 @@
 
 template <typename T, typename IdxT>
 __global__ void gram_csr_upper_kernel(const IdxT* indptr, const IdxT* index,
-                                      const T* data, int nrows, int ncols,
+                                      const T* data, size_t nrows, size_t ncols,
                                       T* out) {
     int row = blockIdx.x;
     int col_offset = threadIdx.x;
@@ -15,13 +15,15 @@ __global__ void gram_csr_upper_kernel(const IdxT* indptr, const IdxT* index,
 
     for (IdxT idx1 = start; idx1 < end; ++idx1) {
         IdxT index1 = index[idx1];
+        if (index1 < 0 || index1 >= ncols) continue;
         T data1 = data[idx1];
         for (IdxT idx2 = idx1 + col_offset; idx2 < end; idx2 += blockDim.x) {
             IdxT index2 = index[idx2];
+            if (index2 < 0 || index2 >= ncols) continue;
             T data2 = data[idx2];
             size_t lo = min(index1, index2);
             size_t hi = max(index1, index2);
-            atomicAdd(&out[(size_t)lo * ncols + hi], data1 * data2);
+            atomicAdd(&out[lo * ncols + hi], data1 * data2);
         }
     }
 }

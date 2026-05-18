@@ -11,10 +11,11 @@ constexpr int ELEMENTWISE_BLOCK_SIZE = 32;
 
 template <typename T, typename IdxT>
 static inline void launch_gram_csr_upper(const IdxT* indptr, const IdxT* index,
-                                         const T* data, int nrows, int ncols,
-                                         T* out, cudaStream_t stream) {
+                                         const T* data, size_t nrows,
+                                         size_t ncols, T* out,
+                                         cudaStream_t stream) {
     dim3 block(GRAM_BLOCK_SIZE);
-    dim3 grid(nrows);
+    dim3 grid((unsigned)nrows);
     gram_csr_upper_kernel<T, IdxT>
         <<<grid, block, 0, stream>>>(indptr, index, data, nrows, ncols, out);
     CUDA_CHECK_LAST_ERROR(gram_csr_upper_kernel);
@@ -61,7 +62,7 @@ void def_gram_csr_upper(nb::module_& m) {
         "gram_csr_upper",
         [](gpu_array_c<const IdxT, Device> indptr,
            gpu_array_c<const IdxT, Device> index,
-           gpu_array_c<const T, Device> data, int nrows, int ncols,
+           gpu_array_c<const T, Device> data, size_t nrows, size_t ncols,
            gpu_array_c<T, Device> out, std::uintptr_t stream) {
             launch_gram_csr_upper<T, IdxT>(indptr.data(), index.data(),
                                            data.data(), nrows, ncols,

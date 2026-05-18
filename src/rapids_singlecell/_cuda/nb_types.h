@@ -61,8 +61,8 @@ inline int max_grid_dim_z() {
 ///   const long long stride = (long long)blockDim.x * gridDim.x;
 ///   for (long long i = ...; i < nwork; i += stride) { ... }
 ///
-/// Defaults to the `gridDim.x` cap. For 2D/3D launches whose strided axis is
-/// y or z, use `strided_grid_y` / `strided_grid_z`. Returns at least 1.
+/// Defaults to the `gridDim.x` cap. For 2D launches whose strided axis is y,
+/// use `strided_grid_y`. Returns at least 1.
 inline unsigned int strided_grid(long long nwork, int block_size) {
     const long long max_grid = max_grid_dim_x();
     long long ideal = (nwork + block_size - 1) / block_size;
