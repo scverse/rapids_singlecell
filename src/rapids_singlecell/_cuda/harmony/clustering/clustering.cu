@@ -95,8 +95,10 @@ static inline void colsum_dispatch(int algo, cublasHandle_t handle, const T* A,
             break;
         }
         default:  // COLSUM_GEMM
-            cublas_gemv<T>(handle, CUBLAS_OP_N, cols, rows, &one, A, cols,
-                           ones_vec, 1, &zero, out, 1);
+            cublas_check_status(
+                cublas_gemv<T>(handle, CUBLAS_OP_N, cols, rows, &one, A, cols,
+                               ones_vec, 1, &zero, out, 1),
+                "cublas_gemv(colsum)");
             break;
     }
 }
@@ -170,7 +172,9 @@ struct ClusteringArgs {
     T tol;
     int max_iter;
     unsigned int seed;
+    bool stabilized;
     cudaStream_t stream;
+    cublasHandle_t handle;
 };
 
 // ---------- Standalone objective computation ----------
@@ -179,7 +183,8 @@ template <typename T>
 static T compute_objective_impl(const T* R, const T* similarities, const T* O,
                                 const T* E, const T* theta, T sigma,
                                 T* obj_scalar, int n_cells, int n_clusters,
-                                int n_batches, cudaStream_t stream) {
+                                int n_batches, bool stabilized,
+                                cudaStream_t stream) {
     int device;
     cudaGetDevice(&device);
     cudaDeviceProp prop;
@@ -203,14 +208,18 @@ static T compute_objective_impl(const T* R, const T* similarities, const T* O,
         R, sigma, n_cells, n_clusters, obj_scalar);
     CUDA_CHECK_LAST_ERROR(entropy_kernel);
 
-    // Diversity: sigma * sum(theta[b] * O[b,k] * log((O[b,k]+1)/(E[b,k]+1)))
+    // Diversity penalty (stabilized selects Harmony2 formula)
     {
         int ob_total = n_batches * n_clusters;
         int threads = (int)warp_aligned_bdim(ob_total);
         int blocks =
             std::max(1, std::min(n_sm, (ob_total + threads - 1) / threads));
-        diversity_kernel<T><<<blocks, threads, 0, stream>>>(
-            O, E, theta, sigma, n_batches, n_clusters, obj_scalar);
+        if (stabilized)
+            diversity_kernel<T, true><<<blocks, threads, 0, stream>>>(
+                O, E, theta, sigma, n_batches, n_clusters, obj_scalar);
+        else
+            diversity_kernel<T, false><<<blocks, threads, 0, stream>>>(
+                O, E, theta, sigma, n_batches, n_clusters, obj_scalar);
         CUDA_CHECK_LAST_ERROR(diversity_kernel);
     }
 
@@ -227,9 +236,8 @@ template <typename T>
 static void clustering_loop_impl(const ClusteringArgs<T>& a) {
     size_t cub_temp_bytes = get_cub_sort_temp_bytes(a.n_cells);
 
-    cublasHandle_t handle;
-    cublasCreate(&handle);
-    cublasSetStream(handle, a.stream);
+    cublasHandle_t handle = a.handle;
+    cublas_check_status(cublasSetStream(handle, a.stream), "cublasSetStream");
 
     T term = T(-2) / a.sigma;
     T one = T(1), zero = T(0);
@@ -255,9 +263,11 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
 
     for (int iter = 0; iter < a.max_iter; iter++) {
         // ---- Centroids: Y = R^T @ Z_norm, then L2-normalize ----
-        cublas_gemm<T>(handle, CUBLAS_OP_N, CUBLAS_OP_T, a.n_pcs, a.n_clusters,
-                       a.n_cells, &one, a.Z_norm, a.n_pcs, a.R, a.n_clusters,
-                       &zero, a.Y, a.n_pcs);
+        cublas_check_status(
+            cublas_gemm<T>(handle, CUBLAS_OP_N, CUBLAS_OP_T, a.n_pcs,
+                           a.n_clusters, a.n_cells, &one, a.Z_norm, a.n_pcs,
+                           a.R, a.n_clusters, &zero, a.Y, a.n_pcs),
+            "cublas_gemm(centroids)");
 
         l2_row_normalize_kernel<T>
             <<<a.n_clusters, warp_aligned_bdim(a.n_pcs), 0, a.stream>>>(
@@ -265,9 +275,12 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
         CUDA_CHECK_LAST_ERROR(l2_row_normalize_kernel);
 
         // ---- Similarities: Z_norm @ Y_norm^T ----
-        cublas_gemm<T>(handle, CUBLAS_OP_T, CUBLAS_OP_N, a.n_clusters,
-                       a.n_cells, a.n_pcs, &one, a.Y_norm, a.n_pcs, a.Z_norm,
-                       a.n_pcs, &zero, a.similarities, a.n_clusters);
+        cublas_check_status(
+            cublas_gemm<T>(handle, CUBLAS_OP_T, CUBLAS_OP_N, a.n_clusters,
+                           a.n_cells, a.n_pcs, &one, a.Y_norm, a.n_pcs,
+                           a.Z_norm, a.n_pcs, &zero, a.similarities,
+                           a.n_clusters),
+            "cublas_gemm(similarities)");
 
         // ---- Shuffle: random permutation via PCG hash + radix sort ----
         pcg_hash_kernel<<<grid_1d(a.n_cells, n_sm), BLOCK_DIM_1D, 0,
@@ -309,9 +322,18 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
             CUDA_CHECK_LAST_ERROR(outer_kernel);
 
             // Compute penalty and fused softmax -> R_out_buffer
-            penalty_kernel<T><<<(ob_total + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D,
-                                BLOCK_DIM_1D, 0, a.stream>>>(
-                a.E, a.O, a.theta, a.penalty, a.n_batches, a.n_clusters);
+            if (a.stabilized)
+                penalty_kernel<T, true>
+                    <<<(ob_total + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D,
+                       BLOCK_DIM_1D, 0, a.stream>>>(a.E, a.O, a.theta,
+                                                    a.penalty, a.n_batches,
+                                                    a.n_clusters);
+            else
+                penalty_kernel<T, false>
+                    <<<(ob_total + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D,
+                       BLOCK_DIM_1D, 0, a.stream>>>(a.E, a.O, a.theta,
+                                                    a.penalty, a.n_batches,
+                                                    a.n_clusters);
             CUDA_CHECK_LAST_ERROR(penalty_kernel);
             fused_pen_norm_kernel<T, int>
                 <<<bs, warp_aligned_bdim(a.n_clusters), 0, a.stream>>>(
@@ -341,7 +363,7 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
         // ---- Objective function (reuses similarities buffer) ----
         host_obj = compute_objective_impl(
             a.R, a.similarities, a.O, a.E, a.theta, a.sigma, a.obj_scalar,
-            a.n_cells, a.n_clusters, a.n_batches, a.stream);
+            a.n_cells, a.n_clusters, a.n_batches, a.stabilized, a.stream);
         objectives.push_back(host_obj);
 
         if (static_cast<int>(objectives.size()) >= WINDOW_SIZE + 1) {
@@ -357,7 +379,6 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
     T final_obj = objectives.empty() ? T(0) : objectives.back();
     cudaMemcpyAsync(a.last_obj, &final_obj, sizeof(T), cudaMemcpyHostToDevice,
                     a.stream);
-    cublasDestroy(handle);
 }
 
 // ---------- Nanobind bindings ----------
@@ -385,7 +406,7 @@ static void register_clustering_loop(nb::module_& m) {
            gpu_array_c<T, Device> last_obj, int n_cells, int n_pcs,
            int n_clusters, int n_batches, int block_size, int colsum_algo,
            double sigma, double tol, int max_iter, unsigned int seed,
-           std::uintptr_t stream) {
+           bool stabilized, std::uintptr_t stream, std::uintptr_t handle) {
             ClusteringArgs<T> a{
                 Z_norm.data(),
                 R.data(),
@@ -420,7 +441,9 @@ static void register_clustering_loop(nb::module_& m) {
                 static_cast<T>(tol),
                 max_iter,
                 seed,
+                stabilized,
                 (cudaStream_t)stream,
+                (cublasHandle_t)handle,
             };
             clustering_loop_impl(a);
         },
@@ -430,7 +453,8 @@ static void register_clustering_loop(nb::module_& m) {
         "R_out_buffer"_a, "cats_in"_a, "R_in_sum"_a, "R_out_sum"_a, "penalty"_a,
         "obj_scalar"_a, "ones_vec"_a, "last_obj"_a, "n_cells"_a, "n_pcs"_a,
         "n_clusters"_a, "n_batches"_a, "block_size"_a, "colsum_algo"_a,
-        "sigma"_a, "tol"_a, "max_iter"_a, "seed"_a, "stream"_a = 0);
+        "sigma"_a, "tol"_a, "max_iter"_a, "seed"_a, "stabilized"_a,
+        "stream"_a = 0, "handle"_a);
 }
 
 template <typename T, typename Device>
@@ -442,15 +466,15 @@ static void register_compute_objective(nb::module_& m) {
            gpu_array_c<const T, Device> O, gpu_array_c<const T, Device> E,
            gpu_array_c<const T, Device> theta, double sigma,
            gpu_array_c<T, Device> obj_scalar, int n_cells, int n_clusters,
-           int n_batches, std::uintptr_t stream) {
+           int n_batches, bool stabilized, std::uintptr_t stream) {
             return compute_objective_impl<T>(
                 R.data(), similarities.data(), O.data(), E.data(), theta.data(),
                 static_cast<T>(sigma), obj_scalar.data(), n_cells, n_clusters,
-                n_batches, (cudaStream_t)stream);
+                n_batches, stabilized, (cudaStream_t)stream);
         },
         "R"_a, nb::kw_only(), "similarities"_a, "O"_a, "E"_a, "theta"_a,
         "sigma"_a, "obj_scalar"_a, "n_cells"_a, "n_clusters"_a, "n_batches"_a,
-        "stream"_a = 0);
+        "stabilized"_a, "stream"_a = 0);
 }
 
 template <typename Device>

@@ -5,7 +5,7 @@
 
 // ---- Compute inverse matrix for one or all clusters (algebraic fast-inverse)
 // ---- Uses the algebraic simplification to avoid explicit matrix inversion:
-//   factor[b] = 1 / (O_k[b] + ridge_lambda)
+//   factor[b] = 1 / (O_k[b] + lambda_kb[b,k])
 //   P_row0[b] = -factor[b] * O_k[b]
 //   c = N_k - sum(factor[b] * O_k[b]^2)
 //   c_inv = 1 / c
@@ -15,12 +15,15 @@
 //   inv[i,j] = P_row0[i-1]*c_inv*P_row0[j-1] + factor[i-1]*delta(i,j)  (i,j >
 //   0)
 //
+// lambda_kb is (n_batches, n_clusters) row-major, same layout as O.
+//
 // When cluster_k >= 0, computes only that cluster (launch with 1 block).
 //   g_factor/g_P_row0 are flat (n_batches,) workspace.
 // When cluster_k < 0, computes all clusters (launch with n_clusters blocks).
 //   g_factor/g_P_row0 are (n_clusters, n_batches) workspace.
 template <typename T>
-__global__ void compute_inv_mats_kernel(const T* __restrict__ O, T ridge_lambda,
+__global__ void compute_inv_mats_kernel(const T* __restrict__ O,
+                                        const T* __restrict__ lambda_kb,
                                         T* __restrict__ inv_mats,
                                         T* __restrict__ g_factor,
                                         T* __restrict__ g_P_row0, int n_batches,
@@ -49,7 +52,8 @@ __global__ void compute_inv_mats_kernel(const T* __restrict__ O, T ridge_lambda,
     for (int b = threadIdx.x; b < n_batches; b += blockDim.x) {
         T o_val =
             O[b * n_clusters + k];  // O is (n_batches, n_clusters) row-major
-        T f = T(1) / (o_val + ridge_lambda);
+        T lam = lambda_kb[b * n_clusters + k];  // same layout as O
+        T f = T(1) / (o_val + lam);
         T p = -f * o_val;
         my_factor[b] = f;
         my_P_row0[b] = p;

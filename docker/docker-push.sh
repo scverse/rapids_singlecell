@@ -2,7 +2,7 @@
 set -euxo pipefail
 
 docker_account=scverse
-rapids_version=26.02
+rapids_version=26.04
 
 declare -A cuda_versions=(
     [cu12]="12.8.0"

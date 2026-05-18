@@ -10,7 +10,7 @@ reviews:
   request_changes_workflow: false
   review_status: false
   auto_review:
-    enabled: true
+    enabled: false
     drafts: false
     base_branches:
       - "^main$"
@@ -23,45 +23,21 @@ reviews:
       enabled: true
   path_instructions:
     - path: "src/rapids_singlecell/_cuda/**"
-      instructions: |
-        These are nanobind CUDA C++ kernels. Pay close attention to:
-        - Shared memory usage and device limits
-        - Thread/block configuration
-        - Memory access patterns and coalescing
-        - Correct use of atomicAdd and synchronization
-        - Template parameter correctness (float vs double)
-        - MANDATORY: Every kernel launch (<<<grid, block, shared, stream>>>) MUST be followed by cudaGetLastError() to catch launch failures. Flag any kernel launch missing this check.
-        - MANDATORY: No magic numbers. All block sizes, tile sizes, grid calculations, and thresholds must use named constants (constexpr int BLOCK_SIZE = 256). Flag any raw numeric literal in dim3, grid, or shared memory calculations.
-    - path: "src/rapids_singlecell/**/_kernels/**"
-      instructions: |
-        These are CuPy RawKernel definitions. Review for:
-        - Correct CUDA kernel launch configurations
-        - Shared memory bounds
-        - Type safety (float32 vs float64 mismatches)
-        - No magic numbers in kernel launch configurations or kernel code. Block sizes, tile sizes, and thresholds must use named constants.
-        - After RawKernel calls, check for cp.cuda.runtime.getLastError() to catch silent launch failures.
+      instructions: "Nanobind CUDA C++ kernels. See knowledge base for detailed review guidelines."
+    - path: "src/rapids_singlecell/**"
+      instructions: "GPU-accelerated Python. See knowledge base for detailed review guidelines."
     - path: "tests/**"
-      instructions: |
-        Do not suggest changing test tolerances without strong justification.
-        Tests run on GPU; some numerical differences vs CPU are expected.
+      instructions: "GPU tests — do not suggest tolerance changes without strong justification."
     - path: "docs/**"
-      instructions: |
-        For documentation changes, focus on:
-        - Accuracy of code examples
-        - Completeness of API documentation
-        - Consistency with current code
+      instructions: "Check accuracy of code examples and consistency with current code."
     - path: ".github/**"
-      instructions: |
-        For CI/workflow changes:
-        - Check for proper error handling
-        - Verify GPU availability checks before tests
-        - Watch for semicolon issues in CMAKE_CUDA_ARCHITECTURES
+      instructions: "CI workflows — watch for semicolon issues in CMAKE_CUDA_ARCHITECTURES."
 knowledge_base:
   opt_out: false
   code_guidelines:
     filePatterns:
-      - "python_agents.md"
-      - "cuda_agents.md"
+      - ".coderabbit/python_agents.md"
+      - ".coderabbit/cuda_agents.md"
       - "docs/contributing.md"
 chat:
-  auto_reply: true
+  auto_reply: false

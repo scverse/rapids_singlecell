@@ -5,12 +5,12 @@ from typing import TYPE_CHECKING
 import cudf
 import cupy as cp
 import numpy as np
-from cuml.thirdparty_adapters import check_array as check_array_cuml
 from scanpy.tools._utils import get_init_pos_from_paga
 
 from rapids_singlecell._compat import _random_state_kwargs
 
 from ._clustering import _create_graph
+from ._utils import _validate_init_pos
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -67,9 +67,7 @@ def draw_graph(
         case _:
             init_coords = init_pos
     if hasattr(init_coords, "dtype"):
-        init_coords = check_array_cuml(
-            init_coords, dtype=np.float32, accept_sparse=False
-        )
+        init_coords = _validate_init_pos(init_coords)
         if init_coords.shape[1] != 2:
             raise ValueError(
                 f"Expected 2 columns but got {init_coords.shape[1]} columns."
@@ -99,6 +97,7 @@ def draw_graph(
         gravity=1.0,
         random_state=0,
     )
+    positions = positions.sort_values("vertex").reset_index(drop=True)
     positions = cp.vstack((positions["x"].to_cupy(), positions["y"].to_cupy())).T
     layout = "fa"
     adata.uns["draw_graph"] = {}

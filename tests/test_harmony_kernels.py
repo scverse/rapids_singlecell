@@ -79,7 +79,8 @@ def test_l2_row_normalize_zero_row(dtype):
 
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("n_batches,n_clusters", [(3, 20), (10, 100), (1, 5)])
-def test_penalty(dtype, n_batches, n_clusters):
+@pytest.mark.parametrize("stabilized", [True, False])
+def test_penalty(dtype, n_batches, n_clusters, stabilized):
     rng = cp.random.default_rng(123)
     E = rng.random((n_batches, n_clusters), dtype=dtype) * 10
     O = rng.random((n_batches, n_clusters), dtype=dtype) * 10
@@ -87,13 +88,20 @@ def test_penalty(dtype, n_batches, n_clusters):
     penalty = cp.empty_like(E)
 
     _pen.penalty(
-        E, O=O, theta=theta, penalty=penalty, n_batches=n_batches, n_clusters=n_clusters
+        E,
+        O=O,
+        theta=theta,
+        penalty=penalty,
+        n_batches=n_batches,
+        n_clusters=n_clusters,
+        stabilized=stabilized,
     )
     cp.cuda.Device().synchronize()
 
     # Reference
+    denom = (O + E + 1) if stabilized else (O + 1)
     expected = cp.power(
-        (E + 1) / (O + 1),
+        (E + 1) / denom,
         theta[:, None],
     )
 
@@ -230,7 +238,7 @@ def test_gather_int(n):
 # ---------- compute_objective ----------
 
 
-def _compute_objective_reference(R, similarities, *, O, E, theta, sigma):
+def _compute_objective_reference(R, similarities, *, O, E, theta, sigma, stabilized):
     """Pure CuPy reference for the three-term harmony objective."""
     # K-means error: sum(R[i] * 2 * (1 - sim[i]))
     kmeans_err = float(cp.sum(R * 2 * (1 - similarities)))
@@ -239,8 +247,9 @@ def _compute_objective_reference(R, similarities, *, O, E, theta, sigma):
     R_norm = R / R.sum(axis=1, keepdims=True)
     entropy = float(sigma * cp.sum(R_norm * cp.log(R_norm + 1e-12)))
 
-    # Diversity: sigma * sum(theta[b] * O[b,k] * log((O[b,k]+1)/(E[b,k]+1)))
-    diversity = float(sigma * cp.sum(theta[:, None] * O * cp.log((O + 1) / (E + 1))))
+    # Diversity
+    numer = (O + E + 1) if stabilized else (O + 1)
+    diversity = float(sigma * cp.sum(theta[:, None] * O * cp.log(numer / (E + 1))))
 
     return kmeans_err + entropy + diversity
 
@@ -249,7 +258,8 @@ def _compute_objective_reference(R, similarities, *, O, E, theta, sigma):
 @pytest.mark.parametrize(
     "n_cells,n_clusters,n_batches", [(500, 20, 3), (1000, 100, 10), (200, 5, 2)]
 )
-def test_compute_objective(dtype, n_cells, n_clusters, n_batches):
+@pytest.mark.parametrize("stabilized", [True, False])
+def test_compute_objective(dtype, n_cells, n_clusters, n_batches, stabilized):
     rng = cp.random.default_rng(42)
 
     # R must be non-negative (cluster assignments)
@@ -272,10 +282,11 @@ def test_compute_objective(dtype, n_cells, n_clusters, n_batches):
         n_cells=n_cells,
         n_clusters=n_clusters,
         n_batches=n_batches,
+        stabilized=stabilized,
     )
 
     expected = _compute_objective_reference(
-        R, similarities, O=O, E=E, theta=theta, sigma=sigma
+        R, similarities, O=O, E=E, theta=theta, sigma=sigma, stabilized=stabilized
     )
 
     # atomicAdd reduction ordering causes slight non-determinism
@@ -286,13 +297,14 @@ def test_compute_objective(dtype, n_cells, n_clusters, n_batches):
 # ---- compute_inv_mat: correctness against CuPy reference ----
 
 
-def _inv_mat_reference(O_col, ridge_lambda, dtype):
+def _inv_mat_reference(O_col, lambda_col, dtype):
     """Pure CuPy reference for the algebraic fast-inverse."""
     n_batches = len(O_col)
     nb1 = n_batches + 1
     O_col = O_col.astype(dtype)
+    lambda_col = lambda_col.astype(dtype)
 
-    factor = dtype(1) / (O_col + dtype(ridge_lambda))
+    factor = dtype(1) / (O_col + lambda_col)
     P_row0 = -factor * O_col
     N_k = O_col.sum()
     c = N_k - (factor * O_col * O_col).sum()
@@ -313,7 +325,9 @@ def test_compute_inv_mat(n_batches, n_clusters, dtype):
     """Test that compute_inv_mat matches CuPy reference."""
     rng = np.random.default_rng(42)
     O = cp.array(rng.random((n_batches, n_clusters)) * 100, dtype=dtype)
-    ridge_lambda = 1.0
+    # Non-uniform lambda_kb to catch stride/transpose bugs
+    lambda_kb = cp.array(rng.random((n_batches, n_clusters)) * 5 + 0.1, dtype=dtype)
+    lambda_kb[0, 0] = dtype(1e30)  # sentinel: exercises the pruning path
     nb1 = n_batches + 1
     stream = cp.cuda.get_current_stream().ptr
 
@@ -325,7 +339,7 @@ def test_compute_inv_mat(n_batches, n_clusters, dtype):
 
         _corr.compute_inv_mat(
             O,
-            ridge_lambda=ridge_lambda,
+            lambda_kb=lambda_kb,
             n_batches=n_batches,
             n_clusters=n_clusters,
             cluster_k=k,
@@ -336,6 +350,80 @@ def test_compute_inv_mat(n_batches, n_clusters, dtype):
         )
         cp.cuda.Device().synchronize()
 
-        expected = _inv_mat_reference(O[:, k], ridge_lambda, dtype)
+        expected = _inv_mat_reference(O[:, k], lambda_kb[:, k], dtype)
+        atol = 1e-6 if dtype == cp.float32 else 1e-12
+        cp.testing.assert_allclose(inv_mat, expected, atol=atol, rtol=1e-5)
+
+
+# ---------- edge cases: absent batches (O=0) ----------
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+@pytest.mark.parametrize("stabilized", [True, False])
+def test_penalty_absent_batch(dtype, stabilized):
+    """Penalty kernel stays finite when some O entries are zero."""
+    n_batches, n_clusters = 4, 10
+    rng = cp.random.default_rng(42)
+    E = rng.random((n_batches, n_clusters), dtype=dtype) * 10
+    O = rng.random((n_batches, n_clusters), dtype=dtype) * 10
+    O[0, 0] = 0
+    O[2, 5] = 0
+    theta = rng.random(n_batches, dtype=dtype) * 2 + 0.5
+    penalty = cp.empty_like(E)
+
+    _pen.penalty(
+        E,
+        O=O,
+        theta=theta,
+        penalty=penalty,
+        n_batches=n_batches,
+        n_clusters=n_clusters,
+        stabilized=stabilized,
+    )
+    cp.cuda.Device().synchronize()
+
+    assert cp.all(cp.isfinite(penalty)), "Penalty has non-finite values with O=0"
+
+    denom = (O + E + 1) if stabilized else (O + 1)
+    expected = cp.power((E + 1) / denom, theta[:, None])
+    atol = 1e-5 if dtype == np.float32 else 1e-10
+    cp.testing.assert_allclose(penalty, expected, atol=atol, rtol=1e-4)
+
+
+@pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
+def test_compute_inv_mat_absent_batch(dtype):
+    """compute_inv_mat stays finite when O=0 and lambda_kb is large (pruned)."""
+    n_batches, n_clusters = 5, 10
+    rng = np.random.default_rng(99)
+    O = cp.array(rng.random((n_batches, n_clusters)) * 100, dtype=dtype)
+    lambda_kb = cp.array(rng.random((n_batches, n_clusters)) * 2 + 0.1, dtype=dtype)
+
+    O[0, 0] = 0
+    lambda_kb[0, 0] = dtype(1e30)
+    O[3, 2] = 0
+    lambda_kb[3, 2] = dtype(1e30)
+
+    nb1 = n_batches + 1
+    stream = cp.cuda.get_current_stream().ptr
+    g_factor = cp.empty(n_batches, dtype=dtype)
+    g_P_row0 = cp.empty(n_batches, dtype=dtype)
+
+    for k in [0, 2]:
+        inv_mat = cp.empty((nb1, nb1), dtype=dtype)
+        _corr.compute_inv_mat(
+            O,
+            lambda_kb=lambda_kb,
+            n_batches=n_batches,
+            n_clusters=n_clusters,
+            cluster_k=k,
+            inv_mat=inv_mat,
+            g_factor=g_factor,
+            g_P_row0=g_P_row0,
+            stream=stream,
+        )
+        cp.cuda.Device().synchronize()
+
+        assert cp.all(cp.isfinite(inv_mat)), f"inv_mat non-finite for cluster {k}"
+        expected = _inv_mat_reference(O[:, k], lambda_kb[:, k], dtype)
         atol = 1e-6 if dtype == cp.float32 else 1e-12
         cp.testing.assert_allclose(inv_mat, expected, atol=atol, rtol=1e-5)

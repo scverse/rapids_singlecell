@@ -6,7 +6,7 @@
 
 - NVIDIA GPU with CUDA support
 - [micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html), conda/mamba, or [uv](https://docs.astral.sh/uv/)
-- A RAPIDS environment (e.g., conda `rapids-26.02` or pip-installed RAPIDS)
+- A RAPIDS environment (e.g., conda `rapids-26.04` or pip-installed RAPIDS)
 
 ### Clone and install
 
@@ -162,8 +162,8 @@ The project uses [hatch](https://hatch.pypa.io/) to manage test environments. Th
 | `deps` | Python | Description |
 |---|---|---|
 | `stable` | 3.12 | Released versions of all dependencies |
-| `dev` | 3.13 | Upstream `main` branches of anndata and scanpy |
-| `rapids_prerelease` | 3.13 | RAPIDS nightly wheels |
+| `dev` | 3.14 | Upstream `main` branches of anndata and scanpy |
+| `rapids_prerelease` | 3.14 | RAPIDS nightly wheels |
 
 To run the test suite against a specific matrix combination:
 

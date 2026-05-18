@@ -5,17 +5,16 @@ channels:
  - conda-forge
  - bioconda
 dependencies:
- - rapids=25.12
- - python=3.13
- - cuda-version=13.0
+ - rapids=26.04
+ - python=3.14
+ - cuda-version=12.9
  - cudnn
  - cutensor
  - cusparselt
  - jupyterlab
  - pip
  - pip:
-    - decoupler
-    - omnipath
     - gdown
     - wget
-    - rapids-singlecell-cu13
+    - scikit-misc
+    - rapids-singlecell-cu12

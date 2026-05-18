@@ -10,6 +10,10 @@ import scanpy as sc
 from scipy.stats import pearsonr
 
 import rapids_singlecell as rsc
+from rapids_singlecell.preprocessing._harmony import (
+    _SUPPRESS_PENALTY,
+    _compute_lambda_kb,
+)
 from rapids_singlecell.preprocessing._harmony._helper import (
     _choose_colsum_algo_benchmark,
     _choose_colsum_algo_heuristic,
@@ -28,20 +32,23 @@ def _get_measure(x, base, norm):
         return np.linalg.norm(x - base) / np.linalg.norm(base)
 
 
-@pytest.fixture
+_HARMONY_DATA_BASE = "https://exampledata.scverse.org/rapids-singlecell/harmony_data"
+
+
+@pytest.fixture(scope="module")
 def adata_reference():
     X_pca_file = pooch.retrieve(
-        "https://github.com/slowkow/harmonypy/raw/refs/heads/master/data/pbmc_3500_pcs.tsv.gz",
+        f"{_HARMONY_DATA_BASE}/pbmc_3500_pcs.tsv.gz",
         known_hash="md5:27e319b3ddcc0c00d98e70aa8e677b10",
     )
     X_pca = pd.read_csv(X_pca_file, delimiter="\t")
     X_pca_harmony_file = pooch.retrieve(
-        "https://github.com/slowkow/harmonypy/raw/refs/heads/master/data/pbmc_3500_pcs_harmonized.tsv.gz",
+        f"{_HARMONY_DATA_BASE}/pbmc_3500_pcs_harmonized.tsv.gz",
         known_hash="md5:a7c4ce4b98c390997c66d63d48e09221",
     )
     X_pca_harmony = pd.read_csv(X_pca_harmony_file, delimiter="\t")
     meta_file = pooch.retrieve(
-        "https://github.com/slowkow/harmonypy/raw/refs/heads/master/data/pbmc_3500_meta.tsv.gz",
+        f"{_HARMONY_DATA_BASE}/pbmc_3500_meta.tsv.gz",
         known_hash="md5:8c7ca20e926513da7cf0def1211baecb",
     )
     meta = pd.read_csv(meta_file, delimiter="\t")
@@ -51,6 +58,54 @@ def adata_reference():
         obsm={"X_pca": X_pca.values, "harmony_org": X_pca_harmony.values},
     )
     return adata
+
+
+@pytest.fixture(scope="module")
+def adata_ircolitis_harmony2():
+    """IRcolitis blood CD8 dataset (68k cells) with Harmony2 (R) reference output."""
+    pcs_file = pooch.retrieve(
+        f"{_HARMONY_DATA_BASE}/ircolitis_blood_cd8_pcs.tsv.gz",
+        known_hash="md5:9f28afa68ed4e1fd465d53d360b58a35",
+    )
+    pcs = pd.read_csv(pcs_file, delimiter="\t")
+    harmony2_file = pooch.retrieve(
+        f"{_HARMONY_DATA_BASE}/ircolitis_blood_cd8_pcs_harmonized.tsv.gz",
+        known_hash="md5:848f1e09016c633e044b7d93650505ba",
+    )
+    h2 = pd.read_csv(harmony2_file, delimiter="\t")
+    obs_file = pooch.retrieve(
+        f"{_HARMONY_DATA_BASE}/ircolitis_blood_cd8_obs.tsv.gz",
+        known_hash="md5:46efe419e59450504c3d3b343eff8022",
+    )
+    obs = pd.read_csv(obs_file, delimiter="\t", low_memory=False)
+
+    X_pca = pcs.drop(columns=["cell_barcode"]).values
+    X_harmony2 = h2.drop(columns=["cell_barcode"]).values
+
+    adata = ad.AnnData(
+        X=None,
+        obs=obs,
+        obsm={"X_pca": X_pca, "harmony2_ref": X_harmony2},
+    )
+    return adata
+
+
+@pytest.mark.parametrize("bad_alpha", [-0.1, 0.0, float("inf"), float("nan")])
+def test_harmony_integrate_bad_alpha(bad_alpha):
+    """Non-positive or non-finite alpha with flavor='harmony2' raises ValueError."""
+    adata = sc.datasets.pbmc68k_reduced()
+    with pytest.raises(ValueError, match="alpha must be a finite positive"):
+        rsc.pp.harmony_integrate(adata, "bulk_labels", alpha=bad_alpha)
+
+
+@pytest.mark.parametrize("bad_threshold", [-0.1, 1.5, 2.0])
+def test_harmony_integrate_bad_prune_threshold(bad_threshold):
+    """batch_prune_threshold outside [0, 1] raises ValueError."""
+    adata = sc.datasets.pbmc68k_reduced()
+    with pytest.raises(ValueError, match="batch_prune_threshold must be in"):
+        rsc.pp.harmony_integrate(
+            adata, "bulk_labels", batch_prune_threshold=bad_threshold
+        )
 
 
 @pytest.mark.parametrize("correction_method", ["fast", "original", "batched"])
@@ -142,31 +197,64 @@ def test_harmony_integrate_reference(
     """
     Test that Harmony integrate works.
     """
+    adata = adata_reference.copy()
     rsc.pp.harmony_integrate(
-        adata_reference,
+        adata,
         "donor",
         correction_method=correction_method,
         dtype=dtype,
         colsum_algo=column,
         max_iter_harmony=20,
+        flavor="harmony1",
     )
 
     assert (
         _get_measure(
-            adata_reference.obsm["harmony_org"],
-            adata_reference.obsm["X_pca_harmony"],
+            adata.obsm["harmony_org"],
+            adata.obsm["X_pca_harmony"],
             "L2",
         ).max()
         < 0.05
     )
     assert (
         _get_measure(
-            adata_reference.obsm["harmony_org"],
-            adata_reference.obsm["X_pca_harmony"],
+            adata.obsm["harmony_org"],
+            adata.obsm["X_pca_harmony"],
             "r",
         ).min()
         > 0.95
     )
+
+
+@pytest.mark.parametrize("correction_method", ["original", "batched"])
+@pytest.mark.parametrize("dtype", [cp.float64, cp.float32])
+def test_harmony2_correction_methods_agree(
+    adata_reference, *, dtype, correction_method
+):
+    """Harmony2 default path: correction methods produce consistent results."""
+    adata = adata_reference.copy()
+    rsc.pp.harmony_integrate(
+        adata,
+        "donor",
+        correction_method=correction_method,
+        dtype=dtype,
+        max_iter_harmony=20,
+    )
+    h2 = adata.obsm["X_pca_harmony"]
+
+    # Run the reference method (fast) for comparison
+    adata_ref = adata_reference.copy()
+    rsc.pp.harmony_integrate(
+        adata_ref,
+        "donor",
+        correction_method="fast",
+        dtype=dtype,
+        max_iter_harmony=20,
+    )
+    h2_ref = adata_ref.obsm["X_pca_harmony"]
+
+    assert _get_measure(h2, h2_ref, "r").min() > 0.99
+    assert _get_measure(h2, h2_ref, "L2").max() < 0.05
 
 
 @pytest.mark.parametrize("n_cells", [1000, 60000])
@@ -208,3 +296,136 @@ def test_scatter_add_shared_vs_optimized(n_cells, n_pcs, n_batches, switcher):
     cp.testing.assert_array_equal(out_optimized, expected)
     cp.testing.assert_array_equal(out_shared, expected)
     cp.testing.assert_array_equal(out_optimized, out_shared)
+
+
+@pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
+def test_compute_lambda_kb_pruning(dtype):
+    """_compute_lambda_kb suppresses correction for N_b==0 and below-threshold pairs."""
+    n_batches, n_clusters = 4, 3
+    alpha = 0.2
+    threshold = 1e-5
+    sentinel = dtype(_SUPPRESS_PENALTY)
+
+    # batch 0 has zero cells (N_b==0), batch 2 has very few (below threshold)
+    N_b = cp.array([0, 100, 1, 50], dtype=dtype)
+    O = cp.array(
+        [
+            [0, 0, 0],  # batch 0: no cells
+            [30, 40, 30],  # batch 1: well-represented
+            [0, 0, 1],  # batch 2: 1 cell total, only in cluster 2
+            [20, 15, 15],
+        ],  # batch 3: well-represented
+        dtype=dtype,
+    )
+    E = cp.ones((n_batches, n_clusters), dtype=dtype) * 10
+
+    result = _compute_lambda_kb(
+        E,
+        O=O,
+        N_b=N_b,
+        alpha=alpha,
+        threshold=threshold,
+        ridge_lambda=1.0,
+        dynamic_lambda=True,
+    )
+
+    # batch 0 (N_b==0): all clusters must be sentinel
+    assert cp.all(result[0] == sentinel)
+    # batch 1 (well-represented): should be alpha * E = 2.0
+    cp.testing.assert_allclose(result[1], cp.full(n_clusters, alpha * 10, dtype=dtype))
+    # batch 2, clusters 0,1 (O/N_b = 0/1 < threshold): sentinel
+    assert result[2, 0] == sentinel
+    assert result[2, 1] == sentinel
+    # batch 2, cluster 2 (O/N_b = 1/1 = 1.0 >= threshold): alpha * E
+    cp.testing.assert_allclose(result[2, 2], dtype(alpha * 10))
+    # batch 3: all alpha * E
+    cp.testing.assert_allclose(result[3], cp.full(n_clusters, alpha * 10, dtype=dtype))
+
+
+@pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
+def test_compute_lambda_kb_dynamic_false(dtype):
+    """_compute_lambda_kb returns uniform ridge_lambda when dynamic_lambda=False."""
+    n_batches, n_clusters = 3, 5
+    E = cp.ones((n_batches, n_clusters), dtype=dtype)
+    O = cp.ones((n_batches, n_clusters), dtype=dtype)
+    N_b = cp.ones(n_batches, dtype=dtype)
+
+    result = _compute_lambda_kb(
+        E,
+        O=O,
+        N_b=N_b,
+        alpha=0.5,
+        threshold=1e-5,
+        ridge_lambda=1.0,
+        dynamic_lambda=False,
+    )
+    cp.testing.assert_array_equal(result, cp.full_like(E, 1.0))
+
+
+@pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
+def test_compute_lambda_kb_fixed_ridge_zero(dtype):
+    """dynamic_lambda=False with ridge_lambda=0 still guards zero-denominator."""
+    sentinel = dtype(_SUPPRESS_PENALTY)
+    E = cp.array([[5.0, 0.0]], dtype=dtype)
+    O = cp.array([[10.0, 0.0]], dtype=dtype)
+    N_b = cp.array([100.0], dtype=dtype)
+
+    result = _compute_lambda_kb(
+        E,
+        O=O,
+        N_b=N_b,
+        alpha=0.2,
+        threshold=None,
+        ridge_lambda=0.0,
+        dynamic_lambda=False,
+    )
+    # (0,0): O=10 + lambda=0 = 10 → no guard, stays 0.0
+    assert result[0, 0] == dtype(0.0)
+    # (0,1): O=0 + lambda=0 = 0 → sentinel
+    assert result[0, 1] == sentinel
+
+
+@pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
+def test_compute_lambda_kb_zero_denom(dtype):
+    """_compute_lambda_kb guards against O==0 and E==0 (zero-denominator)."""
+    sentinel = dtype(_SUPPRESS_PENALTY)
+    # E==0 means lambda_kb = alpha*0 = 0; combined with O==0 triggers zero-denom guard
+    E = cp.array([[0.0, 5.0]], dtype=dtype)
+    O = cp.array([[0.0, 10.0]], dtype=dtype)
+    N_b = cp.array([100.0], dtype=dtype)
+
+    result = _compute_lambda_kb(
+        E,
+        O=O,
+        N_b=N_b,
+        alpha=0.2,
+        threshold=None,
+        ridge_lambda=1.0,
+        dynamic_lambda=True,
+    )
+    # (0,0): O+lambda_kb = 0+0 = 0 → sentinel
+    assert result[0, 0] == sentinel
+    # (0,1): normal → alpha * E = 1.0
+    cp.testing.assert_allclose(result[0, 1], dtype(1.0))
+
+
+@pytest.mark.parametrize("correction_method", ["fast", "original", "batched"])
+@pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
+def test_harmony2_ircolitis_reference(
+    adata_ircolitis_harmony2, correction_method, dtype
+):
+    """Harmony2 on IRcolitis (68k cells, 11 batches) matches R harmony2 reference."""
+    adata = adata_ircolitis_harmony2.copy()
+    rsc.pp.harmony_integrate(
+        adata,
+        "batch",
+        correction_method=correction_method,
+        dtype=dtype,
+        max_iter_harmony=10,
+    )
+
+    ref = adata.obsm["harmony2_ref"]
+    result = adata.obsm["X_pca_harmony"]
+
+    assert _get_measure(ref, result, "r").min() > 0.95
+    assert _get_measure(ref, result, "L2").max() < 0.1
