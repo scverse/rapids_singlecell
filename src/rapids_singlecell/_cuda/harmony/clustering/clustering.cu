@@ -2,6 +2,7 @@
 #include <cuda_runtime.h>
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <vector>
 
@@ -29,9 +30,10 @@ constexpr int SCATTER_SHARED_CELLS_PER_BLOCK = 64;
 // ---------- Launch helpers ----------
 
 // 1D grid size capped at BLOCKS_PER_SM blocks/SM
-static inline int grid_1d(int n, int n_sm) {
-    return std::min(n_sm * BLOCKS_PER_SM,
-                    (n + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D);
+static inline int grid_1d(long long n, int n_sm) {
+    long long blocks = (n + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D;
+    return std::max(1, std::min(n_sm * BLOCKS_PER_SM,
+                                (int)std::min<long long>(blocks, INT_MAX)));
 }
 
 // Block dim rounded up to nearest warp, capped at MAX_BLOCK_DIM
@@ -47,8 +49,12 @@ static size_t get_cub_sort_temp_bytes(int n_cells) {
     size_t bytes = 0;
     auto* du = reinterpret_cast<unsigned int*>(1);
     auto* di = reinterpret_cast<int*>(1);
-    cub::DeviceRadixSort::SortPairs(nullptr, bytes, du, du, di, di, n_cells, 0,
-                                    32);
+    cudaError_t status = cub::DeviceRadixSort::SortPairs(
+        nullptr, bytes, du, du, di, di, n_cells, 0, 32);
+    if (status != cudaSuccess) {
+        throw std::runtime_error(std::string("cub sort temp query failed: ") +
+                                 cudaGetErrorString(status));
+    }
     return bytes;
 }
 
@@ -123,9 +129,9 @@ static inline void scatter_add_to_O(const T* R_buf, const int* cats_in,
     } else {
         size_t N = (size_t)current_bs * n_clusters;
         scatter_add_kernel<T>
-            <<<(int)((N + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D), BLOCK_DIM_1D, 0,
-               stream>>>(R_buf, cats_in, (size_t)current_bs, (size_t)n_clusters,
-                         (size_t)switcher, O);
+            <<<grid_1d((long long)N, n_sm), BLOCK_DIM_1D, 0, stream>>>(
+                R_buf, cats_in, (size_t)current_bs, (size_t)n_clusters,
+                (size_t)switcher, O);
         CUDA_CHECK_LAST_ERROR(scatter_add_kernel);
     }
 }
@@ -197,7 +203,7 @@ static T compute_objective_impl(const T* R, const T* similarities, const T* O,
     {
         size_t n = (size_t)n_cells * n_clusters;
         kmeans_err_kernel<T>
-            <<<grid_1d((int)n, n_sm), BLOCK_DIM_1D, 0, stream>>>(
+            <<<grid_1d((long long)n, n_sm), BLOCK_DIM_1D, 0, stream>>>(
                 R, similarities, n, obj_scalar);
         CUDA_CHECK_LAST_ERROR(kmeans_err_kernel);
     }
@@ -290,9 +296,13 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
             a.idx_list, a.n_cells);
         CUDA_CHECK_LAST_ERROR(iota_kernel);
 
-        cub::DeviceRadixSort::SortPairs(
+        cudaError_t sort_status = cub::DeviceRadixSort::SortPairs(
             a.cub_temp, cub_temp_bytes, a.sort_keys, a.sort_keys_alt,
             a.idx_list, a.idx_list_alt, a.n_cells, 0, 32, a.stream);
+        if (sort_status != cudaSuccess) {
+            throw std::runtime_error(std::string("cub radix sort failed: ") +
+                                     cudaGetErrorString(sort_status));
+        }
 
         // ---- Block loop: update R in mini-batches ----
         for (int pos = 0; pos < a.n_cells; pos += a.block_size) {
@@ -300,7 +310,7 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
             const int* block_idx = a.idx_list_alt + pos;
 
             // Gather block: R[idx] -> R_out_buffer, cats[idx] -> cats_in
-            gather_rows_kernel<T><<<grid_1d(bs * a.n_clusters, n_sm),
+            gather_rows_kernel<T><<<grid_1d((long long)bs * a.n_clusters, n_sm),
                                     BLOCK_DIM_1D, 0, a.stream>>>(
                 a.R, block_idx, a.R_out_buffer, bs, a.n_clusters);
             CUDA_CHECK_LAST_ERROR(gather_rows_kernel);
@@ -343,9 +353,10 @@ static void clustering_loop_impl(const ClusteringArgs<T>& a) {
 
             // Write back and add new contribution: O += scatter(R_out), E +=
             // Pr_b @ R_out_sum
-            scatter_rows_kernel<T><<<grid_1d(bs * a.n_clusters, n_sm),
-                                     BLOCK_DIM_1D, 0, a.stream>>>(
-                a.R_out_buffer, block_idx, a.R, bs, a.n_clusters);
+            scatter_rows_kernel<T>
+                <<<grid_1d((long long)bs * a.n_clusters, n_sm), BLOCK_DIM_1D, 0,
+                   a.stream>>>(a.R_out_buffer, block_idx, a.R, bs,
+                               a.n_clusters);
             CUDA_CHECK_LAST_ERROR(scatter_rows_kernel);
             colsum_dispatch<T>(a.colsum_algo, handle, a.R_out_buffer,
                                a.R_out_sum, a.ones_vec, bs, a.n_clusters, n_sm,

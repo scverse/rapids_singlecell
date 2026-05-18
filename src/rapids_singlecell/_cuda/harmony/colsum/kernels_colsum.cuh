@@ -24,6 +24,7 @@ __global__ void colsum_kernel(const T* __restrict__ A, T* __restrict__ out,
                 val += __shfl_down_sync(0xffffffff, val, off);
             if (threadIdx.x == 0) out[col] = val;
         }
+        __syncthreads();
     }
 }
 
@@ -42,7 +43,7 @@ __global__ void colsum_atomic_kernel(const T* __restrict__ A,
     if (end_row > rows) end_row = rows;
 
     // Initialize shared memory
-    if (threadIdx.x < 32) col_sums[threadIdx.x] = (T)0;
+    if (threadIdx.y == 0) col_sums[threadIdx.x] = (T)0;
     __syncthreads();
 
     // Each thread accumulates multiple rows

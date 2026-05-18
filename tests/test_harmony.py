@@ -10,6 +10,7 @@ import scanpy as sc
 from scipy.stats import pearsonr
 
 import rapids_singlecell as rsc
+from rapids_singlecell._utils import _create_category_index_mapping
 from rapids_singlecell.preprocessing._harmony import (
     _SUPPRESS_PENALTY,
     _compute_lambda_kb,
@@ -19,6 +20,7 @@ from rapids_singlecell.preprocessing._harmony._helper import (
     _choose_colsum_algo_heuristic,
     _colsum_heuristic,
     _scatter_add_cp,
+    _scatter_add_cp_bias_csr,
 )
 
 
@@ -296,6 +298,45 @@ def test_scatter_add_shared_vs_optimized(n_cells, n_pcs, n_batches, switcher):
     cp.testing.assert_array_equal(out_optimized, expected)
     cp.testing.assert_array_equal(out_shared, expected)
     cp.testing.assert_array_equal(out_optimized, out_shared)
+
+
+@pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
+@pytest.mark.parametrize("n_pcs", [3, 4, 5])
+@pytest.mark.parametrize("offset", [0, 1])
+def test_scatter_add_bias_csr_alignment(dtype, n_pcs, offset):
+    rng = np.random.default_rng(42)
+    n_cells = 23
+    n_batches = 4
+    X_base_np = rng.normal(size=n_cells * n_pcs + offset).astype(np.dtype(dtype))
+    X_np = X_base_np[offset:].reshape(n_cells, n_pcs)
+    bias_np = rng.random(n_cells).astype(np.dtype(dtype))
+    cats_np = rng.integers(0, n_batches, size=n_cells, dtype=np.int32)
+
+    X_base = cp.asarray(X_base_np)
+    X = X_base[offset:].reshape(n_cells, n_pcs)
+    bias = cp.asarray(bias_np)
+    cats = cp.asarray(cats_np)
+    cat_offsets, cell_indices = _create_category_index_mapping(cats, n_batches)
+
+    out = cp.zeros((n_batches + 1, n_pcs), dtype=dtype)
+    _scatter_add_cp_bias_csr(
+        X,
+        out,
+        cat_offsets=cat_offsets,
+        cell_indices=cell_indices,
+        bias=bias,
+        n_batches=n_batches,
+    )
+    cp.cuda.Device().synchronize()
+
+    expected_np = np.zeros((n_batches + 1, n_pcs), dtype=np.dtype(dtype))
+    expected_np[0] = X_np.T @ bias_np
+    for batch in range(n_batches):
+        mask = cats_np == batch
+        expected_np[batch + 1] = X_np[mask].T @ bias_np[mask]
+
+    atol = 1e-5 if dtype == cp.float32 else 1e-12
+    cp.testing.assert_allclose(out, cp.asarray(expected_np), atol=atol, rtol=atol)
 
 
 @pytest.mark.parametrize("dtype", [cp.float32, cp.float64])

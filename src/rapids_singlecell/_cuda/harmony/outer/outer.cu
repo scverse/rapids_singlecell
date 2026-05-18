@@ -13,7 +13,7 @@ static inline void launch_outer(T* E, const T* Pr_b, const T* R_sum,
                                 long long switcher, cudaStream_t stream) {
     dim3 block(BLOCK_SIZE);
     long long N = n_cats * n_pcs;
-    dim3 grid((unsigned)((N + block.x - 1) / block.x));
+    dim3 grid(strided_grid(N, BLOCK_SIZE));
     outer_kernel<T>
         <<<grid, block, 0, stream>>>(E, Pr_b, R_sum, n_cats, n_pcs, switcher);
     CUDA_CHECK_LAST_ERROR(outer_kernel);
@@ -25,7 +25,7 @@ static inline void launch_harmony_corr(T* Z, const T* W, const int* cats,
                                        long long n_pcs, cudaStream_t stream) {
     dim3 block(BLOCK_SIZE);
     long long N = n_cells * n_pcs;
-    dim3 grid((unsigned)((N + block.x - 1) / block.x));
+    dim3 grid(strided_grid(N, BLOCK_SIZE));
     harmony_correction_kernel<T>
         <<<grid, block, 0, stream>>>(Z, W, cats, R, n_cells, n_pcs);
     CUDA_CHECK_LAST_ERROR(harmony_correction_kernel);
@@ -39,7 +39,7 @@ static inline void launch_batched_correction(T* Z, const T* W_all,
                                              cudaStream_t stream) {
     dim3 block(BLOCK_SIZE);
     long long N = (long long)n_cells * n_pcs;
-    dim3 grid((unsigned)((N + block.x - 1) / block.x));
+    dim3 grid(strided_grid(N, BLOCK_SIZE));
     batched_correction_kernel<T><<<grid, block, 0, stream>>>(
         Z, W_all, cats, R, n_cells, n_pcs, n_clusters, n_batches_p1);
     CUDA_CHECK_LAST_ERROR(batched_correction_kernel);

@@ -62,13 +62,13 @@ static void correction_batched_impl(
     {
         size_t n_x = (size_t)n_cells * n_pcs;
         gather_rows_kernel<T>
-            <<<(int)((n_x + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D), BLOCK_DIM_1D, 0,
+            <<<strided_grid((long long)n_x, BLOCK_DIM_1D), BLOCK_DIM_1D, 0,
                stream>>>(X, cell_indices, X_sorted, n_cells, n_pcs);
         CUDA_CHECK_LAST_ERROR(gather_rows_kernel);
 
         size_t n_r = (size_t)n_cells * n_clusters;
         gather_rows_kernel<T>
-            <<<(int)((n_r + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D), BLOCK_DIM_1D, 0,
+            <<<strided_grid((long long)n_r, BLOCK_DIM_1D), BLOCK_DIM_1D, 0,
                stream>>>(R, cell_indices, R_sorted, n_cells, n_clusters);
         CUDA_CHECK_LAST_ERROR(gather_rows_kernel);
     }
@@ -123,8 +123,8 @@ static void correction_batched_impl(
     {
         size_t n_total = (size_t)n_cells * n_pcs;
         batched_correction_kernel<T>
-            <<<(int)((n_total + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D), BLOCK_DIM_1D,
-               0, stream>>>(Z, W_all, cats, R, n_cells, n_pcs, n_clusters, nb1);
+            <<<strided_grid((long long)n_total, BLOCK_DIM_1D), BLOCK_DIM_1D, 0,
+               stream>>>(Z, W_all, cats, R, n_cells, n_pcs, n_clusters, nb1);
         CUDA_CHECK_LAST_ERROR(batched_correction_kernel);
     }
 }
