@@ -70,9 +70,7 @@ static inline void launch_pre_den_sparse(const IdxT* data_col_ind,
                                          const T* mean_array, T* den,
                                          int* counter, cudaStream_t stream) {
     dim3 block(ELEMENTWISE_BLOCK_SIZE);
-    long long grid_size =
-        (nnz + ELEMENTWISE_BLOCK_SIZE - 1) / ELEMENTWISE_BLOCK_SIZE;
-    dim3 grid(grid_size);
+    dim3 grid(strided_grid(nnz, ELEMENTWISE_BLOCK_SIZE));
     pre_den_sparse_kernel<T, IdxT><<<grid, block, 0, stream>>>(
         data_col_ind, data_values, nnz, mean_array, den, counter);
     CUDA_CHECK_LAST_ERROR(pre_den_sparse_kernel);

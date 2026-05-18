@@ -14,7 +14,7 @@ static inline void launch_nan_mean_minor(const IdxT* index, const T* data,
                                          const bool* mask, long long nnz,
                                          cudaStream_t stream) {
     dim3 block(BLOCK_SIZE_MINOR);
-    dim3 grid((nnz + BLOCK_SIZE_MINOR - 1) / BLOCK_SIZE_MINOR);
+    dim3 grid(strided_grid(nnz, BLOCK_SIZE_MINOR));
     nan_mean_minor_kernel<T, IdxT>
         <<<grid, block, 0, stream>>>(index, data, means, nans, mask, nnz);
     CUDA_CHECK_LAST_ERROR(nan_mean_minor_kernel);

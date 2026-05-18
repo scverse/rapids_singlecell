@@ -184,54 +184,45 @@ static void dispatch_f64(const double* embedding, const int* cat_offsets,
     }
 }
 
+template <typename T, typename Device>
+void def_compute_distances(nb::module_& m) {
+    m.def(
+        "compute_distances",
+        [](gpu_array_c<const T, Device> embedding,
+           gpu_array_c<const int, Device> cat_offsets,
+           gpu_array_c<const int, Device> cell_indices,
+           gpu_array_c<const int, Device> pair_left,
+           gpu_array_c<const int, Device> pair_right,
+           gpu_array_c<T, Device> pairwise_sums, int num_pairs, int n_features,
+           int blocks_per_pair, int cell_tile, int feat_tile, int block_size,
+           int shared_mem, std::uintptr_t stream) {
+            if constexpr (std::is_same_v<T, double>) {
+                dispatch_f64(embedding.data(), cat_offsets.data(),
+                             cell_indices.data(), pair_left.data(),
+                             pair_right.data(), pairwise_sums.data(), num_pairs,
+                             n_features, blocks_per_pair, cell_tile, feat_tile,
+                             block_size, static_cast<size_t>(shared_mem),
+                             reinterpret_cast<cudaStream_t>(stream));
+            } else {
+                dispatch_f32(embedding.data(), cat_offsets.data(),
+                             cell_indices.data(), pair_left.data(),
+                             pair_right.data(), pairwise_sums.data(), num_pairs,
+                             n_features, blocks_per_pair, cell_tile, feat_tile,
+                             block_size, static_cast<size_t>(shared_mem),
+                             reinterpret_cast<cudaStream_t>(stream));
+            }
+        },
+        "embedding"_a, "cat_offsets"_a, "cell_indices"_a, "pair_left"_a,
+        "pair_right"_a, "pairwise_sums"_a, "num_pairs"_a, "n_features"_a,
+        "blocks_per_pair"_a, "cell_tile"_a, "feat_tile"_a, "block_size"_a,
+        "shared_mem"_a, "stream"_a = 0);
+}
+
 template <typename Device>
 void register_bindings(nb::module_& m) {
-    // Single compute_distances function with overloading for f32/f64
-    // Nanobind will dispatch based on the dtype of the embedding array
-    // IMPORTANT: f64 must be defined before f32 for proper overload dispatch
-    m.def(
-        "compute_distances",
-        [](gpu_array_c<const double, Device> embedding,
-           gpu_array_c<const int, Device> cat_offsets,
-           gpu_array_c<const int, Device> cell_indices,
-           gpu_array_c<const int, Device> pair_left,
-           gpu_array_c<const int, Device> pair_right,
-           gpu_array_c<double, Device> pairwise_sums, int num_pairs,
-           int n_features, int blocks_per_pair, int cell_tile, int feat_tile,
-           int block_size, int shared_mem, std::uintptr_t stream) {
-            dispatch_f64(embedding.data(), cat_offsets.data(),
-                         cell_indices.data(), pair_left.data(),
-                         pair_right.data(), pairwise_sums.data(), num_pairs,
-                         n_features, blocks_per_pair, cell_tile, feat_tile,
-                         block_size, static_cast<size_t>(shared_mem),
-                         reinterpret_cast<cudaStream_t>(stream));
-        },
-        "embedding"_a, "cat_offsets"_a, "cell_indices"_a, "pair_left"_a,
-        "pair_right"_a, "pairwise_sums"_a, "num_pairs"_a, "n_features"_a,
-        "blocks_per_pair"_a, "cell_tile"_a, "feat_tile"_a, "block_size"_a,
-        "shared_mem"_a, "stream"_a = 0);
-
-    m.def(
-        "compute_distances",
-        [](gpu_array_c<const float, Device> embedding,
-           gpu_array_c<const int, Device> cat_offsets,
-           gpu_array_c<const int, Device> cell_indices,
-           gpu_array_c<const int, Device> pair_left,
-           gpu_array_c<const int, Device> pair_right,
-           gpu_array_c<float, Device> pairwise_sums, int num_pairs,
-           int n_features, int blocks_per_pair, int cell_tile, int feat_tile,
-           int block_size, int shared_mem, std::uintptr_t stream) {
-            dispatch_f32(embedding.data(), cat_offsets.data(),
-                         cell_indices.data(), pair_left.data(),
-                         pair_right.data(), pairwise_sums.data(), num_pairs,
-                         n_features, blocks_per_pair, cell_tile, feat_tile,
-                         block_size, static_cast<size_t>(shared_mem),
-                         reinterpret_cast<cudaStream_t>(stream));
-        },
-        "embedding"_a, "cat_offsets"_a, "cell_indices"_a, "pair_left"_a,
-        "pair_right"_a, "pairwise_sums"_a, "num_pairs"_a, "n_features"_a,
-        "blocks_per_pair"_a, "cell_tile"_a, "feat_tile"_a, "block_size"_a,
-        "shared_mem"_a, "stream"_a = 0);
+    // IMPORTANT: f64 must be defined before f32 for proper overload dispatch.
+    def_compute_distances<double, Device>(m);
+    def_compute_distances<float, Device>(m);
 }
 
 NB_MODULE(_edistance_cuda, m) {

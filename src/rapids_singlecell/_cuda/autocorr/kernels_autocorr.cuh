@@ -180,12 +180,12 @@ __global__ void pre_den_sparse_kernel(const IdxT* __restrict__ data_col_ind,
                                       const T* __restrict__ mean_array,
                                       T* __restrict__ den,
                                       int* __restrict__ counter) {
-    long long i = (long long)blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= nnz) {
-        return;
+    const long long stride = (long long)blockDim.x * gridDim.x;
+    for (long long i = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+         i < nnz; i += stride) {
+        IdxT geneidx = data_col_ind[i];
+        T value = data_values[i] - mean_array[geneidx];
+        atomicAdd(&counter[geneidx], 1);
+        atomicAdd(&den[geneidx], value * value);
     }
-    IdxT geneidx = data_col_ind[i];
-    T value = data_values[i] - mean_array[geneidx];
-    atomicAdd(&counter[geneidx], 1);
-    atomicAdd(&den[geneidx], value * value);
 }

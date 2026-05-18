@@ -27,12 +27,14 @@ __global__ void qc_csr_genes_kernel(const IdxT* __restrict__ index,
                                     const T* __restrict__ data,
                                     T* __restrict__ sums_genes,
                                     int* __restrict__ gene_ex, long long nnz) {
-    long long i = (long long)blockDim.x * blockIdx.x + threadIdx.x;
-    if (i >= nnz) return;
-    IdxT g = index[i];
-    T v = data[i];
-    atomicAdd(&sums_genes[g], v);
-    atomicAdd(&gene_ex[g], 1);
+    const long long stride = (long long)blockDim.x * gridDim.x;
+    for (long long i = (long long)blockDim.x * blockIdx.x + threadIdx.x;
+         i < nnz; i += stride) {
+        IdxT g = index[i];
+        T v = data[i];
+        atomicAdd(&sums_genes[g], v);
+        atomicAdd(&gene_ex[g], 1);
+    }
 }
 
 template <typename T>

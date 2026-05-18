@@ -48,7 +48,7 @@ static inline void launch_check_zero_genes(const IdxT* indices, int* genes,
                                            cudaStream_t stream) {
     if (nnz > 0) {
         dim3 block(ELEMENTWISE_BLOCK_SIZE);
-        dim3 grid((nnz + ELEMENTWISE_BLOCK_SIZE - 1) / ELEMENTWISE_BLOCK_SIZE);
+        dim3 grid(strided_grid(nnz, ELEMENTWISE_BLOCK_SIZE));
         check_zero_genes_kernel<IdxT>
             <<<grid, block, 0, stream>>>(indices, genes, nnz, num_genes);
         CUDA_CHECK_LAST_ERROR(check_zero_genes_kernel);

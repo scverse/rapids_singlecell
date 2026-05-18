@@ -26,7 +26,7 @@ static inline void launch_qc_csr_genes(const IdxT* index, const T* data,
                                        T* sums_genes, int* gene_ex,
                                        long long nnz, cudaStream_t stream) {
     int block = GENES_BLOCK_SIZE;
-    long long grid = (nnz + GENES_BLOCK_SIZE - 1) / GENES_BLOCK_SIZE;
+    unsigned int grid = strided_grid(nnz, block);
     qc_csr_genes_kernel<T, IdxT>
         <<<grid, block, 0, stream>>>(index, data, sums_genes, gene_ex, nnz);
     CUDA_CHECK_LAST_ERROR(qc_csr_genes_kernel);

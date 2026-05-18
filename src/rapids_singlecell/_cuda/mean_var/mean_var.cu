@@ -25,7 +25,7 @@ static inline void launch_mean_var_minor(const IdxT* indices, const T* data,
                                          double* means, double* vars,
                                          long long nnz, cudaStream_t stream) {
     int block = BLOCK_SIZE_MINOR;
-    long long grid = (nnz + block - 1) / block;
+    unsigned int grid = strided_grid(nnz, block);
     mean_var_minor_kernel<T, IdxT>
         <<<grid, block, 0, stream>>>(indices, data, means, vars, nnz);
     CUDA_CHECK_LAST_ERROR(mean_var_minor_kernel);

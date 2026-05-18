@@ -9,19 +9,19 @@ __global__ void nan_mean_minor_kernel(const IdxT* __restrict__ index,
                                       int* __restrict__ nans,
                                       const bool* __restrict__ mask,
                                       long long nnz) {
-    long long idx = (long long)blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= nnz) {
-        return;
-    }
-    IdxT minor_pos = index[idx];
-    if (mask[minor_pos] == false) {
-        return;
-    }
-    T v = data[idx];
-    if (isnan((double)v)) {
-        atomicAdd(&nans[minor_pos], 1);
-    } else {
-        atomicAdd(&means[minor_pos], (double)v);
+    const long long stride = (long long)blockDim.x * gridDim.x;
+    for (long long idx = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+         idx < nnz; idx += stride) {
+        IdxT minor_pos = index[idx];
+        if (mask[minor_pos] == false) {
+            continue;
+        }
+        T v = data[idx];
+        if (isnan((double)v)) {
+            atomicAdd(&nans[minor_pos], 1);
+        } else {
+            atomicAdd(&means[minor_pos], (double)v);
+        }
     }
 }
 

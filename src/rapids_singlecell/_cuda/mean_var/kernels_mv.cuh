@@ -49,10 +49,12 @@ __global__ void mean_var_minor_kernel(const IdxT* __restrict__ indices,
                                       double* __restrict__ means,
                                       double* __restrict__ vars,
                                       long long nnz) {
-    long long idx = (long long)blockDim.x * blockIdx.x + threadIdx.x;
-    if (idx >= nnz) return;
-    double value = static_cast<double>(data[idx]);
-    IdxT minor_pos = indices[idx];
-    atomicAdd(&means[minor_pos], value);
-    atomicAdd(&vars[minor_pos], value * value);
+    const long long stride = (long long)blockDim.x * gridDim.x;
+    for (long long idx = (long long)blockDim.x * blockIdx.x + threadIdx.x;
+         idx < nnz; idx += stride) {
+        double value = static_cast<double>(data[idx]);
+        IdxT minor_pos = indices[idx];
+        atomicAdd(&means[minor_pos], value);
+        atomicAdd(&vars[minor_pos], value * value);
+    }
 }

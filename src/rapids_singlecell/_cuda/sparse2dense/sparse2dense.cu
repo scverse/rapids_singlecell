@@ -11,23 +11,14 @@ static inline void launch_sparse2dense(const IdxT* indptr, const IdxT* index,
                                        const T* data, T* out, long long major,
                                        long long minor, int max_nnz,
                                        cudaStream_t stream) {
-    // Get device max grid Y dimension
-    int device = 0;
-    cudaGetDevice(&device);
-    cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, device);
-    int max_grid_y = prop.maxGridSize[1];
-
     if (max_nnz == 0 || major == 0) return;  // nothing to scatter
 
     constexpr int BLOCK_DIM = 32;
     dim3 block(BLOCK_DIM, BLOCK_DIM);
     unsigned grid_x = (unsigned)((major + BLOCK_DIM - 1) / BLOCK_DIM);
-    unsigned grid_y = (unsigned)((max_nnz + BLOCK_DIM - 1) / BLOCK_DIM);
-    // Limit grid Y to device max - strided loop in kernel handles overflow
-    if (grid_y > (unsigned)max_grid_y) {
-        grid_y = (unsigned)max_grid_y;
-    }
+    // Cap grid Y via shared helper (y-axis has lower limit than x);
+    // the kernel grid-strides internally to cover any remaining work.
+    unsigned grid_y = strided_grid_y(max_nnz, BLOCK_DIM);
     dim3 grid(grid_x, grid_y);
     sparse2dense_kernel<T, IdxT, C_ORDER>
         <<<grid, block, 0, stream>>>(indptr, index, data, out, major, minor);
