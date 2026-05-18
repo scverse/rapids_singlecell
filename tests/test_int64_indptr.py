@@ -1038,3 +1038,136 @@ def test_csc_hist(dtype):
         )
         outs[idx_dtype] = hist
     _eq(outs[np.int32], outs[np.int64])
+
+
+# ---------- mixed-precision morans/gearys (AdjIdxT != DataIdxT) -------------
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+def test_morans_sparse_mixed_indices(dtype):
+    """Exercise the cross-typed (AdjIdxT, DataIdxT) instantiations registered
+    in autocorr.cu — the same-dtype tests above don't reach them."""
+    mean_array = cp.full(N_COLS, 0.3, dtype=dtype)
+
+    A32 = _make_csr(dtype, np.int32)
+    adj32 = _make_adjacency(dtype, np.int32)
+    num_ref = cp.zeros(N_COLS, dtype=dtype)
+    _ac.morans_sparse(
+        adj32.indptr,
+        adj32.indices,
+        adj32.data,
+        data_row_ptr=A32.indptr,
+        data_col_ind=A32.indices,
+        data_values=A32.data,
+        n_samples=N_ROWS,
+        n_features=N_COLS,
+        mean_array=mean_array,
+        num=num_ref,
+        stream=_stream(),
+    )
+
+    for adj_dtype, data_dtype in [(np.int32, np.int64), (np.int64, np.int32)]:
+        A = _make_csr(dtype, data_dtype)
+        adj = _make_adjacency(dtype, adj_dtype)
+        num = cp.zeros(N_COLS, dtype=dtype)
+        _ac.morans_sparse(
+            adj.indptr,
+            adj.indices,
+            adj.data,
+            data_row_ptr=A.indptr,
+            data_col_ind=A.indices,
+            data_values=A.data,
+            n_samples=N_ROWS,
+            n_features=N_COLS,
+            mean_array=mean_array,
+            num=num,
+            stream=_stream(),
+        )
+        _close(num_ref, num)
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+def test_gearys_sparse_mixed_indices(dtype):
+    """Exercise the cross-typed (AdjIdxT, DataIdxT) instantiations registered
+    in autocorr.cu — the same-dtype tests above don't reach them."""
+    A32 = _make_csr(dtype, np.int32)
+    adj32 = _make_adjacency(dtype, np.int32)
+    num_ref = cp.zeros(N_COLS, dtype=dtype)
+    _ac.gearys_sparse(
+        adj32.indptr,
+        adj32.indices,
+        adj32.data,
+        data_row_ptr=A32.indptr,
+        data_col_ind=A32.indices,
+        data_values=A32.data,
+        n_samples=N_ROWS,
+        n_features=N_COLS,
+        num=num_ref,
+        stream=_stream(),
+    )
+
+    for adj_dtype, data_dtype in [(np.int32, np.int64), (np.int64, np.int32)]:
+        A = _make_csr(dtype, data_dtype)
+        adj = _make_adjacency(dtype, adj_dtype)
+        num = cp.zeros(N_COLS, dtype=dtype)
+        _ac.gearys_sparse(
+            adj.indptr,
+            adj.indices,
+            adj.data,
+            data_row_ptr=A.indptr,
+            data_col_ind=A.indices,
+            data_values=A.data,
+            n_samples=N_ROWS,
+            n_features=N_COLS,
+            num=num,
+            stream=_stream(),
+        )
+        _close(num_ref, num)
+
+
+# ---------- long-long parameter ABI smoke test ------------------------------
+
+
+def test_sparse2dense_long_long_max_nnz_not_truncated():
+    """``sparse2dense`` binds ``max_nnz`` as ``long long``. Verify a value
+    above 2^32 is not silently truncated to int32 by the nanobind layer.
+
+    Mechanism: the kernel uses ``max_nnz`` only to size the y-grid via
+    ``strided_grid_y`` (which caps at the device limit); actual work is
+    bounded by indptr/indices. If the binding ever regresses to ``int``,
+    passing 2^33 from Python would raise OverflowError. With correct
+    ``long long`` passing the kernel runs (also exercising the
+    strided-grid cap path) and produces the same result as the canonical
+    small-``max_nnz`` call.
+    """
+    dtype = np.float32
+    A = _make_csr(dtype, np.int32)
+    canonical = int((A.indptr[1:] - A.indptr[:-1]).max())
+
+    out_ref = cp.zeros((N_ROWS, N_COLS), dtype=dtype, order="C")
+    _s2d.sparse2dense(
+        A.indptr,
+        A.indices,
+        A.data,
+        out=out_ref,
+        major=N_ROWS,
+        minor=N_COLS,
+        c_switch=True,
+        max_nnz=canonical,
+        stream=_stream(),
+    )
+    assert cp.any(out_ref != 0), "canonical run produced no output — bad fixture"
+
+    out_huge = cp.zeros((N_ROWS, N_COLS), dtype=dtype, order="C")
+    _s2d.sparse2dense(
+        A.indptr,
+        A.indices,
+        A.data,
+        out=out_huge,
+        major=N_ROWS,
+        minor=N_COLS,
+        c_switch=True,
+        max_nnz=1 << 33,
+        stream=_stream(),
+    )
+    _eq(out_ref, out_huge)
