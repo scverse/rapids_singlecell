@@ -53,9 +53,8 @@ __global__ void check_zero_genes_kernel(const IdxT* indices, int* genes,
     const long long stride = (long long)blockDim.x * gridDim.x;
     for (long long value = (long long)blockIdx.x * blockDim.x + threadIdx.x;
          value < nnz; value += stride) {
-        int gene_index = static_cast<int>(indices[value]);
-        if (gene_index >= 0 && gene_index < num_genes) {
-            atomicAdd(&genes[gene_index], 1);
-        }
+        long long gene_index = static_cast<long long>(indices[value]);
+        if (gene_index < 0 || gene_index >= num_genes) continue;
+        atomicAdd(&genes[gene_index], 1);
     }
 }

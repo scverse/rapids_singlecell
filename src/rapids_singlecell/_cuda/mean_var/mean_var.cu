@@ -5,7 +5,6 @@
 
 using namespace nb::literals;
 
-constexpr int BLOCK_SIZE_MAJOR = 64;
 constexpr int BLOCK_SIZE_MINOR = 256;
 
 template <typename T, typename IdxT>

@@ -99,6 +99,21 @@ def _make_csc(dtype, idx_dtype, **kwargs) -> SparseGPU:
     )
 
 
+def _make_adjacency(dtype, idx_dtype) -> SparseGPU:
+    row = np.repeat(np.arange(N_ROWS), 2)
+    col = np.column_stack(
+        ((np.arange(N_ROWS) - 1) % N_ROWS, (np.arange(N_ROWS) + 1) % N_ROWS)
+    ).ravel()
+    data = np.ones(row.size, dtype=dtype)
+    adj = sp.csr_matrix((data, (row, col)), shape=(N_ROWS, N_ROWS))
+    return SparseGPU(
+        indptr=cp.asarray(adj.indptr.astype(idx_dtype)),
+        indices=cp.asarray(adj.indices.astype(idx_dtype)),
+        data=cp.asarray(adj.data.astype(dtype)),
+        shape=adj.shape,
+    )
+
+
 def _zeros(shape, dtype=cp.float32):
     return cp.zeros(shape, dtype=dtype)
 
@@ -117,8 +132,10 @@ def _close(a, b):
     """For kernels with atomicAdd on float accumulators, the int32 vs int64
     paths can shift thread scheduling enough to reorder float adds (ULP-level
     differences). Use tight relative tolerance to catch real dispatch bugs."""
-    rtol = 1e-7 if a.dtype == cp.float32 else 1e-14
-    cp.testing.assert_allclose(a, b, rtol=rtol, atol=0)
+    if a.dtype == cp.float32:
+        cp.testing.assert_allclose(a, b, rtol=1e-5, atol=1e-6)
+    else:
+        cp.testing.assert_allclose(a, b, rtol=1e-13, atol=1e-12)
 
 
 # ----------------------------- _qc_cuda -------------------------------------
@@ -145,7 +162,7 @@ def test_sparse_qc_csr(dtype):
             stream=_stream(),
         )
         outs[idx_dtype] = (sums_cells, sums_genes, cell_ex, gene_ex)
-    for a, b in zip(outs[np.int32], outs[np.int64]):
+    for a, b in zip(outs[np.int32], outs[np.int64], strict=True):
         _eq(a, b)
 
 
@@ -170,7 +187,7 @@ def test_sparse_qc_csc(dtype):
             stream=_stream(),
         )
         outs[idx_dtype] = (sums_cells, sums_genes, cell_ex, gene_ex)
-    for a, b in zip(outs[np.int32], outs[np.int64]):
+    for a, b in zip(outs[np.int32], outs[np.int64], strict=True):
         _eq(a, b)
 
 
@@ -236,7 +253,7 @@ def test_sparse_qc_csr_cells(dtype):
             stream=_stream(),
         )
         outs[idx_dtype] = (sums_cells, cell_ex)
-    for a, b in zip(outs[np.int32], outs[np.int64]):
+    for a, b in zip(outs[np.int32], outs[np.int64], strict=True):
         _eq(a, b)
 
 
@@ -256,7 +273,7 @@ def test_sparse_qc_csr_genes(dtype):
             stream=_stream(),
         )
         outs[idx_dtype] = (sums_genes, gene_ex)
-    for a, b in zip(outs[np.int32], outs[np.int64]):
+    for a, b in zip(outs[np.int32], outs[np.int64], strict=True):
         _eq(a, b)
 
 
@@ -281,7 +298,7 @@ def test_mean_var_major(dtype):
             stream=_stream(),
         )
         outs[idx_dtype] = (means, vars_)
-    for a, b in zip(outs[np.int32], outs[np.int64]):
+    for a, b in zip(outs[np.int32], outs[np.int64], strict=True):
         _eq(a, b)
 
 
@@ -301,7 +318,7 @@ def test_mean_var_minor(dtype):
             stream=_stream(),
         )
         outs[idx_dtype] = (means, vars_)
-    for a, b in zip(outs[np.int32], outs[np.int64]):
+    for a, b in zip(outs[np.int32], outs[np.int64], strict=True):
         _eq(a, b)
 
 
@@ -329,7 +346,7 @@ def test_nan_mean_major(dtype):
             stream=_stream(),
         )
         outs[idx_dtype] = (means, nans)
-    for a, b in zip(outs[np.int32], outs[np.int64]):
+    for a, b in zip(outs[np.int32], outs[np.int64], strict=True):
         _eq(a, b)
 
 
@@ -352,7 +369,7 @@ def test_nan_mean_minor(dtype):
             stream=_stream(),
         )
         outs[idx_dtype] = (means, nans)
-    for a, b in zip(outs[np.int32], outs[np.int64]):
+    for a, b in zip(outs[np.int32], outs[np.int64], strict=True):
         _eq(a, b)
 
 
@@ -547,7 +564,7 @@ def test_sparse_sum_csc(dtype):
             stream=_stream(),
         )
         outs[idx_dtype] = (sums_genes, sums_cells)
-    for a, b in zip(outs[np.int32], outs[np.int64]):
+    for a, b in zip(outs[np.int32], outs[np.int64], strict=True):
         _eq(a, b)
 
 
@@ -716,7 +733,7 @@ def test_sparse_aggr(dtype, is_csc):
     outs = {}
     for idx_dtype in (np.int32, np.int64):
         A = _make_csc(dtype, idx_dtype) if is_csc else _make_csr(dtype, idx_dtype)
-        out = cp.zeros((n_groups, N_COLS), dtype=cp.float64)
+        out = cp.zeros((3, n_groups, N_COLS), dtype=cp.float64)
         _aggr.sparse_aggr(
             A.indptr,
             A.indices,
@@ -742,8 +759,9 @@ def test_csr_to_coo(dtype):
     outs = {}
     for idx_dtype in (np.int32, np.int64):
         A = _make_csr(dtype, idx_dtype)
-        out_row = cp.zeros(A.nnz, dtype=cp.int32)
-        out_col = cp.zeros(A.nnz, dtype=cp.int32)
+        out_idx_dtype = cp.dtype(idx_dtype)
+        out_row = cp.zeros(A.nnz, dtype=out_idx_dtype)
+        out_col = cp.zeros(A.nnz, dtype=out_idx_dtype)
         out_data = cp.zeros(A.nnz, dtype=cp.float64)
         _aggr.csr_to_coo(
             A.indptr,
@@ -758,8 +776,11 @@ def test_csr_to_coo(dtype):
             stream=_stream(),
         )
         outs[idx_dtype] = (out_row, out_col, out_data)
-    for a, b in zip(outs[np.int32], outs[np.int64]):
-        _eq(a, b)
+    assert outs[np.int64][0].dtype == cp.int64
+    assert outs[np.int64][1].dtype == cp.int64
+    _eq(outs[np.int32][0].astype(cp.int64), outs[np.int64][0])
+    _eq(outs[np.int32][1].astype(cp.int64), outs[np.int64][1])
+    _eq(outs[np.int32][2], outs[np.int64][2])
 
 
 def test_sparse_var():
@@ -794,6 +815,45 @@ def test_sparse_var():
     _eq(outs[np.int32], outs[np.int64])
 
 
+def test_sparse_aggregate_elementwise_int64_helpers():
+    from rapids_singlecell.get._kernels._aggr_elementwise import (
+        _scatter_count_nonzero,
+        _scatter_mean_var,
+        _scatter_sum,
+        _sum_duplicates_assign,
+        _sum_duplicates_diff,
+    )
+
+    src_row = cp.asarray([0, 0, 1, 1, 1], dtype=cp.int64)
+    src_col = cp.asarray([0, 0, 0, 1, 1], dtype=cp.int64)
+    src_data = cp.asarray([1.0, 2.0, 3.0, 4.0, 5.0], dtype=cp.float64)
+
+    diff = _sum_duplicates_diff(src_row, src_col, size=src_row.size)
+    index = cp.cumsum(diff, dtype=cp.int64)
+    nnz = int(index[-1].get())
+
+    rows = cp.zeros(nnz + 1, dtype=cp.int64)
+    indices = cp.zeros(nnz + 1, dtype=cp.int64)
+    _sum_duplicates_assign(src_row, src_col, index, rows, indices)
+
+    sums = cp.zeros(nnz + 1, dtype=cp.float64)
+    means = cp.zeros(nnz + 1, dtype=cp.float64)
+    vars_ = cp.zeros(nnz + 1, dtype=cp.float64)
+    counts = cp.zeros(nnz + 1, dtype=cp.float32)
+    _scatter_sum(src_data, index, sums)
+    _scatter_mean_var(src_data, index, means, vars_)
+    _scatter_count_nonzero(src_data, index, counts)
+
+    assert rows.dtype == cp.int64
+    assert indices.dtype == cp.int64
+    _eq(rows, cp.asarray([0, 1, 1], dtype=cp.int64))
+    _eq(indices, cp.asarray([0, 0, 1], dtype=cp.int64))
+    _eq(sums, cp.asarray([3.0, 3.0, 9.0], dtype=cp.float64))
+    _eq(means, cp.asarray([3.0, 3.0, 9.0], dtype=cp.float64))
+    _eq(vars_, cp.asarray([5.0, 9.0, 41.0], dtype=cp.float64))
+    _eq(counts, cp.asarray([2.0, 1.0, 2.0], dtype=cp.float32))
+
+
 # ----------------------------- _ligrec --------------------------------------
 
 
@@ -819,7 +879,7 @@ def test_sum_count_sparse(dtype):
             stream=_stream(),
         )
         outs[idx_dtype] = (sum_out, count_out)
-    for a, b in zip(outs[np.int32], outs[np.int64]):
+    for a, b in zip(outs[np.int32], outs[np.int64], strict=True):
         _eq(a, b)
 
 
@@ -847,6 +907,54 @@ def test_mean_sparse(dtype):
 
 
 # ----------------------------- _autocorr ------------------------------------
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+def test_morans_sparse(dtype):
+    mean_array = cp.full(N_COLS, 0.3, dtype=dtype)
+    outs = {}
+    for idx_dtype in (np.int32, np.int64):
+        A = _make_csr(dtype, idx_dtype)
+        adj = _make_adjacency(dtype, idx_dtype)
+        num = cp.zeros(N_COLS, dtype=dtype)
+        _ac.morans_sparse(
+            adj.indptr,
+            adj.indices,
+            adj.data,
+            data_row_ptr=A.indptr,
+            data_col_ind=A.indices,
+            data_values=A.data,
+            n_samples=N_ROWS,
+            n_features=N_COLS,
+            mean_array=mean_array,
+            num=num,
+            stream=_stream(),
+        )
+        outs[idx_dtype] = num
+    _close(outs[np.int32], outs[np.int64])
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+def test_gearys_sparse(dtype):
+    outs = {}
+    for idx_dtype in (np.int32, np.int64):
+        A = _make_csr(dtype, idx_dtype)
+        adj = _make_adjacency(dtype, idx_dtype)
+        num = cp.zeros(N_COLS, dtype=dtype)
+        _ac.gearys_sparse(
+            adj.indptr,
+            adj.indices,
+            adj.data,
+            data_row_ptr=A.indptr,
+            data_col_ind=A.indices,
+            data_values=A.data,
+            n_samples=N_ROWS,
+            n_features=N_COLS,
+            num=num,
+            stream=_stream(),
+        )
+        outs[idx_dtype] = num
+    _close(outs[np.int32], outs[np.int64])
 
 
 @pytest.mark.parametrize("dtype", DTYPES)

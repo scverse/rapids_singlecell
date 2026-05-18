@@ -78,9 +78,9 @@ static inline void launch_interaction(const int* interactions,
     dim3 block(DENSE_BLOCK_DIM, DENSE_BLOCK_DIM);
     dim3 grid((n_iter + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM,
               (n_inter_clust + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM);
-    interaction_kernel<T><<<grid, block>>>(interactions, interaction_clusters,
-                                           mean, res, mask, g, n_iter,
-                                           n_inter_clust, ncls);
+    interaction_kernel<T>
+        <<<grid, block, 0, stream>>>(interactions, interaction_clusters, mean,
+                                     res, mask, g, n_iter, n_inter_clust, ncls);
     CUDA_CHECK_LAST_ERROR(interaction_kernel);
 }
 

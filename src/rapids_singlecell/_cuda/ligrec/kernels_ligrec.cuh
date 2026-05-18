@@ -35,10 +35,11 @@ __global__ void sum_and_count_sparse_kernel(const IdxT* __restrict__ indptr,
     int cluster = clusters[cell];
     for (IdxT gene = start_idx; gene < stop_idx; gene++) {
         T value = data[gene];
-        int gene_number = index[gene];
+        IdxT gene_number = index[gene];
         if (value > (T)0) {
-            atomicAdd(&sum_gt0[gene_number * n_cls + cluster], value);
-            atomicAdd(&count_gt0[gene_number * n_cls + cluster], 1);
+            long long out_idx = (long long)gene_number * n_cls + cluster;
+            atomicAdd(&sum_gt0[out_idx], value);
+            atomicAdd(&count_gt0[out_idx], 1);
         }
     }
 }
@@ -68,9 +69,10 @@ __global__ void mean_sparse_kernel(const IdxT* __restrict__ indptr,
     int cluster = clusters[cell];
     for (IdxT gene = start_idx; gene < stop_idx; gene++) {
         T value = data[gene];
-        int gene_number = index[gene];
+        IdxT gene_number = index[gene];
         if (value > (T)0) {
-            atomicAdd(&sum_gt0[gene_number * n_cls + cluster], value);
+            long long out_idx = (long long)gene_number * n_cls + cluster;
+            atomicAdd(&sum_gt0[out_idx], value);
         }
     }
 }

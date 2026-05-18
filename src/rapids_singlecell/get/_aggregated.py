@@ -213,8 +213,12 @@ class Aggregate:
         if self.data.format == "csc":
             self.data = self.data.tocsr()
 
-        src_row = cp.zeros(self.data.nnz, dtype=cp.int32)
-        src_col = cp.zeros(self.data.nnz, dtype=cp.int32)
+        index_dtype = cp.result_type(self.data.indptr.dtype, self.data.indices.dtype)
+        if index_dtype.itemsize < 8 and self.data.nnz > 2_147_483_647:
+            index_dtype = cp.dtype(cp.int64)
+
+        src_row = cp.zeros(self.data.nnz, dtype=index_dtype)
+        src_col = cp.zeros(self.data.nnz, dtype=index_dtype)
         src_data = cp.zeros(self.data.nnz, dtype=cp.float64)
         mask = self._get_mask()
 
@@ -238,18 +242,18 @@ class Aggregate:
         src_data = src_data[order]
 
         diff = _sum_duplicates_diff(src_row, src_col, size=src_row.size)
-        index = cp.cumsum(diff, dtype=cp.int32)
-        nnz = index[-1].get()
+        index = cp.cumsum(diff, dtype=index_dtype)
+        nnz = int(index[-1].get())
 
         # calculate the rows and indices
-        rows = cp.zeros(nnz + 1, dtype=cp.int32)
-        indices = cp.zeros(nnz + 1, dtype=cp.int32)
+        rows = cp.zeros(nnz + 1, dtype=index_dtype)
+        indices = cp.zeros(nnz + 1, dtype=index_dtype)
 
         _sum_duplicates_assign(src_row, src_col, index, rows, indices)
 
         # Calculate the indptr using searchsorted to handle empty groups
-        group_boundaries = cp.arange(n_groups + 1, dtype=cp.int32)
-        indptr = cp.searchsorted(rows[: nnz + 1], group_boundaries).astype(cp.int32)
+        group_boundaries = cp.arange(n_groups + 1, dtype=index_dtype)
+        indptr = cp.searchsorted(rows[: nnz + 1], group_boundaries).astype(index_dtype)
         indptr[-1] = nnz + 1
 
         # Calculate the the sparse matrices

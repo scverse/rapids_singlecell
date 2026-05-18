@@ -9,7 +9,7 @@ using namespace nb::literals;
 template <typename T, typename IdxT, bool C_ORDER>
 static inline void launch_sparse2dense(const IdxT* indptr, const IdxT* index,
                                        const T* data, T* out, long long major,
-                                       long long minor, int max_nnz,
+                                       long long minor, long long max_nnz,
                                        cudaStream_t stream) {
     if (max_nnz == 0 || major == 0) return;  // nothing to scatter
 
@@ -31,7 +31,8 @@ template <typename T, typename IdxT>
 static inline void dispatch_sparse2dense(const IdxT* indptr, const IdxT* index,
                                          const T* data, T* out, long long major,
                                          long long minor, bool c_switch,
-                                         int max_nnz, cudaStream_t stream) {
+                                         long long max_nnz,
+                                         cudaStream_t stream) {
     if (c_switch) {
         launch_sparse2dense<T, IdxT, true>(indptr, index, data, out, major,
                                            minor, max_nnz, stream);
@@ -51,7 +52,8 @@ void def_sparse2dense(nb::module_& m) {
            gpu_array_contig<const IdxT, Device, nb::c_contig> index,
            gpu_array_contig<const T, Device, nb::c_contig> data,
            gpu_array_contig<T, Device, OutContig> out, long long major,
-           long long minor, bool c_switch, int max_nnz, std::uintptr_t stream) {
+           long long minor, bool c_switch, long long max_nnz,
+           std::uintptr_t stream) {
             dispatch_sparse2dense<T, IdxT>(
                 indptr.data(), index.data(), data.data(), out.data(), major,
                 minor, c_switch, max_nnz, (cudaStream_t)stream);

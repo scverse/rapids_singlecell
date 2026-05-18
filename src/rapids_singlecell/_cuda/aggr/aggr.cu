@@ -58,15 +58,15 @@ static inline void launch_dense_aggr_F(const T* data, double* out,
     CUDA_CHECK_LAST_ERROR(dense_aggr_kernel_F);
 }
 
-template <typename T, typename IdxT>
+template <typename T, typename IdxT, typename OutIdxT>
 static inline void launch_csr_to_coo(const IdxT* indptr, const IdxT* index,
-                                     const T* data, int* row, int* col,
+                                     const T* data, OutIdxT* row, OutIdxT* col,
                                      double* ndata, const int* cats,
                                      const bool* mask, int n_cells,
                                      cudaStream_t stream) {
     dim3 grid((unsigned)n_cells);
     dim3 block(BLOCK_SIZE_SPARSE);
-    csr_to_coo_kernel<T, IdxT><<<grid, block, 0, stream>>>(
+    csr_to_coo_kernel<T, IdxT, OutIdxT><<<grid, block, 0, stream>>>(
         indptr, index, data, row, col, ndata, cats, mask, n_cells);
     CUDA_CHECK_LAST_ERROR(csr_to_coo_kernel);
 }
@@ -132,19 +132,20 @@ void def_dense_aggr(nb::module_& m) {
         "n_genes"_a, "n_groups"_a, "is_fortran"_a, "stream"_a = 0);
 }
 
-template <typename T, typename IdxT, typename Device>
+template <typename T, typename IdxT, typename OutIdxT, typename Device>
 void def_csr_to_coo(nb::module_& m) {
     m.def(
         "csr_to_coo",
         [](gpu_array_c<const IdxT, Device> indptr,
            gpu_array_c<const IdxT, Device> index,
-           gpu_array_c<const T, Device> data, gpu_array_c<int, Device> out_row,
-           gpu_array_c<int, Device> out_col,
+           gpu_array_c<const T, Device> data,
+           gpu_array_c<OutIdxT, Device> out_row,
+           gpu_array_c<OutIdxT, Device> out_col,
            gpu_array_c<double, Device> out_data,
            gpu_array_c<const int, Device> cats,
            gpu_array_c<const bool, Device> mask, int n_cells,
            std::uintptr_t stream) {
-            launch_csr_to_coo<T, IdxT>(
+            launch_csr_to_coo<T, IdxT, OutIdxT>(
                 indptr.data(), index.data(), data.data(), out_row.data(),
                 out_col.data(), out_data.data(), cats.data(), mask.data(),
                 n_cells, (cudaStream_t)stream);
@@ -185,10 +186,10 @@ void register_bindings(nb::module_& m) {
     def_dense_aggr<double, nb::f_contig, Device>(m);
     def_dense_aggr<double, nb::c_contig, Device>(m);
 
-    def_csr_to_coo<float, int, Device>(m);
-    def_csr_to_coo<float, long long, Device>(m);
-    def_csr_to_coo<double, int, Device>(m);
-    def_csr_to_coo<double, long long, Device>(m);
+    def_csr_to_coo<float, int, int, Device>(m);
+    def_csr_to_coo<float, long long, long long, Device>(m);
+    def_csr_to_coo<double, int, int, Device>(m);
+    def_csr_to_coo<double, long long, long long, Device>(m);
 
     def_sparse_var<int, Device>(m);
     def_sparse_var<long long, Device>(m);

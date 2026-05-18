@@ -24,17 +24,18 @@ static inline void launch_morans_dense(const T* data_centered,
     CUDA_CHECK_LAST_ERROR(morans_I_num_dense_kernel);
 }
 
-template <typename T>
+template <typename T, typename AdjIdxT, typename DataIdxT>
 static inline void launch_morans_sparse(
-    const int* adj_row_ptr, const int* adj_col_ind, const T* adj_data,
-    const int* data_row_ptr, const int* data_col_ind, const T* data_values,
-    int n_samples, int n_features, const T* mean_array, T* num,
-    cudaStream_t stream) {
+    const AdjIdxT* adj_row_ptr, const AdjIdxT* adj_col_ind, const T* adj_data,
+    const DataIdxT* data_row_ptr, const DataIdxT* data_col_ind,
+    const T* data_values, int n_samples, int n_features, const T* mean_array,
+    T* num, cudaStream_t stream) {
     dim3 block(SPARSE_BLOCK_SIZE);
     dim3 grid(n_samples);
-    morans_I_num_sparse_kernel<<<grid, block, 0, stream>>>(
-        adj_row_ptr, adj_col_ind, adj_data, data_row_ptr, data_col_ind,
-        data_values, n_samples, n_features, mean_array, num);
+    morans_I_num_sparse_kernel<T, AdjIdxT, DataIdxT>
+        <<<grid, block, 0, stream>>>(adj_row_ptr, adj_col_ind, adj_data,
+                                     data_row_ptr, data_col_ind, data_values,
+                                     n_samples, n_features, mean_array, num);
     CUDA_CHECK_LAST_ERROR(morans_I_num_sparse_kernel);
 }
 
@@ -51,16 +52,18 @@ static inline void launch_gearys_dense(const T* data, const int* adj_row_ptr,
     CUDA_CHECK_LAST_ERROR(gearys_C_num_dense_kernel);
 }
 
-template <typename T>
+template <typename T, typename AdjIdxT, typename DataIdxT>
 static inline void launch_gearys_sparse(
-    const int* adj_row_ptr, const int* adj_col_ind, const T* adj_data,
-    const int* data_row_ptr, const int* data_col_ind, const T* data_values,
-    int n_samples, int n_features, T* num, cudaStream_t stream) {
+    const AdjIdxT* adj_row_ptr, const AdjIdxT* adj_col_ind, const T* adj_data,
+    const DataIdxT* data_row_ptr, const DataIdxT* data_col_ind,
+    const T* data_values, int n_samples, int n_features, T* num,
+    cudaStream_t stream) {
     dim3 block(SPARSE_BLOCK_SIZE);
     dim3 grid(n_samples);
-    gearys_C_num_sparse_kernel<<<grid, block, 0, stream>>>(
-        adj_row_ptr, adj_col_ind, adj_data, data_row_ptr, data_col_ind,
-        data_values, n_samples, n_features, num);
+    gearys_C_num_sparse_kernel<T, AdjIdxT, DataIdxT>
+        <<<grid, block, 0, stream>>>(adj_row_ptr, adj_col_ind, adj_data,
+                                     data_row_ptr, data_col_ind, data_values,
+                                     n_samples, n_features, num);
     CUDA_CHECK_LAST_ERROR(gearys_C_num_sparse_kernel);
 }
 
@@ -93,23 +96,23 @@ void def_morans_dense(nb::module_& m) {
         "adj_data"_a, "num"_a, "n_samples"_a, "n_features"_a, "stream"_a = 0);
 }
 
-template <typename T, typename Device>
+template <typename T, typename AdjIdxT, typename DataIdxT, typename Device>
 void def_morans_sparse(nb::module_& m) {
     m.def(
         "morans_sparse",
-        [](gpu_array_c<const int, Device> adj_row_ptr,
-           gpu_array_c<const int, Device> adj_col_ind,
+        [](gpu_array_c<const AdjIdxT, Device> adj_row_ptr,
+           gpu_array_c<const AdjIdxT, Device> adj_col_ind,
            gpu_array_c<const T, Device> adj_data,
-           gpu_array_c<const int, Device> data_row_ptr,
-           gpu_array_c<const int, Device> data_col_ind,
+           gpu_array_c<const DataIdxT, Device> data_row_ptr,
+           gpu_array_c<const DataIdxT, Device> data_col_ind,
            gpu_array_c<const T, Device> data_values, int n_samples,
            int n_features, gpu_array_c<const T, Device> mean_array,
            gpu_array_c<T, Device> num, std::uintptr_t stream) {
-            launch_morans_sparse(adj_row_ptr.data(), adj_col_ind.data(),
-                                 adj_data.data(), data_row_ptr.data(),
-                                 data_col_ind.data(), data_values.data(),
-                                 n_samples, n_features, mean_array.data(),
-                                 num.data(), (cudaStream_t)stream);
+            launch_morans_sparse<T, AdjIdxT, DataIdxT>(
+                adj_row_ptr.data(), adj_col_ind.data(), adj_data.data(),
+                data_row_ptr.data(), data_col_ind.data(), data_values.data(),
+                n_samples, n_features, mean_array.data(), num.data(),
+                (cudaStream_t)stream);
         },
         "adj_row_ptr"_a, "adj_col_ind"_a, "adj_data"_a, nb::kw_only(),
         "data_row_ptr"_a, "data_col_ind"_a, "data_values"_a, "n_samples"_a,
@@ -133,18 +136,18 @@ void def_gearys_dense(nb::module_& m) {
         "num"_a, "n_samples"_a, "n_features"_a, "stream"_a = 0);
 }
 
-template <typename T, typename Device>
+template <typename T, typename AdjIdxT, typename DataIdxT, typename Device>
 void def_gearys_sparse(nb::module_& m) {
     m.def(
         "gearys_sparse",
-        [](gpu_array_c<const int, Device> adj_row_ptr,
-           gpu_array_c<const int, Device> adj_col_ind,
+        [](gpu_array_c<const AdjIdxT, Device> adj_row_ptr,
+           gpu_array_c<const AdjIdxT, Device> adj_col_ind,
            gpu_array_c<const T, Device> adj_data,
-           gpu_array_c<const int, Device> data_row_ptr,
-           gpu_array_c<const int, Device> data_col_ind,
+           gpu_array_c<const DataIdxT, Device> data_row_ptr,
+           gpu_array_c<const DataIdxT, Device> data_col_ind,
            gpu_array_c<const T, Device> data_values, int n_samples,
            int n_features, gpu_array_c<T, Device> num, std::uintptr_t stream) {
-            launch_gearys_sparse(
+            launch_gearys_sparse<T, AdjIdxT, DataIdxT>(
                 adj_row_ptr.data(), adj_col_ind.data(), adj_data.data(),
                 data_row_ptr.data(), data_col_ind.data(), data_values.data(),
                 n_samples, n_features, num.data(), (cudaStream_t)stream);
@@ -175,14 +178,26 @@ void register_bindings(nb::module_& m) {
     def_morans_dense<float, Device>(m);
     def_morans_dense<double, Device>(m);
 
-    def_morans_sparse<float, Device>(m);
-    def_morans_sparse<double, Device>(m);
+    def_morans_sparse<float, int, int, Device>(m);
+    def_morans_sparse<float, int, long long, Device>(m);
+    def_morans_sparse<float, long long, int, Device>(m);
+    def_morans_sparse<float, long long, long long, Device>(m);
+    def_morans_sparse<double, int, int, Device>(m);
+    def_morans_sparse<double, int, long long, Device>(m);
+    def_morans_sparse<double, long long, int, Device>(m);
+    def_morans_sparse<double, long long, long long, Device>(m);
 
     def_gearys_dense<float, Device>(m);
     def_gearys_dense<double, Device>(m);
 
-    def_gearys_sparse<float, Device>(m);
-    def_gearys_sparse<double, Device>(m);
+    def_gearys_sparse<float, int, int, Device>(m);
+    def_gearys_sparse<float, int, long long, Device>(m);
+    def_gearys_sparse<float, long long, int, Device>(m);
+    def_gearys_sparse<float, long long, long long, Device>(m);
+    def_gearys_sparse<double, int, int, Device>(m);
+    def_gearys_sparse<double, int, long long, Device>(m);
+    def_gearys_sparse<double, long long, int, Device>(m);
+    def_gearys_sparse<double, long long, long long, Device>(m);
 
     def_pre_den_sparse<float, int, Device>(m);
     def_pre_den_sparse<float, long long, Device>(m);

@@ -2,6 +2,8 @@
 
 #include <cuda_runtime.h>
 
+constexpr int BLOCK_SIZE_MAJOR = 64;
+
 template <typename T, typename IdxT>
 __global__ void mean_var_major_kernel(const IdxT* __restrict__ indptr,
                                       const IdxT* __restrict__ indices,
@@ -15,8 +17,8 @@ __global__ void mean_var_major_kernel(const IdxT* __restrict__ indptr,
     IdxT start_idx = indptr[major_idx];
     IdxT stop_idx = indptr[major_idx + 1];
 
-    __shared__ double mean_place[64];
-    __shared__ double var_place[64];
+    __shared__ double mean_place[BLOCK_SIZE_MAJOR];
+    __shared__ double var_place[BLOCK_SIZE_MAJOR];
 
     mean_place[threadIdx.x] = 0.0;
     var_place[threadIdx.x] = 0.0;

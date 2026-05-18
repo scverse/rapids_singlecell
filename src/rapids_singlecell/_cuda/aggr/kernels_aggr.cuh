@@ -52,24 +52,21 @@ __global__ void csc_aggr_kernel(const IdxT* __restrict__ indptr,
 
 // sparse -> sparse copy (CSR by cells) row/col/value from one to another by
 // cats/mask
-template <typename T, typename IdxT>
-__global__ void csr_to_coo_kernel(const IdxT* __restrict__ indptr,
-                                  const IdxT* __restrict__ index,
-                                  const T* __restrict__ data,
-                                  int* __restrict__ row, int* __restrict__ col,
-                                  double* __restrict__ ndata,
-                                  const int* __restrict__ cats,
-                                  const bool* __restrict__ mask, int n_cells) {
+template <typename T, typename IdxT, typename OutIdxT>
+__global__ void csr_to_coo_kernel(
+    const IdxT* __restrict__ indptr, const IdxT* __restrict__ index,
+    const T* __restrict__ data, OutIdxT* __restrict__ row,
+    OutIdxT* __restrict__ col, double* __restrict__ ndata,
+    const int* __restrict__ cats, const bool* __restrict__ mask, int n_cells) {
     int cell = blockIdx.x;
     if (cell >= n_cells || !mask[cell]) return;
     IdxT start = indptr[cell];
     IdxT end = indptr[cell + 1];
     int group = cats[cell];
     for (IdxT p = start + threadIdx.x; p < end; p += blockDim.x) {
-        int g = static_cast<int>(index[p]);
         ndata[p] = static_cast<double>(data[p]);
-        row[p] = group;
-        col[p] = g;
+        row[p] = static_cast<OutIdxT>(group);
+        col[p] = static_cast<OutIdxT>(index[p]);
     }
 }
 
