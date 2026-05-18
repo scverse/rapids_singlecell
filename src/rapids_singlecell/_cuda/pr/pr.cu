@@ -93,7 +93,7 @@ static inline void launch_dense_hvg_res(const T* data, const T* sums_genes,
 }
 
 // Helper to define sparse_norm_res_csc for a given dtype and index type
-template <typename IdxT, typename T, typename Device>
+template <typename T, typename IdxT, typename Device>
 void def_sparse_norm_res_csc(nb::module_& m) {
     m.def(
         "sparse_norm_res_csc",
@@ -115,7 +115,7 @@ void def_sparse_norm_res_csc(nb::module_& m) {
 }
 
 // Helper to define sparse_norm_res_csr for a given dtype and index type
-template <typename IdxT, typename T, typename Device>
+template <typename T, typename IdxT, typename Device>
 void def_sparse_norm_res_csr(nb::module_& m) {
     m.def(
         "sparse_norm_res_csr",
@@ -156,7 +156,7 @@ void def_dense_norm_res(nb::module_& m) {
 }
 
 // Helper to define sparse_sum_csc for a given dtype and index type
-template <typename IdxT, typename T, typename Device>
+template <typename T, typename IdxT, typename Device>
 void def_sparse_sum_csc(nb::module_& m) {
     m.def(
         "sparse_sum_csc",
@@ -174,7 +174,7 @@ void def_sparse_sum_csc(nb::module_& m) {
 }
 
 // Helper to define csc_hvg_res for a given dtype and index type
-template <typename IdxT, typename T, typename Device>
+template <typename T, typename IdxT, typename Device>
 void def_csc_hvg_res(nb::module_& m) {
     m.def(
         "csc_hvg_res",
@@ -218,32 +218,32 @@ void def_dense_hvg_res(nb::module_& m) {
 template <typename Device>
 void register_bindings(nb::module_& m) {
     // sparse_norm_res_csc
-    def_sparse_norm_res_csc<int, float, Device>(m);
-    def_sparse_norm_res_csc<int, double, Device>(m);
-    def_sparse_norm_res_csc<long long, float, Device>(m);
-    def_sparse_norm_res_csc<long long, double, Device>(m);
+    def_sparse_norm_res_csc<float, int, Device>(m);
+    def_sparse_norm_res_csc<double, int, Device>(m);
+    def_sparse_norm_res_csc<float, long long, Device>(m);
+    def_sparse_norm_res_csc<double, long long, Device>(m);
 
     // sparse_norm_res_csr
-    def_sparse_norm_res_csr<int, float, Device>(m);
-    def_sparse_norm_res_csr<int, double, Device>(m);
-    def_sparse_norm_res_csr<long long, float, Device>(m);
-    def_sparse_norm_res_csr<long long, double, Device>(m);
+    def_sparse_norm_res_csr<float, int, Device>(m);
+    def_sparse_norm_res_csr<double, int, Device>(m);
+    def_sparse_norm_res_csr<float, long long, Device>(m);
+    def_sparse_norm_res_csr<double, long long, Device>(m);
 
     // dense_norm_res
     def_dense_norm_res<float, Device>(m);
     def_dense_norm_res<double, Device>(m);
 
     // sparse_sum_csc
-    def_sparse_sum_csc<int, float, Device>(m);
-    def_sparse_sum_csc<int, double, Device>(m);
-    def_sparse_sum_csc<long long, float, Device>(m);
-    def_sparse_sum_csc<long long, double, Device>(m);
+    def_sparse_sum_csc<float, int, Device>(m);
+    def_sparse_sum_csc<double, int, Device>(m);
+    def_sparse_sum_csc<float, long long, Device>(m);
+    def_sparse_sum_csc<double, long long, Device>(m);
 
     // csc_hvg_res
-    def_csc_hvg_res<int, float, Device>(m);
-    def_csc_hvg_res<int, double, Device>(m);
-    def_csc_hvg_res<long long, float, Device>(m);
-    def_csc_hvg_res<long long, double, Device>(m);
+    def_csc_hvg_res<float, int, Device>(m);
+    def_csc_hvg_res<double, int, Device>(m);
+    def_csc_hvg_res<float, long long, Device>(m);
+    def_csc_hvg_res<double, long long, Device>(m);
 
     // dense_hvg_res - always F-contiguous (Python calls cp.asfortranarray)
     def_dense_hvg_res<float, Device>(m);

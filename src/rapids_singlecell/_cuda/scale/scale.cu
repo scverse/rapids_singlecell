@@ -59,7 +59,7 @@ static inline void launch_dense_scale_diff(T* data, const T* std,
     CUDA_CHECK_LAST_ERROR(dense_scale_diff_kernel);
 }
 
-template <typename IdxT, typename T, typename Device>
+template <typename T, typename IdxT, typename Device>
 void def_csc_scale_diff(nb::module_& m) {
     m.def(
         "csc_scale_diff",
@@ -73,7 +73,7 @@ void def_csc_scale_diff(nb::module_& m) {
         "stream"_a = 0);
 }
 
-template <typename IdxT, typename T, typename Device>
+template <typename T, typename IdxT, typename Device>
 void def_csr_scale_diff(nb::module_& m) {
     m.def(
         "csr_scale_diff",
@@ -123,15 +123,15 @@ void def_dense_scale_diff(nb::module_& m) {
 
 template <typename Device>
 void register_bindings(nb::module_& m) {
-    def_csc_scale_diff<int, float, Device>(m);
-    def_csc_scale_diff<int, double, Device>(m);
-    def_csc_scale_diff<long long, float, Device>(m);
-    def_csc_scale_diff<long long, double, Device>(m);
+    def_csc_scale_diff<float, int, Device>(m);
+    def_csc_scale_diff<double, int, Device>(m);
+    def_csc_scale_diff<float, long long, Device>(m);
+    def_csc_scale_diff<double, long long, Device>(m);
 
-    def_csr_scale_diff<int, float, Device>(m);
-    def_csr_scale_diff<int, double, Device>(m);
-    def_csr_scale_diff<long long, float, Device>(m);
-    def_csr_scale_diff<long long, double, Device>(m);
+    def_csr_scale_diff<float, int, Device>(m);
+    def_csr_scale_diff<double, int, Device>(m);
+    def_csr_scale_diff<float, long long, Device>(m);
+    def_csr_scale_diff<double, long long, Device>(m);
 
     def_dense_scale_center_diff<float, Device>(m);
     def_dense_scale_center_diff<double, Device>(m);

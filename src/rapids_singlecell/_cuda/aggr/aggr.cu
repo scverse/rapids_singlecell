@@ -40,7 +40,7 @@ static inline void launch_dense_aggr_C(const T* data, double* out,
                                        size_t n_cells, size_t n_genes,
                                        size_t n_groups, cudaStream_t stream) {
     dim3 block(BLOCK_SIZE_DENSE);
-    dim3 grid(strided_grid((long long)(n_cells * n_genes), BLOCK_SIZE_DENSE));
+    dim3 grid(strided_grid((long long)n_cells * n_genes, BLOCK_SIZE_DENSE));
     dense_aggr_kernel_C<T><<<grid, block, 0, stream>>>(
         data, out, cats, mask, n_cells, n_genes, n_groups);
     CUDA_CHECK_LAST_ERROR(dense_aggr_kernel_C);
@@ -52,7 +52,7 @@ static inline void launch_dense_aggr_F(const T* data, double* out,
                                        size_t n_cells, size_t n_genes,
                                        size_t n_groups, cudaStream_t stream) {
     dim3 block(BLOCK_SIZE_DENSE);
-    dim3 grid(strided_grid((long long)(n_cells * n_genes), BLOCK_SIZE_DENSE));
+    dim3 grid(strided_grid((long long)n_cells * n_genes, BLOCK_SIZE_DENSE));
     dense_aggr_kernel_F<T><<<grid, block, 0, stream>>>(
         data, out, cats, mask, n_cells, n_genes, n_groups);
     CUDA_CHECK_LAST_ERROR(dense_aggr_kernel_F);

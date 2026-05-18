@@ -42,9 +42,9 @@ static inline void dispatch_sparse2dense(const IdxT* indptr, const IdxT* index,
     }
 }
 
-// Helper to define sparse2dense for a given index type, dtype and output
+// Helper to define sparse2dense for a given dtype, index type and output
 // contiguity
-template <typename IdxT, typename T, typename OutContig, typename Device>
+template <typename T, typename IdxT, typename OutContig, typename Device>
 void def_sparse2dense(nb::module_& m) {
     m.def(
         "sparse2dense",
@@ -65,14 +65,14 @@ void def_sparse2dense(nb::module_& m) {
 template <typename Device>
 void register_bindings(nb::module_& m) {
     // F-order output must come before C-order for proper dispatch
-    def_sparse2dense<int, float, nb::f_contig, Device>(m);
-    def_sparse2dense<int, float, nb::c_contig, Device>(m);
-    def_sparse2dense<int, double, nb::f_contig, Device>(m);
-    def_sparse2dense<int, double, nb::c_contig, Device>(m);
-    def_sparse2dense<long long, float, nb::f_contig, Device>(m);
-    def_sparse2dense<long long, float, nb::c_contig, Device>(m);
-    def_sparse2dense<long long, double, nb::f_contig, Device>(m);
-    def_sparse2dense<long long, double, nb::c_contig, Device>(m);
+    def_sparse2dense<float, int, nb::f_contig, Device>(m);
+    def_sparse2dense<float, int, nb::c_contig, Device>(m);
+    def_sparse2dense<double, int, nb::f_contig, Device>(m);
+    def_sparse2dense<double, int, nb::c_contig, Device>(m);
+    def_sparse2dense<float, long long, nb::f_contig, Device>(m);
+    def_sparse2dense<float, long long, nb::c_contig, Device>(m);
+    def_sparse2dense<double, long long, nb::f_contig, Device>(m);
+    def_sparse2dense<double, long long, nb::c_contig, Device>(m);
 }
 
 NB_MODULE(_sparse2dense_cuda, m) {

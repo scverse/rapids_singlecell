@@ -214,7 +214,7 @@ class Aggregate:
             self.data = self.data.tocsr()
 
         index_dtype = cp.result_type(self.data.indptr.dtype, self.data.indices.dtype)
-        if index_dtype.itemsize < 8 and self.data.nnz > 2_147_483_647:
+        if index_dtype.itemsize < 8 and self.data.nnz > cp.iinfo(cp.int32).max:
             index_dtype = cp.dtype(cp.int64)
 
         src_row = cp.zeros(self.data.nnz, dtype=index_dtype)
