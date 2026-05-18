@@ -90,79 +90,54 @@ void def_csr_scale_diff(nb::module_& m) {
         "clipper"_a, "nrows"_a, "stream"_a = 0);
 }
 
+template <typename T, typename Device>
+void def_dense_scale_center_diff(nb::module_& m) {
+    m.def(
+        "dense_scale_center_diff",
+        [](gpu_array_c<T, Device> data, gpu_array_c<const T, Device> mean,
+           gpu_array_c<const T, Device> std,
+           gpu_array_c<const int, Device> mask, T clipper, long long nrows,
+           long long ncols, std::uintptr_t stream) {
+            launch_dense_scale_center_diff<T>(
+                data.data(), mean.data(), std.data(), mask.data(), clipper,
+                nrows, ncols, (cudaStream_t)stream);
+        },
+        "data"_a, "mean"_a, "std"_a, "mask"_a, nb::kw_only(), "clipper"_a,
+        "nrows"_a, "ncols"_a, "stream"_a = 0);
+}
+
+template <typename T, typename Device>
+void def_dense_scale_diff(nb::module_& m) {
+    m.def(
+        "dense_scale_diff",
+        [](gpu_array_c<T, Device> data, gpu_array_c<const T, Device> std,
+           gpu_array_c<const int, Device> mask, T clipper, long long nrows,
+           long long ncols, std::uintptr_t stream) {
+            launch_dense_scale_diff<T>(data.data(), std.data(), mask.data(),
+                                       clipper, nrows, ncols,
+                                       (cudaStream_t)stream);
+        },
+        "data"_a, "std"_a, "mask"_a, nb::kw_only(), "clipper"_a, "nrows"_a,
+        "ncols"_a, "stream"_a = 0);
+}
+
 template <typename Device>
 void register_bindings(nb::module_& m) {
-    // csc_scale_diff - int32 indices
     def_csc_scale_diff<int, float, Device>(m);
     def_csc_scale_diff<int, double, Device>(m);
-    // csc_scale_diff - int64 indices
     def_csc_scale_diff<long long, float, Device>(m);
     def_csc_scale_diff<long long, double, Device>(m);
 
-    // csr_scale_diff - int32 indices
     def_csr_scale_diff<int, float, Device>(m);
     def_csr_scale_diff<int, double, Device>(m);
-    // csr_scale_diff - int64 indices
     def_csr_scale_diff<long long, float, Device>(m);
     def_csr_scale_diff<long long, double, Device>(m);
 
-    // dense_scale_center_diff - float32
-    m.def(
-        "dense_scale_center_diff",
-        [](gpu_array_c<float, Device> data,
-           gpu_array_c<const float, Device> mean,
-           gpu_array_c<const float, Device> std,
-           gpu_array_c<const int, Device> mask, float clipper, long long nrows,
-           long long ncols, std::uintptr_t stream) {
-            launch_dense_scale_center_diff<float>(
-                data.data(), mean.data(), std.data(), mask.data(), clipper,
-                nrows, ncols, (cudaStream_t)stream);
-        },
-        "data"_a, "mean"_a, "std"_a, "mask"_a, nb::kw_only(), "clipper"_a,
-        "nrows"_a, "ncols"_a, "stream"_a = 0);
+    def_dense_scale_center_diff<float, Device>(m);
+    def_dense_scale_center_diff<double, Device>(m);
 
-    // dense_scale_center_diff - float64
-    m.def(
-        "dense_scale_center_diff",
-        [](gpu_array_c<double, Device> data,
-           gpu_array_c<const double, Device> mean,
-           gpu_array_c<const double, Device> std,
-           gpu_array_c<const int, Device> mask, double clipper, long long nrows,
-           long long ncols, std::uintptr_t stream) {
-            launch_dense_scale_center_diff<double>(
-                data.data(), mean.data(), std.data(), mask.data(), clipper,
-                nrows, ncols, (cudaStream_t)stream);
-        },
-        "data"_a, "mean"_a, "std"_a, "mask"_a, nb::kw_only(), "clipper"_a,
-        "nrows"_a, "ncols"_a, "stream"_a = 0);
-
-    // dense_scale_diff - float32
-    m.def(
-        "dense_scale_diff",
-        [](gpu_array_c<float, Device> data,
-           gpu_array_c<const float, Device> std,
-           gpu_array_c<const int, Device> mask, float clipper, long long nrows,
-           long long ncols, std::uintptr_t stream) {
-            launch_dense_scale_diff<float>(data.data(), std.data(), mask.data(),
-                                           clipper, nrows, ncols,
-                                           (cudaStream_t)stream);
-        },
-        "data"_a, "std"_a, "mask"_a, nb::kw_only(), "clipper"_a, "nrows"_a,
-        "ncols"_a, "stream"_a = 0);
-
-    // dense_scale_diff - float64
-    m.def(
-        "dense_scale_diff",
-        [](gpu_array_c<double, Device> data,
-           gpu_array_c<const double, Device> std,
-           gpu_array_c<const int, Device> mask, double clipper, long long nrows,
-           long long ncols, std::uintptr_t stream) {
-            launch_dense_scale_diff<double>(data.data(), std.data(),
-                                            mask.data(), clipper, nrows, ncols,
-                                            (cudaStream_t)stream);
-        },
-        "data"_a, "std"_a, "mask"_a, nb::kw_only(), "clipper"_a, "nrows"_a,
-        "ncols"_a, "stream"_a = 0);
+    def_dense_scale_diff<float, Device>(m);
+    def_dense_scale_diff<double, Device>(m);
 }
 
 NB_MODULE(_scale_cuda, m) {

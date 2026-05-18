@@ -55,130 +55,77 @@ static inline void launch_check_zero_genes(const IdxT* indices, int* genes,
     }
 }
 
-template <typename Device>
-void register_bindings(nb::module_& m) {
-    // gram_csr_upper - int32 indices
+template <typename T, typename IdxT, typename Device>
+void def_gram_csr_upper(nb::module_& m) {
     m.def(
         "gram_csr_upper",
-        [](gpu_array_c<const int, Device> indptr,
-           gpu_array_c<const int, Device> index,
-           gpu_array_c<const float, Device> data, int nrows, int ncols,
-           gpu_array_c<float, Device> out, std::uintptr_t stream) {
-            launch_gram_csr_upper<float, int>(indptr.data(), index.data(),
-                                              data.data(), nrows, ncols,
-                                              out.data(), (cudaStream_t)stream);
+        [](gpu_array_c<const IdxT, Device> indptr,
+           gpu_array_c<const IdxT, Device> index,
+           gpu_array_c<const T, Device> data, int nrows, int ncols,
+           gpu_array_c<T, Device> out, std::uintptr_t stream) {
+            launch_gram_csr_upper<T, IdxT>(indptr.data(), index.data(),
+                                           data.data(), nrows, ncols,
+                                           out.data(), (cudaStream_t)stream);
         },
         "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "nrows"_a, "ncols"_a,
         "out"_a, "stream"_a = 0);
+}
 
-    m.def(
-        "gram_csr_upper",
-        [](gpu_array_c<const int, Device> indptr,
-           gpu_array_c<const int, Device> index,
-           gpu_array_c<const double, Device> data, int nrows, int ncols,
-           gpu_array_c<double, Device> out, std::uintptr_t stream) {
-            launch_gram_csr_upper<double, int>(
-                indptr.data(), index.data(), data.data(), nrows, ncols,
-                out.data(), (cudaStream_t)stream);
-        },
-        "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "nrows"_a, "ncols"_a,
-        "out"_a, "stream"_a = 0);
-
-    // gram_csr_upper - int64 indices
-    m.def(
-        "gram_csr_upper",
-        [](gpu_array_c<const long long, Device> indptr,
-           gpu_array_c<const long long, Device> index,
-           gpu_array_c<const float, Device> data, int nrows, int ncols,
-           gpu_array_c<float, Device> out, std::uintptr_t stream) {
-            launch_gram_csr_upper<float, long long>(
-                indptr.data(), index.data(), data.data(), nrows, ncols,
-                out.data(), (cudaStream_t)stream);
-        },
-        "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "nrows"_a, "ncols"_a,
-        "out"_a, "stream"_a = 0);
-
-    m.def(
-        "gram_csr_upper",
-        [](gpu_array_c<const long long, Device> indptr,
-           gpu_array_c<const long long, Device> index,
-           gpu_array_c<const double, Device> data, int nrows, int ncols,
-           gpu_array_c<double, Device> out, std::uintptr_t stream) {
-            launch_gram_csr_upper<double, long long>(
-                indptr.data(), index.data(), data.data(), nrows, ncols,
-                out.data(), (cudaStream_t)stream);
-        },
-        "indptr"_a, "index"_a, "data"_a, nb::kw_only(), "nrows"_a, "ncols"_a,
-        "out"_a, "stream"_a = 0);
-
-    // copy_upper_to_lower - float32
+template <typename T, typename Device>
+void def_copy_upper_to_lower(nb::module_& m) {
     m.def(
         "copy_upper_to_lower",
-        [](gpu_array_c<float, Device> out, int ncols, std::uintptr_t stream) {
-            launch_copy_upper_to_lower<float>(out.data(), ncols,
-                                              (cudaStream_t)stream);
+        [](gpu_array_c<T, Device> out, int ncols, std::uintptr_t stream) {
+            launch_copy_upper_to_lower<T>(out.data(), ncols,
+                                          (cudaStream_t)stream);
         },
         nb::kw_only(), "out"_a, "ncols"_a, "stream"_a = 0);
+}
 
-    // copy_upper_to_lower - float64
-    m.def(
-        "copy_upper_to_lower",
-        [](gpu_array_c<double, Device> out, int ncols, std::uintptr_t stream) {
-            launch_copy_upper_to_lower<double>(out.data(), ncols,
-                                               (cudaStream_t)stream);
-        },
-        nb::kw_only(), "out"_a, "ncols"_a, "stream"_a = 0);
-
-    // cov_from_gram - float32
+template <typename T, typename Device>
+void def_cov_from_gram(nb::module_& m) {
     m.def(
         "cov_from_gram",
-        [](gpu_array_c<const float, Device> gram,
-           gpu_array_c<const float, Device> meanx,
-           gpu_array_c<const float, Device> meany,
-           gpu_array_c<float, Device> cov, int ncols, std::uintptr_t stream) {
-            launch_cov_from_gram<float>(cov.data(), gram.data(), meanx.data(),
-                                        meany.data(), ncols,
-                                        (cudaStream_t)stream);
+        [](gpu_array_c<const T, Device> gram,
+           gpu_array_c<const T, Device> meanx,
+           gpu_array_c<const T, Device> meany, gpu_array_c<T, Device> cov,
+           int ncols, std::uintptr_t stream) {
+            launch_cov_from_gram<T>(cov.data(), gram.data(), meanx.data(),
+                                    meany.data(), ncols, (cudaStream_t)stream);
         },
         "gram"_a, "meanx"_a, "meany"_a, nb::kw_only(), "cov"_a, "ncols"_a,
         "stream"_a = 0);
+}
 
-    // cov_from_gram - float64
-    m.def(
-        "cov_from_gram",
-        [](gpu_array_c<const double, Device> gram,
-           gpu_array_c<const double, Device> meanx,
-           gpu_array_c<const double, Device> meany,
-           gpu_array_c<double, Device> cov, int ncols, std::uintptr_t stream) {
-            launch_cov_from_gram<double>(cov.data(), gram.data(), meanx.data(),
-                                         meany.data(), ncols,
-                                         (cudaStream_t)stream);
-        },
-        "gram"_a, "meanx"_a, "meany"_a, nb::kw_only(), "cov"_a, "ncols"_a,
-        "stream"_a = 0);
-
-    // check_zero_genes - int32 indices
+template <typename IdxT, typename Device>
+void def_check_zero_genes(nb::module_& m) {
     m.def(
         "check_zero_genes",
-        [](gpu_array_c<const int, Device> indices, gpu_array_c<int, Device> out,
-           long long nnz, int num_genes, std::uintptr_t stream) {
-            launch_check_zero_genes<int>(indices.data(), out.data(), nnz,
-                                         num_genes, (cudaStream_t)stream);
-        },
-        "indices"_a, nb::kw_only(), "out"_a, "nnz"_a, "num_genes"_a,
-        "stream"_a = 0);
-
-    // check_zero_genes - int64 indices
-    m.def(
-        "check_zero_genes",
-        [](gpu_array_c<const long long, Device> indices,
+        [](gpu_array_c<const IdxT, Device> indices,
            gpu_array_c<int, Device> out, long long nnz, int num_genes,
            std::uintptr_t stream) {
-            launch_check_zero_genes<long long>(indices.data(), out.data(), nnz,
-                                               num_genes, (cudaStream_t)stream);
+            launch_check_zero_genes<IdxT>(indices.data(), out.data(), nnz,
+                                          num_genes, (cudaStream_t)stream);
         },
         "indices"_a, nb::kw_only(), "out"_a, "nnz"_a, "num_genes"_a,
         "stream"_a = 0);
+}
+
+template <typename Device>
+void register_bindings(nb::module_& m) {
+    def_gram_csr_upper<float, int, Device>(m);
+    def_gram_csr_upper<float, long long, Device>(m);
+    def_gram_csr_upper<double, int, Device>(m);
+    def_gram_csr_upper<double, long long, Device>(m);
+
+    def_copy_upper_to_lower<float, Device>(m);
+    def_copy_upper_to_lower<double, Device>(m);
+
+    def_cov_from_gram<float, Device>(m);
+    def_cov_from_gram<double, Device>(m);
+
+    def_check_zero_genes<int, Device>(m);
+    def_check_zero_genes<long long, Device>(m);
 }
 
 NB_MODULE(_spca_cuda, m) {

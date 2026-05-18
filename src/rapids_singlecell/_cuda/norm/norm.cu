@@ -189,89 +189,69 @@ void def_prescaled_mul_csr(nb::module_& m) {
         "stream"_a = 0);
 }
 
+template <typename T, typename Device>
+void def_mul_dense(nb::module_& m) {
+    m.def(
+        "mul_dense",
+        [](gpu_array_c<T, Device> data, int nrows, int ncols, T target_sum,
+           std::uintptr_t stream) {
+            launch_dense_row_scale<T>(data.data(), nrows, ncols, target_sum,
+                                      (cudaStream_t)stream);
+        },
+        "data"_a, nb::kw_only(), "nrows"_a, "ncols"_a, "target_sum"_a,
+        "stream"_a = 0);
+}
+
+template <typename T, typename Device>
+void def_prescaled_mul_dense(nb::module_& m) {
+    m.def(
+        "prescaled_mul_dense",
+        [](gpu_array_c<T, Device> data, gpu_array_c<const T, Device> scales,
+           int nrows, int ncols, std::uintptr_t stream) {
+            launch_prescaled_mul_dense<T>(data.data(), scales.data(), nrows,
+                                          ncols, (cudaStream_t)stream);
+        },
+        "data"_a, nb::kw_only(), "scales"_a, "nrows"_a, "ncols"_a,
+        "stream"_a = 0);
+}
+
 template <typename Device>
 void register_bindings(nb::module_& m) {
-    // mul_dense - float32
-    m.def(
-        "mul_dense",
-        [](gpu_array_c<float, Device> data, int nrows, int ncols,
-           float target_sum, std::uintptr_t stream) {
-            launch_dense_row_scale<float>(data.data(), nrows, ncols, target_sum,
-                                          (cudaStream_t)stream);
-        },
-        "data"_a, nb::kw_only(), "nrows"_a, "ncols"_a, "target_sum"_a,
-        "stream"_a = 0);
+    def_mul_dense<float, Device>(m);
+    def_mul_dense<double, Device>(m);
 
-    // mul_dense - float64
-    m.def(
-        "mul_dense",
-        [](gpu_array_c<double, Device> data, int nrows, int ncols,
-           double target_sum, std::uintptr_t stream) {
-            launch_dense_row_scale<double>(data.data(), nrows, ncols,
-                                           target_sum, (cudaStream_t)stream);
-        },
-        "data"_a, nb::kw_only(), "nrows"_a, "ncols"_a, "target_sum"_a,
-        "stream"_a = 0);
-
-    // mul_csr - float32/float64 x int32/int64
     def_mul_csr<float, int, Device>(m);
     def_mul_csr<float, long long, Device>(m);
     def_mul_csr<double, int, Device>(m);
     def_mul_csr<double, long long, Device>(m);
 
-    // sum_major - float32/float64 x int32/int64
     def_sum_major<float, int, Device>(m);
     def_sum_major<float, long long, Device>(m);
     def_sum_major<double, int, Device>(m);
     def_sum_major<double, long long, Device>(m);
 
-    // find_hi_genes_csr - float32/float64 x int32/int64
     def_find_hi_genes_csr<float, int, Device>(m);
     def_find_hi_genes_csr<float, long long, Device>(m);
     def_find_hi_genes_csr<double, int, Device>(m);
     def_find_hi_genes_csr<double, long long, Device>(m);
 
-    // masked_mul_csr - float32/float64 x int32/int64
     def_masked_mul_csr<float, int, Device>(m);
     def_masked_mul_csr<float, long long, Device>(m);
     def_masked_mul_csr<double, int, Device>(m);
     def_masked_mul_csr<double, long long, Device>(m);
 
-    // masked_sum_major - float32/float64 x int32/int64
     def_masked_sum_major<float, int, Device>(m);
     def_masked_sum_major<float, long long, Device>(m);
     def_masked_sum_major<double, int, Device>(m);
     def_masked_sum_major<double, long long, Device>(m);
 
-    // prescaled_mul_csr - float32/float64 x int32/int64
     def_prescaled_mul_csr<float, int, Device>(m);
     def_prescaled_mul_csr<float, long long, Device>(m);
     def_prescaled_mul_csr<double, int, Device>(m);
     def_prescaled_mul_csr<double, long long, Device>(m);
 
-    // prescaled_mul_dense - float32
-    m.def(
-        "prescaled_mul_dense",
-        [](gpu_array_c<float, Device> data,
-           gpu_array_c<const float, Device> scales, int nrows, int ncols,
-           std::uintptr_t stream) {
-            launch_prescaled_mul_dense<float>(data.data(), scales.data(), nrows,
-                                              ncols, (cudaStream_t)stream);
-        },
-        "data"_a, nb::kw_only(), "scales"_a, "nrows"_a, "ncols"_a,
-        "stream"_a = 0);
-
-    // prescaled_mul_dense - float64
-    m.def(
-        "prescaled_mul_dense",
-        [](gpu_array_c<double, Device> data,
-           gpu_array_c<const double, Device> scales, int nrows, int ncols,
-           std::uintptr_t stream) {
-            launch_prescaled_mul_dense<double>(
-                data.data(), scales.data(), nrows, ncols, (cudaStream_t)stream);
-        },
-        "data"_a, nb::kw_only(), "scales"_a, "nrows"_a, "ncols"_a,
-        "stream"_a = 0);
+    def_prescaled_mul_dense<float, Device>(m);
+    def_prescaled_mul_dense<double, Device>(m);
 }
 
 NB_MODULE(_norm_cuda, m) {
