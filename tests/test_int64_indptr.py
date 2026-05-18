@@ -617,7 +617,7 @@ def test_csc_scale_diff(dtype):
 @pytest.mark.parametrize("dtype", DTYPES)
 def test_csr_scale_diff(dtype):
     std = cp.full(N_COLS, 2.0, dtype=dtype)
-    mask = cp.ones(N_COLS, dtype=cp.int32)
+    mask = cp.ones(N_ROWS, dtype=cp.int32)
     outs = {}
     for idx_dtype in (np.int32, np.int64):
         A = _make_csr(dtype, idx_dtype)
@@ -992,7 +992,7 @@ def test_csr_hist(dtype):
     outs = {}
     for idx_dtype in (np.int32, np.int64):
         A = _make_csr(dtype, idx_dtype)
-        hist = cp.zeros((N_COLS, n_groups, n_bins), dtype=cp.uint32)
+        hist = cp.zeros((N_COLS, n_groups, n_bins + 1), dtype=cp.uint32)
         _wb.csr_hist(
             A.data,
             A.indices,
@@ -1020,7 +1020,7 @@ def test_csc_hist(dtype):
     outs = {}
     for idx_dtype in (np.int32, np.int64):
         A = _make_csc(dtype, idx_dtype)
-        hist = cp.zeros((N_COLS, n_groups, n_bins), dtype=cp.uint32)
+        hist = cp.zeros((N_COLS, n_groups, n_bins + 1), dtype=cp.uint32)
         _wb.csc_hist(
             A.data,
             A.indices,
