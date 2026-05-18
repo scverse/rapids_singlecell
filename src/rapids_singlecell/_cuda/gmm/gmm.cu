@@ -206,142 +206,83 @@ static inline void launch_m_step(const T* resp, const T* X, const T* ones,
     }
 }
 
+template <typename T, typename Device>
+void def_e_step(nb::module_& m) {
+    m.def(
+        "e_step",
+        [](gpu_array_c<const T, Device> X, gpu_array_c<const T, Device> weights,
+           gpu_array_c<const T, Device> means,
+           gpu_array_c<const T, Device> prec_chol,
+           gpu_array_c<const T, Device> log_det_half,
+           gpu_array_c<T, Device> log_prob, gpu_array_c<T, Device> resp,
+           gpu_array_c<T, Device> ll_per_cell, int n, int d, int K,
+           std::uintptr_t stream) {
+            launch_e_step<T>(X.data(), weights.data(), means.data(),
+                             prec_chol.data(), log_det_half.data(), n, d, K,
+                             log_prob.data(), resp.data(), ll_per_cell.data(),
+                             (cudaStream_t)stream);
+        },
+        "X"_a, "weights"_a, "means"_a, "prec_chol"_a, "log_det_half"_a,
+        "log_prob"_a, "resp"_a, "ll_per_cell"_a, nb::kw_only(), "n"_a, "d"_a,
+        "K"_a, "stream"_a = 0);
+}
+
+template <typename T, typename Device>
+void def_e_step_cublas(nb::module_& m) {
+    m.def(
+        "e_step_cublas",
+        [](gpu_array_c<const T, Device> X, gpu_array_c<const T, Device> weights,
+           gpu_array_c<const T, Device> means,
+           gpu_array_c<const T, Device> prec_chol,
+           gpu_array_c<const T, Device> log_det_half,
+           gpu_array_c<T, Device> centered_workspace,
+           gpu_array_c<T, Device> y_workspace, gpu_array_c<T, Device> log_prob,
+           gpu_array_c<T, Device> resp, gpu_array_c<T, Device> ll_per_cell,
+           int n, int d, int K, std::uintptr_t stream, std::uintptr_t handle) {
+            launch_e_step_cublas<T>(
+                X.data(), weights.data(), means.data(), prec_chol.data(),
+                log_det_half.data(), n, d, K, centered_workspace.data(),
+                y_workspace.data(), log_prob.data(), resp.data(),
+                ll_per_cell.data(), (cudaStream_t)stream,
+                (cublasHandle_t)handle);
+        },
+        "X"_a, "weights"_a, "means"_a, "prec_chol"_a, "log_det_half"_a,
+        "centered_workspace"_a, "y_workspace"_a, "log_prob"_a, "resp"_a,
+        "ll_per_cell"_a, nb::kw_only(), "n"_a, "d"_a, "K"_a, "stream"_a = 0,
+        "handle"_a);
+}
+
+template <typename T, typename Device>
+void def_m_step(nb::module_& m) {
+    m.def(
+        "m_step",
+        [](gpu_array_c<const T, Device> resp, gpu_array_c<const T, Device> X,
+           gpu_array_c<const T, Device> ones, gpu_array_c<T, Device> weights,
+           gpu_array_c<T, Device> means, gpu_array_c<T, Device> covariances,
+           gpu_array_c<T, Device> N_k_workspace,
+           gpu_array_c<T, Device> num_workspace,
+           gpu_array_c<T, Device> centered_workspace, int n, int d, int K,
+           T reg_covar, std::uintptr_t stream, std::uintptr_t handle) {
+            launch_m_step<T>(resp.data(), X.data(), ones.data(), n, d, K,
+                             reg_covar, weights.data(), means.data(),
+                             covariances.data(), N_k_workspace.data(),
+                             num_workspace.data(), centered_workspace.data(),
+                             (cudaStream_t)stream, (cublasHandle_t)handle);
+        },
+        "resp"_a, "X"_a, "ones"_a, "weights"_a, "means"_a, "covariances"_a,
+        "N_k_workspace"_a, "num_workspace"_a, "centered_workspace"_a,
+        nb::kw_only(), "n"_a, "d"_a, "K"_a, "reg_covar"_a, "stream"_a = 0,
+        "handle"_a);
+}
+
 template <typename Device>
 void register_bindings(nb::module_& m) {
-    m.def(
-        "e_step",
-        [](gpu_array_c<const float, Device> X,
-           gpu_array_c<const float, Device> weights,
-           gpu_array_c<const float, Device> means,
-           gpu_array_c<const float, Device> prec_chol,
-           gpu_array_c<const float, Device> log_det_half,
-           gpu_array_c<float, Device> log_prob, gpu_array_c<float, Device> resp,
-           gpu_array_c<float, Device> ll_per_cell, int n, int d, int K,
-           std::uintptr_t stream) {
-            launch_e_step<float>(X.data(), weights.data(), means.data(),
-                                 prec_chol.data(), log_det_half.data(), n, d, K,
-                                 log_prob.data(), resp.data(),
-                                 ll_per_cell.data(), (cudaStream_t)stream);
-        },
-        "X"_a, "weights"_a, "means"_a, "prec_chol"_a, "log_det_half"_a,
-        "log_prob"_a, "resp"_a, "ll_per_cell"_a, nb::kw_only(), "n"_a, "d"_a,
-        "K"_a, "stream"_a = 0);
-
-    m.def(
-        "e_step",
-        [](gpu_array_c<const double, Device> X,
-           gpu_array_c<const double, Device> weights,
-           gpu_array_c<const double, Device> means,
-           gpu_array_c<const double, Device> prec_chol,
-           gpu_array_c<const double, Device> log_det_half,
-           gpu_array_c<double, Device> log_prob,
-           gpu_array_c<double, Device> resp,
-           gpu_array_c<double, Device> ll_per_cell, int n, int d, int K,
-           std::uintptr_t stream) {
-            launch_e_step<double>(X.data(), weights.data(), means.data(),
-                                  prec_chol.data(), log_det_half.data(), n, d,
-                                  K, log_prob.data(), resp.data(),
-                                  ll_per_cell.data(), (cudaStream_t)stream);
-        },
-        "X"_a, "weights"_a, "means"_a, "prec_chol"_a, "log_det_half"_a,
-        "log_prob"_a, "resp"_a, "ll_per_cell"_a, nb::kw_only(), "n"_a, "d"_a,
-        "K"_a, "stream"_a = 0);
-
-    m.def(
-        "e_step_cublas",
-        [](gpu_array_c<const float, Device> X,
-           gpu_array_c<const float, Device> weights,
-           gpu_array_c<const float, Device> means,
-           gpu_array_c<const float, Device> prec_chol,
-           gpu_array_c<const float, Device> log_det_half,
-           gpu_array_c<float, Device> centered_workspace,
-           gpu_array_c<float, Device> y_workspace,
-           gpu_array_c<float, Device> log_prob, gpu_array_c<float, Device> resp,
-           gpu_array_c<float, Device> ll_per_cell, int n, int d, int K,
-           std::uintptr_t stream, std::uintptr_t handle) {
-            launch_e_step_cublas<float>(
-                X.data(), weights.data(), means.data(), prec_chol.data(),
-                log_det_half.data(), n, d, K, centered_workspace.data(),
-                y_workspace.data(), log_prob.data(), resp.data(),
-                ll_per_cell.data(), (cudaStream_t)stream,
-                (cublasHandle_t)handle);
-        },
-        "X"_a, "weights"_a, "means"_a, "prec_chol"_a, "log_det_half"_a,
-        "centered_workspace"_a, "y_workspace"_a, "log_prob"_a, "resp"_a,
-        "ll_per_cell"_a, nb::kw_only(), "n"_a, "d"_a, "K"_a, "stream"_a = 0,
-        "handle"_a);
-
-    m.def(
-        "e_step_cublas",
-        [](gpu_array_c<const double, Device> X,
-           gpu_array_c<const double, Device> weights,
-           gpu_array_c<const double, Device> means,
-           gpu_array_c<const double, Device> prec_chol,
-           gpu_array_c<const double, Device> log_det_half,
-           gpu_array_c<double, Device> centered_workspace,
-           gpu_array_c<double, Device> y_workspace,
-           gpu_array_c<double, Device> log_prob,
-           gpu_array_c<double, Device> resp,
-           gpu_array_c<double, Device> ll_per_cell, int n, int d, int K,
-           std::uintptr_t stream, std::uintptr_t handle) {
-            launch_e_step_cublas<double>(
-                X.data(), weights.data(), means.data(), prec_chol.data(),
-                log_det_half.data(), n, d, K, centered_workspace.data(),
-                y_workspace.data(), log_prob.data(), resp.data(),
-                ll_per_cell.data(), (cudaStream_t)stream,
-                (cublasHandle_t)handle);
-        },
-        "X"_a, "weights"_a, "means"_a, "prec_chol"_a, "log_det_half"_a,
-        "centered_workspace"_a, "y_workspace"_a, "log_prob"_a, "resp"_a,
-        "ll_per_cell"_a, nb::kw_only(), "n"_a, "d"_a, "K"_a, "stream"_a = 0,
-        "handle"_a);
-
-    m.def(
-        "m_step",
-        [](gpu_array_c<const float, Device> resp,
-           gpu_array_c<const float, Device> X,
-           gpu_array_c<const float, Device> ones,
-           gpu_array_c<float, Device> weights, gpu_array_c<float, Device> means,
-           gpu_array_c<float, Device> covariances,
-           gpu_array_c<float, Device> N_k_workspace,
-           gpu_array_c<float, Device> num_workspace,
-           gpu_array_c<float, Device> centered_workspace, int n, int d, int K,
-           float reg_covar, std::uintptr_t stream, std::uintptr_t handle) {
-            launch_m_step<float>(resp.data(), X.data(), ones.data(), n, d, K,
-                                 reg_covar, weights.data(), means.data(),
-                                 covariances.data(), N_k_workspace.data(),
-                                 num_workspace.data(),
-                                 centered_workspace.data(),
-                                 (cudaStream_t)stream, (cublasHandle_t)handle);
-        },
-        "resp"_a, "X"_a, "ones"_a, "weights"_a, "means"_a, "covariances"_a,
-        "N_k_workspace"_a, "num_workspace"_a, "centered_workspace"_a,
-        nb::kw_only(), "n"_a, "d"_a, "K"_a, "reg_covar"_a, "stream"_a = 0,
-        "handle"_a);
-
-    m.def(
-        "m_step",
-        [](gpu_array_c<const double, Device> resp,
-           gpu_array_c<const double, Device> X,
-           gpu_array_c<const double, Device> ones,
-           gpu_array_c<double, Device> weights,
-           gpu_array_c<double, Device> means,
-           gpu_array_c<double, Device> covariances,
-           gpu_array_c<double, Device> N_k_workspace,
-           gpu_array_c<double, Device> num_workspace,
-           gpu_array_c<double, Device> centered_workspace, int n, int d, int K,
-           double reg_covar, std::uintptr_t stream, std::uintptr_t handle) {
-            launch_m_step<double>(resp.data(), X.data(), ones.data(), n, d, K,
-                                  reg_covar, weights.data(), means.data(),
-                                  covariances.data(), N_k_workspace.data(),
-                                  num_workspace.data(),
-                                  centered_workspace.data(),
-                                  (cudaStream_t)stream, (cublasHandle_t)handle);
-        },
-        "resp"_a, "X"_a, "ones"_a, "weights"_a, "means"_a, "covariances"_a,
-        "N_k_workspace"_a, "num_workspace"_a, "centered_workspace"_a,
-        nb::kw_only(), "n"_a, "d"_a, "K"_a, "reg_covar"_a, "stream"_a = 0,
-        "handle"_a);
+    def_e_step<float, Device>(m);
+    def_e_step<double, Device>(m);
+    def_e_step_cublas<float, Device>(m);
+    def_e_step_cublas<double, Device>(m);
+    def_m_step<float, Device>(m);
+    def_m_step<double, Device>(m);
 }
 
 NB_MODULE(_gmm_cuda, m) {

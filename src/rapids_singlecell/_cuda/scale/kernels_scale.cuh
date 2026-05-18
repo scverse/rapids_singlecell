@@ -5,23 +5,23 @@
 // All scale kernels assume std[col] > 0, guaranteed by the Python caller
 // (_scale.py clips std to a minimum value before invoking these kernels).
 
-template <typename T>
-__global__ void csc_scale_diff_kernel(const int* __restrict__ indptr,
+template <typename T, typename IdxT>
+__global__ void csc_scale_diff_kernel(const IdxT* __restrict__ indptr,
                                       T* __restrict__ data,
                                       const T* __restrict__ std, int ncols) {
     int col = blockIdx.x;
     if (col >= ncols) return;
-    int start_idx = indptr[col];
-    int stop_idx = indptr[col + 1];
+    long long start_idx = (long long)indptr[col];
+    long long stop_idx = (long long)indptr[col + 1];
     T diver = T(1) / std[col];
-    for (int i = start_idx + threadIdx.x; i < stop_idx; i += blockDim.x) {
+    for (long long i = start_idx + threadIdx.x; i < stop_idx; i += blockDim.x) {
         data[i] *= diver;
     }
 }
 
-template <typename T>
-__global__ void csr_scale_diff_kernel(const int* __restrict__ indptr,
-                                      const int* __restrict__ indices,
+template <typename T, typename IdxT>
+__global__ void csr_scale_diff_kernel(const IdxT* __restrict__ indptr,
+                                      const IdxT* __restrict__ indices,
                                       T* __restrict__ data,
                                       const T* __restrict__ std,
                                       const int* __restrict__ mask, T clipper,
@@ -29,10 +29,11 @@ __global__ void csr_scale_diff_kernel(const int* __restrict__ indptr,
     int row = blockIdx.x;
     if (row >= nrows) return;
     if (mask[row]) {
-        int start_idx = indptr[row];
-        int stop_idx = indptr[row + 1];
-        for (int i = start_idx + threadIdx.x; i < stop_idx; i += blockDim.x) {
-            int idx = indices[i];
+        long long start_idx = (long long)indptr[row];
+        long long stop_idx = (long long)indptr[row + 1];
+        for (long long i = start_idx + threadIdx.x; i < stop_idx;
+             i += blockDim.x) {
+            long long idx = (long long)indices[i];
             T res = data[i] / std[idx];
             data[i] = res < clipper ? res : clipper;
         }
@@ -61,8 +62,8 @@ __global__ void dense_scale_diff_kernel(T* __restrict__ data,
                                         const T* __restrict__ std,
                                         const int* __restrict__ mask, T clipper,
                                         long long nrows, long long ncols) {
-    long long row = (long long)(blockIdx.x * blockDim.x + threadIdx.x);
-    long long col = (long long)(blockIdx.y * blockDim.y + threadIdx.y);
+    long long row = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+    long long col = (long long)blockIdx.y * blockDim.y + threadIdx.y;
     if (row < nrows && col < ncols) {
         if (mask[row]) {
             T res = data[row * ncols + col] / std[col];

@@ -2,9 +2,9 @@
 
 #include <cuda_runtime.h>
 
-template <typename T>
+template <typename T, typename IdxT>
 __global__ void sparse_norm_res_csc_kernel(
-    const int* __restrict__ indptr, const int* __restrict__ index,
+    const IdxT* __restrict__ indptr, const IdxT* __restrict__ index,
     const T* __restrict__ data, const T* __restrict__ sums_cells,
     const T* __restrict__ sums_genes, T* __restrict__ residuals,
     const T inv_sum_total, const T clip, const T inv_theta, int n_cells,
@@ -13,9 +13,9 @@ __global__ void sparse_norm_res_csc_kernel(
     if (gene >= n_genes) {
         return;
     }
-    int start = indptr[gene];
-    int stop = indptr[gene + 1];
-    int sparse_idx = start;
+    IdxT start = indptr[gene];
+    IdxT stop = indptr[gene + 1];
+    IdxT sparse_idx = start;
     for (int cell = 0; cell < n_cells; ++cell) {
         T mu = sums_genes[gene] * sums_cells[cell] * inv_sum_total;
         long long res_index = static_cast<long long>(cell) * n_genes + gene;
@@ -31,9 +31,9 @@ __global__ void sparse_norm_res_csc_kernel(
     }
 }
 
-template <typename T>
+template <typename T, typename IdxT>
 __global__ void sparse_norm_res_csr_kernel(
-    const int* __restrict__ indptr, const int* __restrict__ index,
+    const IdxT* __restrict__ indptr, const IdxT* __restrict__ index,
     const T* __restrict__ data, const T* __restrict__ sums_cells,
     const T* __restrict__ sums_genes, T* __restrict__ residuals,
     const T inv_sum_total, const T clip, const T inv_theta, int n_cells,
@@ -42,9 +42,9 @@ __global__ void sparse_norm_res_csr_kernel(
     if (cell >= n_cells) {
         return;
     }
-    int start = indptr[cell];
-    int stop = indptr[cell + 1];
-    int sparse_idx = start;
+    IdxT start = indptr[cell];
+    IdxT stop = indptr[cell + 1];
+    IdxT sparse_idx = start;
     for (int gene = 0; gene < n_genes; ++gene) {
         long long res_index = static_cast<long long>(cell) * n_genes + gene;
         T mu = sums_genes[gene] * sums_cells[cell] * inv_sum_total;
