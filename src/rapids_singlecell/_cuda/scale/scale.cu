@@ -6,7 +6,7 @@
 using namespace nb::literals;
 
 constexpr int BLOCK_SIZE_SPARSE = 64;
-constexpr int BLOCK_SIZE_DENSE_TILE = 32;
+constexpr int BLOCK_SIZE_DENSE_TILE = 16;
 
 template <typename T, typename IdxT>
 static inline void launch_csc_scale_diff(const IdxT* indptr, T* data,
@@ -39,8 +39,8 @@ static inline void launch_dense_scale_center_diff(T* data, const T* mean,
                                                   long long ncols,
                                                   cudaStream_t stream) {
     dim3 block(BLOCK_SIZE_DENSE_TILE, BLOCK_SIZE_DENSE_TILE);
-    dim3 grid((unsigned)((nrows + block.x - 1) / block.x),
-              (unsigned)((ncols + block.y - 1) / block.y));
+    dim3 grid(strided_grid(static_cast<long long>(nrows), block.x),
+              strided_grid_y(static_cast<long long>(ncols), block.y));
     dense_scale_center_diff_kernel<T><<<grid, block, 0, stream>>>(
         data, mean, std, mask, clipper, nrows, ncols);
     CUDA_CHECK_LAST_ERROR(dense_scale_center_diff_kernel);
@@ -52,8 +52,8 @@ static inline void launch_dense_scale_diff(T* data, const T* std,
                                            long long nrows, long long ncols,
                                            cudaStream_t stream) {
     dim3 block(BLOCK_SIZE_DENSE_TILE, BLOCK_SIZE_DENSE_TILE);
-    dim3 grid((unsigned)((nrows + block.x - 1) / block.x),
-              (unsigned)((ncols + block.y - 1) / block.y));
+    dim3 grid(strided_grid(static_cast<long long>(nrows), block.x),
+              strided_grid_y(static_cast<long long>(ncols), block.y));
     dense_scale_diff_kernel<T>
         <<<grid, block, 0, stream>>>(data, std, mask, clipper, nrows, ncols);
     CUDA_CHECK_LAST_ERROR(dense_scale_diff_kernel);

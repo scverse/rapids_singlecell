@@ -85,8 +85,9 @@ __global__ void edistance_kernel(const T* __restrict__ embedding,
                     if (cell_idx < cells_in_tile && feat_idx < feats_in_tile) {
                         int global_b_idx =
                             cell_indices[start_b + jb_base + cell_idx];
-                        val = embedding[global_b_idx * n_features + feat_base +
-                                        feat_idx];
+                        val = embedding[static_cast<size_t>(global_b_idx) *
+                                            n_features +
+                                        feat_base + feat_idx];
                     }
                     // Store as smem_b[feat][cell] for sequential access
                     smem_b[feat_idx * CELL_TILE + cell_idx] = val;
@@ -97,7 +98,9 @@ __global__ void edistance_kernel(const T* __restrict__ embedding,
                 // Compute partial squared differences for this feature chunk
                 if (valid_a) {
                     for (int f = 0; f < feats_in_tile; ++f) {
-                        T val_a = embedding[idx_i * n_features + feat_base + f];
+                        T val_a =
+                            embedding[static_cast<size_t>(idx_i) * n_features +
+                                      feat_base + f];
 
 #pragma unroll
                         for (int c = 0; c < CELL_TILE; ++c) {

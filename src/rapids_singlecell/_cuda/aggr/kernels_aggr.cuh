@@ -100,8 +100,8 @@ __global__ void dense_aggr_kernel_C(const T* __restrict__ data,
                                     const bool* __restrict__ mask,
                                     size_t n_cells, size_t n_genes,
                                     size_t n_groups) {
-    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
-    size_t stride = gridDim.x * blockDim.x;
+    size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    size_t stride = static_cast<size_t>(gridDim.x) * blockDim.x;
     size_t N = n_cells * n_genes;
     while (i < N) {
         size_t cell = i / n_genes;
@@ -129,8 +129,8 @@ __global__ void dense_aggr_kernel_F(const T* __restrict__ data,
                                     const bool* __restrict__ mask,
                                     size_t n_cells, size_t n_genes,
                                     size_t n_groups) {
-    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
-    size_t stride = gridDim.x * blockDim.x;
+    size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    size_t stride = static_cast<size_t>(gridDim.x) * blockDim.x;
     size_t N = n_cells * n_genes;
     while (i < N) {
         size_t cell = i % n_cells;

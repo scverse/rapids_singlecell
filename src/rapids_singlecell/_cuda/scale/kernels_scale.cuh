@@ -44,15 +44,19 @@ template <typename T>
 __global__ void dense_scale_center_diff_kernel(
     T* data, const T* __restrict__ mean, const T* __restrict__ std,
     const int* __restrict__ mask, T clipper, long long nrows, long long ncols) {
-    long long row = (long long)blockIdx.x * blockDim.x + threadIdx.x;
-    long long col = (long long)blockIdx.y * blockDim.y + threadIdx.y;
-    if (row < nrows && col < ncols) {
-        if (mask[row]) {
-            T res = data[row * ncols + col] - mean[col];
+    const long long row_stride = (long long)blockDim.x * gridDim.x;
+    const long long col_stride = (long long)blockDim.y * gridDim.y;
+    for (long long row = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+         row < nrows; row += row_stride) {
+        if (!mask[row]) continue;
+        for (long long col = (long long)blockIdx.y * blockDim.y + threadIdx.y;
+             col < ncols; col += col_stride) {
+            const long long idx = row * ncols + col;
+            T res = data[idx] - mean[col];
             res = res / std[col];
             if (res > clipper) res = clipper;
             if (res < -clipper) res = -clipper;
-            data[row * ncols + col] = res;
+            data[idx] = res;
         }
     }
 }
@@ -62,12 +66,16 @@ __global__ void dense_scale_diff_kernel(T* __restrict__ data,
                                         const T* __restrict__ std,
                                         const int* __restrict__ mask, T clipper,
                                         long long nrows, long long ncols) {
-    long long row = (long long)blockIdx.x * blockDim.x + threadIdx.x;
-    long long col = (long long)blockIdx.y * blockDim.y + threadIdx.y;
-    if (row < nrows && col < ncols) {
-        if (mask[row]) {
-            T res = data[row * ncols + col] / std[col];
-            data[row * ncols + col] = res < clipper ? res : clipper;
+    const long long row_stride = (long long)blockDim.x * gridDim.x;
+    const long long col_stride = (long long)blockDim.y * gridDim.y;
+    for (long long row = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+         row < nrows; row += row_stride) {
+        if (!mask[row]) continue;
+        for (long long col = (long long)blockIdx.y * blockDim.y + threadIdx.y;
+             col < ncols; col += col_stride) {
+            const long long idx = row * ncols + col;
+            T res = data[idx] / std[col];
+            data[idx] = res < clipper ? res : clipper;
         }
     }
 }

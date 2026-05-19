@@ -13,11 +13,13 @@ template <typename T>
 static inline void launch_morans_dense(const T* data_centered,
                                        const int* adj_row_ptr,
                                        const int* adj_col_ind,
-                                       const T* adj_data, T* num, int n_samples,
-                                       int n_features, cudaStream_t stream) {
+                                       const T* adj_data, T* num,
+                                       size_t n_samples, size_t n_features,
+                                       cudaStream_t stream) {
     dim3 block(DENSE_BLOCK_DIM, DENSE_BLOCK_DIM);
-    dim3 grid((n_features + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM,
-              (n_samples + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM);
+    dim3 grid(
+        strided_grid(static_cast<long long>(n_features), DENSE_BLOCK_DIM),
+        strided_grid_y(static_cast<long long>(n_samples), DENSE_BLOCK_DIM));
     morans_I_num_dense_kernel<<<grid, block, 0, stream>>>(
         data_centered, adj_row_ptr, adj_col_ind, adj_data, num, n_samples,
         n_features);
@@ -42,11 +44,13 @@ static inline void launch_morans_sparse(
 template <typename T>
 static inline void launch_gearys_dense(const T* data, const int* adj_row_ptr,
                                        const int* adj_col_ind,
-                                       const T* adj_data, T* num, int n_samples,
-                                       int n_features, cudaStream_t stream) {
+                                       const T* adj_data, T* num,
+                                       size_t n_samples, size_t n_features,
+                                       cudaStream_t stream) {
     dim3 block(DENSE_BLOCK_DIM, DENSE_BLOCK_DIM);
-    dim3 grid((n_features + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM,
-              (n_samples + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM);
+    dim3 grid(
+        strided_grid(static_cast<long long>(n_features), DENSE_BLOCK_DIM),
+        strided_grid_y(static_cast<long long>(n_samples), DENSE_BLOCK_DIM));
     gearys_C_num_dense_kernel<<<grid, block, 0, stream>>>(
         data, adj_row_ptr, adj_col_ind, adj_data, num, n_samples, n_features);
     CUDA_CHECK_LAST_ERROR(gearys_C_num_dense_kernel);
@@ -87,7 +91,7 @@ void def_morans_dense(nb::module_& m) {
            gpu_array_c<const int, Device> adj_row_ptr,
            gpu_array_c<const int, Device> adj_col_ind,
            gpu_array_c<const T, Device> adj_data, gpu_array_c<T, Device> num,
-           int n_samples, int n_features, std::uintptr_t stream) {
+           size_t n_samples, size_t n_features, std::uintptr_t stream) {
             launch_morans_dense(data_centered.data(), adj_row_ptr.data(),
                                 adj_col_ind.data(), adj_data.data(), num.data(),
                                 n_samples, n_features, (cudaStream_t)stream);
@@ -127,7 +131,7 @@ void def_gearys_dense(nb::module_& m) {
            gpu_array_c<const int, Device> adj_row_ptr,
            gpu_array_c<const int, Device> adj_col_ind,
            gpu_array_c<const T, Device> adj_data, gpu_array_c<T, Device> num,
-           int n_samples, int n_features, std::uintptr_t stream) {
+           size_t n_samples, size_t n_features, std::uintptr_t stream) {
             launch_gearys_dense(data.data(), adj_row_ptr.data(),
                                 adj_col_ind.data(), adj_data.data(), num.data(),
                                 n_samples, n_features, (cudaStream_t)stream);

@@ -15,29 +15,29 @@ static inline void launch_gram_csr_upper(const IdxT* indptr, const IdxT* index,
                                          size_t ncols, T* out,
                                          cudaStream_t stream) {
     dim3 block(GRAM_BLOCK_SIZE);
-    dim3 grid((unsigned)nrows);
+    dim3 grid(strided_grid(nrows, 1));
     gram_csr_upper_kernel<T, IdxT>
         <<<grid, block, 0, stream>>>(indptr, index, data, nrows, ncols, out);
     CUDA_CHECK_LAST_ERROR(gram_csr_upper_kernel);
 }
 
 template <typename T>
-static inline void launch_copy_upper_to_lower(T* out, int ncols,
+static inline void launch_copy_upper_to_lower(T* out, size_t ncols,
                                               cudaStream_t stream) {
     dim3 block(MATRIX_BLOCK_DIM, MATRIX_BLOCK_DIM);
-    dim3 grid((ncols + MATRIX_BLOCK_DIM - 1) / MATRIX_BLOCK_DIM,
-              (ncols + MATRIX_BLOCK_DIM - 1) / MATRIX_BLOCK_DIM);
+    dim3 grid(strided_grid(ncols, MATRIX_BLOCK_DIM),
+              strided_grid_y(ncols, MATRIX_BLOCK_DIM));
     copy_upper_to_lower_kernel<T><<<grid, block, 0, stream>>>(out, ncols);
     CUDA_CHECK_LAST_ERROR(copy_upper_to_lower_kernel);
 }
 
 template <typename T>
 static inline void launch_cov_from_gram(T* cov, const T* gram, const T* meanx,
-                                        const T* meany, int ncols,
+                                        const T* meany, size_t ncols,
                                         cudaStream_t stream) {
     dim3 block(MATRIX_BLOCK_DIM, MATRIX_BLOCK_DIM);
-    dim3 grid((ncols + MATRIX_BLOCK_DIM - 1) / MATRIX_BLOCK_DIM,
-              (ncols + MATRIX_BLOCK_DIM - 1) / MATRIX_BLOCK_DIM);
+    dim3 grid(strided_grid(ncols, MATRIX_BLOCK_DIM),
+              strided_grid_y(ncols, MATRIX_BLOCK_DIM));
     cov_from_gram_kernel<T>
         <<<grid, block, 0, stream>>>(cov, gram, meanx, meany, ncols);
     CUDA_CHECK_LAST_ERROR(cov_from_gram_kernel);
@@ -76,7 +76,7 @@ template <typename T, typename Device>
 void def_copy_upper_to_lower(nb::module_& m) {
     m.def(
         "copy_upper_to_lower",
-        [](gpu_array_c<T, Device> out, int ncols, std::uintptr_t stream) {
+        [](gpu_array_c<T, Device> out, size_t ncols, std::uintptr_t stream) {
             launch_copy_upper_to_lower<T>(out.data(), ncols,
                                           (cudaStream_t)stream);
         },
@@ -90,7 +90,7 @@ void def_cov_from_gram(nb::module_& m) {
         [](gpu_array_c<const T, Device> gram,
            gpu_array_c<const T, Device> meanx,
            gpu_array_c<const T, Device> meany, gpu_array_c<T, Device> cov,
-           int ncols, std::uintptr_t stream) {
+           size_t ncols, std::uintptr_t stream) {
             launch_cov_from_gram<T>(cov.data(), gram.data(), meanx.data(),
                                     meany.data(), ncols, (cudaStream_t)stream);
         },
