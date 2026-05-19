@@ -6,7 +6,7 @@
 using namespace nb::literals;
 
 constexpr int BLOCK_SIZE_SPARSE = 64;
-constexpr int BLOCK_SIZE_DENSE_TILE = 32;
+constexpr int BLOCK_SIZE_DENSE_TILE = 16;
 
 template <typename T, typename IdxT>
 static inline void launch_csc_scale_diff(const IdxT* indptr, T* data,
