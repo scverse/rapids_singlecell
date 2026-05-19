@@ -9,30 +9,29 @@ __global__ void auc_kernel(const int* __restrict__ ranks, size_t R, size_t C,
                            const int* __restrict__ lens, size_t n_sets,
                            int n_up, const float* __restrict__ max_aucs,
                            float* __restrict__ es) {
-    const size_t set = blockIdx.x;
-    if (set >= n_sets) return;
+    for (size_t set = blockIdx.x; set < n_sets; set += gridDim.x) {
+        const int start = starts[set];
+        const int end = start + lens[set];
+        const size_t row_stride = static_cast<size_t>(blockDim.x) * gridDim.y;
 
-    const int start = starts[set];
-    const int end = start + lens[set];
-    const size_t row_stride = static_cast<size_t>(blockDim.x) * gridDim.y;
+        for (size_t row =
+                 static_cast<size_t>(blockIdx.y) * blockDim.x + threadIdx.x;
+             row < R; row += row_stride) {
+            int r = 0;
+            int s = 0;
 
-    for (size_t row =
-             static_cast<size_t>(blockIdx.y) * blockDim.x + threadIdx.x;
-         row < R; row += row_stride) {
-        int r = 0;
-        int s = 0;
-
-        for (int i = start; i < end; ++i) {
-            const int g = cnct[i];
-            const int rk = ranks[row * C + g];
-            if (rk <= n_up) {
-                r += 1;
-                s += rk;
+            for (int i = start; i < end; ++i) {
+                const int g = cnct[i];
+                const int rk = ranks[row * C + g];
+                if (rk <= n_up) {
+                    r += 1;
+                    s += rk;
+                }
             }
+            const float val =
+                (float)((static_cast<long long>(r) * n_up) - s) / max_aucs[set];
+            es[row * n_sets + set] = val;
         }
-        const float val =
-            (float)((static_cast<long long>(r) * n_up) - s) / max_aucs[set];
-        es[row * n_sets + set] = val;
     }
 }
 
@@ -43,7 +42,7 @@ static inline void launch_auc(const int* ranks, size_t R, size_t C,
                               cudaStream_t stream) {
     constexpr int BLOCK_SIZE = 32;
     dim3 block(BLOCK_SIZE);
-    dim3 grid((unsigned)n_sets,
+    dim3 grid(strided_grid(static_cast<long long>(n_sets), 1),
               strided_grid_y(static_cast<long long>(R), BLOCK_SIZE));
     auc_kernel<<<grid, block, 0, stream>>>(ranks, R, C, cnct, starts, lens,
                                            n_sets, n_up, max_aucs, es);

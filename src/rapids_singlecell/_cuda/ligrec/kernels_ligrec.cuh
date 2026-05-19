@@ -146,8 +146,6 @@ __global__ void interaction_kernel(const int* __restrict__ interactions,
                 } else {
                     res[res_idx] = nan("");
                 }
-            } else {
-                res[res_idx] = nan("");
             }
         }
     }
