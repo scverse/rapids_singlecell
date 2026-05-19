@@ -11,18 +11,22 @@ __global__ void morans_I_num_dense_kernel(const T* __restrict__ data_centered,
                                           T* __restrict__ num, int n_samples,
                                           int n_features) {
     int f = blockIdx.x * blockDim.x + threadIdx.x;
-    int i = blockIdx.y * blockDim.y + threadIdx.y;
-    if (i >= n_samples || f >= n_features) {
+    if (f >= n_features) {
         return;
     }
-    int k_start = adj_row_ptr[i];
-    int k_end = adj_row_ptr[i + 1];
-    for (int k = k_start; k < k_end; ++k) {
-        int j = adj_col_ind[k];
-        T w = adj_data[k];
-        T prod = data_centered[i * n_features + f] *
-                 data_centered[j * n_features + f];
-        atomicAdd(&num[f], w * prod);
+    const size_t n_samples_size = static_cast<size_t>(n_samples);
+    const size_t stride = static_cast<size_t>(gridDim.y) * blockDim.y;
+    for (size_t i = static_cast<size_t>(blockIdx.y) * blockDim.y + threadIdx.y;
+         i < n_samples_size; i += stride) {
+        int k_start = adj_row_ptr[i];
+        int k_end = adj_row_ptr[i + 1];
+        for (int k = k_start; k < k_end; ++k) {
+            int j = adj_col_ind[k];
+            T w = adj_data[k];
+            T prod = data_centered[i * n_features + f] *
+                     data_centered[static_cast<size_t>(j) * n_features + f];
+            atomicAdd(&num[f], w * prod);
+        }
     }
 }
 
@@ -103,17 +107,22 @@ __global__ void gearys_C_num_dense_kernel(const T* __restrict__ data,
                                           T* __restrict__ num, int n_samples,
                                           int n_features) {
     int f = blockIdx.x * blockDim.x + threadIdx.x;
-    int i = blockIdx.y * blockDim.y + threadIdx.y;
-    if (i >= n_samples || f >= n_features) {
+    if (f >= n_features) {
         return;
     }
-    int k_start = adj_row_ptr[i];
-    int k_end = adj_row_ptr[i + 1];
-    for (int k = k_start; k < k_end; ++k) {
-        int j = adj_col_ind[k];
-        T w = adj_data[k];
-        T diff = data[i * n_features + f] - data[j * n_features + f];
-        atomicAdd(&num[f], w * diff * diff);
+    const size_t n_samples_size = static_cast<size_t>(n_samples);
+    const size_t stride = static_cast<size_t>(gridDim.y) * blockDim.y;
+    for (size_t i = static_cast<size_t>(blockIdx.y) * blockDim.y + threadIdx.y;
+         i < n_samples_size; i += stride) {
+        int k_start = adj_row_ptr[i];
+        int k_end = adj_row_ptr[i + 1];
+        for (int k = k_start; k < k_end; ++k) {
+            int j = adj_col_ind[k];
+            T w = adj_data[k];
+            T diff = data[i * n_features + f] -
+                     data[static_cast<size_t>(j) * n_features + f];
+            atomicAdd(&num[f], w * diff * diff);
+        }
     }
 }
 

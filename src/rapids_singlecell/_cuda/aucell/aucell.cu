@@ -3,42 +3,48 @@
 
 using namespace nb::literals;
 
-__global__ void auc_kernel(const int* __restrict__ ranks, int R, int C,
+__global__ void auc_kernel(const int* __restrict__ ranks, size_t R, size_t C,
                            const int* __restrict__ cnct,
                            const int* __restrict__ starts,
-                           const int* __restrict__ lens, int n_sets, int n_up,
-                           const float* __restrict__ max_aucs,
+                           const int* __restrict__ lens, size_t n_sets,
+                           int n_up, const float* __restrict__ max_aucs,
                            float* __restrict__ es) {
-    const int set = blockIdx.x;
-    const int row = blockIdx.y * blockDim.x + threadIdx.x;
-    if (set >= n_sets || row >= R) return;
+    const size_t set = blockIdx.x;
+    if (set >= n_sets) return;
 
     const int start = starts[set];
     const int end = start + lens[set];
+    const size_t row_stride = static_cast<size_t>(blockDim.x) * gridDim.y;
 
-    int r = 0;
-    int s = 0;
+    for (size_t row =
+             static_cast<size_t>(blockIdx.y) * blockDim.x + threadIdx.x;
+         row < R; row += row_stride) {
+        int r = 0;
+        int s = 0;
 
-    for (int i = start; i < end; ++i) {
-        const int g = cnct[i];
-        const int rk = ranks[row * C + g];
-        if (rk <= n_up) {
-            r += 1;
-            s += rk;
+        for (int i = start; i < end; ++i) {
+            const int g = cnct[i];
+            const int rk = ranks[row * C + g];
+            if (rk <= n_up) {
+                r += 1;
+                s += rk;
+            }
         }
+        const float val =
+            (float)((static_cast<long long>(r) * n_up) - s) / max_aucs[set];
+        es[row * n_sets + set] = val;
     }
-    const float val =
-        (float)((static_cast<long long>(r) * n_up) - s) / max_aucs[set];
-    es[row * n_sets + set] = val;
 }
 
-static inline void launch_auc(const int* ranks, int R, int C, const int* cnct,
-                              const int* starts, const int* lens, int n_sets,
-                              int n_up, const float* max_aucs, float* es,
+static inline void launch_auc(const int* ranks, size_t R, size_t C,
+                              const int* cnct, const int* starts,
+                              const int* lens, size_t n_sets, int n_up,
+                              const float* max_aucs, float* es,
                               cudaStream_t stream) {
     constexpr int BLOCK_SIZE = 32;
     dim3 block(BLOCK_SIZE);
-    dim3 grid((unsigned)n_sets, (unsigned)((R + BLOCK_SIZE - 1) / BLOCK_SIZE));
+    dim3 grid((unsigned)n_sets,
+              strided_grid_y(static_cast<long long>(R), BLOCK_SIZE));
     auc_kernel<<<grid, block, 0, stream>>>(ranks, R, C, cnct, starts, lens,
                                            n_sets, n_up, max_aucs, es);
     CUDA_CHECK_LAST_ERROR(auc_kernel);
@@ -48,10 +54,10 @@ template <typename Device>
 void register_bindings(nb::module_& m) {
     m.def(
         "auc",
-        [](gpu_array_c<const int, Device> ranks, int R, int C,
+        [](gpu_array_c<const int, Device> ranks, size_t R, size_t C,
            gpu_array_c<const int, Device> cnct,
            gpu_array_c<const int, Device> starts,
-           gpu_array_c<const int, Device> lens, int n_sets, int n_up,
+           gpu_array_c<const int, Device> lens, size_t n_sets, int n_up,
            gpu_array_c<const float, Device> max_aucs,
            gpu_array_c<float, Device> es, std::uintptr_t stream) {
             launch_auc(ranks.data(), R, C, cnct.data(), starts.data(),

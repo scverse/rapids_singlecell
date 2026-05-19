@@ -17,7 +17,7 @@ static inline void launch_morans_dense(const T* data_centered,
                                        int n_features, cudaStream_t stream) {
     dim3 block(DENSE_BLOCK_DIM, DENSE_BLOCK_DIM);
     dim3 grid((n_features + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM,
-              (n_samples + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM);
+              strided_grid_y(n_samples, DENSE_BLOCK_DIM));
     morans_I_num_dense_kernel<<<grid, block, 0, stream>>>(
         data_centered, adj_row_ptr, adj_col_ind, adj_data, num, n_samples,
         n_features);
@@ -46,7 +46,7 @@ static inline void launch_gearys_dense(const T* data, const int* adj_row_ptr,
                                        int n_features, cudaStream_t stream) {
     dim3 block(DENSE_BLOCK_DIM, DENSE_BLOCK_DIM);
     dim3 grid((n_features + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM,
-              (n_samples + DENSE_BLOCK_DIM - 1) / DENSE_BLOCK_DIM);
+              strided_grid_y(n_samples, DENSE_BLOCK_DIM));
     gearys_C_num_dense_kernel<<<grid, block, 0, stream>>>(
         data, adj_row_ptr, adj_col_ind, adj_data, num, n_samples, n_features);
     CUDA_CHECK_LAST_ERROR(gearys_C_num_dense_kernel);
