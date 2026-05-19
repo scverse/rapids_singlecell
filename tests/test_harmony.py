@@ -303,9 +303,9 @@ def test_scatter_add_shared_vs_optimized(n_cells, n_pcs, n_batches, switcher):
 @pytest.mark.parametrize("dtype", [cp.float32, cp.float64])
 @pytest.mark.parametrize("n_pcs", [3, 4, 5])
 @pytest.mark.parametrize("offset", [0, 1])
-def test_scatter_add_bias_csr_alignment(dtype, n_pcs, offset):
+@pytest.mark.parametrize("n_cells", [0, 1, 23, 1024])
+def test_scatter_add_bias_csr_alignment(dtype, n_pcs, offset, n_cells):
     rng = np.random.default_rng(42)
-    n_cells = 23
     n_batches = 4
     X_base_np = rng.normal(size=n_cells * n_pcs + offset).astype(np.dtype(dtype))
     X_np = X_base_np[offset:].reshape(n_cells, n_pcs)

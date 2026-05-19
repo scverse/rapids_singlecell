@@ -29,7 +29,13 @@ from rapids_singlecell._cuda import (
 )
 
 pytestmark = pytest.mark.skipif(
-    _norm is None or _pen is None or _scatter is None or _colsum is None or _km is None,
+    _norm is None
+    or _pen is None
+    or _scatter is None
+    or _colsum is None
+    or _km is None
+    or _cl is None
+    or _corr is None,
     reason="Harmony CUDA modules not available",
 )
 
@@ -245,9 +251,9 @@ def test_gather_int(n):
 
 
 @pytest.mark.parametrize("dtype", DTYPES)
-def test_colsum_columns_multiple_cols_per_block(dtype):
+@pytest.mark.parametrize("rows", [0, 1, 257, 4096])
+def test_colsum_columns_multiple_cols_per_block(dtype, rows):
     rng = cp.random.default_rng(123)
-    rows = 257
     n_sm = cp.cuda.Device().attributes["MultiProcessorCount"]
     cols = n_sm * 8 + 17
     x = rng.standard_normal((rows, cols), dtype=dtype)
@@ -256,16 +262,18 @@ def test_colsum_columns_multiple_cols_per_block(dtype):
     _colsum.colsum(x, out=out, rows=rows, cols=cols)
     cp.cuda.Device().synchronize()
 
-    atol = 1e-5 if dtype == np.float32 else 1e-12
-    cp.testing.assert_allclose(out, x.sum(axis=0), atol=atol, rtol=1e-5)
+    atol = 5e-4 if dtype == np.float32 else 1e-12
+    rtol = 1e-4 if dtype == np.float32 else 1e-5
+    expected_np = cp.asnumpy(x).sum(axis=0)
+    cp.testing.assert_allclose(out, cp.asarray(expected_np), atol=atol, rtol=rtol)
 
 
 # ---------- kmeans_err ----------
 
 
 @pytest.mark.parametrize("dtype", DTYPES)
-def test_kmeans_err_offset_contiguous(dtype):
-    n = 257
+@pytest.mark.parametrize("n", [0, 1, 257, 8192])
+def test_kmeans_err_offset_contiguous(dtype, n):
     r_base = cp.arange(n + 1, dtype=dtype)
     dot_base = cp.linspace(dtype(0.1), dtype(0.9), n + 1, dtype=dtype)
     r = r_base[1:]
@@ -275,9 +283,11 @@ def test_kmeans_err_offset_contiguous(dtype):
     _km.kmeans_err(r, dot=dot, n=n, out=out)
     cp.cuda.Device().synchronize()
 
-    expected = cp.sum(r * dtype(2) * (dtype(1) - dot))
+    r_np = cp.asnumpy(r)
+    dot_np = cp.asnumpy(dot)
+    expected_np = np.sum(r_np * dtype(2) * (dtype(1) - dot_np), dtype=dtype)
     atol = 1e-4 if dtype == np.float32 else 1e-10
-    cp.testing.assert_allclose(out[0], expected, atol=atol, rtol=1e-5)
+    cp.testing.assert_allclose(out[0], dtype(expected_np), atol=atol, rtol=1e-5)
 
 
 # ---------- compute_objective ----------
