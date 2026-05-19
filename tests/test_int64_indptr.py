@@ -138,6 +138,16 @@ def _close(a, b):
         cp.testing.assert_allclose(a, b, rtol=1e-13, atol=1e-12)
 
 
+def _close_morans_i(a, b):
+    """Sparse Moran's I has many float32 atomic adds into small numerators.
+    Turing/T4 can reorder the int32 and int64 instantiations enough to exceed
+    the generic atomic tolerance without indicating a dispatch regression."""
+    if a.dtype == cp.float32:
+        cp.testing.assert_allclose(a, b, rtol=1e-4, atol=5e-6)
+    else:
+        cp.testing.assert_allclose(a, b, rtol=1e-13, atol=1e-12)
+
+
 # ----------------------------- _qc_cuda -------------------------------------
 
 
@@ -931,7 +941,7 @@ def test_morans_sparse(dtype):
             stream=_stream(),
         )
         outs[idx_dtype] = num
-    _close(outs[np.int32], outs[np.int64])
+    _close_morans_i(outs[np.int32], outs[np.int64])
 
 
 @pytest.mark.parametrize("dtype", DTYPES)
@@ -1083,7 +1093,7 @@ def test_morans_sparse_mixed_indices(dtype):
             num=num,
             stream=_stream(),
         )
-        _close(num_ref, num)
+        _close_morans_i(num_ref, num)
 
 
 @pytest.mark.parametrize("dtype", DTYPES)
