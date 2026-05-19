@@ -50,8 +50,8 @@ static void correction_fast_impl(
 
         // R_col = R[:, k]
         gather_column_kernel<T>
-            <<<(n_cells + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D, BLOCK_DIM_1D, 0,
-               stream>>>(R, R_col, k, n_cells, n_clusters);
+            <<<strided_grid(n_cells, BLOCK_DIM_1D), BLOCK_DIM_1D, 0, stream>>>(
+                R, R_col, k, n_cells, n_clusters);
         CUDA_CHECK_LAST_ERROR(gather_column_kernel);
 
         // Zero Phi_t_diag_R_X
@@ -101,8 +101,8 @@ static void correction_fast_impl(
         {
             long long n = (long long)n_cells * n_pcs;
             harmony_correction_kernel<T>
-                <<<(n + BLOCK_DIM_1D - 1) / BLOCK_DIM_1D, BLOCK_DIM_1D, 0,
-                   stream>>>(Z, W, cats, R_col, n_cells, n_pcs);
+                <<<strided_grid(n, BLOCK_DIM_1D), BLOCK_DIM_1D, 0, stream>>>(
+                    Z, W, cats, R_col, n_cells, n_pcs);
             CUDA_CHECK_LAST_ERROR(harmony_correction_kernel);
         }
     }

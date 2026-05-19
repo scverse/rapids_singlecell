@@ -15,8 +15,9 @@ static inline void launch_kmeans_err(const T* r, const T* dot, size_t n, T* out,
 
     constexpr int BLOCK_SIZE = 256;
     constexpr int BLOCKS_PER_SM = 8;
-    int blocks = std::min((int)((n + BLOCK_SIZE - 1) / BLOCK_SIZE),
-                          prop.multiProcessorCount * BLOCKS_PER_SM);
+    int blocks =
+        std::max(1, std::min((int)((n + BLOCK_SIZE - 1) / BLOCK_SIZE),
+                             prop.multiProcessorCount * BLOCKS_PER_SM));
     kmeans_err_kernel<T><<<blocks, BLOCK_SIZE, 0, stream>>>(r, dot, n, out);
     CUDA_CHECK_LAST_ERROR(kmeans_err_kernel);
 }
