@@ -21,6 +21,33 @@ type _Method = Literal[
 ]
 
 
+def _array_result_to_records(
+    arrays: dict[str, object], field: str, dtype: str | np.dtype
+) -> np.ndarray:
+    group_names = tuple(str(name) for name in arrays["group_names"])
+    values = np.asarray(arrays[field])
+    out = np.empty(
+        values.shape[1],
+        dtype=[(group_name, np.dtype(dtype)) for group_name in group_names],
+    )
+    for row, group_name in enumerate(group_names):
+        out[group_name] = values[row]
+    return out
+
+
+def _array_result_to_names(arrays: dict[str, object]) -> np.ndarray:
+    group_names = tuple(str(name) for name in arrays["group_names"])
+    var_names = np.asarray(arrays["var_names"])
+    gene_indices = np.asarray(arrays["gene_indices"], dtype=np.intp)
+    out = np.empty(
+        gene_indices.shape[1],
+        dtype=[(group_name, object) for group_name in group_names],
+    )
+    for row, group_name in enumerate(group_names):
+        out[group_name] = var_names[gene_indices[row]]
+    return out
+
+
 def rank_genes_groups(
     adata: AnnData,
     groupby: str,
@@ -37,17 +64,21 @@ def rank_genes_groups(
     corr_method: _CorrMethod = "benjamini-hochberg",
     tie_correct: bool = False,
     use_continuity: bool = False,
+    return_u_values: bool = False,
     layer: str | None = None,
     chunk_size: int | None = None,
     pre_load: bool = False,
     n_bins: int | None = None,
     bin_range: Literal["log1p", "auto"] | None = None,
+    skip_empty_groups: bool = False,
     **kwds,
 ) -> None:
     """
     Rank genes for characterizing groups using GPU acceleration.
 
-    Expects logarithmized data.
+    Expects nonnegative expression data. Log1p/log-normalized data is expected
+    for biologically meaningful log fold changes; negative values are rejected
+    for eager in-memory inputs.
 
     .. note::
         **Dask support:** `'t-test'`, `'t-test_overestim_var'`, and
@@ -101,6 +132,10 @@ def rank_genes_groups(
         z-scores. Subtracts 0.5 from ``|R - E[R]|`` before dividing by the
         standard deviation, matching :func:`scipy.stats.mannwhitneyu`
         default behavior.
+    return_u_values
+        For `'wilcoxon'`, store Mann-Whitney U statistics in `scores` instead
+        of z-scores. P-values are still computed from the z-score normal
+        approximation using the selected tie and continuity settings.
     layer
         Key from `adata.layers` whose value will be used to perform tests on.
     chunk_size
@@ -119,15 +154,20 @@ def rank_genes_groups(
         ``None`` (default) uses ``'auto'`` for in-memory arrays and
         ``'log1p'`` for Dask arrays (to avoid a costly data scan).
         ``'log1p'`` uses a fixed [0, 15] range suitable for most log1p-normalized data.
-        ``'auto'`` computes the actual data range. Use this for z-scored
-        or unnormalized data.
+        ``'auto'`` computes the actual data range. Use this for nonnegative
+        expression data outside the fixed log1p range.
+    skip_empty_groups
+        Skip selected groups with fewer than two observations after filtering.
+        This is useful for perturbation workflows where a per-cell-type slice
+        keeps categories that are empty or singleton in that slice.
     **kwds
         Additional arguments passed to the method. For `'logreg'`, these are
         passed to :class:`cuml.linear_model.LogisticRegression`.
 
     Returns
     -------
-    Updates `adata` with the following fields:
+    Updates `adata` with the following fields. Rank result fields are
+    Scanpy-compatible structured arrays.
 
     `adata.uns['rank_genes_groups' | key_added]['names']`
         Structured array to be indexed by group id storing the gene
@@ -135,7 +175,8 @@ def rank_genes_groups(
     `adata.uns['rank_genes_groups' | key_added]['scores']`
         Structured array to be indexed by group id storing the z-score
         underlying the computation of a p-value for each gene for each
-        group. Ordered according to scores.
+        group, or the Mann-Whitney U statistic when
+        `return_u_values=True`. Ordered according to scores.
     `adata.uns['rank_genes_groups' | key_added]['logfoldchanges']`
         Structured array to be indexed by group id storing the log2
         fold change for each gene for each group.
@@ -154,6 +195,13 @@ def rank_genes_groups(
         msg = "corr_method must be either 'benjamini-hochberg' or 'bonferroni'."
         raise ValueError(msg)
 
+    if "return_format" in kwds:
+        msg = (
+            "return_format has been removed; rank_genes_groups always writes "
+            "Scanpy-compatible structured results to adata.uns."
+        )
+        raise TypeError(msg)
+
     if method is None:
         method = "t-test"
 
@@ -168,6 +216,10 @@ def rank_genes_groups(
             "method must be one of 'logreg', 't-test', 't-test_overestim_var', "
             f"'wilcoxon', 'wilcoxon_binned'. Got {method!r}."
         )
+        raise ValueError(msg)
+
+    if return_u_values and method != "wilcoxon":
+        msg = "return_u_values is only supported for method='wilcoxon'."
         raise ValueError(msg)
 
     if key_added is None:
@@ -197,6 +249,7 @@ def rank_genes_groups(
         layer=layer,
         comp_pts=pts,
         pre_load=pre_load,
+        skip_empty_groups=skip_empty_groups,
     )
 
     # Determine n_genes_user
@@ -211,25 +264,14 @@ def rank_genes_groups(
         rankby_abs=rankby_abs,
         tie_correct=tie_correct,
         use_continuity=use_continuity,
+        return_u_values=return_u_values,
         chunk_size=chunk_size,
         n_bins=n_bins,
         bin_range=bin_range,
         **kwds,
     )
 
-    # Build output
-    test_obj.stats.columns = test_obj.stats.columns.swaplevel()
-
-    dtypes = {
-        "names": "U50",
-        "scores": "float32",
-        "logfoldchanges": "float32",
-        "pvals": "float64",
-        "pvals_adj": "float64",
-    }
-
-    adata.uns[key_added] = {}
-    adata.uns[key_added]["params"] = {
+    params = {
         "groupby": groupby,
         "reference": reference,
         "method": method,
@@ -237,10 +279,22 @@ def rank_genes_groups(
         "layer": layer,
         "corr_method": corr_method,
     }
+    if method == "wilcoxon":
+        params["tie_correct"] = tie_correct
+        params["return_u_values"] = return_u_values
 
-    # Store pts results if computed
+    arrays = test_obj.stats_arrays or {}
+    adata.uns[key_added] = {"params": params}
+    if arrays and len(arrays.get("group_names", ())) > 0:
+        adata.uns[key_added]["names"] = _array_result_to_names(arrays)
+        for col in ("scores", "logfoldchanges", "pvals", "pvals_adj"):
+            if col in arrays:
+                values = arrays[col]
+                dtype = values.dtype
+                adata.uns[key_added][col] = _array_result_to_records(arrays, col, dtype)
+
+    groups_names = [str(name) for name in test_obj.groups_order]
     if test_obj.pts is not None:
-        groups_names = [str(name) for name in test_obj.groups_order]
         adata.uns[key_added]["pts"] = pd.DataFrame(
             test_obj.pts.T, index=test_obj.var_names, columns=groups_names
         )
@@ -249,14 +303,7 @@ def rank_genes_groups(
             test_obj.pts_rest.T, index=test_obj.var_names, columns=groups_names
         )
 
-    if method == "wilcoxon":
-        adata.uns[key_added]["params"]["tie_correct"] = tie_correct
-
-    for col in test_obj.stats.columns.levels[0]:
-        if col in dtypes:
-            adata.uns[key_added][col] = test_obj.stats[col].to_records(
-                index=False, column_dtypes=dtypes[col]
-            )
+    return None
 
 
 if TYPE_CHECKING:
@@ -285,7 +332,7 @@ def rank_genes_groups_logreg(
     layer: str | None = None,
     **kwds,
 ) -> None:
-    rank_genes_groups(
+    return rank_genes_groups(
         adata,
         groupby,
         groups=groups,
