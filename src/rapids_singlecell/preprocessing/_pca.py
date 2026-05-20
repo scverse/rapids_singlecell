@@ -69,7 +69,7 @@ def _resolve_mask_var(
 
 
 def pca(
-    adata: AnnData,
+    data: AnnData,
     n_comps: int | None = None,
     *,
     layer: str = None,
@@ -112,7 +112,7 @@ def pca(
 
     Parameters
     ----------
-    adata
+    data
         AnnData object
 
     n_comps
@@ -210,6 +210,7 @@ def pca(
                 Explained variance, equivalent to the eigenvalues of the \
                 covariance matrix.
     """
+    adata = data
     if use_highly_variable is True and "highly_variable" not in adata.var.keys():
         raise ValueError(
             "Did not find adata.var['highly_variable']. "

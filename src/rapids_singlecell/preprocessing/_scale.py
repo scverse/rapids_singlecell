@@ -24,7 +24,7 @@ from rapids_singlecell.preprocessing._utils import (
 
 
 def scale(
-    adata: AnnData,
+    data: AnnData,
     *,
     zero_center: bool = True,
     max_value: float | None = None,
@@ -39,7 +39,7 @@ def scale(
 
     Parameters
     ----------
-        adata
+        data
             AnnData object
 
         zero_center
@@ -74,6 +74,7 @@ def scale(
     depending on `inplace`.
 
     """
+    adata = data
     if copy:
         if not inplace:
             raise ValueError("`copy=True` cannot be used with `inplace=False`.")
