@@ -152,8 +152,11 @@ def harmonize(
     cat_offsets, cell_indices = _create_category_index_mapping(cats, n_batches)
 
     # Set up parameters
+    if max_iter_harmony < 1:
+        raise ValueError("max_iter_harmony must be >= 1")
     if n_clusters is None:
         n_clusters = int(min(100, n_cells / 30))
+        n_clusters = max(n_clusters, 2)
 
     # TODO: Allow for multiple colsum algorithms in a list
     assert colsum_algo in ["columns", "atomics", "gemm", "benchmark", None]
@@ -443,6 +446,7 @@ def _clustering(
         seed=random_state & 0xFFFFFFFF,
         stabilized=stabilized_penalty,
         stream=cp.cuda.get_current_stream().ptr,
+        handle=cp.cuda.device.get_cublas_handle(),
     )
     objectives_harmony.append(float(cpp_workspace["last_obj"][0]))
 
@@ -614,6 +618,7 @@ def _correction_fast(
         g_factor=g_factor,
         g_P_row0=g_P_row0,
         stream=cp.cuda.get_current_stream().ptr,
+        handle=cp.cuda.device.get_cublas_handle(),
     )
     return Z
 
@@ -671,6 +676,7 @@ def _correction_batched(
         X_sorted=X_sorted,
         R_sorted=R_sorted,
         stream=cp.cuda.get_current_stream().ptr,
+        handle=cp.cuda.device.get_cublas_handle(),
     )
     return Z
 

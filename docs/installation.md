@@ -26,21 +26,7 @@ mamba env create -f conda/rsc_rapids_26.04_cuda12.yml
 RAPIDS currently doesn't support `channel_priority: strict`; use `channel_priority: flexible` instead
 ```
 
-```{warning}
-The conda environment files on the `main` branch reference the new `rapids-singlecell-cu12`/`-cu13` wheel names, which are currently only available as pre-release.
-Until 0.15.0 is released, use the environment files from the [v0.14.1 tag](https://github.com/scverse/rapids_singlecell/tree/v0.14.1/conda) instead, or add `--pre` to the pip line manually.
-```
-
 ## PyPI
-
-```{note}
-**Pre-release testing:** Version 0.15.0 is currently in pre-release. We'd love for you to test it
-and report any issues! Install the latest release candidate with:
-
-    pip install --pre rapids-singlecell-cu13  # or rapids-singlecell-cu12
-
-Please report any problems on [GitHub Issues](https://github.com/scverse/rapids_singlecell/issues).
-```
 
 Starting with version 0.15.0, *rapids-singlecell* ships precompiled CUDA kernels via nanobind.
 Prebuilt wheels are available for **x86_64** and **aarch64** Linux for both CUDA 12 and CUDA 13.
@@ -216,7 +202,17 @@ Then run the following command to execute the container:
 ```bash
 apptainer run --nv rsc.sif
 ```
+### Running on HPC systems with SLURM
 
+When running on HPC systems via SLURM, conda must be explicitly activated before running Python scripts. Use `apptainer exec` instead of `apptainer run`:
+
+```bash
+apptainer exec --nv \
+    --bind /path/to/your/data:/path/to/your/data \
+    rsc.sif \
+    bash -c "source /opt/conda/etc/profile.d/conda.sh && conda activate base && python"
+```
+Without sourcing conda first, `CONDA_PREFIX` will be unset and CuPy will fail to locate the CUDA libraries inside the container, resulting in a `TypeError: expected str, bytes or os.PathLike object, not NoneType` error.
 
 # System requirements
 
