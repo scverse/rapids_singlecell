@@ -53,10 +53,10 @@ rsc.pp.log1p(adata)
 ## Physical graph
 
 ```python
-sq.gr.spatial_neighbors_delaunay(adata, library_key="sample", percentile=99)
+rsc.gr.spatial_neighbors_delaunay(adata, library_key="sample", percentile=99)
 ```
 
-- If `api map` lists a spatial-neighbors builder in `rsc.gr`, use it with the same arguments instead.
+- `rsc.gr.spatial_neighbors_knn` and, for Visium spot grids, `rsc.gr.spatial_neighbors_grid` take the same `library_key`.
 - Build one graph per sample (`library_key`), prune long Delaunay edges with `percentile`, and check the degree distribution and isolated cells.
 - The physical graph lives in `obsp["spatial_connectivities"]`, separate from the expression graph in `obsp["connectivities"]`.
   `rsc.gr` functions move it to the GPU themselves.
@@ -86,8 +86,12 @@ for k in range(5, 16):
 
 - `rsc.gr.spatial_autocorr(adata, mode="moran", copy=True)` scores HVGs by default and `genes=` any others.
   Rank genes by Moran's I, not p-values, and interpret within cell type at single-cell resolution.
+- `rsc.gr.sepal(adata, max_neighs=6)` scores spatially variable genes on Visium hexagonal (`6`) or square-grid (`4`) spot or bin graphs from `rsc.gr.spatial_neighbors_grid`; single-cell graphs are not regular grids.
 - `rsc.gr.co_occurrence(adata, cluster_key="cell_type", interval=...)` runs on the GPU.
+- `rsc.gr.ripley(adata, cluster_key="cell_type", mode="L")` computes Ripley's F, G or L on the GPU; simulations differ from squidpy for the same `rng`.
   Neighborhood enrichment has no rsc port, so use `sq.gr.nhood_enrichment` with `backend="threading"` when `n_jobs > 1`.
+- `rsc.gr.nhood_enrichment(adata, cluster_key="cell_type", library_key="sample")` runs all permutations on the GPU.
+  `library_key` permutes labels only within each sample; cells without a label are dropped with their edges.
 - Read enrichment between cell types as co-compartmentalization and summarize it per sample.
 - `rsc.gr.ligrec` reads host `X` or `.raw`, so run it after `rsc.get.anndata_to_CPU`.
 - The default OmniPath network contains intracellular pairs (for example KIT to PIK3R1).
