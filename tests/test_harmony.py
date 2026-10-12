@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 
 import anndata as ad
@@ -1152,8 +1153,9 @@ def test_harmony_auto_batched_in_cluster_chunks(monkeypatch, dtype):
 @pytest.mark.filterwarnings("ignore:Harmony did not converge")
 def test_harmony_bfloat16_falls_back_to_float32():
     key = ["batch", "second"]  # bfloat16 assignments need one batch key
-    with pytest.warns(UserWarning, match="dtype='bfloat16'"):
+    with pytest.warns(UserWarning, match="dtype='bfloat16'") as record:
         fallback = _integrate("bfloat16", key=key)
+    assert record[0].filename == __file__  # the warning points at the caller
     assert fallback.tobytes() == _integrate(key=key).tobytes()
 
 
@@ -1546,12 +1548,16 @@ def test_harmony_host_input_shards_stage_only_their_rows(monkeypatch, layout):
 def test_harmonize_failure_joins_the_output_prefault(monkeypatch):
     # The thread zeroing `out` is joined when harmonize raises too, so it
     # never writes the caller's array afterwards.
+    raised = threading.Event()
+
     class Late(np.ndarray):
         def fill(self, value):
+            raised.wait(10)  # from the failure on, however long setup took
             time.sleep(0.2)
             super().fill(value)
 
     def fail(*args, **kwargs):
+        raised.set()
         raise RuntimeError("upload")
 
     adata = _repeatability_adata(np.float32)
