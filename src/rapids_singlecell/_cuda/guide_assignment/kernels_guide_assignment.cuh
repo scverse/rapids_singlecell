@@ -9,7 +9,11 @@ namespace guide_assignment {
 constexpr int BLOCK_SIZE = 128;
 constexpr int NUM_WARPS = BLOCK_SIZE / 32;
 constexpr int NEWTON_STEPS = 12;
+constexpr int PRIOR_SAMPLES = 15;
+constexpr int N_QUANTILES = 5;
+constexpr int N_OUTPUTS = 6;
 constexpr float LOG_SQRT_2PI = 0.91893853320467274f;
+constexpr double LOG_SQRT_2PI_D = 0.91893853320467274;
 constexpr float SCALE_FLOOR = 1e-3f;
 constexpr float LOG_SCALE_FLOOR = -6.9077552789821368f;
 constexpr float WEIGHT_FLOOR = 1e-6f;
@@ -21,6 +25,21 @@ struct Params {
     float w_norm;
 };
 
+__device__ inline float quantile(int i) {
+    switch (i) {
+        case 0:
+            return 0.5f;
+        case 1:
+            return 0.75f;
+        case 2:
+            return 0.9f;
+        case 3:
+            return 0.97f;
+        default:
+            return 0.99f;
+    }
+}
+
 __device__ inline float warp_sum(float v) {
     for (int offset = 16; offset > 0; offset >>= 1) {
         v += __shfl_down_sync(0xffffffff, v, offset);
@@ -28,24 +47,25 @@ __device__ inline float warp_sum(float v) {
     return v;
 }
 
-// Block-wide sums of three values, identical on every thread afterwards.
-__device__ inline void block_sum3(float (&s)[3], float (*partials)[3]) {
+// Block-wide sums of N values, identical on every thread afterwards.
+template <int N>
+__device__ inline void block_sum(float (&s)[N], float (*partials)[4]) {
     const int lane = threadIdx.x & 31;
     const int warp = threadIdx.x >> 5;
 #pragma unroll
-    for (int k = 0; k < 3; ++k) {
+    for (int k = 0; k < N; ++k) {
         s[k] = warp_sum(s[k]);
     }
     __syncthreads();
     if (lane == 0) {
 #pragma unroll
-        for (int k = 0; k < 3; ++k) {
+        for (int k = 0; k < N; ++k) {
             partials[warp][k] = s[k];
         }
     }
     __syncthreads();
 #pragma unroll
-    for (int k = 0; k < 3; ++k) {
+    for (int k = 0; k < N; ++k) {
         float total = 0.0f;
 #pragma unroll
         for (int w = 0; w < NUM_WARPS; ++w) {
@@ -55,13 +75,141 @@ __device__ inline void block_sum3(float (&s)[3], float (*partials)[3]) {
     }
 }
 
+__device__ inline float block_max(float v, float (*partials)[4]) {
+    const int lane = threadIdx.x & 31;
+    const int warp = threadIdx.x >> 5;
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        v = fmaxf(v, __shfl_down_sync(0xffffffff, v, offset));
+    }
+    __syncthreads();
+    if (lane == 0) {
+        partials[warp][0] = v;
+    }
+    __syncthreads();
+    float result = partials[0][0];
+#pragma unroll
+    for (int w = 1; w < NUM_WARPS; ++w) {
+        result = fmaxf(result, partials[w][0]);
+    }
+    return result;
+}
+
+// Inclusive prefix sum over the block; `total` receives the block-wide sum.
+__device__ inline float block_inclusive_scan(float v, float& total,
+                                             float (*partials)[4]) {
+    const int lane = threadIdx.x & 31;
+    const int warp = threadIdx.x >> 5;
+    for (int offset = 1; offset < 32; offset <<= 1) {
+        const float n = __shfl_up_sync(0xffffffff, v, offset);
+        if (lane >= offset) {
+            v += n;
+        }
+    }
+    __syncthreads();
+    if (lane == 31) {
+        partials[warp][0] = v;
+    }
+    __syncthreads();
+    total = 0.0f;
+#pragma unroll
+    for (int w = 0; w < NUM_WARPS; ++w) {
+        if (w < warp) {
+            v += partials[w][0];
+        }
+        total += partials[w][0];
+    }
+    return v;
+}
+
+// Median of 15 samples stored `stride` apart, as the 8th smallest value.
+__device__ inline float median15(const float* x, long long stride) {
+    float a[PRIOR_SAMPLES];
+    for (int i = 0; i < PRIOR_SAMPLES; ++i) {
+        const float value = x[i * stride];
+        int j = i;
+        while (j > 0 && a[j - 1] > value) {
+            a[j] = a[j - 1];
+            --j;
+        }
+        a[j] = value;
+    }
+    return a[PRIOR_SAMPLES / 2];
+}
+
+// Start from prior medians, as crispat: 15 standard normal draws per parameter.
+__device__ inline Params prior_init(const float* draws_rate,
+                                    const float* draws_mu,
+                                    const float* draws_scale, int start,
+                                    int guide, int n_guides) {
+    const long long base =
+        static_cast<long long>(start) * PRIOR_SAMPLES * n_guides + guide;
+    Params p;
+    p.rate = expf(median15(draws_rate + base, n_guides));
+    p.mu = 3.0f + 2.0f * median15(draws_mu + base, n_guides);
+    p.scale = expf(2.0f + median15(draws_scale + base, n_guides));
+    p.w_norm = 0.5f;
+    return p;
+}
+
+// Start that splits the values at a weight quantile: Poisson below, Gaussian
+// above.
+__device__ inline Params data_init(const float* __restrict__ v,
+                                   const float* __restrict__ w, int nv,
+                                   float sum_w, float vmax, float q,
+                                   float (*partials)[4]) {
+    const float total = fmaxf(sum_w, 1.0f);
+    float s[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float carry = 0.0f;
+    for (int base = 0; base < nv; base += BLOCK_SIZE) {
+        const int j = base + threadIdx.x;
+        const float wj = j < nv ? w[j] : 0.0f;
+        float chunk_total;
+        const float cumulative =
+            carry + block_inclusive_scan(wj, chunk_total, partials);
+        if (j < nv) {
+            const bool upper = (cumulative / total > q) && (wj > 0.0f);
+            if (upper) {
+                s[0] += wj;
+                s[1] += wj * v[j];
+            } else {
+                s[2] += wj;
+                s[3] += wj * v[j];
+            }
+        }
+        carry += chunk_total;
+    }
+    block_sum<4>(s, partials);
+    const float n_up = s[0];
+    const float n_low = s[2];
+    Params p;
+    p.rate = fmaxf(s[3] / fmaxf(n_low, 1.0f), 0.05f);
+    p.mu = n_up > 0.0f ? s[1] / fmaxf(n_up, 1.0f) : vmax;
+    float ss[1] = {0.0f};
+    carry = 0.0f;
+    for (int base = 0; base < nv; base += BLOCK_SIZE) {
+        const int j = base + threadIdx.x;
+        const float wj = j < nv ? w[j] : 0.0f;
+        float chunk_total;
+        const float cumulative =
+            carry + block_inclusive_scan(wj, chunk_total, partials);
+        if (j < nv && (cumulative / total > q) && (wj > 0.0f)) {
+            const float d = v[j] - p.mu;
+            ss[0] += wj * d * d;
+        }
+        carry += chunk_total;
+    }
+    block_sum<1>(ss, partials);
+    p.scale = fmaxf(sqrtf(ss[0] / fmaxf(n_up, 1.0f)), 0.5f);
+    p.w_norm = fminf(fmaxf(n_up / total, 0.01f), 0.9f);
+    return p;
+}
+
 // Log mixture density of one log2 count and the Gaussian responsibility.
-__device__ inline void mixture_terms(float value, float log_gamma,
-                                     const Params& p, float log_rate,
-                                     float log_scale, float log_w,
-                                     float log1m_w, float& log_mix,
+__device__ inline void mixture_terms(float value, const Params& p,
+                                     float log_rate, float log_scale,
+                                     float log_w, float log1m_w, float& log_mix,
                                      float& resp) {
-    const float log_pois = value * log_rate - p.rate - log_gamma;
+    const float log_pois = value * log_rate - p.rate - lgammaf(value + 1.0f);
     const float z = (value - p.mu) / p.scale;
     const float log_norm = -LOG_SQRT_2PI - log_scale - 0.5f * z * z;
     const float log_norm_weighted = log_w + log_norm;
@@ -109,10 +257,9 @@ __device__ inline float solve_log_rate(float sum_values, float n_pois) {
 // Sums of w*log_mix, w*resp and w*resp*value, or of w*resp*(value - center)^2.
 template <bool SECOND_PASS>
 __device__ inline void e_step_sums(const float* __restrict__ values,
-                                   const float* __restrict__ weights,
-                                   const float* __restrict__ log_gamma,
-                                   int n_values, const Params& p, float center,
-                                   float (&s)[3], float (*partials)[3]) {
+                                   const float* __restrict__ weights, int nv,
+                                   const Params& p, float center, float (&s)[3],
+                                   float (*partials)[4]) {
     const float log_rate = logf(p.rate);
     const float log_scale = logf(p.scale);
     const float log_w = logf(p.w_norm);
@@ -120,11 +267,11 @@ __device__ inline void e_step_sums(const float* __restrict__ values,
     s[0] = 0.0f;
     s[1] = 0.0f;
     s[2] = 0.0f;
-    for (int j = threadIdx.x; j < n_values; j += BLOCK_SIZE) {
+    for (int j = threadIdx.x; j < nv; j += BLOCK_SIZE) {
         float log_mix;
         float resp;
-        mixture_terms(values[j], log_gamma[j], p, log_rate, log_scale, log_w,
-                      log1m_w, log_mix, resp);
+        mixture_terms(values[j], p, log_rate, log_scale, log_w, log1m_w,
+                      log_mix, resp);
         const float w_resp = weights[j] * resp;
         if (SECOND_PASS) {
             const float d = values[j] - center;
@@ -135,42 +282,49 @@ __device__ inline void e_step_sums(const float* __restrict__ values,
             s[2] += w_resp * values[j];
         }
     }
-    block_sum3(s, partials);
+    block_sum<3>(s, partials);
 }
 
-// MAP-EM of one (start, guide) until the relative loss change is below tol;
-// layouts [starts, ld, 4] and [starts, ld].
+// MAP-EM of one (start, guide) until the relative loss change is below tol.
+// Values are [guides, width] with n_values used entries per guide, draws are
+// [n_init_seeds, 15, guides], outputs [starts, guides, 4] and [starts, guides].
 __device__ inline void fit_poisson_gauss_block(
     const float* __restrict__ values, const float* __restrict__ weights,
-    const float* __restrict__ log_gamma, const float* __restrict__ inits,
-    float* __restrict__ params_out, float* __restrict__ loss_out, int ld,
-    int n_values, int n_iter, float tol) {
+    const int* __restrict__ n_values, const float* __restrict__ draws_rate,
+    const float* __restrict__ draws_mu, const float* __restrict__ draws_scale,
+    float* __restrict__ params_out, float* __restrict__ loss_out, int n_guides,
+    int width, int n_init_seeds, int n_iter, float tol) {
     const int guide = blockIdx.x;
     const int start = blockIdx.y;
-    const long long offset = static_cast<long long>(guide) * n_values;
-    const float* v = values + offset;
-    const float* w = weights + offset;
-    const float* lg = log_gamma + offset;
-    const long long slot = static_cast<long long>(start) * ld + guide;
+    const int nv = n_values[guide];
+    const float* v = values + static_cast<long long>(guide) * width;
+    const float* w = weights + static_cast<long long>(guide) * width;
+    const long long slot = static_cast<long long>(start) * n_guides + guide;
 
-    __shared__ float partials[NUM_WARPS][3];
-
-    Params p{inits[slot * 4], inits[slot * 4 + 1], inits[slot * 4 + 2],
-             inits[slot * 4 + 3]};
+    __shared__ float partials[NUM_WARPS][4];
 
     float s[3] = {0.0f, 0.0f, 0.0f};
-    for (int j = threadIdx.x; j < n_values; j += BLOCK_SIZE) {
+    float vmax = 0.0f;
+    for (int j = threadIdx.x; j < nv; j += BLOCK_SIZE) {
         s[0] += w[j];
         s[1] += w[j] * v[j];
+        vmax = fmaxf(vmax, v[j]);
     }
-    block_sum3(s, partials);
+    block_sum<3>(s, partials);
     const float sum_w = s[0];
     const float sum_wv = s[1];
+    vmax = block_max(vmax, partials);
+
+    Params p = start < n_init_seeds
+                   ? prior_init(draws_rate, draws_mu, draws_scale, start, guide,
+                                n_guides)
+                   : data_init(v, w, nv, sum_w, vmax,
+                               quantile(start - n_init_seeds), partials);
 
     float previous = INFINITY;
     float current = 1e30f;
     for (int iteration = 0; iteration < n_iter; ++iteration) {
-        e_step_sums<false>(v, w, lg, n_values, p, 0.0f, s, partials);
+        e_step_sums<false>(v, w, nv, p, 0.0f, s, partials);
         const float loss = -(s[0] + log_prior(p));
         const float n_norm = s[1];
         const float sum_resp_values = s[2];
@@ -181,7 +335,7 @@ __device__ inline void fit_poisson_gauss_block(
         const float precision = 1.0f / (p.scale * p.scale);
         const float mu_new = (sum_resp_values * precision + 0.75f) /
                              (n_norm * precision + 0.25f);
-        e_step_sums<true>(v, w, lg, n_values, p, mu_new, s, partials);
+        e_step_sums<true>(v, w, nv, p, mu_new, s, partials);
         const float scale_new =
             fmaxf(expf(solve_log_scale(s[0], n_norm)), SCALE_FLOOR);
         const float rate_new =
@@ -194,7 +348,7 @@ __device__ inline void fit_poisson_gauss_block(
         }
     }
 
-    e_step_sums<false>(v, w, lg, n_values, p, 0.0f, s, partials);
+    e_step_sums<false>(v, w, nv, p, 0.0f, s, partials);
     if (threadIdx.x == 0) {
         params_out[slot * 4] = p.rate;
         params_out[slot * 4 + 1] = p.mu;
@@ -204,15 +358,101 @@ __device__ inline void fit_poisson_gauss_block(
     }
 }
 
-__global__ void fit_poisson_gauss_kernel(const float* __restrict__ values,
-                                         const float* __restrict__ weights,
-                                         const float* __restrict__ log_gamma,
-                                         const float* __restrict__ inits,
-                                         float* __restrict__ params_out,
-                                         float* __restrict__ loss_out, int ld,
-                                         int n_values, int n_iter, float tol) {
-    fit_poisson_gauss_block(values, weights, log_gamma, inits, params_out,
-                            loss_out, ld, n_values, n_iter, tol);
+__global__ void fit_poisson_gauss_kernel(
+    const float* __restrict__ values, const float* __restrict__ weights,
+    const int* __restrict__ n_values, const float* __restrict__ draws_rate,
+    const float* __restrict__ draws_mu, const float* __restrict__ draws_scale,
+    float* __restrict__ params_out, float* __restrict__ loss_out, int n_guides,
+    int width, int n_init_seeds, int n_iter, float tol) {
+    fit_poisson_gauss_block(values, weights, n_values, draws_rate, draws_mu,
+                            draws_scale, params_out, loss_out, n_guides, width,
+                            n_init_seeds, n_iter, tol);
+}
+
+__device__ inline bool posterior_above_half(double log_count, double rate,
+                                            double mu, double scale,
+                                            double w_norm) {
+    const double log_norm =
+        -LOG_SQRT_2PI_D - log(scale) -
+        0.5 * ((log_count - mu) / scale) * ((log_count - mu) / scale);
+    const double log_pois =
+        log_count * log(rate) - rate - lgamma(log_count + 1.0);
+    const double log_num = log(w_norm) + log_norm;
+    const double other = log(1.0 - w_norm) + log_pois;
+    const double upper = fmax(log_num, other);
+    const double log_den = upper + log1p(exp(-fabs(log_num - other)));
+    return exp(log_num - log_den) > 0.5;
+}
+
+// One block per guide: keep the admissible start with the lowest loss and scan
+// counts 1..max_count for the first with a Gaussian posterior above 0.5.
+// out is [guides, 6]: rate, mu, scale, w_norm, loss, threshold (nan if none).
+__global__ void select_threshold_kernel(const float* __restrict__ params,
+                                        const float* __restrict__ loss,
+                                        const int* __restrict__ max_counts,
+                                        float* __restrict__ out, int n_guides,
+                                        int n_starts) {
+    const int guide = blockIdx.x;
+    __shared__ int first_count[NUM_WARPS];
+
+    int best = -1;
+    float best_loss = INFINITY;
+    for (int start = 0; start < n_starts; ++start) {
+        const long long slot = static_cast<long long>(start) * n_guides + guide;
+        const float l = loss[slot];
+        const float rate = params[slot * 4];
+        const float mu = params[slot * 4 + 1];
+        const float scale = params[slot * 4 + 2];
+        const float w_norm = params[slot * 4 + 3];
+        const bool admissible = isfinite(l) && mu > rate &&
+                                w_norm > 2.0f * WEIGHT_FLOOR &&
+                                scale > 2.0f * SCALE_FLOOR;
+        if (admissible && l < best_loss) {
+            best_loss = l;
+            best = start;
+        }
+    }
+    if (best < 0) {
+        if (threadIdx.x == 0) {
+            for (int k = 0; k < N_OUTPUTS; ++k) {
+                out[static_cast<long long>(guide) * N_OUTPUTS + k] = NAN;
+            }
+        }
+        return;
+    }
+    const long long slot = static_cast<long long>(best) * n_guides + guide;
+    const double rate = params[slot * 4];
+    const double mu = params[slot * 4 + 1];
+    const double scale = params[slot * 4 + 2];
+    const double w_norm = params[slot * 4 + 3];
+    const int max_count = max_counts[guide];
+    int found = max_count + 1;
+    for (int t = threadIdx.x + 1; t <= max_count; t += BLOCK_SIZE) {
+        if (posterior_above_half(log2(static_cast<double>(t)), rate, mu, scale,
+                                 w_norm)) {
+            found = t;
+            break;
+        }
+    }
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        found = min(found, __shfl_down_sync(0xffffffff, found, offset));
+    }
+    if ((threadIdx.x & 31) == 0) {
+        first_count[threadIdx.x >> 5] = found;
+    }
+    __syncthreads();
+    if (threadIdx.x == 0) {
+        for (int w = 1; w < NUM_WARPS; ++w) {
+            found = min(found, first_count[w]);
+        }
+        float* o = out + static_cast<long long>(guide) * N_OUTPUTS;
+        o[0] = params[slot * 4];
+        o[1] = params[slot * 4 + 1];
+        o[2] = params[slot * 4 + 2];
+        o[3] = params[slot * 4 + 3];
+        o[4] = best_loss;
+        o[5] = found <= max_count ? static_cast<float>(found) : NAN;
+    }
 }
 
 }  // namespace guide_assignment
