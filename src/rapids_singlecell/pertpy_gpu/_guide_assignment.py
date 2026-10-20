@@ -133,8 +133,7 @@ def _binary_to_per_cell_strings(
 class GuideAssignment:
     """GPU-accelerated guide RNA assignment.
 
-    Provides the threshold-based and mixture-model-based methods of pertpy's
-    ``GuideAssignment`` with the same parameters and results.
+    Provides the threshold-based and mixture-model-based methods of pertpy's ``GuideAssignment`` with the same parameters and results.
     """
 
     def assign_by_threshold(
@@ -147,8 +146,7 @@ class GuideAssignment:
     ) -> None:
         """Assign cells to gRNAs exceeding a count threshold.
 
-        Each cell is assigned to every gRNA with at least ``assignment_threshold``
-        counts.
+        Each cell is assigned to every gRNA with at least ``assignment_threshold`` counts.
         Expects unnormalized count data.
 
         Parameters
@@ -158,10 +156,10 @@ class GuideAssignment:
         assignment_threshold
             Minimum count for a viable assignment.
         layer
-            Layer with raw counts. Uses ``adata.X`` if ``None``.
+            Layer with raw counts.
+            Uses ``adata.X`` if ``None``.
         output_layer
-            Key under which the binary assignment matrix is stored in
-            ``adata.layers``.
+            Key under which the binary assignment matrix is stored in ``adata.layers``.
         """
         X = X_to_GPU(_get_obs_rep(adata, layer=layer))
         if cp_issparse(X):
@@ -183,8 +181,7 @@ class GuideAssignment:
     ) -> None:
         """Assign each cell to its most expressed gRNA.
 
-        Each cell is assigned to the gRNA with the highest count, provided that
-        count is at least ``assignment_threshold``.
+        Each cell is assigned to the gRNA with the highest count, provided that count is at least ``assignment_threshold``.
         Ties are resolved in favour of the first of the tied gRNAs.
         Expects unnormalized count data.
 
@@ -195,7 +192,8 @@ class GuideAssignment:
         assignment_threshold
             Minimum count for a viable assignment.
         layer
-            Layer with raw counts. Uses ``adata.X`` if ``None``.
+            Layer with raw counts.
+            Uses ``adata.X`` if ``None``.
         obs_key
             Column in ``adata.obs`` where the assignment is stored.
         no_grna_assigned_key
@@ -234,36 +232,28 @@ class GuideAssignment:
     ) -> np.ndarray | None:
         """Assign gRNAs to cells using a Poisson-Gaussian mixture model.
 
-        The model, priors and per-guide thresholding rule are those of
-        ``crispat.ga_poisson_gauss`` and of pertpy's ``assign_mixture_model``.
-        For each guide, the log2 of its non-zero UMI counts is modelled as a mixture
-        of a continuous Poisson background and a Gaussian on-target component with
-        priors ``weights ~ Dirichlet([0.9, 0.1])``, ``mu ~ Normal(3, 2)``,
-        ``scale ~ LogNormal(2, 1)`` and ``lam ~ LogNormal(0, 1)``.
-        A cell is assigned to a guide if its UMI count is at least the smallest
-        integer ``t`` for which ``P(Normal | log2(t)) > 0.5``.
+        The model, priors and per-guide thresholding rule are those of ``crispat.ga_poisson_gauss`` and of pertpy's ``assign_mixture_model``.
+        For each guide, the log2 of its non-zero UMI counts is modelled as a mixture of a continuous Poisson background and a Gaussian on-target component with priors ``weights ~ Dirichlet([0.9, 0.1])``, ``mu ~ Normal(3, 2)``, ``scale ~ LogNormal(2, 1)`` and ``lam ~ LogNormal(0, 1)``.
+        A cell is assigned to a guide if its UMI count is at least the smallest integer ``t`` for which ``P(Normal | log2(t)) > 0.5``.
 
-        The MAP estimate is found by multi-start EM on the distinct count values of
-        every guide, for all guides in parallel on the GPU.
-        The lowest-loss solution is kept after discarding label-switched optima and
-        degenerate optima in which the Gaussian weight vanishes or the Gaussian
-        collapses onto a single count value.
+        The MAP estimate is found by multi-start EM on the distinct count values of every guide, for all guides in parallel on the GPU.
+        The lowest-loss solution is kept after discarding label-switched optima and degenerate optima in which the Gaussian weight vanishes or the Gaussian collapses onto a single count value.
 
         Parameters
         ----------
         adata
             Annotated data matrix with guide RNA counts.
         model
-            The mixture model to use; only ``"poisson_gauss_mixture"`` is supported.
+            The mixture model to use.
+            Only ``"poisson_gauss_mixture"`` is supported.
         layer
-            Layer with raw counts. Uses ``adata.X`` if ``None``.
+            Layer with raw counts.
+            Uses ``adata.X`` if ``None``.
         assigned_guides_key
             Per-cell assignment is saved on ``adata.obs[assigned_guides_key]``.
         output_layer
-            The binary cell-by-guide assignment matrix is saved on
-            ``adata.layers[output_layer]``, or not at all if ``None``.
-            Unlike the per-cell assignment it is not capped by
-            ``max_assignments_per_cell``.
+            The binary cell-by-guide assignment matrix is saved on ``adata.layers[output_layer]``, or not at all if ``None``.
+            Unlike the per-cell assignment it is not capped by ``max_assignments_per_cell``.
         no_grna_assigned_key
             Key to use when a cell is negative for all gRNAs.
         max_assignments_per_cell

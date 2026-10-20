@@ -1,13 +1,8 @@
 """Poisson-Gaussian mixture model for gRNA assignment on the GPU.
 
-Mirrors ``pertpy.preprocessing._guide_rna_mixture``, which implements the model of
-``crispat.ga_poisson_gauss`` (Velten group, https://github.com/velten-group/crispat).
-For every guide, the log2 of its non-zero UMI counts is modelled as a mixture of a
-continuous Poisson background and a Gaussian on-target component with priors
-``weights ~ Dirichlet([0.9, 0.1])``, ``mu ~ Normal(3, 2)``, ``scale ~ LogNormal(2, 1)``
-and ``lam ~ LogNormal(0, 1)``.
-The MAP estimate is found by multi-start EM on the unique count values of every
-guide, for all guides and starts in parallel with CuPy.
+Mirrors ``pertpy.preprocessing._guide_rna_mixture``, which implements the model of ``crispat.ga_poisson_gauss`` (Velten group, https://github.com/velten-group/crispat).
+For every guide, the log2 of its non-zero UMI counts is modelled as a mixture of a continuous Poisson background and a Gaussian on-target component with priors ``weights ~ Dirichlet([0.9, 0.1])``, ``mu ~ Normal(3, 2)``, ``scale ~ LogNormal(2, 1)`` and ``lam ~ LogNormal(0, 1)``.
+The MAP estimate is found by multi-start EM on the distinct count values of every guide, for all guides and starts in parallel with CuPy.
 """
 
 from __future__ import annotations
@@ -193,8 +188,7 @@ def _fit_chunk(
 ) -> tuple[cp.ndarray, ...]:
     """Fit all starts of a chunk of guides and keep the best admissible solution per guide.
 
-    Label-switched optima (Gaussian below the Poisson) and solutions pinned at the
-    weight or scale floor are inadmissible.
+    Label-switched optima (Gaussian below the Poisson) and solutions pinned at the weight or scale floor are inadmissible.
     """
     log_gamma = gammaln(values + 1.0).astype(cp.float32, copy=False)
     inits = cp.concatenate(
@@ -245,21 +239,18 @@ def fit_poisson_gauss_mixture(
 ) -> PoissonGaussFit:
     """Fit Poisson-Gaussian mixtures for many guides in parallel by multi-start MAP-EM.
 
-    Guides are grouped by their number of distinct values and fit in chunks of bounded
-    size, so peak memory does not grow with the number of guides.
+    Guides are grouped by their number of distinct values and fit in chunks of bounded size, so peak memory does not grow with the number of guides.
 
     Parameters
     ----------
     values
-        Sorted log2-transformed distinct non-zero counts per guide of shape
-        ``[n_guides, n_values]``, zero padded.
+        Sorted log2-transformed distinct non-zero counts per guide of shape ``[n_guides, n_values]``, zero padded.
     weights
         Number of cells with each value, zero for padding.
     n_iter
         Maximum EM iterations per start.
     n_init_seeds
-        Number of prior-median initialisations per guide, used in addition to
-        quantile-split initialisations.
+        Number of prior-median initialisations per guide, used in addition to quantile-split initialisations.
     seed
         Random seed for the prior-median initialisations.
     tol
@@ -328,8 +319,7 @@ def compute_count_thresholds(
 ) -> np.ndarray:
     """Per-guide assignment threshold matching crispat.
 
-    For each guide, scans integer UMI counts ``t = 1, 2, ..., max_count`` and returns
-    the smallest ``t`` for which ``P(Normal | log2(t)) > 0.5``.
+    For each guide, scans integer UMI counts ``t = 1, 2, ..., max_count`` and returns the smallest ``t`` for which ``P(Normal | log2(t)) > 0.5``.
     Returns ``np.nan`` if no such ``t`` exists within ``max_count`` or the guide has no fit.
     """
     max_counts = np.asarray(max_counts, dtype=np.int64)
