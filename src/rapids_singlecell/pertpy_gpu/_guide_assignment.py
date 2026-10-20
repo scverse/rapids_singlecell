@@ -91,7 +91,7 @@ def _distinct_values(
     return values_padded, weights_padded, nonzero_counts, max_counts
 
 
-def _binary_to_per_cell_strings(
+def _per_cell_assignments(
     indptr: np.ndarray,
     indices: np.ndarray,
     guide_names: np.ndarray,
@@ -100,8 +100,8 @@ def _binary_to_per_cell_strings(
     max_assignments_per_cell: int,
     multiple_grna_assigned_key: str,
     multiple_grna_assignment_string: str,
-) -> np.ndarray:
-    """Per-cell assignment strings from the CSR structure of the binary assignment."""
+) -> pd.Categorical:
+    """Per-cell assignment labels from the CSR structure of the binary assignment."""
     n_cells = indptr.size - 1
     n_assigned = np.diff(indptr)
     if any(multiple_grna_assignment_string in name for name in guide_names):
@@ -113,21 +113,30 @@ def _binary_to_per_cell_strings(
             UserWarning,
             stacklevel=3,
         )
-    assignments = np.full(n_cells, no_grna_assigned_key, dtype=object)
+    labels = [np.array([no_grna_assigned_key, multiple_grna_assigned_key]), guide_names]
+    codes = np.zeros(n_cells, dtype=np.int64)
+    codes[n_assigned > max_assignments_per_cell] = 1
     single = n_assigned == 1
-    assignments[single] = guide_names[indices[indptr[:-1][single]]]
+    codes[single] = 2 + indices[indptr[:-1][single]]
+    offset = 2 + len(guide_names)
     multi = (n_assigned > 1) & (n_assigned <= max_assignments_per_cell)
-    if multi.any():
-        cell_of_entry = np.repeat(np.arange(n_cells), n_assigned)
-        entries = multi[cell_of_entry]
-        joined = (
-            pd.Series(guide_names[indices[entries]])
-            .groupby(cell_of_entry[entries])
-            .agg(multiple_grna_assignment_string.join)
-        )
-        assignments[joined.index.to_numpy()] = joined.to_numpy()
-    assignments[n_assigned > max_assignments_per_cell] = multiple_grna_assigned_key
-    return assignments
+    for k in np.unique(n_assigned[multi]):
+        cells = np.flatnonzero(n_assigned == k)
+        names = guide_names[indices[indptr[cells][:, None] + np.arange(k)]]
+        joined = names[:, 0]
+        for j in range(1, k):
+            joined = np.char.add(
+                np.char.add(joined, multiple_grna_assignment_string), names[:, j]
+            )
+        unique, inverse = np.unique(joined, return_inverse=True)
+        codes[cells] = offset + inverse
+        labels.append(unique)
+        offset += len(unique)
+    categories, remap = np.unique(np.concatenate(labels), return_inverse=True)
+    codes = remap[codes]
+    used = np.zeros(len(categories), dtype=bool)
+    used[codes] = True
+    return pd.Categorical.from_codes((np.cumsum(used) - 1)[codes], categories[used])
 
 
 class GuideAssignment:
@@ -282,7 +291,7 @@ class GuideAssignment:
                 "Model not implemented. Please use 'poisson_gauss_mixture'."
             )
         X = X_to_GPU(_get_obs_rep(adata, layer=layer))
-        guide_names = np.asarray(adata.var_names, dtype=object)
+        guide_names = np.asarray(adata.var_names, dtype=str)
         n_cells, n_guides = X.shape
 
         cols, rows, values = _nonzero_entries(X)
@@ -357,7 +366,7 @@ class GuideAssignment:
             shape=(n_cells, n_guides),
         )
         binary_csr = binary.tocsr()
-        assignments = _binary_to_per_cell_strings(
+        assignments = _per_cell_assignments(
             cp.asnumpy(binary_csr.indptr),
             cp.asnumpy(binary_csr.indices),
             guide_names,
@@ -367,11 +376,11 @@ class GuideAssignment:
             multiple_grna_assignment_string=multiple_grna_assignment_string,
         )
         if only_return_results:
-            return assignments
+            return np.asarray(assignments)
 
         for column, estimate in estimates.items():
             adata.var[column] = estimate
-        adata.obs[assigned_guides_key] = pd.Categorical(assignments)
+        adata.obs[assigned_guides_key] = assignments
         if output_layer is not None:
             if isspmatrix_csc(X):
                 layer_value = binary

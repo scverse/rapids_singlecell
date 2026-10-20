@@ -2,7 +2,7 @@
 
 Mirrors ``pertpy.preprocessing._guide_rna_mixture``, which implements the model of ``crispat.ga_poisson_gauss`` (Velten group, https://github.com/velten-group/crispat).
 For every guide, the log2 of its non-zero UMI counts is modelled as a mixture of a continuous Poisson background and a Gaussian on-target component with priors ``weights ~ Dirichlet([0.9, 0.1])``, ``mu ~ Normal(3, 2)``, ``scale ~ LogNormal(2, 1)`` and ``lam ~ LogNormal(0, 1)``.
-The MAP estimate is found by multi-start EM on the distinct count values of every guide, for all guides and starts in parallel with CuPy.
+The MAP estimate is found by multi-start EM on the distinct count values of every guide, with one CUDA block per guide and start.
 """
 
 from __future__ import annotations
@@ -12,17 +12,16 @@ from dataclasses import dataclass
 import cupy as cp
 import numpy as np
 from cupyx.scipy.special import gammaln
-from scipy.special import gammaln as _np_gammaln
+
+from rapids_singlecell._cuda import _guide_assignment_cuda as _ga
 
 _LOG_SQRT_2PI = 0.5 * float(np.log(2.0 * np.pi))
 _SCALE_FLOOR = 1e-3
 _WEIGHT_FLOOR = 1e-6
 _INIT_QUANTILES = (0.5, 0.75, 0.9, 0.97, 0.99)
 _PRIOR_INIT_SAMPLES = 15
-_NEWTON_STEPS = 12
 _CHUNK_ELEMENTS = 2**22
-_CONVERGENCE_CHECK_EVERY = 25
-_LOG_SCALE_FLOOR = float(np.log(_SCALE_FLOOR))
+_SCAN_ELEMENTS = 2**22
 
 
 @dataclass
@@ -34,107 +33,6 @@ class PoissonGaussFit:
     gaussian_std: np.ndarray
     mix_probs: np.ndarray
     final_loss: np.ndarray
-
-
-@cp.fuse()
-def _mixture_terms(values, log_gamma, rate, mu, scale, w_norm):  # noqa: PLR0917
-    """Per-value log mixture density and Gaussian responsibility."""
-    log_pois = values * cp.log(rate) - rate - log_gamma
-    log_norm = -_LOG_SQRT_2PI - cp.log(scale) - 0.5 * cp.square((values - mu) / scale)
-    log_norm_weighted = cp.log(w_norm) + log_norm
-    log_mix = cp.logaddexp(log_norm_weighted, cp.log1p(-w_norm) + log_pois)
-    return log_mix, cp.exp(log_norm_weighted - log_mix)
-
-
-@cp.fuse()
-def _log_prior(rate, mu, scale, w_norm):
-    return (
-        -0.1 * cp.log1p(-w_norm)
-        - 0.9 * cp.log(w_norm)
-        - 0.5 * cp.square((mu - 3.0) / 2.0)
-        - cp.log(scale)
-        - 0.5 * cp.square(cp.log(scale) - 2.0)
-        - cp.log(rate)
-        - 0.5 * cp.square(cp.log(rate))
-    )
-
-
-def _neg_log_joint(
-    rate: cp.ndarray,
-    mu: cp.ndarray,
-    scale: cp.ndarray,
-    w_norm: cp.ndarray,
-    *,
-    values: cp.ndarray,
-    weights: cp.ndarray,
-    log_gamma: cp.ndarray,
-) -> tuple[cp.ndarray, cp.ndarray]:
-    """Negative log joint per start and guide, with the Gaussian responsibilities.
-
-    Parameters have shape ``[starts, guides]``, the data ``[guides, values]``.
-    Additive prior constants are dropped.
-    """
-    log_mix, resp = _mixture_terms(
-        values,
-        log_gamma,
-        rate[..., None],
-        mu[..., None],
-        scale[..., None],
-        w_norm[..., None],
-    )
-    loss = -((weights * log_mix).sum(axis=-1) + _log_prior(rate, mu, scale, w_norm))
-    return loss, resp
-
-
-@cp.fuse()
-def _solve_log_scale(sum_squares, n_norm):
-    """MAP log scale of the Gaussian: the root of a convex decreasing function."""
-    v = 0.5 * cp.log(cp.maximum(sum_squares, 1e-12) / cp.maximum(n_norm, 1e-12))
-    v = cp.minimum(cp.maximum(v, _LOG_SCALE_FLOOR), 10.0)
-    for _ in range(_NEWTON_STEPS):
-        e = sum_squares * cp.exp(-2.0 * v)
-        f = e - (v - 2.0) - n_norm - 1.0
-        v = cp.minimum(cp.maximum(v - f / (-2.0 * e - 1.0), _LOG_SCALE_FLOOR), 10.0)
-    return v
-
-
-@cp.fuse()
-def _solve_log_rate(sum_values, n_pois):
-    """MAP log rate of the Poisson: the root of a concave decreasing function."""
-    log_rate = cp.log(cp.maximum(sum_values, 1e-12) / cp.maximum(n_pois, 1e-12))
-    log_rate = cp.minimum(cp.maximum(log_rate, -20.0), 10.0)
-    for _ in range(_NEWTON_STEPS):
-        e = n_pois * cp.exp(log_rate)
-        g = sum_values - 1.0 - log_rate - e
-        log_rate = cp.minimum(cp.maximum(log_rate - g / (-1.0 - e), -20.0), 10.0)
-    return log_rate
-
-
-def _em_step(
-    params: tuple[cp.ndarray, cp.ndarray, cp.ndarray, cp.ndarray],
-    values: cp.ndarray,
-    weights: cp.ndarray,
-    log_gamma: cp.ndarray,
-) -> tuple[tuple[cp.ndarray, cp.ndarray, cp.ndarray, cp.ndarray], cp.ndarray]:
-    """One MAP-EM step; returns the updated parameters and the loss of the old ones."""
-    rate, mu, scale, w_norm = params
-    loss, resp = _neg_log_joint(
-        rate, mu, scale, w_norm, values=values, weights=weights, log_gamma=log_gamma
-    )
-    w_resp = weights * resp
-    n_norm = w_resp.sum(axis=-1)
-    n_pois = weights.sum(axis=-1) - n_norm
-    w_new = cp.clip(
-        (n_norm - 0.9) / (n_norm + n_pois - 1.0), _WEIGHT_FLOOR, 1.0 - _WEIGHT_FLOOR
-    )
-    precision = 1.0 / cp.square(scale)
-    sum_resp_values = (w_resp * values).sum(axis=-1)
-    mu_new = (sum_resp_values * precision + 0.75) / (n_norm * precision + 0.25)
-    sum_squares = (w_resp * cp.square(values - mu_new[..., None])).sum(axis=-1)
-    scale_new = cp.maximum(cp.exp(_solve_log_scale(sum_squares, n_norm)), _SCALE_FLOOR)
-    sum_rest_values = (weights * values).sum(axis=-1) - sum_resp_values
-    rate_new = cp.exp(_solve_log_rate(sum_rest_values, n_pois))
-    return (rate_new, mu_new, scale_new, w_new), loss
 
 
 def _prior_median_inits(
@@ -180,41 +78,31 @@ def _data_inits(values: cp.ndarray, weights: cp.ndarray) -> cp.ndarray:
 def _fit_chunk(
     values: cp.ndarray,
     weights: cp.ndarray,
-    rng: cp.random.Generator,
+    log_gamma: cp.ndarray,
+    inits: cp.ndarray,
     *,
-    n_init_seeds: int,
     n_iter: int,
     tol: float,
 ) -> tuple[cp.ndarray, ...]:
-    """Fit all starts of a chunk of guides and keep the best admissible solution per guide.
+    """Fit all starts of a group of guides and keep the best admissible solution per guide.
 
     Label-switched optima (Gaussian below the Poisson) and solutions pinned at the weight or scale floor are inadmissible.
     """
-    log_gamma = gammaln(values + 1.0).astype(cp.float32, copy=False)
-    inits = cp.concatenate(
-        [
-            _prior_median_inits(rng, values.shape[0], n_init_seeds),
-            _data_inits(values, weights),
-        ]
+    params = cp.full_like(inits, cp.nan)
+    loss = cp.full(inits.shape[:2], cp.inf, dtype=cp.float32)
+    _ga.fit_poisson_gauss(
+        values,
+        weights,
+        log_gamma,
+        inits,
+        params,
+        loss,
+        n_guides=values.shape[0],
+        n_iter=n_iter,
+        tol=tol,
+        stream=cp.cuda.get_current_stream().ptr,
     )
-    params = tuple(cp.ascontiguousarray(inits[..., k]) for k in range(4))
-    previous = cp.full(params[0].shape, cp.inf, dtype=cp.float32)
-    current = cp.full(params[0].shape, 1e30, dtype=cp.float32)
-    active = cp.ones(params[0].shape, dtype=cp.bool_)
-    for iteration in range(1, n_iter + 1):
-        new_params, loss = _em_step(params, values, weights, log_gamma)
-        params = tuple(
-            cp.where(active, new, old) for new, old in zip(new_params, params)
-        )
-        previous = cp.where(active, current, previous)
-        current = cp.where(active, loss, current)
-        active &= cp.abs(previous - current) > tol * cp.abs(current)
-        if iteration % _CONVERGENCE_CHECK_EVERY == 0 and not bool(active.any()):
-            break
-    rate, mu, scale, w_norm = params
-    loss, _ = _neg_log_joint(
-        rate, mu, scale, w_norm, values=values, weights=weights, log_gamma=log_gamma
-    )
+    rate, mu, scale, w_norm = (cp.ascontiguousarray(params[..., k]) for k in range(4))
     admissible = (
         cp.isfinite(loss)
         & (mu > rate)
@@ -239,7 +127,7 @@ def fit_poisson_gauss_mixture(
 ) -> PoissonGaussFit:
     """Fit Poisson-Gaussian mixtures for many guides in parallel by multi-start MAP-EM.
 
-    Guides are grouped by their number of distinct values and fit in chunks of bounded size, so peak memory does not grow with the number of guides.
+    Guides are grouped by their number of distinct values and fit in chunks, which bounds the zero padding of each launch.
 
     Parameters
     ----------
@@ -264,6 +152,8 @@ def fit_poisson_gauss_mixture(
     weights = cp.asarray(weights, dtype=cp.float32)
     n_guides = values.shape[0]
     n_starts = n_init_seeds + len(_INIT_QUANTILES)
+    log_gamma = gammaln(values + 1.0).astype(cp.float32, copy=False)
+    data_inits = _data_inits(values, weights)
     n_values = cp.asnumpy((weights > 0).sum(axis=1))
     bucket = np.ceil(np.log2(np.maximum(n_values, 2))).astype(int)
 
@@ -274,6 +164,7 @@ def fit_poisson_gauss_mixture(
     for chunk_id, b in enumerate(np.unique(bucket)):
         guides = np.flatnonzero(bucket == b)
         width = min(2**b, values.shape[1])
+        # rows and parts also define the random starts; changing them changes the fit
         rows = 2 ** int(
             np.ceil(
                 np.log2(min(guides.size, max(_CHUNK_ELEMENTS // (n_starts * width), 1)))
@@ -282,19 +173,21 @@ def fit_poisson_gauss_mixture(
         for part, chunk in enumerate(
             np.array_split(guides, int(np.ceil(guides.size / rows)))
         ):
-            chunk_values = cp.zeros((rows, width), dtype=cp.float32)
-            chunk_weights = cp.zeros((rows, width), dtype=cp.float32)
-            chunk_idx = cp.asarray(chunk)
-            chunk_values[: chunk.size] = values[chunk_idx, :width]
-            chunk_weights[: chunk.size] = weights[chunk_idx, :width]
+            chunk_gpu = cp.asarray(chunk)
             rng = cp.random.default_rng(seed * 1_000_003 + chunk_id * 2**16 + part)
+            inits = cp.concatenate(
+                [
+                    _prior_median_inits(rng, rows, n_init_seeds)[:, : chunk.size],
+                    data_inits[:, chunk_gpu],
+                ]
+            )
             rate, mu, scale, w_norm, loss, ok = (
-                cp.asnumpy(a)[: chunk.size]
+                cp.asnumpy(a)
                 for a in _fit_chunk(
-                    chunk_values,
-                    chunk_weights,
-                    rng,
-                    n_init_seeds=n_init_seeds,
+                    values[chunk_gpu, :width],
+                    weights[chunk_gpu, :width],
+                    log_gamma[chunk_gpu, :width],
+                    cp.ascontiguousarray(inits),
                     n_iter=n_iter,
                     tol=tol,
                 )
@@ -323,22 +216,46 @@ def compute_count_thresholds(
     Returns ``np.nan`` if no such ``t`` exists within ``max_count`` or the guide has no fit.
     """
     max_counts = np.asarray(max_counts, dtype=np.int64)
-    thresholds = np.full(len(fit.poisson_rate), np.nan, dtype=np.float64)
-    for g, max_c in enumerate(max_counts):
-        if max_c < 1 or np.isnan(fit.gaussian_mean[g]):
-            continue
-        counts = np.arange(1, int(max_c) + 1, dtype=np.float64)
-        log_counts = np.log2(counts)
-        mu = float(fit.gaussian_mean[g])
-        scale = float(fit.gaussian_std[g])
-        rate = float(fit.poisson_rate[g])
-        log_norm = (
-            -_LOG_SQRT_2PI - np.log(scale) - 0.5 * ((log_counts - mu) / scale) ** 2
-        )
-        log_pois = log_counts * np.log(rate) - rate - _np_gammaln(log_counts + 1.0)
-        log_num = np.log(fit.mix_probs[g, 1]) + log_norm
-        log_den = np.logaddexp(log_num, np.log(fit.mix_probs[g, 0]) + log_pois)
-        above = np.flatnonzero(np.exp(log_num - log_den) > 0.5)
-        if above.size > 0:
-            thresholds[g] = float(counts[above[0]])
+    thresholds = np.full(len(max_counts), np.nan, dtype=np.float64)
+    fitted = np.flatnonzero(np.isfinite(fit.gaussian_mean) & (max_counts >= 1))
+    lengths = max_counts[fitted]
+    chunk_of_guide = (np.cumsum(lengths) - lengths) // _SCAN_ELEMENTS
+    for chunk in np.unique(chunk_of_guide):
+        guides = fitted[chunk_of_guide == chunk]
+        thresholds[guides] = _scan_thresholds(fit, guides, max_counts[guides])
     return thresholds
+
+
+def _scan_thresholds(
+    fit: PoissonGaussFit, guides: np.ndarray, lengths: np.ndarray
+) -> np.ndarray:
+    """Smallest count per guide with a Gaussian posterior above 0.5, scanned on the GPU."""
+    lengths_gpu = cp.asarray(lengths)
+    offsets = cp.cumsum(lengths_gpu) - lengths_gpu
+    segment = cp.repeat(cp.arange(len(guides)), lengths_gpu)
+    total = int(lengths.sum())
+    counts = (cp.arange(total) - offsets[segment] + 1).astype(cp.float64)
+    log_counts = cp.log2(counts)
+    mu, scale, rate, w_pois, w_norm = (
+        cp.asarray(a[guides])[segment]
+        for a in (
+            fit.gaussian_mean,
+            fit.gaussian_std,
+            fit.poisson_rate,
+            fit.mix_probs[:, 0],
+            fit.mix_probs[:, 1],
+        )
+    )
+    log_norm = (
+        -_LOG_SQRT_2PI - cp.log(scale) - 0.5 * cp.square((log_counts - mu) / scale)
+    )
+    log_pois = log_counts * cp.log(rate) - rate - gammaln(log_counts + 1.0)
+    log_num = cp.log(w_norm) + log_norm
+    log_den = cp.logaddexp(log_num, cp.log(w_pois) + log_pois)
+    above = cp.flatnonzero(cp.exp(log_num - log_den) > 0.5)
+    first = cp.full(len(guides), total, dtype=cp.int64)
+    cp.minimum.at(first, segment[above], above)
+    found = first < total
+    result = np.full(len(guides), np.nan)
+    result[cp.asnumpy(found)] = cp.asnumpy((first - offsets + 1)[found])
+    return result
