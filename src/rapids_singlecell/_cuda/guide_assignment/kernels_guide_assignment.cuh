@@ -106,8 +106,7 @@ __device__ inline float solve_log_rate(float sum_values, float n_pois) {
     return log_rate;
 }
 
-// Sums of w * log_mix, w * resp and w * resp * value, or of w * resp * (value -
-// center)^2.
+// Sums of w*log_mix, w*resp and w*resp*value, or of w*resp*(value - center)^2.
 template <bool SECOND_PASS>
 __device__ inline void e_step_sums(const float* __restrict__ values,
                                    const float* __restrict__ weights,
