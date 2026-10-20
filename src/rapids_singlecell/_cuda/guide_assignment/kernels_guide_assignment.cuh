@@ -67,7 +67,8 @@ __device__ inline void mixture_terms(float value, float log_gamma,
     const float log_norm_weighted = log_w + log_norm;
     const float log_pois_weighted = log1m_w + log_pois;
     const float upper = fmaxf(log_norm_weighted, log_pois_weighted);
-    log_mix = upper + log1pf(expf(-fabsf(log_norm_weighted - log_pois_weighted)));
+    log_mix =
+        upper + log1pf(expf(-fabsf(log_norm_weighted - log_pois_weighted)));
     resp = expf(log_norm_weighted - log_mix);
 }
 
@@ -95,8 +96,7 @@ __device__ inline float solve_log_scale(float sum_squares, float n_norm) {
 
 // MAP log rate of the Poisson: the root of a concave decreasing function.
 __device__ inline float solve_log_rate(float sum_values, float n_pois) {
-    float log_rate =
-        logf(fmaxf(sum_values, 1e-12f) / fmaxf(n_pois, 1e-12f));
+    float log_rate = logf(fmaxf(sum_values, 1e-12f) / fmaxf(n_pois, 1e-12f));
     log_rate = fminf(fmaxf(log_rate, -20.0f), 10.0f);
     for (int i = 0; i < NEWTON_STEPS; ++i) {
         const float e = n_pois * expf(log_rate);
@@ -106,14 +106,14 @@ __device__ inline float solve_log_rate(float sum_values, float n_pois) {
     return log_rate;
 }
 
-// Sums of w * log_mix, w * resp and w * resp * value, or of w * resp * (value - center)^2.
+// Sums of w * log_mix, w * resp and w * resp * value, or of w * resp * (value -
+// center)^2.
 template <bool SECOND_PASS>
 __device__ inline void e_step_sums(const float* __restrict__ values,
                                    const float* __restrict__ weights,
                                    const float* __restrict__ log_gamma,
-                                   int n_values, const Params& p,
-                                   float center, float (&s)[3],
-                                   float (*partials)[3]) {
+                                   int n_values, const Params& p, float center,
+                                   float (&s)[3], float (*partials)[3]) {
     const float log_rate = logf(p.rate);
     const float log_scale = logf(p.scale);
     const float log_w = logf(p.w_norm);
@@ -139,7 +139,8 @@ __device__ inline void e_step_sums(const float* __restrict__ values,
     block_sum3(s, partials);
 }
 
-// MAP-EM of one (start, guide) until the relative loss change is below tol; layouts [starts, ld, 4] and [starts, ld].
+// MAP-EM of one (start, guide) until the relative loss change is below tol;
+// layouts [starts, ld, 4] and [starts, ld].
 __device__ inline void fit_poisson_gauss_block(
     const float* __restrict__ values, const float* __restrict__ weights,
     const float* __restrict__ log_gamma, const float* __restrict__ inits,
@@ -175,10 +176,9 @@ __device__ inline void fit_poisson_gauss_block(
         const float n_norm = s[1];
         const float sum_resp_values = s[2];
         const float n_pois = sum_w - n_norm;
-        const float w_new =
-            fminf(fmaxf((n_norm - 0.9f) / (n_norm + n_pois - 1.0f),
-                        WEIGHT_FLOOR),
-                  1.0f - WEIGHT_FLOOR);
+        const float w_new = fminf(
+            fmaxf((n_norm - 0.9f) / (n_norm + n_pois - 1.0f), WEIGHT_FLOOR),
+            1.0f - WEIGHT_FLOOR);
         const float precision = 1.0f / (p.scale * p.scale);
         const float mu_new = (sum_resp_values * precision + 0.75f) /
                              (n_norm * precision + 0.25f);
@@ -205,11 +205,13 @@ __device__ inline void fit_poisson_gauss_block(
     }
 }
 
-__global__ void fit_poisson_gauss_kernel(
-    const float* __restrict__ values, const float* __restrict__ weights,
-    const float* __restrict__ log_gamma, const float* __restrict__ inits,
-    float* __restrict__ params_out, float* __restrict__ loss_out, int ld,
-    int n_values, int n_iter, float tol) {
+__global__ void fit_poisson_gauss_kernel(const float* __restrict__ values,
+                                         const float* __restrict__ weights,
+                                         const float* __restrict__ log_gamma,
+                                         const float* __restrict__ inits,
+                                         float* __restrict__ params_out,
+                                         float* __restrict__ loss_out, int ld,
+                                         int n_values, int n_iter, float tol) {
     fit_poisson_gauss_block(values, weights, log_gamma, inits, params_out,
                             loss_out, ld, n_values, n_iter, tol);
 }

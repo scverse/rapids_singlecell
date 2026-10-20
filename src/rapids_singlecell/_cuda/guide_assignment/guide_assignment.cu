@@ -51,15 +51,13 @@ void def_fit_poisson_gauss(nb::module_& m) {
                        "loss must have shape [starts, guides]");
             nb_require(n_guides >= 0 && n_guides <= ld,
                        "n_guides must not exceed the first dimension");
-            launch_fit_poisson_gauss(values.data(), weights.data(),
-                                     log_gamma.data(), inits.data(),
-                                     params.data(), loss.data(), n_guides, ld,
-                                     n_values, n_starts, n_iter, tol,
-                                     (cudaStream_t)stream);
+            launch_fit_poisson_gauss(
+                values.data(), weights.data(), log_gamma.data(), inits.data(),
+                params.data(), loss.data(), n_guides, ld, n_values, n_starts,
+                n_iter, tol, (cudaStream_t)stream);
         },
-        "values"_a, "weights"_a, "log_gamma"_a, "inits"_a, "params"_a,
-        "loss"_a, nb::kw_only(), "n_guides"_a, "n_iter"_a, "tol"_a,
-        "stream"_a = 0);
+        "values"_a, "weights"_a, "log_gamma"_a, "inits"_a, "params"_a, "loss"_a,
+        nb::kw_only(), "n_guides"_a, "n_iter"_a, "tol"_a, "stream"_a = 0);
 }
 
 template <typename Device>
