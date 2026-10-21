@@ -1,18 +1,35 @@
 from __future__ import annotations
 
 import warnings
+from functools import cache, partial
 from typing import TYPE_CHECKING, Literal
 
 import cupy as cp
 import numpy as np
 import pandas as pd
 from cupyx.scipy.sparse import csc_matrix as cp_csc
+from cupyx.scipy.sparse import csr_matrix as cp_csr
 from cupyx.scipy.sparse import issparse as cp_issparse
 from cupyx.scipy.sparse import isspmatrix_csc, isspmatrix_csr
+from scverse_misc import Deprecation, deprecated_arg
 
+from rapids_singlecell._cuda import _guide_assignment_cuda as _ga
 from rapids_singlecell.get import X_to_GPU, _get_obs_rep, _set_obs_rep
 
-from ._guide_assignment_mixture import fit_poisson_gauss_mixture
+_N_QUANTILE_STARTS = 5
+_PRIOR_INIT_SAMPLES = 15
+_HISTOGRAM_CAP = 1024
+# Histogram bins over all guides, so wide guide libraries get fewer bins each.
+_HISTOGRAM_BINS = 1 << 24
+_COLUMN_CHUNK = 4096
+# Blocks per CSC or dense column launch; long columns get longer chunks instead.
+_COLUMN_BLOCKS = 1 << 16
+# Size of fixed-width label strings above which labels are joined as objects.
+_LABEL_BYTES = 1 << 28
+_LEARNING_RATE_DEPRECATION = Deprecation(
+    "0.19.0",
+    "The mixture model is fit by EM, which has no learning rate. The argument is ignored.",
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -35,44 +52,99 @@ def _format_guides(names: Sequence[str], limit: int = 10) -> str:
     return shown if len(names) <= limit else f"{shown} and {len(names) - limit} more"
 
 
-def _nonzero_entries(X) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray]:
-    """Column, row and value of every non-zero entry, dropping explicitly stored zeros."""
-    X_csc = X if isspmatrix_csc(X) else (X.tocsc() if cp_issparse(X) else cp_csc(X))
-    cols = cp.repeat(cp.arange(X_csc.shape[1], dtype=cp.int32), cp.diff(X_csc.indptr))
-    rows = X_csc.indices.astype(cp.int32, copy=False)
-    values = X_csc.data.astype(cp.float32, copy=False)
-    keep = values != 0
-    if not bool(keep.all()):
-        cols, rows, values = cols[keep], rows[keep], values[keep]
-    return cols, rows, values
+def _layout(X):
+    """CSR or CSC ``X`` with float32 or float64 values for the sparse kernels, or dense ``X`` likewise.
+
+    Other sparse formats become CSR, other dtypes float32, and matrices with mixed index dtypes or strided data are copied.
+    """
+    if cp_issparse(X):
+        if not (isspmatrix_csc(X) or isspmatrix_csr(X)):
+            X = X.tocsr()
+        if X.indptr.dtype != X.indices.dtype or not X.data.flags.c_contiguous:
+            X = X.copy()
+    return X if X.dtype in (cp.float32, cp.float64) else X.astype(cp.float32)
+
+
+@cache
+def _max_grid_y() -> int:
+    return cp.cuda.Device().attributes["MaxGridDimY"]
+
+
+def _column_chunks(X) -> tuple[int, int]:
+    """Entries per block and blocks per column of CSC or dense ``X``, so long columns fill the GPU."""
+    if isspmatrix_csc(X):
+        longest = int(cp.diff(X.indptr).max()) if X.shape[1] else 0
+    else:
+        longest = X.shape[0]
+    n_chunks = min(
+        -(-longest // _COLUMN_CHUNK),
+        _COLUMN_BLOCKS // max(X.shape[1], 1),
+        _max_grid_y(),
+    )
+    n_chunks = max(n_chunks, 1)
+    return max(-(-longest // n_chunks), 1), n_chunks
 
 
 def _distinct_values(
-    cols: cp.ndarray, values: cp.ndarray, n_guides: int
+    X, n_guides: int
 ) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, cp.ndarray, cp.ndarray]:
-    """Sorted distinct values and their multiplicities per guide, zero padded.
+    """Sorted distinct non-zero values and their multiplicities per guide, zero padded.
 
+    Integer counts below ``_HISTOGRAM_CAP`` are counted in a per-guide histogram by the CSR, CSC or dense kernel, the few other values are sorted.
     Also returns the number of distinct values, the number of non-zero cells and the maximum count per guide.
     """
-    if cols.size == 0:
-        empty = cp.zeros((n_guides, 0), dtype=cp.float32)
-        counts = cp.zeros(n_guides, dtype=cp.int32)
-        return empty, empty, counts, counts, cp.zeros(n_guides, dtype=cp.float32)
-    order = cp.argsort(cols.astype(cp.float64) * (float(values.max()) + 1.0) + values)
-    cols_sorted, values_sorted = cols[order], values[order]
-    starts = cp.flatnonzero(
-        cp.concatenate(
-            [
-                cp.ones(1, dtype=cp.bool_),
-                (cols_sorted[1:] != cols_sorted[:-1])
-                | (values_sorted[1:] != values_sorted[:-1]),
-            ]
+    data = X.data if cp_issparse(X) else X
+    top = float(data.max()) if data.size else 0.0
+    # NaN or large counts get the full histogram, the tail takes the rest.
+    cap = int(top) + 1 if top < _HISTOGRAM_CAP else _HISTOGRAM_CAP
+    cap = min(cap, max(_HISTOGRAM_BINS // max(n_guides, 1), 2))
+    hist = cp.zeros((n_guides, cap), dtype=cp.uint32)
+    n_tail = cp.zeros(1, dtype=cp.uint64)
+    tail = cp.empty(max(data.size // 64, 1024), dtype=cp.uint64)
+    if isspmatrix_csr(X):
+        histogram = partial(_ga.value_histogram_csr, X.indices, X.data)
+    else:
+        chunk, n_chunks = _column_chunks(X)
+        histogram = (
+            partial(_ga.value_histogram_csc, X.indptr, X.indices, X.data)
+            if isspmatrix_csc(X)
+            else partial(_ga.value_histogram_dense, X)
         )
+        histogram = partial(histogram, chunk=chunk, n_chunks=n_chunks)
+    for _ in range(2):
+        histogram(hist, n_tail, tail, stream=cp.cuda.get_current_stream().ptr)
+        if int(n_tail[0]) <= tail.size:
+            break
+        tail = cp.empty(int(n_tail[0]), dtype=cp.uint64)
+        hist[:] = 0
+        n_tail[:] = 0
+    tail = tail[: int(n_tail[0])]
+    # The bits of non-negative floats sort like the floats, so keys sort by guide, then value.
+    bins = cp.flatnonzero(hist)
+    keys = cp.concatenate(
+        [
+            ((bins // cap).astype(cp.uint64) << 32)
+            | (bins % cap).astype(cp.float32).view(cp.uint32),
+            tail,
+        ]
     )
-    multiplicity = cp.diff(cp.append(starts, cols.size))
-    distinct_cols = cols_sorted[starts].astype(cp.int64)
-    distinct_values = values_sorted[starts]
-    n_distinct = cp.bincount(distinct_cols, minlength=n_guides)
+    counts = cp.concatenate([hist.ravel()[bins], cp.ones(tail.size, dtype=cp.uint32)])
+    if keys.size == 0:
+        empty = cp.zeros((n_guides, 0), dtype=cp.float32)
+        zeros = cp.zeros(n_guides, dtype=cp.float32)
+        return empty, empty, zeros.astype(cp.int32), zeros, zeros
+    order = cp.argsort(keys)
+    keys, counts = keys[order], counts[order]
+    starts = cp.flatnonzero(
+        cp.concatenate([cp.ones(1, dtype=cp.bool_), keys[1:] != keys[:-1]])
+    )
+    total = cp.concatenate(
+        [cp.zeros(1, dtype=cp.int64), cp.cumsum(counts, dtype=cp.int64)]
+    )
+    multiplicity = cp.diff(total[cp.append(starts, keys.size)])
+    distinct_cols = (keys[starts] >> 32).astype(cp.int64)
+    distinct_values = (keys[starts] & 0xFFFFFFFF).astype(cp.uint32).view(cp.float32)
+    n_distinct = cp.diff(cp.searchsorted(distinct_cols, cp.arange(n_guides + 1)))
     first_of_guide = cp.cumsum(n_distinct) - n_distinct
     rank = cp.arange(starts.size) - cp.repeat(first_of_guide, n_distinct)
     width = int(n_distinct.max())
@@ -89,9 +161,124 @@ def _distinct_values(
         values_padded,
         weights_padded,
         n_distinct.astype(cp.int32),
-        cp.bincount(cols, minlength=n_guides),
+        weights_padded.sum(axis=1),
         max_counts,
     )
+
+
+def _fit_mixture(
+    values: cp.ndarray,
+    weights: cp.ndarray,
+    n_values: cp.ndarray,
+    max_counts: cp.ndarray,
+    *,
+    n_iter: int,
+    n_init_seeds: int,
+    seed: int,
+) -> np.ndarray:
+    """Rate, mean, std, Gaussian weight, loss and threshold of every guide by multi-start MAP-EM, nan without an admissible fit.
+
+    Every guide starts from ``n_init_seeds`` prior medians, as crispat, and from five quantile splits of its values.
+    """
+    n_guides = values.shape[0]
+    rng = cp.random.default_rng(seed)
+    draws = cp.stack(
+        [
+            rng.standard_normal(
+                (n_init_seeds, _PRIOR_INIT_SAMPLES, n_guides), dtype=cp.float32
+            )
+            for _ in range(3)
+        ]
+    )
+    n_starts = n_init_seeds + _N_QUANTILE_STARTS
+    out = cp.full((n_guides, 6), cp.nan, dtype=cp.float32)
+    _ga.fit_poisson_gauss(
+        values,
+        weights,
+        n_values.astype(cp.int32),
+        max_counts.astype(cp.int32),
+        draws,
+        cp.empty((n_starts, n_guides, 4), dtype=cp.float32),
+        cp.empty((n_starts, n_guides), dtype=cp.float32),
+        out,
+        n_iter=n_iter,
+        tol=1e-7,
+        stream=cp.cuda.get_current_stream().ptr,
+    )
+    return cp.asnumpy(out).astype(np.float64)
+
+
+def _assigned(X, thresholds: cp.ndarray):
+    """Binary matrix in the layout of ``X`` of the entries at or above their guide's threshold.
+
+    Thresholds are rounded to the precision of ``X``, as a scalar would be, and a NaN threshold assigns nothing.
+    """
+    thresholds = thresholds.astype(X.dtype if X.dtype.kind == "f" else cp.float64)
+    if not cp_issparse(X):
+        return (X >= thresholds).astype(cp.int8)
+    if isspmatrix_csc(X):
+        chunk, n_chunks = _column_chunks(X)
+        assigned = partial(_ga.assigned_csc, chunk=chunk, n_chunks=n_chunks)
+        n_slots = X.shape[1] * n_chunks
+    else:
+        assigned, n_chunks, n_slots = _ga.assigned_csr, 1, X.shape[0]
+    # Count the assigned entries of every row or column chunk, then write them.
+    args = (X.indptr, X.indices, X.data, thresholds.astype(cp.float64))
+    stream = cp.cuda.get_current_stream().ptr
+    offsets = cp.zeros(n_slots + 1, dtype=X.indptr.dtype)
+    assigned(*args, offsets[1:], offsets[:0], fill=False, stream=stream)
+    cp.cumsum(offsets, out=offsets)
+    indices = cp.empty(int(offsets[-1]), dtype=X.indptr.dtype)
+    assigned(*args, offsets, indices, fill=True, stream=stream)
+    return (cp_csc if isspmatrix_csc(X) else cp_csr)(
+        (
+            cp.ones(indices.size, dtype=cp.float32),
+            indices,
+            cp.ascontiguousarray(offsets[::n_chunks]),
+        ),
+        shape=X.shape,
+    )
+
+
+def _cell_major(binary):
+    """CSR form of a binary assignment matrix with sorted guides in every cell; duplicate entries are summed, as in pertpy."""
+    if not cp_issparse(binary):
+        rows, cols = cp.nonzero(binary)
+        if not rows.size:
+            return cp_csr(binary.shape, dtype=cp.float32)
+        ones = cp.ones(rows.size, dtype=cp.float32)
+        return cp_csr((ones, (rows, cols)), shape=binary.shape)
+    cells = binary.tocsr() if binary.nnz else cp_csr(binary.shape, dtype=cp.float32)
+    cells.sum_duplicates()
+    return cells
+
+
+def _max_guide(X) -> tuple[np.ndarray, np.ndarray]:
+    """Largest stored count of every cell of sparse ``X`` and its guide, ``-1`` for cells without stored counts.
+
+    As in pertpy's sparse path implicit zeros are ignored; ties go to the first guide, which is pertpy's first stored entry for canonical input.
+    """
+    stream = cp.cuda.get_current_stream().ptr
+    values = cp.empty(X.shape[0], dtype=cp.float64)
+    if isspmatrix_csc(X):
+        chunk, n_chunks = _column_chunks(X)
+        guides = cp.full(X.shape[0], np.iinfo(np.int32).max, dtype=cp.int32)
+        keys = cp.zeros(X.shape[0], dtype=cp.uint64)
+        _ga.max_guide_csc(
+            X.indptr,
+            X.indices,
+            X.data,
+            keys,
+            values,
+            guides,
+            chunk=chunk,
+            n_chunks=n_chunks,
+            stream=stream,
+        )
+    else:
+        guides = cp.empty(X.shape[0], dtype=cp.int32)
+        _ga.max_guide_csr(X.indptr, X.indices, X.data, values, guides, stream=stream)
+    return cp.asnumpy(values), cp.asnumpy(guides)
 
 
 def _per_cell_assignments(
@@ -108,63 +295,56 @@ def _per_cell_assignments(
     n_cells = indptr.size - 1
     n_guides = len(guide_names)
     n_assigned = cp.diff(indptr)
-    separator_in_names = any(
-        multiple_grna_assignment_string in name for name in guide_names
-    )
-    if separator_in_names:
+    if any(multiple_grna_assignment_string in name for name in guide_names):
         warnings.warn(
             "Some guide names contain the separator "
             f"{multiple_grna_assignment_string!r}, so assignments of several guides "
             "to one cell cannot be split unambiguously. "
             "Pass a different `multiple_grna_assignment_string`.",
             UserWarning,
-            stacklevel=3,
+            stacklevel=4,
         )
     labels = [
         np.array([no_grna_assigned_key, multiple_grna_assigned_key], dtype=str),
         guide_names,
     ]
     codes = cp.zeros(n_cells, dtype=cp.int64)
-    codes[n_assigned > max_assignments_per_cell] = 1
     single = n_assigned == 1
     codes[single] = 2 + indices[indptr[:-1][single]]
-    multi = cp.flatnonzero((n_assigned > 1) & (n_assigned <= max_assignments_per_cell))
-    if multi.size:
-        k = int(n_assigned[multi].max())
-        slot = cp.arange(k)
-        positions = cp.minimum(indptr[multi][:, None] + slot, indices.size - 1)
-        members = cp.where(slot < n_assigned[multi][:, None], indices[positions] + 1, 0)
+    multi = (n_assigned > 1) & (n_assigned <= max_assignments_per_cell)
+    with_separator = np.char.add(multiple_grna_assignment_string, guide_names)
+    offset = 2 + n_guides
+    # Cells are grouped by their number of guides, so one cell with many guides does not widen the others.
+    for size in cp.asnumpy(cp.unique(n_assigned[multi])).tolist():
+        cells = cp.flatnonzero(multi & (n_assigned == size))
+        members = indices[indptr[cells][:, None] + cp.arange(size)]
         order = cp.lexsort(members.T[::-1])
         members = members[order]
-        new_row = cp.ones(multi.size, dtype=cp.bool_)
+        new_row = cp.ones(cells.size, dtype=cp.bool_)
         new_row[1:] = (members[1:] != members[:-1]).any(axis=1)
-        inverse = cp.empty(multi.size, dtype=cp.int64)
+        inverse = cp.empty(cells.size, dtype=cp.int64)
         inverse[order] = cp.cumsum(new_row) - 1
-        codes[multi] = 2 + n_guides + inverse
+        codes[cells] = offset + inverse
         unique = cp.asnumpy(members[new_row])
-        joined = guide_names[unique[:, 0] - 1]
-        for j in range(1, k):
-            present = unique[:, j] > 0
-            joined = np.char.add(
-                joined,
-                np.where(
-                    present,
-                    np.char.add(
-                        multiple_grna_assignment_string,
-                        guide_names[np.maximum(unique[:, j] - 1, 0)],
-                    ),
-                    "",
-                ),
-            )
+        joined = guide_names[unique[:, 0]]
+        for j in range(1, size):
+            joined = np.char.add(joined, with_separator[unique[:, j]])
         labels.append(joined)
-    categories = np.concatenate(labels)
+        offset += len(joined)
+    codes[n_assigned > max_assignments_per_cell] = 1
     codes = cp.asnumpy(codes)
-    if separator_in_names or np.isin(labels[0], guide_names).any():
-        remap, categories = pd.factorize(categories)
-        codes = remap[codes]
-    used = np.zeros(len(categories), dtype=bool)
+    widest = max(label.dtype.itemsize for label in labels)
+    if offset * widest > _LABEL_BYTES:
+        labels = [label.astype(object) for label in labels]
+    names = np.concatenate(labels)
+    # Sorted distinct labels, as the categories of pertpy's pd.Categorical.
+    used = np.zeros(names.size, dtype=bool)
     used[codes] = True
-    return pd.Categorical.from_codes((np.cumsum(used) - 1)[codes], categories[used])
+    used = np.flatnonzero(used)
+    categories, inverse = np.unique(names[used], return_inverse=True)
+    remap = np.empty(names.size, dtype=np.intp)
+    remap[used] = inverse
+    return pd.Categorical.from_codes(remap[codes], categories)
 
 
 class GuideAssignment:
@@ -199,13 +379,9 @@ class GuideAssignment:
             Key under which the binary assignment matrix is stored in ``adata.layers``.
         """
         X = X_to_GPU(_get_obs_rep(adata, layer=layer))
-        if cp_issparse(X):
-            result = X.copy()
-            result.data = (X.data >= assignment_threshold).astype(result.dtype)
-            result.eliminate_zeros()
-        else:
-            result = (X >= assignment_threshold).astype(cp.int8)
-        _set_obs_rep(adata, result, layer=output_layer)
+        X = _layout(X) if cp_issparse(X) else X
+        binary = _assigned(X, cp.full(X.shape[1], assignment_threshold))
+        _set_obs_rep(adata, binary, layer=output_layer)
 
     def assign_to_max_guide(
         self,
@@ -220,6 +396,7 @@ class GuideAssignment:
 
         Each cell is assigned to the gRNA with the highest count, provided that count is at least ``assignment_threshold``.
         Ties are resolved in favour of the first of the tied gRNAs.
+        For sparse input, as in pertpy, only stored counts are considered.
         Expects unnormalized count data.
 
         Parameters
@@ -238,17 +415,16 @@ class GuideAssignment:
         """
         X = X_to_GPU(_get_obs_rep(adata, layer=layer))
         if cp_issparse(X):
-            X = X if isspmatrix_csr(X) else X.tocsr()
-            max_values = cp.asnumpy(X.max(axis=1).toarray()).ravel()
+            max_values, max_positions = _max_guide(_layout(X))
         else:
             max_values = cp.asnumpy(X.max(axis=1)).ravel()
-        max_positions = cp.asnumpy(X.argmax(axis=1)).ravel()
-        adata.obs[obs_key] = np.where(
-            max_values >= assignment_threshold,
-            adata.var_names.to_numpy()[max_positions],
-            no_grna_assigned_key,
-        )
+            max_positions = cp.asnumpy(X.argmax(axis=1)).ravel()
+        # Position -1 picks the appended key.
+        labels = np.append(adata.var_names.to_numpy(), no_grna_assigned_key)
+        assigned = (max_positions >= 0) & (max_values >= assignment_threshold)
+        adata.obs[obs_key] = labels[np.where(assigned, max_positions, -1)]
 
+    @deprecated_arg("learning_rate", _LEARNING_RATE_DEPRECATION)
     def assign_mixture_model(
         self,
         adata: AnnData,
@@ -264,6 +440,7 @@ class GuideAssignment:
         only_return_results: bool = False,
         show_progress: bool = False,
         n_iter: int = 1000,
+        learning_rate: float = 0.01,
         n_init_seeds: int = 10,
         seed: int = 2024,
     ) -> np.ndarray | None:
@@ -305,6 +482,8 @@ class GuideAssignment:
             Whether to print a progress line.
         n_iter
             Maximum number of EM iterations per start.
+        learning_rate
+            Deprecated and ignored.
         n_init_seeds
             Number of prior-median initialisations per guide.
         seed
@@ -320,16 +499,17 @@ class GuideAssignment:
             )
         X = X_to_GPU(_get_obs_rep(adata, layer=layer))
         guide_names = np.asarray(adata.var_names, dtype=str)
-        n_cells, n_guides = X.shape
+        n_guides = X.shape[1]
 
-        cols, rows, values = _nonzero_entries(X)
-        if values.size and bool(values.min() < 0):
+        X = _layout(X)
+        data = X.data if cp_issparse(X) else X
+        if bool((data < 0).any()):
             raise ValueError(
                 "Data contains negative values. Please use non-negative data for guide "
                 "assignment with the Mixture Model."
             )
         values_padded, weights_padded, n_distinct, nonzero_counts, max_counts = (
-            _distinct_values(cols, values, n_guides)
+            _distinct_values(X, n_guides)
         )
 
         fittable = cp.asnumpy((nonzero_counts >= 2) & (max_counts >= 2))
@@ -339,65 +519,43 @@ class GuideAssignment:
                 f"Skipping {skipped.size} guides with fewer than 2 expressing cells or a "
                 f"maximum count below 2: {_format_guides(list(guide_names[skipped]))}.",
                 UserWarning,
-                stacklevel=2,
+                stacklevel=3,
             )
 
         fittable_idx = np.flatnonzero(fittable)
-        estimates = {
-            name: np.full(n_guides, np.nan, dtype=np.float64)
-            for name in _MIXTURE_MODEL_VAR_COLUMNS
-        }
-        thresholds = estimates["threshold"]
+        estimates = np.full((n_guides, 6), np.nan)
         if fittable_idx.size > 0:
             if show_progress:
                 print(
                     f"Fitting Poisson-Gaussian mixture for {fittable_idx.size} guides "
                     "in parallel."
                 )
-            fittable_gpu = cp.asarray(fittable_idx)
-            fit = fit_poisson_gauss_mixture(
-                values_padded[fittable_gpu],
-                weights_padded[fittable_gpu],
-                n_values=n_distinct[fittable_gpu],
-                max_counts=max_counts[fittable_gpu],
+            idx = cp.asarray(fittable_idx)
+            estimates[fittable_idx] = _fit_mixture(
+                values_padded[idx],
+                weights_padded[idx],
+                n_distinct[idx],
+                max_counts[idx],
                 n_iter=n_iter,
                 n_init_seeds=n_init_seeds,
                 seed=seed,
             )
-            thresholds[fittable_idx] = fit.threshold
-            estimates["poisson_rate"][fittable_idx] = fit.poisson_rate
-            estimates["gaussian_mean"][fittable_idx] = fit.gaussian_mean
-            estimates["gaussian_std"][fittable_idx] = fit.gaussian_std
-            estimates["mix_probs_0"][fittable_idx] = fit.mix_probs[:, 0]
-            estimates["mix_probs_1"][fittable_idx] = fit.mix_probs[:, 1]
-            estimates["final_loss"][fittable_idx] = fit.final_loss
-
-            unassignable = fittable_idx[np.isnan(thresholds[fittable_idx])]
+            unassignable = fittable_idx[np.isnan(estimates[fittable_idx, 5])]
             if unassignable.size:
                 warnings.warn(
                     f"No positive population found for {unassignable.size} guides, which "
                     "are not assigned to any cell: "
                     f"{_format_guides(list(guide_names[unassignable]))}.",
                     UserWarning,
-                    stacklevel=2,
+                    stacklevel=3,
                 )
 
-        threshold_of_entry = cp.asarray(
-            np.nan_to_num(thresholds, nan=np.inf), dtype=cp.float32
-        )
-        assigned = values >= threshold_of_entry[cols]
-        rows_assigned = rows[assigned]
-        indptr = cp.zeros(n_guides + 1, dtype=cp.int64)
-        cp.add.at(indptr, cols[assigned] + 1, 1)
-        indptr = cp.cumsum(indptr).astype(cp.int32)
-        binary = cp_csc(
-            (cp.ones(rows_assigned.size, dtype=cp.float32), rows_assigned, indptr),
-            shape=(n_cells, n_guides),
-        )
-        binary_csr = binary.tocsr()
+        rate, mean, std, weight, loss, thresholds = estimates.T
+        binary = _assigned(X, cp.asarray(thresholds))
+        cells = _cell_major(binary)
         assignments = _per_cell_assignments(
-            binary_csr.indptr,
-            binary_csr.indices,
+            cells.indptr,
+            cells.indices,
             guide_names,
             no_grna_assigned_key=no_grna_assigned_key,
             max_assignments_per_cell=max_assignments_per_cell,
@@ -407,15 +565,10 @@ class GuideAssignment:
         if only_return_results:
             return np.asarray(assignments)
 
-        for column, estimate in estimates.items():
+        columns = (rate, mean, std, 1.0 - weight, weight, thresholds, loss)
+        for column, estimate in zip(_MIXTURE_MODEL_VAR_COLUMNS, columns, strict=True):
             adata.var[column] = estimate
         adata.obs[assigned_guides_key] = assignments
         if output_layer is not None:
-            if isspmatrix_csc(X):
-                layer_value = binary
-            elif cp_issparse(X):
-                layer_value = binary_csr
-            else:
-                layer_value = binary_csr.toarray().astype(cp.int8)
-            _set_obs_rep(adata, layer_value, layer=output_layer)
+            _set_obs_rep(adata, binary, layer=output_layer)
         return None

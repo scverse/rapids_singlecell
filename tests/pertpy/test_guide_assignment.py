@@ -223,3 +223,153 @@ def test_mixture_model_rejects_negative_values_and_unknown_model(
     tiny_adata.X[0, 0] = -1
     with pytest.raises(ValueError, match="negative values"):
         rsc.ptg.GuideAssignment().assign_mixture_model(tiny_adata)
+
+
+@pytest.mark.parametrize("storage", ["dense", "csr", "csc"])
+def test_mixture_model_rejects_negative_values_next_to_nan(
+    tiny_adata: AnnData, storage: str
+) -> None:
+    tiny_adata.X[0, 0] = -1
+    tiny_adata.X[1, 1] = cp.nan
+    if storage != "dense":
+        tiny_adata.X = (gpu_csr if storage == "csr" else gpu_csc)(tiny_adata.X)
+    with pytest.raises(ValueError, match="negative values"):
+        rsc.ptg.GuideAssignment().assign_mixture_model(tiny_adata)
+
+
+def _layouts(X: np.ndarray) -> dict:
+    """The same counts as dense C/F, CSR, CSC, COO, int64-indexed, float64 and unsorted CSR."""
+    csr = gpu_csr(cp.asarray(X))
+    wide = csr.copy()
+    wide.indptr, wide.indices = (
+        wide.indptr.astype(cp.int64),
+        wide.indices.astype(cp.int64),
+    )
+    indptr = cp.asnumpy(csr.indptr)
+    reverse = np.concatenate(
+        [np.arange(start, end)[::-1] for start, end in zip(indptr[:-1], indptr[1:])]
+    )
+    unsorted = gpu_csr(
+        (csr.data[reverse], csr.indices[reverse], csr.indptr), shape=csr.shape
+    )
+    return {
+        "dense C": cp.asarray(X),
+        "dense F": cp.asfortranarray(cp.asarray(X)),
+        "csr": csr,
+        "csc": gpu_csc(cp.asarray(X)),
+        "coo": csr.tocoo(),
+        "int64 indices": wide,
+        "float64": csr.astype(cp.float64),
+        "unsorted csr": unsorted,
+    }
+
+
+def test_layouts_match(
+    guide_adata: tuple[AnnData, np.ndarray], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rapids_singlecell.pertpy_gpu import _guide_assignment
+
+    adata, _ = guide_adata
+    X = cp.asnumpy(adata.X)
+    ga = rsc.ptg.GuideAssignment()
+    reference = adata.copy()
+    ga.assign_mixture_model(reference)
+    # Tiny histograms and column chunks run the histogram tail, its retry and
+    # many chunks per column on this small data.
+    monkeypatch.setattr(_guide_assignment, "_HISTOGRAM_CAP", 8)
+    monkeypatch.setattr(_guide_assignment, "_COLUMN_CHUNK", 7)
+    for name, layout in _layouts(X).items():
+        a = AnnData(X=layout, obs=adata.obs.copy(), var=adata.var.copy())
+        ga.assign_mixture_model(a)
+        ga.assign_to_max_guide(a, assignment_threshold=3, obs_key="max_guide")
+        ga.assign_by_threshold(a, assignment_threshold=3, output_layer="threshold")
+        np.testing.assert_array_equal(
+            a.var["threshold"], reference.var["threshold"], err_msg=name
+        )
+        np.testing.assert_array_equal(
+            a.obs["assigned_guide"], reference.obs["assigned_guide"], err_msg=name
+        )
+        np.testing.assert_array_equal(
+            _dense(a.layers["assigned_guides"]),
+            _dense(reference.layers["assigned_guides"]),
+            err_msg=name,
+        )
+        np.testing.assert_array_equal(
+            _dense(a.layers["threshold"]), X >= 3, err_msg=name
+        )
+        best = np.where(X.max(axis=1) >= 3, X.argmax(axis=1), -1)
+        expected = np.append(adata.var_names, "Negative")[best]
+        np.testing.assert_array_equal(a.obs["max_guide"], expected, err_msg=name)
+
+
+@pytest.mark.parametrize("storage", ["dense", "csr", "csc"])
+def test_assign_to_max_guide_nan_ties_and_empty_cells(storage: str) -> None:
+    # A NaN is the largest count but fails the threshold, ties go to the first
+    # guide and cells without counts stay unassigned, as in pertpy.
+    X = np.array([[np.nan, 5, 0], [2, 2, 0], [0, 0, 0], [-0.0, 0, 0]], np.float32)
+    adata = _adata(X)
+    if storage != "dense":
+        adata.X = (gpu_csr if storage == "csr" else gpu_csc)(adata.X)
+    rsc.ptg.GuideAssignment().assign_to_max_guide(adata, assignment_threshold=1)
+    assert list(adata.obs["assigned_guide"]) == [
+        "Negative",
+        "guide_0",
+        "Negative",
+        "Negative",
+    ]
+
+
+@pytest.mark.parametrize("storage", ["csr", "csc"])
+def test_assign_to_max_guide_without_guides(storage: str) -> None:
+    adata = _adata(np.zeros((3, 0), np.float32))
+    adata.X = (gpu_csr if storage == "csr" else gpu_csc)(adata.X)
+    rsc.ptg.GuideAssignment().assign_to_max_guide(adata, assignment_threshold=1)
+    assert list(adata.obs["assigned_guide"]) == ["Negative"] * 3
+
+
+@pytest.mark.parametrize("storage", ["dense", "csr", "csc"])
+def test_assign_by_threshold_compares_in_data_precision(storage: str) -> None:
+    adata = _adata(np.array([[0.7, 0.2]], np.float32))
+    if storage != "dense":
+        adata.X = (gpu_csr if storage == "csr" else gpu_csc)(adata.X)
+    rsc.ptg.GuideAssignment().assign_by_threshold(adata, assignment_threshold=0.7)
+    np.testing.assert_array_equal(_dense(adata.layers["assigned_guides"]), [[1, 0]])
+
+
+def _pertpy_labels(binary: np.ndarray, names: np.ndarray, **kwargs) -> pd.Categorical:
+    """pertpy's per-cell labels of a dense binary assignment."""
+    cap = kwargs.get("max_assignments_per_cell", 5)
+    out = np.full(len(binary), kwargs.get("no_grna_assigned_key", "negative"), object)
+    for i, row in enumerate(binary):
+        guides = names[np.flatnonzero(row)]
+        if 1 <= guides.size <= cap:
+            out[i] = "+".join(guides)
+    out[binary.sum(axis=1) > cap] = kwargs.get("multiple_grna_assigned_key", "multiple")
+    return pd.Categorical(out)
+
+
+@pytest.mark.parametrize(
+    ("names", "kwargs"),
+    [
+        (None, {"no_grna_assigned_key": "none", "multiple_grna_assigned_key": "none"}),
+        (None, {"multiple_grna_assigned_key": "guide_0+guide_1"}),
+        (None, {"max_assignments_per_cell": 0}),
+        (None, {"max_assignments_per_cell": 1}),
+        (["a", "a", "b", "b", "c", "c", "d", "d", "e", "e", "f", "f"], {}),
+    ],
+)
+def test_mixture_model_labels_match_pertpy(
+    guide_adata: tuple[AnnData, np.ndarray], names: list | None, kwargs: dict
+) -> None:
+    adata, _ = guide_adata
+    if names is not None:
+        adata.var_names = names
+    rsc.ptg.GuideAssignment().assign_mixture_model(adata, **kwargs)
+    expected = _pertpy_labels(
+        _dense(adata.layers["assigned_guides"]) > 0,
+        np.asarray(adata.var_names, dtype=object),
+        **kwargs,
+    )
+    labels = adata.obs["assigned_guide"]
+    assert list(labels.cat.categories) == list(expected.categories)
+    np.testing.assert_array_equal(labels.astype(str), np.asarray(expected, dtype=str))

@@ -3,122 +3,254 @@
 #include "../nb_types.h"
 
 #include "kernels_guide_assignment.cuh"
+#include "kernels_sparse.cuh"
 
 using namespace nb::literals;
+namespace ga = guide_assignment;
 
-static inline void launch_fit_poisson_gauss(
-    const float* values, const float* weights, const int* n_values,
-    const float* draws_rate, const float* draws_mu, const float* draws_scale,
-    float* params, float* loss, int n_guides, int width, int n_init_seeds,
-    int n_starts, int n_iter, float tol, cudaStream_t stream) {
-    if (n_guides == 0 || n_starts == 0) return;
+constexpr int SPARSE_BLOCK = 256;
 
-    dim3 block(guide_assignment::BLOCK_SIZE);
-    dim3 grid(n_guides, n_starts);
-    guide_assignment::fit_poisson_gauss_kernel<<<grid, block, 0, stream>>>(
-        values, weights, n_values, draws_rate, draws_mu, draws_scale, params,
-        loss, n_guides, width, n_init_seeds, n_iter, tol);
-    CUDA_CHECK_LAST_ERROR(fit_poisson_gauss_kernel);
+template <typename T, typename IdxT, typename Device>
+ga::CscColumns<T, IdxT> csc_columns(gpu_array_c<const IdxT, Device>& indptr,
+                                    gpu_array_c<const IdxT, Device>& indices,
+                                    gpu_array_c<const T, Device>& data) {
+    return {indptr.data(), indices.data(), data.data()};
 }
 
-static inline void launch_select_threshold(const float* params,
-                                           const float* loss,
-                                           const int* max_counts, float* out,
-                                           int n_guides, int n_starts,
-                                           cudaStream_t stream) {
+// Blocks for one warp per row.
+inline unsigned int warp_blocks(long long n_rows) {
+    return static_cast<unsigned int>((n_rows * 32 + SPARSE_BLOCK - 1) /
+                                     SPARSE_BLOCK);
+}
+
+template <typename Columns, typename Device>
+void histogram_columns(Columns columns, long long n_guides, long long chunk,
+                       long long n_chunks,
+                       gpu_array_c<unsigned int, Device>& hist,
+                       gpu_array_c<unsigned long long, Device>& n_tail,
+                       gpu_array_c<unsigned long long, Device>& tail,
+                       std::uintptr_t stream) {
     if (n_guides == 0) return;
-
-    dim3 block(guide_assignment::BLOCK_SIZE);
-    dim3 grid(n_guides);
-    guide_assignment::select_threshold_kernel<<<grid, block, 0, stream>>>(
-        params, loss, max_counts, out, n_guides, n_starts);
-    CUDA_CHECK_LAST_ERROR(select_threshold_kernel);
+    const int cap = static_cast<int>(hist.shape(1));
+    ga::value_histogram_columns_kernel<<<dim3(n_guides, n_chunks), SPARSE_BLOCK,
+                                         cap * sizeof(unsigned int),
+                                         (cudaStream_t)stream>>>(
+        columns, chunk, cap, hist.data(), n_tail.data(), tail.data(),
+        tail.shape(0));
+    CUDA_CHECK_LAST_ERROR(value_histogram_columns_kernel);
 }
 
+// Fits every (guide, start) by MAP-EM, then keeps the best admissible start of
+// every guide and its threshold in out.
 template <typename Device>
-void def_fit_poisson_gauss(nb::module_& m) {
+void def_fit(nb::module_& m) {
     m.def(
         "fit_poisson_gauss",
         [](gpu_array_c<const float, Device> values,
            gpu_array_c<const float, Device> weights,
            gpu_array_c<const int, Device> n_values,
-           gpu_array_c<const float, Device> draws_rate,
-           gpu_array_c<const float, Device> draws_mu,
-           gpu_array_c<const float, Device> draws_scale,
+           gpu_array_c<const int, Device> max_counts,
+           gpu_array_c<const float, Device> draws,
            gpu_array_c<float, Device> params, gpu_array_c<float, Device> loss,
-           int n_iter, float tol, std::uintptr_t stream) {
-            nb_require(values.ndim() == 2 && weights.ndim() == 2 &&
-                           weights.shape(0) == values.shape(0) &&
-                           weights.shape(1) == values.shape(1),
-                       "values and weights must be 2-D of equal shape");
+           gpu_array_c<float, Device> out, int n_iter, float tol,
+           std::uintptr_t stream) {
             const int n_guides = static_cast<int>(values.shape(0));
-            const int width = static_cast<int>(values.shape(1));
-            nb_require(n_values.ndim() == 1 && n_values.shape(0) == n_guides,
-                       "n_values needs one entry per guide");
-            nb_require(
-                draws_rate.ndim() == 3 && draws_mu.ndim() == 3 &&
-                    draws_scale.ndim() == 3 &&
-                    draws_rate.shape(1) == guide_assignment::PRIOR_SAMPLES &&
-                    draws_rate.shape(2) == n_guides &&
-                    draws_mu.shape(0) == draws_rate.shape(0) &&
-                    draws_mu.shape(1) == draws_rate.shape(1) &&
-                    draws_mu.shape(2) == draws_rate.shape(2) &&
-                    draws_scale.shape(0) == draws_rate.shape(0) &&
-                    draws_scale.shape(1) == draws_rate.shape(1) &&
-                    draws_scale.shape(2) == draws_rate.shape(2),
-                "draws must have shape [n_init_seeds, 15, guides]");
-            const int n_init_seeds = static_cast<int>(draws_rate.shape(0));
-            const int n_starts = n_init_seeds + guide_assignment::N_QUANTILES;
-            nb_require(params.ndim() == 3 && params.shape(0) == n_starts &&
-                           params.shape(1) == n_guides && params.shape(2) == 4,
-                       "params must have shape [n_init_seeds + 5, guides, 4]");
-            nb_require(loss.ndim() == 2 && loss.shape(0) == n_starts &&
-                           loss.shape(1) == n_guides,
-                       "loss must have shape [n_init_seeds + 5, guides]");
-            launch_fit_poisson_gauss(
-                values.data(), weights.data(), n_values.data(),
-                draws_rate.data(), draws_mu.data(), draws_scale.data(),
-                params.data(), loss.data(), n_guides, width, n_init_seeds,
-                n_starts, n_iter, tol, (cudaStream_t)stream);
+            const int n_starts = static_cast<int>(params.shape(0));
+            if (n_guides == 0) return;
+            ga::fit_poisson_gauss_kernel<<<dim3(n_guides, n_starts),
+                                           ga::BLOCK_SIZE, 0,
+                                           (cudaStream_t)stream>>>(
+                values.data(), weights.data(), n_values.data(), draws.data(),
+                params.data(), loss.data(), n_guides,
+                static_cast<int>(values.shape(1)),
+                static_cast<int>(draws.shape(1)), n_iter, tol);
+            CUDA_CHECK_LAST_ERROR(fit_poisson_gauss_kernel);
+            ga::select_threshold_kernel<<<n_guides, ga::BLOCK_SIZE, 0,
+                                          (cudaStream_t)stream>>>(
+                params.data(), loss.data(), max_counts.data(), out.data(),
+                n_guides, n_starts);
+            CUDA_CHECK_LAST_ERROR(select_threshold_kernel);
         },
-        "values"_a, "weights"_a, "n_values"_a, "draws_rate"_a, "draws_mu"_a,
-        "draws_scale"_a, "params"_a, "loss"_a, nb::kw_only(), "n_iter"_a,
-        "tol"_a, "stream"_a = 0);
+        "values"_a.noconvert(), "weights"_a.noconvert(),
+        "n_values"_a.noconvert(), "max_counts"_a.noconvert(),
+        "draws"_a.noconvert(), "params"_a.noconvert(), "loss"_a.noconvert(),
+        "out"_a.noconvert(), nb::kw_only(), "n_iter"_a, "tol"_a,
+        "stream"_a = 0);
 }
 
-template <typename Device>
-void def_select_threshold(nb::module_& m) {
+template <typename T, typename IdxT, typename Device>
+void def_sparse(nb::module_& m) {
     m.def(
-        "select_threshold",
-        [](gpu_array_c<const float, Device> params,
-           gpu_array_c<const float, Device> loss,
-           gpu_array_c<const int, Device> max_counts,
-           gpu_array_c<float, Device> out, std::uintptr_t stream) {
-            nb_require(params.ndim() == 3 && params.shape(2) == 4,
-                       "params must have shape [starts, guides, 4]");
-            const int n_starts = static_cast<int>(params.shape(0));
-            const int n_guides = static_cast<int>(params.shape(1));
-            nb_require(loss.ndim() == 2 && loss.shape(0) == n_starts &&
-                           loss.shape(1) == n_guides,
-                       "loss must have shape [starts, guides]");
-            nb_require(
-                max_counts.ndim() == 1 && max_counts.shape(0) == n_guides,
-                "max_counts needs one entry per guide");
-            nb_require(out.ndim() == 2 && out.shape(0) == n_guides &&
-                           out.shape(1) == guide_assignment::N_OUTPUTS,
-                       "out must have shape [guides, 6]");
-            launch_select_threshold(params.data(), loss.data(),
-                                    max_counts.data(), out.data(), n_guides,
-                                    n_starts, (cudaStream_t)stream);
+        "value_histogram_csr",
+        [](gpu_array_c<const IdxT, Device> indices,
+           gpu_array_c<const T, Device> data,
+           gpu_array_c<unsigned int, Device> hist,
+           gpu_array_c<unsigned long long, Device> n_tail,
+           gpu_array_c<unsigned long long, Device> tail,
+           std::uintptr_t stream) {
+            const long long nnz = static_cast<long long>(data.shape(0));
+            if (nnz == 0) return;
+            ga::value_histogram_csr_kernel<<<strided_grid(nnz, SPARSE_BLOCK),
+                                             SPARSE_BLOCK, 0,
+                                             (cudaStream_t)stream>>>(
+                indices.data(), data.data(), nnz,
+                static_cast<int>(hist.shape(1)), hist.data(), n_tail.data(),
+                tail.data(), tail.shape(0));
+            CUDA_CHECK_LAST_ERROR(value_histogram_csr_kernel);
         },
-        "params"_a, "loss"_a, "max_counts"_a, "out"_a, nb::kw_only(),
+        "indices"_a.noconvert(), "data"_a.noconvert(), "hist"_a.noconvert(),
+        "n_tail"_a.noconvert(), "tail"_a.noconvert(), nb::kw_only(),
+        "stream"_a = 0);
+    m.def(
+        "value_histogram_csc",
+        [](gpu_array_c<const IdxT, Device> indptr,
+           gpu_array_c<const IdxT, Device> indices,
+           gpu_array_c<const T, Device> data,
+           gpu_array_c<unsigned int, Device> hist,
+           gpu_array_c<unsigned long long, Device> n_tail,
+           gpu_array_c<unsigned long long, Device> tail, long long chunk,
+           long long n_chunks, std::uintptr_t stream) {
+            histogram_columns(
+                csc_columns<T, IdxT, Device>(indptr, indices, data),
+                static_cast<long long>(indptr.shape(0)) - 1, chunk, n_chunks,
+                hist, n_tail, tail, stream);
+        },
+        "indptr"_a.noconvert(), "indices"_a.noconvert(), "data"_a.noconvert(),
+        "hist"_a.noconvert(), "n_tail"_a.noconvert(), "tail"_a.noconvert(),
+        nb::kw_only(), "chunk"_a, "n_chunks"_a, "stream"_a = 0);
+    m.def(
+        "assigned_csr",
+        [](gpu_array_c<const IdxT, Device> indptr,
+           gpu_array_c<const IdxT, Device> indices,
+           gpu_array_c<const T, Device> data,
+           gpu_array_c<const double, Device> thresholds,
+           gpu_array_c<IdxT, Device> offsets,
+           gpu_array_c<IdxT, Device> out_indices, bool fill,
+           std::uintptr_t stream) {
+            const long long n_rows =
+                static_cast<long long>(indptr.shape(0)) - 1;
+            if (n_rows <= 0) return;
+            auto kernel = fill ? ga::assigned_csr_kernel<T, IdxT, true>
+                               : ga::assigned_csr_kernel<T, IdxT, false>;
+            kernel<<<warp_blocks(n_rows), SPARSE_BLOCK, 0,
+                     (cudaStream_t)stream>>>(
+                indptr.data(), indices.data(), data.data(), thresholds.data(),
+                n_rows, offsets.data(), out_indices.data());
+            CUDA_CHECK_LAST_ERROR(assigned_csr_kernel);
+        },
+        "indptr"_a.noconvert(), "indices"_a.noconvert(), "data"_a.noconvert(),
+        "thresholds"_a.noconvert(), "offsets"_a.noconvert(),
+        "out_indices"_a.noconvert(), nb::kw_only(), "fill"_a, "stream"_a = 0);
+    m.def(
+        "assigned_csc",
+        [](gpu_array_c<const IdxT, Device> indptr,
+           gpu_array_c<const IdxT, Device> indices,
+           gpu_array_c<const T, Device> data,
+           gpu_array_c<const double, Device> thresholds,
+           gpu_array_c<IdxT, Device> offsets,
+           gpu_array_c<IdxT, Device> out_indices, long long chunk,
+           long long n_chunks, bool fill, std::uintptr_t stream) {
+            const long long n_guides =
+                static_cast<long long>(indptr.shape(0)) - 1;
+            if (n_guides <= 0) return;
+            auto kernel = fill ? ga::assigned_csc_kernel<T, IdxT, true>
+                               : ga::assigned_csc_kernel<T, IdxT, false>;
+            kernel<<<dim3(n_guides, n_chunks), SPARSE_BLOCK, 0,
+                     (cudaStream_t)stream>>>(
+                csc_columns<T, IdxT, Device>(indptr, indices, data),
+                thresholds.data(), chunk, offsets.data(), out_indices.data());
+            CUDA_CHECK_LAST_ERROR(assigned_csc_kernel);
+        },
+        "indptr"_a.noconvert(), "indices"_a.noconvert(), "data"_a.noconvert(),
+        "thresholds"_a.noconvert(), "offsets"_a.noconvert(),
+        "out_indices"_a.noconvert(), nb::kw_only(), "chunk"_a, "n_chunks"_a,
+        "fill"_a, "stream"_a = 0);
+    m.def(
+        "max_guide_csr",
+        [](gpu_array_c<const IdxT, Device> indptr,
+           gpu_array_c<const IdxT, Device> indices,
+           gpu_array_c<const T, Device> data,
+           gpu_array_c<double, Device> values, gpu_array_c<int, Device> guides,
+           std::uintptr_t stream) {
+            const long long n_rows =
+                static_cast<long long>(indptr.shape(0)) - 1;
+            if (n_rows <= 0) return;
+            ga::max_guide_csr_kernel<T, IdxT>
+                <<<warp_blocks(n_rows), SPARSE_BLOCK, 0,
+                   (cudaStream_t)stream>>>(indptr.data(), indices.data(),
+                                           data.data(), n_rows, values.data(),
+                                           guides.data());
+            CUDA_CHECK_LAST_ERROR(max_guide_csr_kernel);
+        },
+        "indptr"_a.noconvert(), "indices"_a.noconvert(), "data"_a.noconvert(),
+        "values"_a.noconvert(), "guides"_a.noconvert(), nb::kw_only(),
+        "stream"_a = 0);
+    m.def(
+        "max_guide_csc",
+        [](gpu_array_c<const IdxT, Device> indptr,
+           gpu_array_c<const IdxT, Device> indices,
+           gpu_array_c<const T, Device> data,
+           gpu_array_c<unsigned long long, Device> keys,
+           gpu_array_c<double, Device> values, gpu_array_c<int, Device> guides,
+           long long chunk, long long n_chunks, std::uintptr_t stream) {
+            const long long n_guides =
+                static_cast<long long>(indptr.shape(0)) - 1;
+            const long long n_rows = static_cast<long long>(keys.shape(0));
+            if (n_rows == 0) return;
+            const auto columns =
+                csc_columns<T, IdxT, Device>(indptr, indices, data);
+            const dim3 grid(n_guides, n_chunks);
+            if (n_guides > 0) {
+                ga::max_key_csc_kernel<<<grid, SPARSE_BLOCK, 0,
+                                         (cudaStream_t)stream>>>(columns, chunk,
+                                                                 keys.data());
+                CUDA_CHECK_LAST_ERROR(max_key_csc_kernel);
+                ga::max_guide_csc_kernel<<<grid, SPARSE_BLOCK, 0,
+                                           (cudaStream_t)stream>>>(
+                    columns, chunk, keys.data(), guides.data());
+                CUDA_CHECK_LAST_ERROR(max_guide_csc_kernel);
+            }
+            ga::max_guide_finish_kernel<<<strided_grid(n_rows, SPARSE_BLOCK),
+                                          SPARSE_BLOCK, 0,
+                                          (cudaStream_t)stream>>>(
+                keys.data(), n_rows, values.data(), guides.data());
+            CUDA_CHECK_LAST_ERROR(max_guide_finish_kernel);
+        },
+        "indptr"_a.noconvert(), "indices"_a.noconvert(), "data"_a.noconvert(),
+        "keys"_a.noconvert(), "values"_a.noconvert(), "guides"_a.noconvert(),
+        nb::kw_only(), "chunk"_a, "n_chunks"_a, "stream"_a = 0);
+}
+
+template <typename T, typename Device>
+void def_dense(nb::module_& m) {
+    m.def(
+        "value_histogram_dense",
+        [](gpu_array<const T, Device> x, gpu_array_c<unsigned int, Device> hist,
+           gpu_array_c<unsigned long long, Device> n_tail,
+           gpu_array_c<unsigned long long, Device> tail, long long chunk,
+           long long n_chunks, std::uintptr_t stream) {
+            histogram_columns(
+                ga::DenseColumns<T>{x.data(),
+                                    static_cast<long long>(x.shape(0)),
+                                    static_cast<long long>(x.stride(0)),
+                                    static_cast<long long>(x.stride(1))},
+                static_cast<long long>(x.shape(1)), chunk, n_chunks, hist,
+                n_tail, tail, stream);
+        },
+        "x"_a.noconvert(), "hist"_a.noconvert(), "n_tail"_a.noconvert(),
+        "tail"_a.noconvert(), nb::kw_only(), "chunk"_a, "n_chunks"_a,
         "stream"_a = 0);
 }
 
 template <typename Device>
 void register_bindings(nb::module_& m) {
-    def_fit_poisson_gauss<Device>(m);
-    def_select_threshold<Device>(m);
+    def_fit<Device>(m);
+    def_sparse<float, int, Device>(m);
+    def_sparse<float, long long, Device>(m);
+    def_sparse<double, int, Device>(m);
+    def_sparse<double, long long, Device>(m);
+    def_dense<float, Device>(m);
+    def_dense<double, Device>(m);
 }
 
 NB_MODULE(_guide_assignment_cuda, m) {
