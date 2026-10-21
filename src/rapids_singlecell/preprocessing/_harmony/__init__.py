@@ -50,6 +50,7 @@ _UPLOAD_THREADS = 8
 _COMM_VALUES = 1 << 22  # int64 values per exchange; larger sums take several
 _BLOCK_UNITS = 384  # units of the block draw (see _draw_blocks)
 _SEGMENT = 2048  # cells per segment of the exact sums (see _segments)
+_SOLVE_ONE_AT_A_TIME = 256  # system size (see _solve_spd_batched)
 
 # Each flavor inherits the stopping rules of the implementation it reproduces:
 # harmony2 follows harmonypy 2.0.0 / harmony 2.0.5 (R), harmony1 follows
@@ -491,11 +492,17 @@ def harmonize(
         cats = cell_indices = None
     comm = None
     if n_ranks > 1:
-        # Exact int64 sums of block counts, centroids and right-hand sides.
+        # Exact int64 sums of block counts, centroids and right-hand sides;
+        # per-group sums move only each GPU's groups.
         limbs = _limbs(dtype.itemsize)
         capacity = max(n_blocks * n_batches, limbs * n_groups * n_pcs, 3 * n_pcs)
+        first = np.searchsorted(host_offsets, bounds[:-1], side="right") - 1
+        end = np.searchsorted(host_offsets, np.subtract(bounds[1:], 1), side="right")
         comm, comm_buffers = _comm(
-            devices, min(capacity * n_clusters, _COMM_VALUES), peer=peer
+            devices,
+            min(capacity * n_clusters, _COMM_VALUES),
+            peer=peer,
+            groups=np.column_stack([first, np.maximum(first, end)]).ravel().tolist(),
         )
 
     def run(rank: int):
@@ -624,6 +631,7 @@ def harmonize(
                     normalize=normalize,
                     n_total=n_cells,
                     sums=sums,
+                    n_ranks=n_ranks,
                 )
             else:
                 Z_hat = _correction(
@@ -1228,13 +1236,16 @@ def _correction_multi(
     normalize: bool = False,
     n_total: int = 0,
     sums: dict | None = None,
+    n_ranks: int = 1,
 ) -> cp.ndarray:
     """Apply the exact general-design correction in bounded cluster chunks.
 
     Cells are sorted by joint category and ``segments`` are their segments
     (see _segments, plus the right-hand side bounds). The joint counts are the
     clustering's, recomputed from R per chunk (over ``n_total`` cells on all
-    GPUs of ``sums``).
+    ``n_ranks`` GPUs of ``sums``). Systems solved one at a time (see
+    _solve_spd_batched) are split between the GPUs, which then exchange the
+    coefficients.
     """
     seg_start, seg_group, bounds = segments
     n_pcs, n_clusters = X.shape[1], R.shape[1]
@@ -1248,11 +1259,21 @@ def _correction_multi(
         itemsize=X.dtype.itemsize,
     )
     starts = range(0, n_clusters, chunk_size)
+    rank = (sums or {}).get("rank", 0)
+    if nb1 < _SOLVE_ONE_AT_A_TIME:
+        rank, n_ranks = 0, 1  # every GPU solves every system
+    # Rounds of one chunk, or of one chunk per GPU when chunks are smaller:
+    # GPU r solves the systems cuts[r] .. cuts[r + 1] of a round.
+    per_round = 1 if chunk_size >= n_ranks else n_ranks
     stream = cp.cuda.get_current_stream().ptr
     Z = _correction_output(X, output)
-    # Each chunk continues the sums of the earlier clusters in Z and the last
-    # one subtracts them from X, so no second buffer is needed.
+    system = None
     for i, cluster_start in enumerate(starts):
+        if i % per_round == 0:  # clusters first .. first + m
+            first = cluster_start
+            m = min(n_clusters - first, per_round * chunk_size)
+            share = chunk_size if per_round > 1 else -(-m // n_ranks)
+            cuts = [min(m, r * share) for r in range(n_ranks + 1)]
         chunk = slice(cluster_start, cluster_start + chunk_size)
         lambda_chunk = cp.ascontiguousarray(lambda_kb[:, chunk])
         R_chunk = R[:, chunk]
@@ -1296,24 +1317,42 @@ def _correction_multi(
             stream=stream,
             **(sums or {}),
         )
-        W_all = _solve_spd_batched(gram, rhs).astype(X.dtype)
+        lo, hi = (cut + first - cluster_start for cut in cuts[rank : rank + 2])
+        if 0 <= lo < k:  # this GPU's systems (all in one chunk)
+            system = gram[lo:hi], rhs[lo:hi]
         del gram, rhs, joint_rhs, acc, joint_O
-        last = i == len(starts) - 1
-        _correction_batched_cuda.apply_multi(
-            X,
-            R=R_chunk,
-            W_all=W_all,
-            joint_cats=joint_cats,
-            n_batches=n_batches,
-            seg_start=seg_start,
-            seg_group=seg_group,
-            normalize=normalize and last,
-            W_joint=cp.empty((n_joint_categories, k, n_pcs), dtype=X.dtype),
-            Z=Z,
-            resume=i > 0,
-            finish=last,
-            stream=stream,
-        )
+        if (i + 1) % per_round and i + 1 < len(starts):
+            continue  # the round's next chunk
+        W_all = _solve_spd_batched(*system) if system else cp.empty((0, nb1, n_pcs))
+        system = None
+        if n_ranks > 1:
+            W_all, W_mine = cp.empty((m, nb1, n_pcs)), W_all
+            W_all[cuts[rank] : cuts[rank + 1]] = W_mine
+            _clustering_cuda.allgather_rows(
+                W_all.reshape(m, -1).view(cp.int64), starts=cuts, stream=stream, **sums
+            )
+        W_all = W_all.astype(X.dtype)
+        # Each chunk continues the sums of the earlier clusters in Z and the
+        # last one subtracts them from X, so no second buffer is needed.
+        for start in range(first, first + m, chunk_size):
+            R_chunk = R[:, start : start + chunk_size]
+            k = R_chunk.shape[1]
+            last = start + k == n_clusters
+            _correction_batched_cuda.apply_multi(
+                X,
+                R=R_chunk,
+                W_all=W_all[start - first :][:k],
+                joint_cats=joint_cats,
+                n_batches=n_batches,
+                seg_start=seg_start,
+                seg_group=seg_group,
+                normalize=normalize and last,
+                W_joint=cp.empty((n_joint_categories, k, n_pcs), dtype=X.dtype),
+                Z=Z,
+                resume=start > 0,
+                finish=last,
+                stream=stream,
+            )
     return Z
 
 
@@ -1347,7 +1386,7 @@ def _solve_spd_batched(gram: cp.ndarray, rhs: cp.ndarray) -> cp.ndarray:
     cp.cuda.cusolver.setStream(cusolver_handle, stream.ptr)
     cp.cuda.cublas.setStream(cublas_handle, stream.ptr)
     lower = cp.cuda.cublas.CUBLAS_FILL_MODE_LOWER
-    if matrix_size >= 256:
+    if matrix_size >= _SOLVE_ONE_AT_A_TIME:
         # Large systems (many batch levels): the blocked factorization of one
         # matrix at a time is much faster than the batched one. A symmetric
         # C-ordered matrix is its own column-major form.
