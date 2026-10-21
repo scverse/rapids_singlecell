@@ -22,3 +22,7 @@ __all__ = [
     "read_lazy",
     "release_memory",
 ]
+
+# Public class members are part of the installed API contract used by agent tooling.
+# ``KvikioCodecPipeline`` is called by zarr (see ``enable``), it has no methods for users.
+__api_members__: dict[str, list[str]] = {"KvikioCodecPipeline": []}
