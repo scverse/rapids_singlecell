@@ -109,9 +109,43 @@ def _describe(arr: zarr.Array) -> dict[str, Any]:
         problems.append(
             "not sharded: every chunk is a separate file, which slows down small reads"
         )
+    if layout is not None and _shard_unordered(arr, layout):
+        problems.append(
+            "the chunks inside its shards are stored out of order (as zarrs writes them), "
+            "so a contiguous range needs many small reads"
+        )
     desc["gpu_readable"] = layout is not None
     desc["problems"] = problems
     return desc
+
+
+def _shard_unordered(arr: zarr.Array, layout: Any) -> bool:
+    """Whether the inner chunks of the first shard of a 1-D array are stored out of order.
+
+    Only for local stores. (zarr stores the chunks of N-D shards in Morton order.)
+    """
+    from zarr.storage import LocalStore
+
+    from rapids_singlecell_zarr._pipeline import _MAX_UINT_64, _read_shard_index
+
+    if (
+        arr.ndim != 1
+        or layout.inner_chunk_shape is None
+        or not isinstance(arr.store, LocalStore)
+    ):
+        return False
+    path = (
+        Path(arr.store.root) / arr.path / arr.metadata.encode_chunk_key((0,) * arr.ndim)
+    )
+    if not path.exists():
+        return False
+    per_shard = tuple(
+        s // c for s, c in zip(arr.shards, layout.inner_chunk_shape, strict=True)
+    )
+    index = _read_shard_index(layout, path, path.stat().st_size, per_shard)
+    offsets = index[..., 0].ravel()
+    offsets = offsets[offsets != _MAX_UINT_64].astype(np.int64)
+    return bool((np.diff(offsets) < 0).any())
 
 
 def _codecs(arr: zarr.Array) -> list[Any]:

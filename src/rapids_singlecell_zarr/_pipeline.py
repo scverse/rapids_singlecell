@@ -211,6 +211,12 @@ class KvikioCodecPipeline(BatchedCodecPipeline):
             return await self._read_via_host(batch, out_arr, drop_axes)
         if out_arr.nbytes < int(os.environ.get(_MIN_BYTES_ENV, _DEFAULT_MIN_BYTES)):
             return await self._read_small(batch, paths, out_arr, drop_axes)
+        if _contiguous_reads(layout, batch, out_arr, drop_axes):
+            results = await asyncio.to_thread(
+                _read_gpu_contiguous, layout, batch, paths, out_arr
+            )
+            if results is not None:
+                return results
         return await asyncio.to_thread(
             _read_gpu, layout, batch, paths, out_arr, drop_axes
         )
@@ -314,13 +320,35 @@ _DEFAULT_DECODERS = 1
 # of a few milliseconds, more than decoding e.g. a small slice of a sparse matrix's `indptr` takes.
 _MIN_BYTES_ENV = "RSC_IO_MIN_BYTES"
 _DEFAULT_MIN_BYTES = 1 << 20
+# How contiguous reads of sharded 1-D arrays (e.g. a sparse matrix's data and indices) fetch the
+# stored bytes: "host" reads them into pinned host memory and copies them to the GPU at once, which
+# is fastest when the data comes from the page cache or GPUDirect Storage runs in compatibility
+# mode; "kvikio" reads them straight into GPU memory with KvikIO (for GPUDirect Storage).
+_FETCH_ENV = "RSC_IO_FETCH"
+_DEFAULT_FETCH = "host"
+# Threads for host reads. Reads of at least `_PARALLEL_READ_BYTES` on average are spread over them;
+# smaller ones are faster in one thread than handed between threads competing for the GIL.
+_READ_THREADS_ENV = "RSC_IO_READ_THREADS"
+_DEFAULT_READ_THREADS = 16
+_PARALLEL_READ_BYTES = 256 << 10
 
 _pools: dict[int, queue.Queue[tuple[Any, Any]]] = {}
 _pools_lock = threading.Lock()
+# nvCOMP allocates and frees pinned host memory in every decode call, and freeing it
+# (`cudaFreeHost`) synchronises the whole device, serialising concurrent reads: it gets the
+# pinned memory from this pool instead.
+_pinned_pool: list[Any] = []
+# pinned host buffers that host reads are staged in, per thread
+_staging: dict[int, Any] = {}
+_staging_lock = threading.Lock()
 
 
 def release_memory() -> None:
-    """Release the scratch space held by the cached nvCOMP codecs."""
+    """Release the scratch space held by the cached nvCOMP codecs and the pinned read buffers."""
+    with _staging_lock:
+        _staging.clear()
+    if _pinned_pool:
+        _pinned_pool[0].free_all_blocks()
     with _pools_lock:
         for device_id in list(_pools):
             pool = _pools.pop(device_id)
@@ -344,6 +372,11 @@ def _pool(device_id: int) -> queue.Queue[tuple[Any, Any]]:
 
     with _pools_lock:
         if device_id not in _pools:
+            if not _pinned_pool:
+                _pinned_pool.append(cp.cuda.PinnedMemoryPool())
+                nv.set_pinned_allocator(
+                    lambda nbytes, *_: _pinned_pool[0].malloc(nbytes)
+                )
             n = int(os.environ.get(_DECODERS_ENV, _DEFAULT_DECODERS))
             pool: queue.Queue[tuple[Any, Any]] = queue.Queue(maxsize=n)
             for _ in range(n):
@@ -374,26 +407,37 @@ def _max_decode_bytes() -> int:
 
 
 def _decode(pieces: list[_Piece], stream: Any, device: Any) -> None:
+    _decode_into(
+        [p.data for p in pieces],
+        [p.target for p in pieces],
+        [p.target.nbytes for p in pieces],
+        stream,
+        device,
+    )
+
+
+def _decode_into(
+    src: list[Any], dst: list[Any], sizes: list[int], stream: Any, device: Any
+) -> None:
+    """Decode the zstd frames `src` into `dst` (`sizes` decoded bytes each) on a pooled codec."""
     import nvidia.nvcomp as nv
 
     limit = _max_decode_bytes()
-    groups: list[list[_Piece]] = [[]]
-    size = 0
-    for p in pieces:
-        if size and size + p.target.nbytes > limit:
-            groups.append([])
-            size = 0
-        groups[-1].append(p)
-        size += p.target.nbytes
+    groups: list[tuple[int, int]] = []
+    start = size = 0
+    for i, n in enumerate(sizes):
+        if size and size + n > limit:
+            groups.append((start, i))
+            start, size = i, 0
+        size += n
+    groups.append((start, len(sizes)))
     pool = _pool(device.id)
     codec, codec_stream = pool.get()
     try:
         # the codec's stream waits for the reads/allocations queued on ours, and vice versa
         codec_stream.wait_event(stream.record())
-        for group in groups:
-            codec.decode(
-                nv.as_arrays([p.data for p in group]), out=[p.target for p in group]
-            )
+        for a, b in groups:
+            codec.decode(nv.as_arrays(src[a:b]), out=nv.as_arrays(dst[a:b]))
         done = codec_stream.record()
     finally:
         # work queued later on the codec's stream runs after ours, so it can be reused right away
@@ -491,6 +535,295 @@ def _read_host(
     results = tuple(_scatter(e, host, drop_axes) for e in entries)
     out.set(host)
     return results
+
+
+# ---------------------------------------------------------------------------------------------
+# Contiguous reads of sharded 1-D arrays
+# ---------------------------------------------------------------------------------------------
+# E.g. row ranges of a sparse matrix's `data` and `indices`, which data loaders read many of at
+# once. All entries of a read are planned with numpy instead of per stored chunk, every shard
+# index is read once, and the stored bytes are fetched and decoded together.
+
+
+class _DevicePtr:
+    """A device byte range for nvCOMP: much cheaper to make than a CuPy view."""
+
+    __slots__ = ("__cuda_array_interface__",)
+
+    def __init__(self, ptr: int, nbytes: int) -> None:
+        self.__cuda_array_interface__ = {
+            "shape": (nbytes,),
+            "typestr": "|u1",
+            "data": (ptr, False),
+            "version": 3,
+            "strides": None,
+        }
+
+
+def _contiguous_reads(
+    layout: _Layout, batch: list[BatchInfo], out: Any, drop_axes: tuple[int, ...]
+) -> bool:
+    """Whether every entry is a contiguous range of a sharded, zstd-compressed 1-D array."""
+    if (
+        not layout.compressed
+        or layout.inner_chunk_shape is None
+        or len(layout.inner_chunk_shape) != 1
+        or out.ndim != 1
+        or drop_axes
+        or not out.flags.c_contiguous
+    ):
+        return False
+    for _, _, chunk_sel, out_sel, _ in batch:
+        cs = chunk_sel[0] if isinstance(chunk_sel, tuple) else chunk_sel
+        os_ = out_sel[0] if isinstance(out_sel, tuple) else out_sel
+        if not (isinstance(cs, slice) and isinstance(os_, slice)):
+            return False
+        if cs.step not in (None, 1) or os_.step not in (None, 1):
+            return False
+    return True
+
+
+def _read_gpu_contiguous(
+    layout: _Layout, batch: list[BatchInfo], paths: list[Path], out: Any
+) -> tuple[GetResult, ...] | None:
+    """Read contiguous ranges of a sharded 1-D array; None if `_read_gpu` has to (missing chunks)."""
+    import cupy as cp
+
+    assert layout.inner_chunk_shape is not None
+    (n,) = layout.inner_chunk_shape
+    chunk_bytes = n * out.itemsize
+    fds: dict[Path, int] = {}
+    try:
+        plan = _plan_contiguous(layout, batch, paths, out, fds)
+        if plan is None:
+            return None
+        if plan.files.size == 0:
+            return tuple(GetResult(status="present") for _ in batch)
+        with out.device as device:
+            stream = _stream(device.id)
+            with stream:
+                temp = cp.empty(max(len(plan.copies), 1) * n, out.dtype)
+                targets = np.where(
+                    plan.targets >= 0,
+                    plan.targets,
+                    temp.data.ptr + (-1 - plan.targets) * chunk_bytes,
+                )
+                # `staged` (pinned host memory, if any) must outlive the asynchronous copy
+                stored, positions, staged = _fetch_contiguous(
+                    plan, list(fds.values()), stream
+                )
+                src_ptrs = (stored.data.ptr + positions).tolist()
+                _decode_into(
+                    [
+                        _DevicePtr(p, s)
+                        for p, s in zip(src_ptrs, plan.sizes.tolist(), strict=True)
+                    ],
+                    [_DevicePtr(int(t), chunk_bytes) for t in targets.tolist()],
+                    [chunk_bytes] * len(src_ptrs),
+                    stream,
+                    device,
+                )
+                for k, (a, b, out_a, out_b) in enumerate(plan.copies):
+                    out[out_a:out_b] = temp[k * n + a : k * n + b]
+                stream.synchronize()
+                del staged
+        return tuple(GetResult(status="present") for _ in batch)
+    finally:
+        for fd in fds.values():
+            os.close(fd)
+
+
+@dataclass(slots=True)
+class _ContiguousPlan:
+    """The stored chunks to read, as arrays (one element per stored chunk)."""
+
+    files: np.ndarray  # index into the list of open files
+    offsets: np.ndarray  # byte offset in the file
+    sizes: np.ndarray  # stored (compressed) bytes
+    # device address to decode into: >= 0 into `out`, -1 - k into slot k of a temporary
+    targets: np.ndarray
+    # (start, stop) within temporary chunk k, copied to out[out_start:out_stop]
+    copies: list[tuple[int, int, int, int]]
+
+
+def _plan_contiguous(
+    layout: _Layout,
+    batch: list[BatchInfo],
+    paths: list[Path],
+    out: Any,
+    fds: dict[Path, int],
+) -> _ContiguousPlan | None:
+    assert layout.inner_chunk_shape is not None
+    (n,) = layout.inner_chunk_shape
+    itemsize = out.itemsize
+    indexes: dict[Path, np.ndarray] = {}
+    file_ids: dict[Path, int] = {}
+    files, offsets, sizes, targets = [], [], [], []
+    copies: list[tuple[int, int, int, int]] = []
+    for (_, spec, chunk_sel, out_sel, _), path in zip(batch, paths, strict=True):
+        shard_len = spec.shape[0]
+        cs = chunk_sel[0] if isinstance(chunk_sel, tuple) else chunk_sel
+        os_ = out_sel[0] if isinstance(out_sel, tuple) else out_sel
+        start, stop, _ = cs.indices(shard_len)
+        out_start = os_.start or 0
+        if stop <= start:
+            continue
+        if path not in indexes:
+            try:
+                fd = os.open(path, os.O_RDONLY)
+            except FileNotFoundError:  # a missing shard: filled by `_read_gpu`
+                return None
+            fds[path] = fd
+            file_ids[path] = len(file_ids)
+            indexes[path] = _read_shard_index(
+                layout, path, os.fstat(fd).st_size, (shard_len // n,)
+            )
+        index = indexes[path]
+        chunks = np.arange(start // n, (stop - 1) // n + 1)
+        begin = chunks * n
+        a = np.maximum(begin, start)
+        b = np.minimum(begin + n, stop)
+        stored = index[chunks]
+        if (
+            stored[:, 0] == _MAX_UINT_64
+        ).any():  # unwritten chunks: filled by `_read_gpu`
+            return None
+        whole = (a == begin) & (b == begin + n)
+        target = np.where(whole, out.data.ptr + (out_start + a - start) * itemsize, 0)
+        for k in np.flatnonzero(~whole).tolist():
+            target[k] = -1 - len(copies)
+            copies.append(
+                (
+                    int(a[k] - begin[k]),
+                    int(b[k] - begin[k]),
+                    int(out_start + a[k] - start),
+                    int(out_start + b[k] - start),
+                )
+            )
+        files.append(np.full(len(chunks), file_ids[path]))
+        offsets.append(stored[:, 0].astype(np.int64))
+        sizes.append(stored[:, 1].astype(np.int64))
+        targets.append(target)
+    if not files:
+        empty = np.zeros(0, np.int64)
+        return _ContiguousPlan(empty, empty, empty, empty, [])
+    return _ContiguousPlan(
+        np.concatenate(files),
+        np.concatenate(offsets),
+        np.concatenate(sizes),
+        np.concatenate(targets),
+        copies,
+    )
+
+
+def _fetch_contiguous(
+    plan: _ContiguousPlan, fds: list[int], stream: Any
+) -> tuple[Any, np.ndarray, np.ndarray | None]:
+    """The stored bytes of all planned chunks in one device buffer, and each chunk's position in it.
+
+    Chunks that are stored next to each other are read together.
+    """
+    import cupy as cp
+
+    order = np.lexsort((plan.offsets, plan.files))
+    files, offsets, sizes = plan.files[order], plan.offsets[order], plan.sizes[order]
+    first = np.ones(len(order), bool)
+    first[1:] = (files[1:] != files[:-1]) | (offsets[1:] != offsets[:-1] + sizes[:-1])
+    run = np.cumsum(first) - 1
+    run_start = offsets[first]
+    run_stop = np.zeros(len(run_start), np.int64)
+    np.maximum.at(run_stop, run, offsets + sizes)
+    run_len = run_stop - run_start
+    run_pos = np.concatenate(([0], np.cumsum(run_len)[:-1]))
+    total = int(run_len.sum())
+    positions = np.empty(len(order), np.int64)
+    positions[order] = run_pos[run] + offsets - run_start[run]
+    reads = list(
+        zip(
+            [fds[f] for f in files[first].tolist()],
+            run_start.tolist(),
+            run_len.tolist(),
+            run_pos.tolist(),
+            strict=True,
+        )
+    )
+    device_buf = cp.empty(total, cp.uint8)
+    if os.environ.get(_FETCH_ENV, _DEFAULT_FETCH) == "kvikio":
+        _fetch_kvikio(reads, device_buf)
+        return device_buf, positions, None
+    host = _staging_buffer(total)
+    _fetch_host_reads(reads, host)
+    device_buf.set(host, stream=stream)
+    return device_buf, positions, host
+
+
+def _fetch_host_reads(reads: list[tuple[int, int, int, int]], host: np.ndarray) -> None:
+    view = memoryview(host)
+
+    def read(job: tuple[int, int, int, int]) -> None:
+        fd, start, length, pos = job
+        if os.preadv(fd, [view[pos : pos + length]], start) != length:
+            msg = f"short read of {length} bytes at offset {start}"
+            raise OSError(msg)
+
+    threads = int(os.environ.get(_READ_THREADS_ENV, _DEFAULT_READ_THREADS))
+    if (
+        threads > 1
+        and len(reads) > 1
+        and len(host) // len(reads) >= _PARALLEL_READ_BYTES
+    ):
+        list(_read_executor(threads).map(read, reads))
+    else:
+        for job in reads:
+            read(job)
+
+
+def _fetch_kvikio(reads: list[tuple[int, int, int, int]], device_buf: Any) -> None:
+    import kvikio
+
+    handles: dict[int, Any] = {}
+    futures = []
+    try:
+        for fd, start, length, pos in reads:
+            if fd not in handles:
+                handles[fd] = kvikio.CuFile(f"/proc/self/fd/{fd}", "r")
+            futures.append(
+                handles[fd].pread(
+                    device_buf[pos : pos + length], length, file_offset=start
+                )
+            )
+        for fut in futures:
+            fut.get()
+    finally:
+        for fh in handles.values():
+            fh.close()
+
+
+_executor: Any = None
+_executor_lock = threading.Lock()
+
+
+def _read_executor(threads: int) -> Any:
+    global _executor
+    with _executor_lock:
+        if _executor is None or _executor._max_workers != threads:
+            from concurrent.futures import ThreadPoolExecutor
+
+            _executor = ThreadPoolExecutor(threads, thread_name_prefix="rsc-io-read")
+        return _executor
+
+
+def _staging_buffer(nbytes: int) -> np.ndarray:
+    """A pinned host buffer of `nbytes` bytes, reused by later reads of this thread."""
+    import cupyx
+
+    key = threading.get_ident()
+    with _staging_lock:
+        buf = _staging.get(key)
+        if buf is None or buf.nbytes < nbytes:
+            buf = cupyx.empty_pinned(max(nbytes, 64 << 20), np.uint8)
+            _staging[key] = buf
+    return buf[:nbytes]
 
 
 def _scatter(entry: _Entry, out: Any, drop_axes: tuple[int, ...]) -> GetResult:

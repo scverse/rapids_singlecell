@@ -132,17 +132,18 @@ def _convert_sparse(
         {"encoding-type": fmt, "encoding-version": "0.1.0", "shape": list(shape)}
     )
     compressors = [ZstdCodec(level=level)]
-    # `indptr` gets small chunks too: every read of a row range reads a piece of it
-    dx.create_array(
-        "indptr",
-        data=indptr,
-        chunks=(inner,),
-        shards=(shard,),
-        compressors=compressors,
-    )
-    kw = {"chunks": (inner,), "shards": (shard,), "compressors": compressors}
-    d_data = dx.create_array("data", shape=(nnz,), dtype=s_data.dtype, **kw)
-    d_idx = dx.create_array("indices", shape=(nnz,), dtype=idx_dtype, **kw)
+    with _write_pipeline():
+        # `indptr` gets small chunks too: every read of a row range reads a piece of it
+        dx.create_array(
+            "indptr",
+            data=indptr,
+            chunks=(inner,),
+            shards=(shard,),
+            compressors=compressors,
+        )
+        kw = {"chunks": (inner,), "shards": (shard,), "compressors": compressors}
+        d_data = dx.create_array("data", shape=(nnz,), dtype=s_data.dtype, **kw)
+        d_idx = dx.create_array("indices", shape=(nnz,), dtype=idx_dtype, **kw)
     name = sx.path
 
     def convert(k: int) -> int:
@@ -199,14 +200,15 @@ def _convert_dense(
         chunks = (1, max(1, chunk_bytes // itemsize))
         per_row = ceil(n_cols / chunks[1])
         shards = (max(1, chunks_per_shard // per_row), per_row * chunks[1])
-    dx = dst_g.create_array(
-        key,
-        shape=sx.shape,
-        dtype=sx.dtype,
-        chunks=chunks,
-        shards=shards,
-        compressors=[ZstdCodec(level=level)],
-    )
+    with _write_pipeline():
+        dx = dst_g.create_array(
+            key,
+            shape=sx.shape,
+            dtype=sx.dtype,
+            chunks=chunks,
+            shards=shards,
+            compressors=[ZstdCodec(level=level)],
+        )
     dx.attrs.update(dict(sx.attrs))
     rows = shards[0]
     name = sx.path
@@ -261,6 +263,18 @@ def _index_dtype(n_minor: int) -> np.dtype:
         if n_minor - 1 <= np.iinfo(dt).max:
             return np.dtype(dt)
     return np.dtype(np.int64)
+
+
+def _write_pipeline() -> ConfigSet:
+    """zarr's fused pipeline, for the arrays created within.
+
+    It stores the chunks of a shard in order, so a contiguous range is one read. zarrs (faster
+    at writing) stores them in whatever order they were compressed in, scattering a range
+    over the whole shard.
+    """
+    return zarr.config.set(
+        {"codec_pipeline.path": "zarr.core.codec_pipeline.FusedCodecPipeline"}
+    )
 
 
 def _cpu_pipeline() -> ConfigSet:

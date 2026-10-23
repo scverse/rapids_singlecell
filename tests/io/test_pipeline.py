@@ -3,6 +3,7 @@ from __future__ import annotations
 import pickle
 import warnings
 from contextlib import contextmanager
+from importlib.util import find_spec
 from typing import TYPE_CHECKING
 
 import cupy as cp
@@ -70,7 +71,7 @@ def fused_reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def fast_path_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Records reads that zarr-kvikio handles itself (instead of zarr's own pipeline)."""
     calls: list[str] = []
-    for name in ["_read_gpu", "_read_host"]:
+    for name in ["_read_gpu", "_read_host", "_read_gpu_contiguous"]:
         orig = getattr(_pipeline, name)
 
         def spy(*args, _orig=orig, _name=name, **kwargs):
@@ -411,7 +412,7 @@ def test_small_reads_decoded_on_host(tmp_path, monkeypatch, fast_path_calls):
     assert set(fast_path_calls) == {"_read_host"}
     fast_path_calls.clear()
     check(tmp_path / "a.zarr", slice(None))  # 4 MiB
-    assert fast_path_calls == ["_read_gpu"]
+    assert fast_path_calls == ["_read_gpu_contiguous"]
 
 
 @pytest.mark.parametrize("decoders", ["1", "3"])
@@ -430,3 +431,81 @@ def test_concurrent_reads(tmp_path, monkeypatch, decoders):
     for s, r in zip(sels, results, strict=True):
         np.testing.assert_array_equal(r, data[s])
     rio.release_memory()
+
+
+@pytest.mark.parametrize("fetch", ["host", "kvikio"])
+@pytest.mark.parametrize(
+    "selection",
+    [slice(None), slice(37, 4900), slice(1000, 1001), slice(512, 1536)],
+    ids=["all", "partial-chunks-several-shards", "one-value", "whole-chunks"],
+)
+def test_contiguous_reads(
+    tmp_path, monkeypatch, fast_path_calls, read_path, *, fetch, selection
+):
+    """Contiguous ranges of sharded 1-D arrays, like a sparse matrix's data and indices."""
+    monkeypatch.setenv("RSC_IO_FETCH", fetch)
+    data = rng.random(5000).astype("float32")
+    write(tmp_path / "a.zarr", data, (256,), shards=(1024,))
+    check(tmp_path / "a.zarr", selection)
+    if read_path == "gpu":
+        assert fast_path_calls == ["_read_gpu_contiguous"]
+
+
+@pytest.mark.skipif(find_spec("zarrs") is None, reason="needs zarrs")
+def test_contiguous_reads_unordered_shards(tmp_path, fast_path_calls, read_path):
+    """zarrs writes the chunks of a shard in whatever order they are encoded."""
+    data = rng.random(1 << 16).astype("float32")
+    path = tmp_path / "a.zarr"
+    with zarr.config.set({"codec_pipeline.path": "zarrs.ZarrsCodecPipeline"}):
+        import zarrs  # noqa: F401
+
+        write(path, data, (256,), shards=(1 << 14,))
+    index = np.frombuffer((path / "c" / "0").read_bytes()[-(16 * 64 + 4) : -4], "<u8")
+    if np.all(np.diff(index[0::2].astype(np.int64)) > 0):
+        pytest.skip("zarrs wrote this shard in order")
+    check(path, slice(300, 60_000))
+    if read_path == "gpu":
+        assert fast_path_calls == ["_read_gpu_contiguous"]
+
+
+def test_contiguous_reads_missing_chunks(tmp_path, fast_path_calls, read_path):
+    """Unwritten inner chunks are filled by the general path."""
+    data = np.full(4096, 7, dtype="float32")
+    data[:1000] = rng.random(1000)
+    write(tmp_path / "a.zarr", data, (256,), shards=(1024,), fill_value=7)
+    check(tmp_path / "a.zarr", slice(10, 4000))
+    if read_path == "gpu":
+        assert fast_path_calls == ["_read_gpu_contiguous", "_read_gpu"]
+
+
+def test_contiguous_reads_in_parallel(
+    tmp_path, monkeypatch, fast_path_calls, read_path
+):
+    """Large stored ranges are read by several threads."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    monkeypatch.setattr(_pipeline, "_PARALLEL_READ_BYTES", 0)
+    used = []
+    submit = ThreadPoolExecutor.map
+
+    def spy(self, *args, **kwargs):
+        used.append(self._thread_name_prefix)
+        return submit(self, *args, **kwargs)
+
+    monkeypatch.setattr(ThreadPoolExecutor, "map", spy)
+    data = rng.random(1 << 15).astype("float32")
+    write(tmp_path / "a.zarr", data, (512,), shards=(1 << 13,))
+    check(tmp_path / "a.zarr", slice(5, (1 << 15) - 5))
+    if read_path == "gpu":
+        assert "rsc-io-read" in used
+
+
+def test_release_memory_staging(tmp_path, monkeypatch):
+    monkeypatch.setenv("RSC_IO_FETCH", "host")
+    data = rng.random(1 << 15).astype("float32")
+    write(tmp_path / "a.zarr", data, (512,), shards=(1 << 13,))
+    check(tmp_path / "a.zarr", slice(None))
+    assert _pipeline._staging
+    rio.release_memory()
+    assert not _pipeline._staging
+    check(tmp_path / "a.zarr", slice(None))  # works again afterwards

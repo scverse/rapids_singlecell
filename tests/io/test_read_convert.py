@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from importlib.util import find_spec
+from pathlib import Path
 
 import anndata as ad
 import cupyx.scipy.sparse as cpx
@@ -16,9 +17,6 @@ import rapids_singlecell.io as rio
 from rapids_singlecell.io._check import check_store
 from rapids_singlecell.io._config import gpu_io_available
 from rapids_singlecell.io._read import _chunk_size
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 gpu_io = pytest.mark.skipif(not gpu_io_available(), reason="needs KvikIO and nvCOMP")
 
@@ -148,3 +146,48 @@ def test_check(tmp_path, capsys):
 
     rio.check(tmp_path / "src.zarr")
     assert "convert_zarr" in capsys.readouterr().out
+
+
+def _offsets_in_order(arr: zarr.Array) -> bool:
+    n = arr.shards[0] // arr.chunks[0]
+    root = Path(arr.store.root) / arr.path / "c"
+    for shard in root.iterdir():
+        raw = shard.read_bytes()
+        offsets = np.frombuffer(raw[-(16 * n + 4) : -4], "<u8")[0::2]
+        offsets = offsets[offsets != 2**64 - 1].astype(np.int64)
+        if (np.diff(offsets) < 0).any():
+            return False
+    return True
+
+
+@pytest.mark.skipif(find_spec("zarrs") is None, reason="needs zarrs")
+def test_convert_zarr_orders_shards(tmp_path):
+    """The chunks of every shard are stored in order, even with zarrs (which doesn't) installed."""
+    from rapids_singlecell.io._check import _shard_unordered
+    from rapids_singlecell_zarr._pipeline import KvikioCodecPipeline, _layout_of
+
+    adata = make_adata(n_obs=4000)
+    src = write_blosc(adata, tmp_path / "src.zarr")
+    rio.convert_zarr(src, tmp_path / "dst.zarr", chunk_bytes=1024, chunks_per_shard=64)
+    x = zarr.open_group(tmp_path / "dst.zarr", mode="r")["X"]
+    assert _offsets_in_order(x["data"])
+    assert _offsets_in_order(x["indices"])
+
+    # zarrs writes them in whatever order they were compressed in, which `check` reports
+    import zarrs  # noqa: F401
+
+    rng = np.random.default_rng(0)
+    with zarr.config.set({"codec_pipeline.path": "zarrs.ZarrsCodecPipeline"}):
+        arr = zarr.create_array(
+            tmp_path / "zarrs.zarr",
+            shape=(1 << 16,),
+            dtype="float32",
+            chunks=(256,),
+            shards=(1 << 14,),
+        )
+        arr[:] = rng.random(1 << 16).astype("float32")
+    if _offsets_in_order(arr):
+        pytest.skip("zarrs wrote these shards in order")
+    layout = _layout_of(KvikioCodecPipeline.from_codecs(arr.metadata.codecs))
+    assert _shard_unordered(arr, layout)
+    assert not _shard_unordered(x["data"], layout)
